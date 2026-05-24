@@ -50,8 +50,19 @@ class ProvidersStatusResponse(BaseModel):
     bitquery: ProviderStatus
 
 
+class DataQualityComponents(BaseModel):
+    pool_data: Literal["mock", "real", "fallback_mock"]
+    token_data: Literal["mock", "real", "fallback_mock"]
+    wallet_buyers: Literal["mock"]
+    wallet_balances: Literal["mock"]
+    pnl: Literal["mock_calculated"]
+    clustering: Literal["mock_calculated"]
+    common_holdings: Literal["mock"]
+
+
 class DataQuality(BaseModel):
-    mode: str
+    mode: Literal["mock", "real"]
+    components: DataQualityComponents
     warnings: list[str]
     provider_notes: list[str]
 

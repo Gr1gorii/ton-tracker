@@ -114,8 +114,19 @@ export interface ProvidersStatus {
   bitquery: ProviderStatusInfo;
 }
 
+export interface DataQualityComponents {
+  pool_data: "mock" | "real" | "fallback_mock";
+  token_data: "mock" | "real" | "fallback_mock";
+  wallet_buyers: "mock";
+  wallet_balances: "mock";
+  pnl: "mock_calculated";
+  clustering: "mock_calculated";
+  common_holdings: "mock";
+}
+
 export interface DataQuality {
-  mode: string;
+  mode: "mock" | "real";
+  components: DataQualityComponents;
   warnings: string[];
   provider_notes: string[];
 }
