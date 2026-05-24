@@ -549,6 +549,16 @@ body {
   color: var(--green);
 }
 
+.status-buy {
+  background: rgba(46, 204, 113, 0.14);
+  color: var(--green);
+}
+
+.status-sell {
+  background: rgba(255, 90, 95, 0.14);
+  color: var(--red);
+}
+
 .status-partial_seller {
   background: rgba(245, 166, 35, 0.14);
   color: var(--amber);
