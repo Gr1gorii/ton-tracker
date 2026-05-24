@@ -1,7 +1,8 @@
 """FastAPI application entry point for the TON Wallet Intelligence Dashboard.
 
-v0.1 — all analysis data is MOCK. No real GeckoTerminal / TonAPI / Toncenter /
-Bitquery calls are made anywhere. See README.md.
+v0.2 — adds a real data adapter layer. Pool/token data can be real
+(DATA_MODE=real + GeckoTerminal); wallet-level analysis remains mock. Mock mode
+is the default and stays fully functional. See README.md.
 """
 
 from __future__ import annotations
@@ -13,18 +14,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from config import get_settings
 from database import get_session, init_db
 from models import AnalysisRun
-from schemas import AnalyzeRequest, AnalyzeResponse, HealthResponse
+from schemas import (
+    AnalyzeRequest,
+    AnalyzeResponse,
+    HealthResponse,
+    ProvidersStatusResponse,
+)
 from services import export
-from services.analysis import analyze
+from services.analysis import analyze, get_providers_status
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 app = FastAPI(
     title="TON Wallet Intelligence Dashboard API",
     version=VERSION,
-    description="v0.1 prototype — mock data only, no real on-chain analysis.",
+    description=(
+        "v0.2 — real data adapter layer. Mock mode is the default; "
+        "wallet-level analysis is still mock."
+    ),
 )
 
 # Allow the local Vite dev server (and common alternates) to call the API.
@@ -48,7 +58,18 @@ def _on_startup() -> None:
 
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
-    return HealthResponse(status="ok", version=VERSION, is_mock=True)
+    settings = get_settings()
+    return HealthResponse(
+        status="ok",
+        version=VERSION,
+        is_mock=settings.is_mock,
+        data_mode=settings.data_mode,
+    )
+
+
+@app.get("/api/providers/status", response_model=ProvidersStatusResponse)
+def providers_status() -> dict:
+    return get_providers_status()
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)
@@ -124,6 +145,6 @@ def root() -> dict:
     return {
         "name": "TON Wallet Intelligence Dashboard API",
         "version": VERSION,
-        "is_mock": True,
+        "data_mode": get_settings().data_mode,
         "docs": "/docs",
     }

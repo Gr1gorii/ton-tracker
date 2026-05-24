@@ -12,10 +12,13 @@ require changes here.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
+from adapters.bitquery import BitqueryAdapter
 from adapters.geckoterminal import GeckoTerminalAdapter
 from adapters.ton_provider import TonProviderAdapter
-from services import clustering
+from config import ProviderResult, Settings, get_settings
+from services import clustering, mock_data
 from services.mock_data import (
     HIGH_TON_BALANCE,
     INTERESTING_POSITION_USD,
@@ -200,23 +203,113 @@ def _common_holdings(wallets: list[dict]) -> list[dict]:
     return result
 
 
+def get_providers_status(settings: Optional[Settings] = None) -> dict:
+    """Report configuration/availability for every provider.
+
+    Used by both the /api/providers/status endpoint and the data_quality
+    block. Does not make network calls.
+    """
+    settings = settings or get_settings()
+    gecko = GeckoTerminalAdapter(settings)
+    ton = TonProviderAdapter(settings)
+    bitquery = BitqueryAdapter(settings)
+    return {
+        "data_mode": settings.data_mode,
+        "geckoterminal": gecko.status(),
+        "ton_provider": ton.status(),
+        "bitquery": bitquery.status(),
+    }
+
+
+def _build_data_quality(
+    settings: Settings,
+    gecko_result: ProviderResult,
+    providers_status: dict,
+) -> dict:
+    """Assemble warnings + provider notes describing data provenance."""
+    warnings: list[str] = []
+    provider_notes: list[str] = []
+
+    if settings.is_mock:
+        warnings.append(
+            "v0.2 is running in mock mode. No real on-chain data is used."
+        )
+        provider_notes.append(
+            "All pool, token, wallet, PnL and clustering data is mock."
+        )
+        return {
+            "mode": settings.data_mode,
+            "warnings": warnings,
+            "provider_notes": provider_notes,
+        }
+
+    # Real mode.
+    if gecko_result.ok and gecko_result.source == "real":
+        provider_notes.append(
+            "GeckoTerminal pool data is real, but wallet-level analysis is "
+            "still mocked."
+        )
+    elif not gecko_result.ok:
+        warnings.append(
+            gecko_result.message
+            or "GeckoTerminal pool data is unavailable; using mock pool data."
+        )
+        provider_notes.append("Falling back to mock pool/token data.")
+
+    if not providers_status["ton_provider"]["available"]:
+        warnings.append(providers_status["ton_provider"]["message"])
+    if not providers_status["bitquery"]["available"]:
+        warnings.append(providers_status["bitquery"]["message"])
+
+    provider_notes.append(
+        "Wallet-level analysis (buyers, PnL, clustering) uses mock data in "
+        "v0.2."
+    )
+    return {
+        "mode": settings.data_mode,
+        "warnings": warnings,
+        "provider_notes": provider_notes,
+    }
+
+
 def analyze(
     pool_url: str,
     time_window: str,
     custom_start: str | None = None,
     custom_end: str | None = None,
+    settings: Optional[Settings] = None,
 ) -> dict:
-    """Run the full (mock) analysis and return the response payload."""
+    """Run the analysis and return the response payload.
+
+    Pool/token data may be real (DATA_MODE=real + reachable GeckoTerminal);
+    wallet-level data is mock in v0.2. The ``data_quality`` block documents
+    exactly what is real vs mock for this run.
+    """
+    settings = settings or get_settings()
     start, end, window_seconds = _resolve_window(
         time_window, custom_start, custom_end
     )
 
-    gecko = GeckoTerminalAdapter()
-    ton = TonProviderAdapter()
+    gecko = GeckoTerminalAdapter(settings)
+    ton = TonProviderAdapter(settings)
 
-    token_info = gecko.get_token_info(pool_url)
-    pool_info = gecko.get_pool_info(pool_url)
+    # Pool/token: real when configured + reachable, otherwise mock fallback.
+    gecko_result = gecko.get_pool_and_token(pool_url)
+    if gecko_result.ok:
+        token_info = gecko_result.data["token"]
+        pool_info = gecko_result.data["pool"]
+    else:
+        parsed = gecko.parse_pool_url(pool_url)
+        token_info = mock_data.get_token_info()
+        pool_info = mock_data.get_pool_info()
+        pool_info["requested_network"] = parsed["network"]
+        pool_info["requested_pool_address"] = parsed["pool_address"]
+
+    # Wallet aggregates remain mock in v0.2.
     raw_wallets = ton.get_window_buyers(pool_url, start, end)
+
+    providers_status = get_providers_status(settings)
+    data_quality = _build_data_quality(settings, gecko_result, providers_status)
 
     current_price = token_info["current_price_usd"]
 
@@ -275,11 +368,13 @@ def analyze(
         "groups": groups,
         "common_holdings": common,
         "interesting_wallets": interesting_wallets,
+        "data_quality": data_quality,
+        "providers": providers_status,
         "disclaimer": (
-            "v0.1 — данные смоделированы (mock). Реальные API (GeckoTerminal, "
-            "TonAPI, Toncenter) ещё не подключены. Кластеризация носит "
-            "вероятностный характер и не является доказательством общего "
-            "владения кошельками."
+            "v0.2 — анализ кошельков (покупатели, PnL, кластеризация) "
+            "использует mock-данные. Данные пула/токена могут быть реальными "
+            "в режиме real. Кластеризация носит вероятностный характер и не "
+            "является доказательством общего владения кошельками."
         ),
-        "is_mock": True,
+        "is_mock": settings.is_mock,
     }

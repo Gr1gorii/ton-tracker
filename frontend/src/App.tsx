@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { analyze, API_BASE } from "./api";
-import type { AnalysisResult, TimeWindow } from "./types";
+import { useEffect, useState } from "react";
+import { analyze, API_BASE, getProvidersStatus } from "./api";
+import type { AnalysisResult, ProvidersStatus, TimeWindow } from "./types";
 import PoolUrlInput from "./components/PoolUrlInput";
 import TimeWindowPicker from "./components/TimeWindowPicker";
+import ProviderStatus from "./components/ProviderStatus";
 import TokenOverview from "./components/TokenOverview";
 import BuyersTable from "./components/BuyersTable";
 import WalletGroups from "./components/WalletGroups";
@@ -22,6 +23,18 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+
+  const [providers, setProviders] = useState<ProvidersStatus | null>(null);
+  const [providersError, setProvidersError] = useState<string | null>(null);
+
+  // Load provider/data-mode status once on mount.
+  useEffect(() => {
+    getProvidersStatus()
+      .then(setProviders)
+      .catch((e) =>
+        setProvidersError(e instanceof Error ? e.message : "Unknown error"),
+      );
+  }, []);
 
   async function handleAnalyze() {
     if (!poolUrl.trim()) {
@@ -82,6 +95,12 @@ export default function App() {
         clustering is <strong>probabilistic</strong> and is not proof of common
         ownership.
       </div>
+
+      <ProviderStatus
+        providers={result?.providers ?? providers}
+        dataQuality={result?.data_quality ?? null}
+        error={providersError}
+      />
 
       <div className="controls-card">
         <PoolUrlInput value={poolUrl} onChange={setPoolUrl} disabled={loading} />

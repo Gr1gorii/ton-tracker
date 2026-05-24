@@ -1,4 +1,8 @@
-import type { AnalysisResult, AnalyzeRequest } from "./types";
+import type {
+  AnalysisResult,
+  AnalyzeRequest,
+  ProvidersStatus,
+} from "./types";
 
 // API base URL. Override with VITE_API_BASE at build/dev time.
 export const API_BASE =
@@ -39,6 +43,14 @@ export function exportUrl(
     time_window: timeWindow,
   });
   return `${API_BASE}/api/export/${format}?${params.toString()}`;
+}
+
+export async function getProvidersStatus(): Promise<ProvidersStatus> {
+  const res = await fetch(`${API_BASE}/api/providers/status`);
+  if (!res.ok) {
+    throw new Error(`Provider status request failed (${res.status})`);
+  }
+  return (await res.json()) as ProvidersStatus;
 }
 
 export async function checkHealth(): Promise<boolean> {

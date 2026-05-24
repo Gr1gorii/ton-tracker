@@ -1,17 +1,24 @@
-# TON Wallet Intelligence Dashboard — v0.1
+# TON Wallet Intelligence Dashboard — v0.2
 
 A local prototype that analyzes wallets which bought a token in a chosen time
 window on a TON pool, computes realised / unrealised PnL, surfaces interesting
 wallets and shared holdings, and groups wallets into **possible** behavioral
 clusters.
 
-> **v0.1 status — this is a prototype.**
-> - All analysis runs on **realistic mock data**. No real APIs are connected.
-> - GeckoTerminal, TonAPI, Toncenter and Bitquery are **not** integrated yet.
+> **v0.2 status — real data adapter layer.**
+> - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`. Mock mode is fully
+>   functional and uses **realistic mock data**.
+> - In `real` mode, **GeckoTerminal pool/token data can be real** (public API,
+>   no key). If it fails, the app falls back to mock data and warns — it never
+>   crashes.
+> - **Wallet-level analysis (buyers, PnL, clustering) is still mock** in v0.2.
+>   TonAPI/Toncenter and Bitquery adapters are scaffolded but not implemented;
+>   without keys they return a clear `provider_not_configured` status.
+> - Every analysis response carries a `data_quality` block stating exactly
+>   what is real vs mock for that run.
 > - Wallet clustering is **probabilistic** — similarity signals only, **not
 >   proof of common ownership**.
-> - PnL is calculated by real functions over mock, normalized trade data.
-> - The app does **not** perform real on-chain analysis yet.
+> - The app does **not** perform real on-chain wallet analysis yet.
 
 ---
 
@@ -34,19 +41,24 @@ without touching the analysis / PnL / clustering services.
 ```
 backend/
   main.py              FastAPI app + endpoints
+  config.py            Settings (DATA_MODE + providers) + ProviderResult
+  .env.example         Provider configuration template
   requirements.txt
   models.py            SQLAlchemy model (AnalysisRun)
   schemas.py           Pydantic request/response schemas
   database.py          SQLite engine + session
+  conftest.py          Test path setup
   services/
-    analysis.py        Orchestrates the full analysis payload
+    analysis.py        Orchestration + data_quality + provider status
     pnl.py             Decimal-based PnL calculations
     clustering.py      Probabilistic wallet similarity / grouping
     mock_data.py       Hand-crafted mock token/pool/wallet fixtures
     export.py          CSV / JSON serialization
   adapters/
-    geckoterminal.py   Token/pool data adapter (mock-backed)
-    ton_provider.py    On-chain wallet/trade adapter (mock-backed)
+    geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
+    ton_provider.py    Wallet balances/transfers — mock or (later) real
+    bitquery.py        DEX trades — mock or (later) real Bitquery
+  tests/               pytest suite (parser, config, data_quality, PnL, clustering)
 
 frontend/
   package.json
@@ -61,6 +73,7 @@ frontend/
     components/
       PoolUrlInput.tsx
       TimeWindowPicker.tsx
+      ProviderStatus.tsx
       TokenOverview.tsx
       BuyersTable.tsx
       WalletGroups.tsx
@@ -113,10 +126,43 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
+## Data modes & providers (v0.2)
+
+Configure providers via environment variables (copy `backend/.env.example` to
+`backend/.env`):
+
+| Variable                 | Purpose                                            |
+| ------------------------ | -------------------------------------------------- |
+| `DATA_MODE`              | `mock` (default) or `real`                         |
+| `GECKOTERMINAL_BASE_URL` | GeckoTerminal v2 API base (public, no key)         |
+| `TON_API_BASE_URL`       | TON indexer base URL (real TON data)               |
+| `TON_API_KEY`            | TON indexer API key                                |
+| `BITQUERY_API_URL`       | Bitquery endpoint (real DEX trades)                |
+| `BITQUERY_API_KEY`       | Bitquery API key                                   |
+
+What is real vs mock in v0.2:
+
+| Data                              | mock mode | real mode                          |
+| --------------------------------- | --------- | ---------------------------------- |
+| Pool / token info                 | mock      | **real** GeckoTerminal (or fallback) |
+| Buyers, balances, PnL, clustering | mock      | mock (real not implemented)        |
+
+Each `/api/analyze` response includes a `data_quality` block
+(`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
+**Data mode / Provider status** panel reflecting `GET /api/providers/status`.
+A missing TON/Bitquery key yields a clear `provider_not_configured` status —
+the backend never crashes.
+
+---
+
 ## API
 
 ### `GET /api/health`
-Returns service status and version.
+Returns service status, version, and current `data_mode`.
+
+### `GET /api/providers/status`
+Returns `data_mode` plus `{configured, available, message}` for GeckoTerminal,
+the TON provider, and Bitquery.
 
 ### `POST /api/analyze`
 Request body:
@@ -131,7 +177,8 @@ Request body:
 ```
 
 Returns token info, pool info, the analyzed window, per-wallet PnL + flags,
-candidate clusters, common holdings, interesting wallets, and a summary.
+candidate clusters, common holdings, interesting wallets, a summary, the
+`data_quality` block, and the `providers` status.
 
 ### `GET /api/export/csv` and `GET /api/export/json`
 Download placeholders. They run a fresh mock analysis and stream it back as a
@@ -140,7 +187,7 @@ downloadable CSV (wallet table) or JSON (full payload). Optional query params:
 
 ---
 
-## How the analysis works (v0.1)
+## How the analysis works
 
 ### PnL (`services/pnl.py`)
 Average-cost basis, computed with `Decimal`. From the normalized inputs
@@ -180,10 +227,11 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Roadmap beyond v0.1
+## Roadmap beyond v0.2
 
-- Implement `adapters/geckoterminal.py` against the real GeckoTerminal API.
-- Implement `adapters/ton_provider.py` against a real TON indexer
-  (TonAPI / Toncenter / Bitquery) to fetch real buyers, trades and balances.
-- Export specific stored runs by id instead of re-running a mock analysis.
+- Implement real `adapters/ton_provider.py` against a TON indexer
+  (TonAPI / Toncenter) for real wallet balances, transactions and transfers.
+- Implement real `adapters/bitquery.py` for historical DEX trades, then derive
+  real per-wallet buy/sell aggregates for PnL + clustering.
+- Export specific stored runs by id instead of re-running an analysis.
 - Richer clustering features and confidence calibration.

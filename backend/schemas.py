@@ -34,6 +34,26 @@ class HealthResponse(BaseModel):
     status: str
     version: str
     is_mock: bool
+    data_mode: str
+
+
+class ProviderStatus(BaseModel):
+    configured: bool
+    available: bool
+    message: str
+
+
+class ProvidersStatusResponse(BaseModel):
+    data_mode: str
+    geckoterminal: ProviderStatus
+    ton_provider: ProviderStatus
+    bitquery: ProviderStatus
+
+
+class DataQuality(BaseModel):
+    mode: str
+    warnings: list[str]
+    provider_notes: list[str]
 
 
 class AnalyzeResponse(BaseModel):
@@ -53,3 +73,5 @@ class AnalyzeResponse(BaseModel):
     groups: list[dict[str, Any]]
     common_holdings: list[dict[str, Any]]
     interesting_wallets: list[dict[str, Any]]
+    data_quality: DataQuality
+    providers: dict[str, Any]
