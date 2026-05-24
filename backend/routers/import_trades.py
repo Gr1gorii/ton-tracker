@@ -8,7 +8,12 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from schemas import ImportTradesPreviewRequest, ImportTradesPreviewResponse
+from schemas import (
+    ImportTradesAnalysisResponse,
+    ImportTradesPreviewRequest,
+    ImportTradesPreviewResponse,
+)
+from services.import_analysis import analyze_imported_trades
 from services.import_parser import parse_csv_trades, parse_json_trades
 
 router = APIRouter(prefix="/api/import/trades", tags=["trade-import"])
@@ -38,6 +43,31 @@ def preview_imported_trades(payload: ImportTradesPreviewRequest) -> dict[str, An
         "has_more": parsed["summary"]["valid_rows"] > payload.preview_limit,
         "source": source,
     }
+
+
+@router.post("/analyze", response_model=ImportTradesAnalysisResponse)
+def analyze_imported_trades_endpoint(
+    payload: ImportTradesPreviewRequest,
+) -> dict[str, Any]:
+    """Parse imported trades and return a simple per-wallet analysis."""
+    source = f"imported_{payload.format}"
+
+    if payload.format == "csv":
+        if not isinstance(payload.content, str):
+            raise HTTPException(
+                status_code=422,
+                detail="CSV import content must be a string.",
+            )
+        parsed = parse_csv_trades(payload.content)
+    else:
+        rows = _json_rows(payload.content)
+        parsed = parse_json_trades(rows)
+
+    return analyze_imported_trades(
+        parsed=parsed,
+        preview_limit=payload.preview_limit,
+        source=source,
+    )
 
 
 def _json_rows(content: Any) -> list[Mapping[str, Any]]:

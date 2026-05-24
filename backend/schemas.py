@@ -69,6 +69,16 @@ class ImportTradesPreviewResponse(BaseModel):
     source: Literal["imported_csv", "imported_json"]
 
 
+class ImportTradesAnalysisResponse(BaseModel):
+    summary: dict[str, Any]
+    wallets: list[dict[str, Any]]
+    trades_preview: list[dict[str, Any]]
+    preview_limit: int
+    has_more_wallets: bool
+    source: Literal["imported_csv", "imported_json"]
+    analysis_note: str
+
+
 class DataQualityComponents(BaseModel):
     pool_data: Literal["mock", "real", "fallback_mock"]
     token_data: Literal["mock", "real", "fallback_mock"]
