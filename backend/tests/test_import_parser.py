@@ -141,3 +141,163 @@ def test_empty_csv_returns_clear_validation_summary():
             "errors": [],
         },
     }
+
+
+def test_missing_required_csv_columns_returns_header_error():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,token_amount,usd_amount",
+                "tx1,2026-05-24T10:00:00Z,4,10",
+            ]
+        )
+    )
+
+    assert result["trades"] == []
+    assert result["summary"] == {
+        "total_rows": 0,
+        "valid_rows": 0,
+        "invalid_rows": 0,
+        "duplicate_rows": 0,
+        "errors": [
+            {
+                "row": 1,
+                "field": "header",
+                "message": "Missing required columns: wallet, side",
+            }
+        ],
+    }
+
+
+def test_invalid_datetime_returns_validation_error():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount",
+                "tx1,not-a-date,EQwallet1,buy,4,10",
+            ]
+        )
+    )
+
+    assert result["summary"]["invalid_rows"] == 1
+    assert result["summary"]["errors"] == [
+        {"row": 2, "field": "block_time", "message": "Invalid ISO datetime"}
+    ]
+
+
+def test_missing_required_row_value_returns_validation_error():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount",
+                "tx1,2026-05-24T10:00:00Z,, ,4,10",
+            ]
+        )
+    )
+
+    assert result["summary"]["valid_rows"] == 0
+    assert result["summary"]["invalid_rows"] == 1
+    assert result["summary"]["errors"] == [
+        {"row": 2, "field": "wallet", "message": "Required value is missing"},
+        {"row": 2, "field": "side", "message": "Required value is missing"},
+    ]
+
+
+def test_numeric_range_validation_rejects_non_positive_token_amount():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,0,10",
+            ]
+        )
+    )
+
+    assert result["summary"]["invalid_rows"] == 1
+    assert result["summary"]["errors"] == [
+        {
+            "row": 2,
+            "field": "token_amount",
+            "message": "Invalid numeric value: must be > 0",
+        }
+    ]
+
+
+def test_numeric_range_validation_rejects_negative_usd_amount():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,4,-1",
+            ]
+        )
+    )
+
+    assert result["summary"]["invalid_rows"] == 1
+    assert result["summary"]["errors"] == [
+        {
+            "row": 2,
+            "field": "usd_amount",
+            "message": "Invalid numeric value: must be >= 0",
+        }
+    ]
+
+
+def test_numeric_range_validation_rejects_negative_price_usd():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount,price_usd",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,4,10,-0.1",
+            ]
+        )
+    )
+
+    assert result["summary"]["invalid_rows"] == 1
+    assert result["summary"]["errors"] == [
+        {
+            "row": 2,
+            "field": "price_usd",
+            "message": "Invalid numeric value: must be >= 0",
+        }
+    ]
+
+
+def test_non_finite_numeric_values_are_invalid():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount,price_usd",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,NaN,Infinity,1",
+            ]
+        )
+    )
+
+    assert result["summary"]["invalid_rows"] == 1
+    assert result["summary"]["errors"] == [
+        {"row": 2, "field": "token_amount", "message": "Invalid numeric value"},
+        {"row": 2, "field": "usd_amount", "message": "Invalid numeric value"},
+    ]
+
+
+def test_multi_error_accumulation_in_one_row():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount",
+                "tx1,bad-date,EQwallet1,hold,not-a-number,10",
+            ]
+        )
+    )
+
+    assert result["summary"]["valid_rows"] == 0
+    assert result["summary"]["invalid_rows"] == 1
+    assert result["summary"]["errors"] == [
+        {"row": 2, "field": "block_time", "message": "Invalid ISO datetime"},
+        {
+            "row": 2,
+            "field": "side",
+            "message": "Invalid side: expected buy or sell",
+        },
+        {"row": 2, "field": "token_amount", "message": "Invalid numeric value"},
+    ]
