@@ -48,6 +48,64 @@ def test_missing_price_usd_calculates_from_usd_and_token_amount():
     assert result["trades"][0]["price_usd"] == Decimal("2.5")
 
 
+def test_csv_header_with_utf8_bom_parses_successfully():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "\ufefftx_hash,block_time,wallet,side,token_amount,usd_amount",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,4,10",
+            ]
+        )
+    )
+
+    assert result["summary"]["valid_rows"] == 1
+    assert result["trades"][0]["tx_hash"] == "tx1"
+
+
+def test_csv_headers_are_case_insensitive():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "TX_HASH,Block_Time,WALLET,Side,Token_Amount,USD_AMOUNT",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,4,10",
+            ]
+        )
+    )
+
+    assert result["summary"]["valid_rows"] == 1
+    assert result["trades"][0]["wallet"] == "EQwallet1"
+
+
+def test_csv_headers_allow_surrounding_whitespace():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                " tx_hash , block_time , wallet , side , token_amount , usd_amount ",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,4,10",
+            ]
+        )
+    )
+
+    assert result["summary"]["valid_rows"] == 1
+    assert result["trades"][0]["price_usd"] == Decimal("2.5")
+
+
+def test_optional_csv_headers_are_normalized():
+    result = parse_csv_trades(
+        "\n".join(
+            [
+                "tx_hash,block_time,wallet,side,token_amount,usd_amount,Price_USD,Pool_Address,DEX",
+                "tx1,2026-05-24T10:00:00Z,EQwallet1,buy,4,10,2.5,EQpool,stonfi",
+            ]
+        )
+    )
+
+    assert result["summary"]["valid_rows"] == 1
+    assert result["trades"][0]["price_usd"] == Decimal("2.5")
+    assert result["trades"][0]["pool_address"] == "EQpool"
+    assert result["trades"][0]["dex"] == "stonfi"
+
+
 def test_invalid_side_returns_validation_error():
     result = parse_csv_trades(
         "\n".join(

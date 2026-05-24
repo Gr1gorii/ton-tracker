@@ -32,6 +32,7 @@ def parse_csv_trades(csv_text: str) -> dict[str, Any]:
     reader = csv.DictReader(StringIO(csv_text.strip()))
     if not reader.fieldnames:
         return _empty_result()
+    reader.fieldnames = [_normalize_header(field) for field in reader.fieldnames]
     missing_columns = _missing_required_columns(reader.fieldnames)
     if missing_columns:
         return _header_error_result(
@@ -178,8 +179,12 @@ def _header_error_result(message: str) -> dict[str, Any]:
 
 
 def _missing_required_columns(fieldnames: list[str]) -> list[str]:
-    present = {field.strip() for field in fieldnames if field}
+    present = {field for field in fieldnames if field}
     return [field for field in REQUIRED_COLUMNS if field not in present]
+
+
+def _normalize_header(field: str | None) -> str:
+    return (field or "").lstrip("\ufeff").strip().lower()
 
 
 def _required_string(
