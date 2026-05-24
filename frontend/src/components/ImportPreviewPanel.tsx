@@ -87,6 +87,27 @@ export default function ImportPreviewPanel() {
 
   const loading = activeAction !== null;
 
+  function clearStaleResults() {
+    setError(null);
+    setPreviewResult(null);
+    setAnalysisResult(null);
+  }
+
+  function handleFormatChange(nextFormat: ImportFormat) {
+    setFormat(nextFormat);
+    clearStaleResults();
+  }
+
+  function handleContentChange(nextContent: string) {
+    setContent(nextContent);
+    clearStaleResults();
+  }
+
+  function handlePreviewLimitChange(nextLimit: string) {
+    setPreviewLimit(nextLimit);
+    clearStaleResults();
+  }
+
   function requestContentFromInput(): ImportPreviewContent | null {
     if (format === "json") {
       try {
@@ -102,6 +123,7 @@ export default function ImportPreviewPanel() {
   async function handlePreview() {
     setError(null);
     setPreviewResult(null);
+    setAnalysisResult(null);
     const requestContent = requestContentFromInput();
     if (requestContent === null) return;
 
@@ -122,6 +144,7 @@ export default function ImportPreviewPanel() {
 
   async function handleAnalyze() {
     setError(null);
+    setPreviewResult(null);
     setAnalysisResult(null);
     const requestContent = requestContentFromInput();
     if (requestContent === null) return;
@@ -170,7 +193,7 @@ export default function ImportPreviewPanel() {
                 key={option}
                 type="button"
                 className={`segment ${format === option ? "segment-active" : ""}`}
-                onClick={() => setFormat(option)}
+                onClick={() => handleFormatChange(option)}
                 disabled={loading}
               >
                 {option.toUpperCase()}
@@ -191,7 +214,7 @@ export default function ImportPreviewPanel() {
             max={100}
             value={previewLimit}
             disabled={loading}
-            onChange={(e) => setPreviewLimit(e.target.value)}
+            onChange={(e) => handlePreviewLimitChange(e.target.value)}
           />
         </div>
 
@@ -209,7 +232,7 @@ export default function ImportPreviewPanel() {
             }
             value={content}
             disabled={loading}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => handleContentChange(e.target.value)}
           />
         </div>
 
