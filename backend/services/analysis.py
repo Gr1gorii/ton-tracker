@@ -288,7 +288,7 @@ def _build_data_quality(
 
     provider_notes.append(
         "Wallet-level analysis (buyers, PnL, clustering) uses mock data in "
-        "v0.2."
+        "v0.2.1."
     )
     return {
         "mode": settings.data_mode,
@@ -308,7 +308,7 @@ def analyze(
     """Run the analysis and return the response payload.
 
     Pool/token data may be real (DATA_MODE=real + reachable GeckoTerminal);
-    wallet-level data is mock in v0.2. The ``data_quality`` block documents
+    wallet-level data is mock in v0.2.1. The ``data_quality`` block documents
     exactly what is real vs mock for this run.
     """
     settings = settings or get_settings()
@@ -331,7 +331,7 @@ def analyze(
         pool_info["requested_network"] = parsed["network"]
         pool_info["requested_pool_address"] = parsed["pool_address"]
 
-    # Wallet aggregates remain mock in v0.2.
+    # Wallet aggregates remain mock in v0.2.1.
     raw_wallets = ton.get_window_buyers(pool_url, start, end)
 
     providers_status = get_providers_status(settings)
@@ -397,10 +397,10 @@ def analyze(
         "data_quality": data_quality,
         "providers": providers_status,
         "disclaimer": (
-            "v0.2 — анализ кошельков (покупатели, PnL, кластеризация) "
-            "использует mock-данные. Данные пула/токена могут быть реальными "
-            "в режиме real. Кластеризация носит вероятностный характер и не "
-            "является доказательством общего владения кошельками."
+            "v0.2.1 — pool/token data may be real in real mode, but "
+            "wallet-level analysis remains mock. Кластеризация носит "
+            "вероятностный характер и не является доказательством общего "
+            "владения кошельками."
         ),
         "is_mock": settings.is_mock,
     }
