@@ -36,6 +36,20 @@ export default function App() {
       );
   }, []);
 
+  const dataMode = result?.data_quality.mode ?? providers?.data_mode ?? "unknown";
+  const dataBadge =
+    dataMode === "mock"
+      ? { label: "MOCK DATA", className: "badge badge-mock" }
+      : dataMode === "real"
+        ? { label: "MIXED DATA", className: "badge badge-real" }
+        : { label: "DATA MODE UNKNOWN", className: "badge badge-group" };
+  const bannerText =
+    dataMode === "mock"
+      ? "v0.2.1 — mock mode is active. No real on-chain wallet data is used."
+      : dataMode === "real"
+        ? "v0.2.1 — pool/token data may be real through GeckoTerminal, but wallets, balances, PnL and clusters are still mock."
+        : "v0.2.1 — pool/token data may be real in real mode, but wallet buyers, balances, PnL and clusters remain mock.";
+
   async function handleAnalyze() {
     if (!poolUrl.trim()) {
       setError("Please enter a pool URL.");
@@ -83,17 +97,15 @@ export default function App() {
           <span className="brand-mark">◈</span>
           <div>
             <h1>TON Wallet Intelligence</h1>
-            <span className="brand-sub">Dashboard · v0.1</span>
+            <span className="brand-sub">Dashboard · v0.2.1</span>
           </div>
         </div>
-        <span className="badge badge-mock">MOCK DATA</span>
+        <span className={dataBadge.className}>{dataBadge.label}</span>
       </header>
 
       <div className="banner">
-        v0.1 prototype — analysis uses simulated mock data. Real APIs
-        (GeckoTerminal / TonAPI / Toncenter) are not connected yet. Wallet
-        clustering is <strong>probabilistic</strong> and is not proof of common
-        ownership.
+        {bannerText} Wallet clustering is <strong>probabilistic</strong> and is
+        not proof of common ownership.
       </div>
 
       <ProviderStatus
