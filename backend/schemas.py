@@ -1,0 +1,55 @@
+"""Pydantic schemas for request/response validation.
+
+The analysis response is large and partly dynamic (it includes a Cyrillic
+``Вывод`` key), so the response is returned as a plain dict from the service
+layer. Here we strictly validate the *request* and document the response shape
+for OpenAPI via a permissive model.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+class AnalyzeRequest(BaseModel):
+    pool_url: str = Field(
+        ...,
+        description="GeckoTerminal TON pool URL to analyze.",
+        examples=["https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z"],
+    )
+    time_window: Literal["24h", "3d", "7d", "custom"] = Field(
+        ..., description="Analysis window."
+    )
+    custom_start: Optional[str] = Field(
+        None, description="ISO start datetime (required when time_window=custom)."
+    )
+    custom_end: Optional[str] = Field(
+        None, description="ISO end datetime (required when time_window=custom)."
+    )
+
+
+class HealthResponse(BaseModel):
+    status: str
+    version: str
+    is_mock: bool
+
+
+class AnalyzeResponse(BaseModel):
+    """Permissive response model.
+
+    The real payload is built in ``services.analysis.analyze``. We allow extra
+    fields so the Cyrillic ``Вывод`` keys and nested structures pass through.
+    """
+
+    model_config = {"extra": "allow"}
+
+    pool_url: str
+    time_window: str
+    is_mock: bool
+    summary: dict[str, Any]
+    wallets: list[dict[str, Any]]
+    groups: list[dict[str, Any]]
+    common_holdings: list[dict[str, Any]]
+    interesting_wallets: list[dict[str, Any]]

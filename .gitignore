@@ -1,0 +1,19 @@
+# Python
+backend/.venv/
+__pycache__/
+*.py[cod]
+*.db
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Tooling
+.claude/settings.local.json
