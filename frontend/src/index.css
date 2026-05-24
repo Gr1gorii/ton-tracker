@@ -283,6 +283,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .import-state {
@@ -295,6 +296,16 @@ body {
   flex-direction: column;
   gap: 18px;
   margin-top: 18px;
+}
+
+.import-analysis-note {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
 }
 
 .import-subhead {
@@ -565,6 +576,11 @@ body {
 }
 
 .status-full_exit {
+  background: rgba(255, 90, 95, 0.14);
+  color: var(--red);
+}
+
+.status-seller_only {
   background: rgba(255, 90, 95, 0.14);
   color: var(--red);
 }

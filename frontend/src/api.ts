@@ -1,6 +1,7 @@
 import type {
   AnalysisResult,
   AnalyzeRequest,
+  ImportedTradesAnalysisResponse,
   ImportPreviewRequest,
   ImportPreviewResponse,
   ProvidersStatus,
@@ -81,6 +82,34 @@ export async function previewImportedTrades(
   }
 
   return (await res.json()) as ImportPreviewResponse;
+}
+
+export async function analyzeImportedTrades(
+  req: ImportPreviewRequest,
+): Promise<ImportedTradesAnalysisResponse> {
+  const res = await fetch(`${API_BASE}/api/import/trades/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    let detail = `Import analysis request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body && typeof body.detail === "string") {
+        detail = body.detail;
+      } else if (Array.isArray(body?.detail) && body.detail.length > 0) {
+        const first = body.detail[0];
+        if (typeof first?.msg === "string") detail = first.msg;
+      }
+    } catch {
+      // non-JSON error body; keep the generic message
+    }
+    throw new Error(detail);
+  }
+
+  return (await res.json()) as ImportedTradesAnalysisResponse;
 }
 
 export async function checkHealth(): Promise<boolean> {
