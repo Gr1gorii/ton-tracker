@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { analyze } from "./api";
+import { analyze, API_BASE } from "./api";
 import type { AnalysisResult, TimeWindow } from "./types";
 import PoolUrlInput from "./components/PoolUrlInput";
 import TimeWindowPicker from "./components/TimeWindowPicker";
@@ -28,9 +28,15 @@ export default function App() {
       setError("Please enter a pool URL.");
       return;
     }
-    if (timeWindow === "custom" && (!customStart || !customEnd)) {
-      setError("Please choose both a start and end date for a custom window.");
-      return;
+    if (timeWindow === "custom") {
+      if (!customStart || !customEnd) {
+        setError("Please choose both a start and end date for a custom window.");
+        return;
+      }
+      if (new Date(customStart) >= new Date(customEnd)) {
+        setError("Custom range end must be after the start.");
+        return;
+      }
     }
 
     setLoading(true);
@@ -109,7 +115,7 @@ export default function App() {
         <div className="state-box error-box">
           <strong>Request failed.</strong> {error}
           <div className="muted small">
-            Is the backend running on the API base URL? Start it with{" "}
+            Is the backend running at <code>{API_BASE}</code>? Start it with{" "}
             <code>uvicorn main:app --reload</code>.
           </div>
         </div>
