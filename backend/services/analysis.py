@@ -229,31 +229,56 @@ def _build_data_quality(
     """Assemble warnings + provider notes describing data provenance."""
     warnings: list[str] = []
     provider_notes: list[str] = []
+    pool_token_source = "mock"
+
+    if settings.is_real:
+        pool_token_source = (
+            "real"
+            if gecko_result.ok and gecko_result.source == "real"
+            else "fallback_mock"
+        )
+
+    components = {
+        "pool_data": pool_token_source,
+        "token_data": pool_token_source,
+        "wallet_buyers": "mock",
+        "wallet_balances": "mock",
+        "pnl": "mock_calculated",
+        "clustering": "mock_calculated",
+        "common_holdings": "mock",
+    }
 
     if settings.is_mock:
         warnings.append(
-            "v0.2 is running in mock mode. No real on-chain data is used."
+            "Mock mode is active. No real on-chain wallet data is used."
         )
         provider_notes.append(
             "All pool, token, wallet, PnL and clustering data is mock."
         )
         return {
             "mode": settings.data_mode,
+            "components": components,
             "warnings": warnings,
             "provider_notes": provider_notes,
         }
 
     # Real mode.
+    warnings.append(
+        "Real mode is enabled, but wallet-level analysis is still mocked in "
+        "v0.2.1."
+    )
     if gecko_result.ok and gecko_result.source == "real":
         provider_notes.append(
             "GeckoTerminal pool data is real, but wallet-level analysis is "
             "still mocked."
         )
-    elif not gecko_result.ok:
+    elif pool_token_source == "fallback_mock":
         warnings.append(
-            gecko_result.message
-            or "GeckoTerminal pool data is unavailable; using mock pool data."
+            "GeckoTerminal pool/token data could not be fetched. Falling "
+            "back to mock pool/token data."
         )
+        if gecko_result.message:
+            provider_notes.append(gecko_result.message)
         provider_notes.append("Falling back to mock pool/token data.")
 
     if not providers_status["ton_provider"]["available"]:
@@ -267,6 +292,7 @@ def _build_data_quality(
     )
     return {
         "mode": settings.data_mode,
+        "components": components,
         "warnings": warnings,
         "provider_notes": provider_notes,
     }

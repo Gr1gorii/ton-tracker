@@ -1,5 +1,6 @@
 import type {
   DataQuality,
+  DataQualityComponents,
   ProvidersStatus,
   ProviderStatusInfo,
 } from "../types";
@@ -34,23 +35,53 @@ function ProviderRow({
   );
 }
 
+const componentLabels: Array<[keyof DataQualityComponents, string]> = [
+  ["pool_data", "Pool data"],
+  ["token_data", "Token data"],
+  ["wallet_buyers", "Wallet buyers"],
+  ["wallet_balances", "Wallet balances"],
+  ["pnl", "PnL"],
+  ["clustering", "Clustering"],
+  ["common_holdings", "Common holdings"],
+];
+
+function formatComponentValue(value: string): string {
+  return value.replace(/_/g, " ");
+}
+
+function componentClass(value: string): string {
+  if (value === "real") return "component-source component-real";
+  if (value === "fallback_mock") return "component-source component-fallback";
+  return "component-source component-mock";
+}
+
 export default function ProviderStatus({
   providers,
   dataQuality,
   error,
 }: Props) {
   const mode = providers?.data_mode ?? dataQuality?.mode ?? "unknown";
+  const isRealMode = mode === "real";
+  const modeLabel =
+    mode === "real" ? "Real mode" : mode === "mock" ? "Mock mode" : "Unknown mode";
 
   return (
     <section className="provider-status-card">
       <div className="provider-status-head">
         <h3>Data mode / Provider status</h3>
         <span
-          className={`badge ${mode === "real" ? "badge-real" : "badge-mock"}`}
+          className={`badge ${isRealMode ? "badge-real" : "badge-mock"}`}
         >
-          {mode === "real" ? "REAL MODE" : "MOCK MODE"}
+          {modeLabel}
         </span>
       </div>
+
+      {isRealMode && (
+        <div className="dq-critical">
+          Pool/token data may be real. Wallets, PnL and clusters are mock in
+          v0.2.1. Not real wallet-level analysis yet.
+        </div>
+      )}
 
       {error && (
         <div className="muted small">
@@ -66,10 +97,26 @@ export default function ProviderStatus({
         </div>
       )}
 
+      {dataQuality?.components && (
+        <div className="component-provenance">
+          {componentLabels.map(([key, label]) => {
+            const value = dataQuality.components[key];
+            return (
+              <div className="component-row" key={key}>
+                <span className="component-label">{label}</span>
+                <span className={componentClass(value)}>
+                  {formatComponentValue(value)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {dataQuality && dataQuality.warnings.length > 0 && (
         <ul className="dq-warnings">
           {dataQuality.warnings.map((w, i) => (
-            <li key={i}>⚠ {w}</li>
+            <li key={i}>Warning: {w}</li>
           ))}
         </ul>
       )}
