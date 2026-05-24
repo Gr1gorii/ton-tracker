@@ -3,6 +3,11 @@ backend/.venv/
 __pycache__/
 *.py[cod]
 *.db
+.pytest_cache/
+
+# Secrets — keep .env.example tracked, ignore real .env files
+backend/.env
+.env
 
 # Node / frontend
 frontend/node_modules/

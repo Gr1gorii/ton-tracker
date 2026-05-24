@@ -101,6 +101,25 @@ export interface AnalyzedWindow {
   window_seconds: number;
 }
 
+export interface ProviderStatusInfo {
+  configured: boolean;
+  available: boolean;
+  message: string;
+}
+
+export interface ProvidersStatus {
+  data_mode: string;
+  geckoterminal: ProviderStatusInfo;
+  ton_provider: ProviderStatusInfo;
+  bitquery: ProviderStatusInfo;
+}
+
+export interface DataQuality {
+  mode: string;
+  warnings: string[];
+  provider_notes: string[];
+}
+
 export interface AnalysisResult {
   pool_url: string;
   time_window: string;
@@ -112,6 +131,8 @@ export interface AnalysisResult {
   groups: WalletGroup[];
   common_holdings: CommonHolding[];
   interesting_wallets: Wallet[];
+  data_quality: DataQuality;
+  providers: ProvidersStatus;
   disclaimer: string;
   is_mock: boolean;
 }
