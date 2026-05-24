@@ -7,5 +7,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Fail loudly if 5173 is taken instead of drifting to another port —
+    // the backend CORS allowlist is pinned to 5173.
+    strictPort: true,
   },
 });
