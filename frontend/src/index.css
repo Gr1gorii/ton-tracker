@@ -240,6 +240,67 @@ body {
   gap: 8px;
 }
 
+/* Import preview ----------------------------------------------------- */
+.import-preview-panel {
+  margin-bottom: 24px;
+}
+
+.import-preview-note {
+  background: var(--amber-bg);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  border-radius: 9px;
+  color: #f3d29a;
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.import-preview-form {
+  display: grid;
+  grid-template-columns: minmax(150px, max-content) minmax(130px, 170px) 1fr;
+  gap: 16px;
+  align-items: end;
+}
+
+.import-content-field {
+  grid-column: 1 / -1;
+}
+
+.import-textarea {
+  min-height: 150px;
+  resize: vertical;
+  font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+  line-height: 1.5;
+}
+
+.import-limit-input {
+  max-width: 150px;
+}
+
+.import-preview-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.import-state {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.import-preview-results {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.import-subhead {
+  margin-bottom: 10px;
+}
+
 /* State boxes -------------------------------------------------------- */
 .state-box {
   border-radius: var(--radius);
@@ -883,6 +944,9 @@ body {
 
 @media (max-width: 900px) {
   .controls-card {
+    grid-template-columns: 1fr;
+  }
+  .import-preview-form {
     grid-template-columns: 1fr;
   }
   .two-col {

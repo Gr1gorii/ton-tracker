@@ -10,6 +10,7 @@ import WalletGroups from "./components/WalletGroups";
 import CommonHoldings from "./components/CommonHoldings";
 import InterestingWallets from "./components/InterestingWallets";
 import ExportButtons from "./components/ExportButtons";
+import ImportPreviewPanel from "./components/ImportPreviewPanel";
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
@@ -141,6 +142,8 @@ export default function App() {
           )}
         </div>
       </div>
+
+      <ImportPreviewPanel />
 
       {error && (
         <div className="state-box error-box">
