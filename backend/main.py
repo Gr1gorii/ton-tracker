@@ -1,8 +1,8 @@
 """FastAPI application entry point for the TON Wallet Intelligence Dashboard.
 
-v0.2 — adds a real data adapter layer. Pool/token data can be real
-(DATA_MODE=real + GeckoTerminal); wallet-level analysis remains mock. Mock mode
-is the default and stays fully functional. See README.md.
+v0.2.1 — data provenance labels for mixed real/mock mode. Pool/token data may
+be real in DATA_MODE=real through GeckoTerminal, but wallet-level analysis
+remains mock. Mock mode is the default and stays fully functional.
 """
 
 from __future__ import annotations
@@ -26,14 +26,15 @@ from schemas import (
 from services import export
 from services.analysis import analyze, get_providers_status
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
 
 app = FastAPI(
     title="TON Wallet Intelligence Dashboard API",
     version=VERSION,
     description=(
-        "v0.2 — real data adapter layer. Mock mode is the default; "
-        "wallet-level analysis is still mock."
+        "v0.2.1 — data provenance labels for mixed real/mock mode. "
+        "Pool/token data may be real in DATA_MODE=real through GeckoTerminal, "
+        "but wallet-level analysis remains mock."
     ),
 )
 
