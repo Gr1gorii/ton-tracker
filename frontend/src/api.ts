@@ -1,6 +1,8 @@
 import type {
   AnalysisResult,
   AnalyzeRequest,
+  ImportPreviewRequest,
+  ImportPreviewResponse,
   ProvidersStatus,
 } from "./types";
 
@@ -51,6 +53,34 @@ export async function getProvidersStatus(): Promise<ProvidersStatus> {
     throw new Error(`Provider status request failed (${res.status})`);
   }
   return (await res.json()) as ProvidersStatus;
+}
+
+export async function previewImportedTrades(
+  req: ImportPreviewRequest,
+): Promise<ImportPreviewResponse> {
+  const res = await fetch(`${API_BASE}/api/import/trades/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    let detail = `Import preview request failed (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body && typeof body.detail === "string") {
+        detail = body.detail;
+      } else if (Array.isArray(body?.detail) && body.detail.length > 0) {
+        const first = body.detail[0];
+        if (typeof first?.msg === "string") detail = first.msg;
+      }
+    } catch {
+      // non-JSON error body; keep the generic message
+    }
+    throw new Error(detail);
+  }
+
+  return (await res.json()) as ImportPreviewResponse;
 }
 
 export async function checkHealth(): Promise<boolean> {

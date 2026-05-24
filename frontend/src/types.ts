@@ -154,3 +154,51 @@ export interface AnalyzeRequest {
   custom_start?: string;
   custom_end?: string;
 }
+
+export type ImportFormat = "csv" | "json";
+export type ImportSource = "imported_csv" | "imported_json";
+export type ImportPreviewContent =
+  | string
+  | Record<string, unknown>
+  | Array<Record<string, unknown>>;
+
+export interface ImportValidationError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+export interface ImportValidationSummary {
+  total_rows: number;
+  valid_rows: number;
+  invalid_rows: number;
+  duplicate_rows: number;
+  errors: ImportValidationError[];
+}
+
+export interface ImportedTradePreview {
+  tx_hash: string;
+  block_time: string;
+  wallet: string;
+  side: "buy" | "sell";
+  token_amount: string | number;
+  usd_amount: string | number;
+  price_usd?: string | number | null;
+  pool_address?: string | null;
+  dex?: string | null;
+  source: ImportSource;
+}
+
+export interface ImportPreviewRequest {
+  format: ImportFormat;
+  content: ImportPreviewContent;
+  preview_limit?: number;
+}
+
+export interface ImportPreviewResponse {
+  summary: ImportValidationSummary;
+  trades_preview: ImportedTradePreview[];
+  preview_limit: number;
+  has_more: boolean;
+  source: ImportSource;
+}
