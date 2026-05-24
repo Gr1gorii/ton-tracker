@@ -37,6 +37,72 @@ const STATUS_LABELS: Record<ImportedWalletStatus, string> = {
 
 type ActiveAction = "preview" | "analysis" | null;
 
+const SAMPLE_TRADES = [
+  {
+    tx_hash: "sample-buy-1",
+    block_time: "2026-05-24T12:00:00Z",
+    wallet: "EQsamplePartial",
+    side: "buy",
+    token_amount: "1000",
+    usd_amount: "250",
+    price_usd: "0.25",
+    pool_address: "EQsamplePool",
+    dex: "stonfi",
+  },
+  {
+    tx_hash: "sample-sell-1",
+    block_time: "2026-05-24T12:20:00Z",
+    wallet: "EQsamplePartial",
+    side: "sell",
+    token_amount: "400",
+    usd_amount: "140",
+    price_usd: "0.35",
+    pool_address: "EQsamplePool",
+    dex: "stonfi",
+  },
+  {
+    tx_hash: "sample-buy-2",
+    block_time: "2026-05-24T12:35:00Z",
+    wallet: "EQsampleHolder",
+    side: "buy",
+    token_amount: "750",
+    usd_amount: "225",
+    price_usd: "0.3",
+    pool_address: "EQsamplePool",
+    dex: "dedust",
+  },
+  {
+    tx_hash: "sample-sell-2",
+    block_time: "2026-05-24T12:45:00Z",
+    wallet: "EQsampleSellerOnly",
+    side: "sell",
+    token_amount: "500",
+    usd_amount: "175",
+    price_usd: "0.35",
+    pool_address: "EQsamplePool",
+    dex: "dedust",
+  },
+] as const;
+
+const SAMPLE_CSV = [
+  "tx_hash,block_time,wallet,side,token_amount,usd_amount,price_usd,pool_address,dex",
+  ...SAMPLE_TRADES.map((trade) =>
+    [
+      trade.tx_hash,
+      trade.block_time,
+      trade.wallet,
+      trade.side,
+      trade.token_amount,
+      trade.usd_amount,
+      trade.price_usd,
+      trade.pool_address,
+      trade.dex,
+    ].join(","),
+  ),
+].join("\n");
+
+const SAMPLE_JSON = JSON.stringify(SAMPLE_TRADES, null, 2);
+
 function displayValue(value: string | number | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
@@ -105,6 +171,23 @@ export default function ImportPreviewPanel() {
 
   function handlePreviewLimitChange(nextLimit: string) {
     setPreviewLimit(nextLimit);
+    clearStaleResults();
+  }
+
+  function loadSampleCsv() {
+    setFormat("csv");
+    setContent(SAMPLE_CSV);
+    clearStaleResults();
+  }
+
+  function loadSampleJson() {
+    setFormat("json");
+    setContent(SAMPLE_JSON);
+    clearStaleResults();
+  }
+
+  function clearInput() {
+    setContent("");
     clearStaleResults();
   }
 
@@ -222,6 +305,38 @@ export default function ImportPreviewPanel() {
           <label className="field-label" htmlFor="import-content">
             Trade data
           </label>
+          <div className="import-sample-row">
+            <span className="field-sublabel">
+              Use the sample data to test preview and imported-trade analysis
+              without connecting real APIs.
+            </span>
+            <div className="import-sample-actions">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={loadSampleCsv}
+                disabled={loading}
+              >
+                Load sample CSV
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={loadSampleJson}
+                disabled={loading}
+              >
+                Load sample JSON
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={clearInput}
+                disabled={loading}
+              >
+                Clear input
+              </button>
+            </div>
+          </div>
           <textarea
             id="import-content"
             className="text-input import-textarea"
