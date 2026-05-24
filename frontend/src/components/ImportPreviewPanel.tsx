@@ -36,6 +36,25 @@ const STATUS_LABELS: Record<ImportedWalletStatus, string> = {
 };
 
 type ActiveAction = "preview" | "analysis" | null;
+type WalletCsvColumn = keyof ImportedWalletAnalysis;
+
+const WALLET_CSV_COLUMNS: WalletCsvColumn[] = [
+  "wallet",
+  "status",
+  "buy_trades_count",
+  "sell_trades_count",
+  "total_bought_qty",
+  "total_bought_usd",
+  "total_sold_qty",
+  "total_sold_usd",
+  "net_holding_qty",
+  "avg_buy_price_usd",
+  "avg_sell_price_usd",
+  "realized_pnl_usd",
+  "realized_pnl_pct",
+  "first_trade_time",
+  "last_trade_time",
+];
 
 const SAMPLE_TRADES = [
   {
@@ -138,6 +157,53 @@ function walletKey(wallet: ImportedWalletAnalysis, index: number): string {
     wallet.sell_trades_count,
     index,
   ].join(":");
+}
+
+function downloadTextFile(
+  filename: string,
+  content: string,
+  mimeType: string,
+) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportAnalysisJson(result: ImportedTradesAnalysisResponse) {
+  downloadTextFile(
+    "imported-trades-analysis.json",
+    JSON.stringify(result, null, 2),
+    "application/json;charset=utf-8",
+  );
+}
+
+function exportWalletsCsv(wallets: ImportedWalletAnalysis[]) {
+  const rows = [
+    WALLET_CSV_COLUMNS.join(","),
+    ...wallets.map((wallet) =>
+      WALLET_CSV_COLUMNS.map((column) => csvValue(wallet[column])).join(","),
+    ),
+  ];
+  downloadTextFile(
+    "imported-trades-wallets.csv",
+    rows.join("\n"),
+    "text/csv;charset=utf-8",
+  );
+}
+
+function csvValue(value: string | number | null): string {
+  if (value === null) return "";
+  const text = String(value);
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
 }
 
 export default function ImportPreviewPanel() {
@@ -452,6 +518,29 @@ function AnalysisResults({
             <div className="stat-value">{result.summary[field]}</div>
           </div>
         ))}
+      </div>
+
+      <div className="import-export-row">
+        <span className="muted small">
+          Exports are based only on imported rows and do not include live wallet
+          balances.
+        </span>
+        <div className="import-export-actions">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => exportAnalysisJson(result)}
+          >
+            Export analysis JSON
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => exportWalletsCsv(result.wallets)}
+          >
+            Export wallets CSV
+          </button>
+        </div>
       </div>
 
       {result.summary.errors.length > 0 && (
