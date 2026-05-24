@@ -328,6 +328,30 @@ body {
   padding: 10px 12px;
 }
 
+.import-export-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  padding: 10px 12px;
+}
+
+.import-export-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.import-export-actions .btn {
+  padding: 7px 11px;
+  font-size: 12px;
+}
+
 .import-subhead {
   margin-bottom: 10px;
 }
