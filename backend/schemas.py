@@ -50,6 +50,25 @@ class ProvidersStatusResponse(BaseModel):
     bitquery: ProviderStatus
 
 
+class ImportTradesPreviewRequest(BaseModel):
+    format: Literal["csv", "json"]
+    content: Any
+    preview_limit: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of valid normalized trades to preview.",
+    )
+
+
+class ImportTradesPreviewResponse(BaseModel):
+    summary: dict[str, Any]
+    trades_preview: list[dict[str, Any]]
+    preview_limit: int
+    has_more: bool
+    source: Literal["imported_csv", "imported_json"]
+
+
 class DataQualityComponents(BaseModel):
     pool_data: Literal["mock", "real", "fallback_mock"]
     token_data: Literal["mock", "real", "fallback_mock"]
