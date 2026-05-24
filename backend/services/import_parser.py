@@ -21,8 +21,6 @@ REQUIRED_COLUMNS = (
     "usd_amount",
 )
 
-OPTIONAL_COLUMNS = ("price_usd", "pool_address", "dex")
-
 ZERO = Decimal("0")
 
 
@@ -34,6 +32,11 @@ def parse_csv_trades(csv_text: str) -> dict[str, Any]:
     reader = csv.DictReader(StringIO(csv_text.strip()))
     if not reader.fieldnames:
         return _empty_result()
+    missing_columns = _missing_required_columns(reader.fieldnames)
+    if missing_columns:
+        return _header_error_result(
+            f"Missing required columns: {', '.join(missing_columns)}"
+        )
 
     rows = []
     for row_number, row in enumerate(reader, start=2):
@@ -159,6 +162,24 @@ def _empty_result() -> dict[str, Any]:
             "errors": [],
         },
     }
+
+
+def _header_error_result(message: str) -> dict[str, Any]:
+    return {
+        "trades": [],
+        "summary": {
+            "total_rows": 0,
+            "valid_rows": 0,
+            "invalid_rows": 0,
+            "duplicate_rows": 0,
+            "errors": [_error(1, "header", message)],
+        },
+    }
+
+
+def _missing_required_columns(fieldnames: list[str]) -> list[str]:
+    present = {field.strip() for field in fieldnames if field}
+    return [field for field in REQUIRED_COLUMNS if field not in present]
 
 
 def _required_string(
