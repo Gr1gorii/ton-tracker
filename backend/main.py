@@ -23,6 +23,7 @@ from schemas import (
     HealthResponse,
     ProvidersStatusResponse,
 )
+from routers.import_trades import router as import_trades_router
 from services import export
 from services.analysis import analyze, get_providers_status
 
@@ -50,6 +51,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(import_trades_router)
 
 
 @app.on_event("startup")
