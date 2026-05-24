@@ -65,6 +65,29 @@ def test_valid_json_preview_returns_summary_and_preview():
     assert body["source"] == "imported_json"
 
 
+def test_json_single_object_preview_is_supported():
+    response = _client().post(
+        "/api/import/trades/preview",
+        json={
+            "format": "json",
+            "content": {
+                "tx_hash": "tx1",
+                "block_time": "2026-05-24T12:00:00Z",
+                "wallet": "EQwallet1",
+                "side": "buy",
+                "token_amount": "1000",
+                "usd_amount": "250",
+            },
+            "preview_limit": 10,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]["valid_rows"] == 1
+    assert len(body["trades_preview"]) == 1
+
+
 def test_preview_limit_limits_rows_and_sets_has_more():
     response = _client().post(
         "/api/import/trades/preview",
@@ -137,6 +160,54 @@ def test_duplicate_rows_are_counted_and_excluded_from_preview():
     assert body["summary"]["duplicate_rows"] == 1
     assert len(body["trades_preview"]) == 1
     assert body["trades_preview"][0]["usd_amount"] == "2"
+
+
+def test_csv_content_must_be_string():
+    response = _client().post(
+        "/api/import/trades/preview",
+        json={
+            "format": "csv",
+            "content": [{"not": "a string"}],
+            "preview_limit": 10,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_preview_limit_above_max_returns_validation_error():
+    response = _client().post(
+        "/api/import/trades/preview",
+        json={
+            "format": "csv",
+            "content": "",
+            "preview_limit": 101,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_preview_limit_below_min_returns_validation_error():
+    response = _client().post(
+        "/api/import/trades/preview",
+        json={
+            "format": "csv",
+            "content": "",
+            "preview_limit": 0,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_missing_content_returns_validation_error():
+    response = _client().post(
+        "/api/import/trades/preview",
+        json={"format": "csv"},
+    )
+
+    assert response.status_code == 422
 
 
 def test_unsupported_format_returns_validation_error():
