@@ -202,3 +202,44 @@ export interface ImportPreviewResponse {
   has_more: boolean;
   source: ImportSource;
 }
+
+export type ImportedWalletStatus =
+  | "holder"
+  | "partial_seller"
+  | "full_exit"
+  | "seller_only"
+  | "unknown";
+
+export interface ImportedTradesAnalysisSummary extends ImportValidationSummary {
+  wallets_count: number;
+  buy_trades_count: number;
+  sell_trades_count: number;
+}
+
+export interface ImportedWalletAnalysis {
+  wallet: string;
+  buy_trades_count: number;
+  sell_trades_count: number;
+  total_bought_qty: string;
+  total_bought_usd: string;
+  total_sold_qty: string;
+  total_sold_usd: string;
+  net_holding_qty: string;
+  avg_buy_price_usd: string | null;
+  avg_sell_price_usd: string | null;
+  realized_pnl_usd: string;
+  realized_pnl_pct: string | null;
+  status: ImportedWalletStatus;
+  first_trade_time: string;
+  last_trade_time: string;
+}
+
+export interface ImportedTradesAnalysisResponse {
+  summary: ImportedTradesAnalysisSummary;
+  wallets: ImportedWalletAnalysis[];
+  trades_preview: ImportedTradePreview[];
+  preview_limit: number;
+  has_more_wallets: boolean;
+  source: ImportSource;
+  analysis_note: string;
+}
