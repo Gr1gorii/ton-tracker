@@ -652,6 +652,12 @@ body {
   border: 1px solid rgba(59, 130, 246, 0.4);
 }
 
+.badge-provider {
+  background: var(--panel-3);
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+
 .badge-interesting {
   background: var(--amber-bg);
   color: var(--amber);
