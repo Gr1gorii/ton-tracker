@@ -357,7 +357,7 @@ function PreviewResults({ result }: { result: BitqueryPreviewResponse }) {
     <div className="bitquery-results">
       <div className="bitquery-result-head">
         <span className="badge badge-group">success: {String(result.success)}</span>
-        <span className="badge badge-real">{result.provider}</span>
+        <span className="badge badge-provider">Provider: {result.provider}</span>
         <span
           className={
             result.data_mode === "mock" ? "badge badge-mock" : "badge badge-real"
@@ -390,7 +390,7 @@ function AnalysisResults({ result }: { result: BitqueryAnalysisResponse }) {
     <div className="bitquery-results">
       <div className="bitquery-result-head">
         <span className="badge badge-group">success: {String(result.success)}</span>
-        <span className="badge badge-real">{result.provider}</span>
+        <span className="badge badge-provider">Provider: {result.provider}</span>
         <span
           className={
             result.data_mode === "mock" ? "badge badge-mock" : "badge badge-real"
