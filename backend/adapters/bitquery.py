@@ -56,6 +56,81 @@ class BitqueryAdapter:
             source="real",
         )
 
+    # -- Query building --------------------------------------------------
+
+    @staticmethod
+    def _format_query_time(value: datetime | str, field_name: str) -> str:
+        if value is None:
+            raise ValueError(f"{field_name} is required")
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    def build_token_trades_query(self, token_address: str, start: datetime | str,
+                                 end: datetime | str) -> dict:
+        """Build the Bitquery GraphQL request for TON DEX token trades.
+
+        This intentionally only prepares the future real-provider request. It
+        does not perform any network calls or require a configured API key.
+        """
+        if not token_address or not str(token_address).strip():
+            raise ValueError("token_address is required")
+
+        start_value = self._format_query_time(start, "start")
+        end_value = self._format_query_time(end, "end")
+
+        query = """
+query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
+  ton(network: ton) {
+    dexTrades(
+      options: {asc: "block.timestamp.time"}
+      date: {since: $start, till: $end}
+      any: [
+        {buyCurrency: {address: {is: $token}}},
+        {sellCurrency: {address: {is: $token}}}
+      ]
+    ) {
+      transaction {
+        hash
+      }
+      block {
+        timestamp {
+          time
+        }
+      }
+      buyer {
+        address
+      }
+      seller {
+        address
+      }
+      buyCurrency {
+        address
+      }
+      sellCurrency {
+        address
+      }
+      buyAmount
+      sellAmount
+      tradeAmount(in: USD)
+      protocol
+      pool {
+        address
+      }
+    }
+  }
+}
+""".strip()
+
+        return {
+            "query": query,
+            "variables": {
+                "token": token_address,
+                "start": start_value,
+                "end": end_value,
+            },
+        }
+
     # -- Normalization ---------------------------------------------------
 
     @staticmethod
