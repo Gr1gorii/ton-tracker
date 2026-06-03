@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AnalyzeRequest(BaseModel):
@@ -48,6 +48,39 @@ class ProvidersStatusResponse(BaseModel):
     geckoterminal: ProviderStatus
     ton_provider: ProviderStatus
     bitquery: ProviderStatus
+
+
+class BitqueryTokenTradesPreviewRequest(BaseModel):
+    token_address: str = Field(
+        ...,
+        description="TON token address to preview DEX trades for.",
+    )
+    start: str = Field(..., description="ISO start datetime.")
+    end: str = Field(..., description="ISO end datetime.")
+    preview_limit: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum number of normalized Bitquery trades to preview.",
+    )
+
+    @field_validator("token_address", "start", "end")
+    @classmethod
+    def _required_non_empty_string(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("Required value is missing")
+        return cleaned
+
+
+class BitqueryTokenTradesPreviewResponse(BaseModel):
+    provider: Literal["bitquery"]
+    data_mode: Literal["mock", "real"]
+    success: bool
+    summary: dict[str, Any]
+    trades_preview: list[dict[str, Any]]
+    warnings: list[str]
+    error: dict[str, Any] | None
 
 
 class ImportTradesPreviewRequest(BaseModel):
