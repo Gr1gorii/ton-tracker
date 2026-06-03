@@ -83,6 +83,20 @@ class BitqueryTokenTradesPreviewResponse(BaseModel):
     error: dict[str, Any] | None
 
 
+class BitqueryTokenTradesAnalysisResponse(BaseModel):
+    provider: Literal["bitquery"]
+    data_mode: Literal["mock", "real"]
+    success: bool
+    summary: dict[str, Any]
+    wallets: list[dict[str, Any]]
+    trades_preview: list[dict[str, Any]]
+    preview_limit: int
+    has_more_wallets: bool
+    warnings: list[str]
+    error: dict[str, Any] | None
+    analysis_note: str
+
+
 class ImportTradesPreviewRequest(BaseModel):
     format: Literal["csv", "json"]
     content: Any
