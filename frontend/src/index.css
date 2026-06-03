@@ -356,6 +356,73 @@ body {
   margin-bottom: 10px;
 }
 
+/* Bitquery preview and analysis ------------------------------------- */
+.bitquery-panel {
+  margin-bottom: 24px;
+}
+
+.bitquery-note {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--cyan);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.bitquery-form {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.2fr) minmax(210px, 1fr) minmax(210px, 1fr) minmax(120px, 150px);
+  gap: 16px;
+  align-items: end;
+}
+
+.bitquery-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.bitquery-state {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.bitquery-results {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.bitquery-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bitquery-provider-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bitquery-provider-error {
+  padding: 16px;
+}
+
+.bitquery-warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* State boxes -------------------------------------------------------- */
 .state-box {
   border-radius: var(--radius);
@@ -1017,6 +1084,9 @@ body {
     grid-template-columns: 1fr;
   }
   .import-preview-form {
+    grid-template-columns: 1fr;
+  }
+  .bitquery-form {
     grid-template-columns: 1fr;
   }
   .two-col {

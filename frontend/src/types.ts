@@ -243,3 +243,68 @@ export interface ImportedTradesAnalysisResponse {
   source: ImportSource;
   analysis_note: string;
 }
+
+export interface BitqueryTokenTradesRequest {
+  token_address: string;
+  start: string;
+  end: string;
+  preview_limit?: number;
+}
+
+export interface BitqueryProviderError {
+  code: string | null;
+  message: string;
+}
+
+export interface BitqueryPreviewSummary {
+  total_trades: number;
+  preview_count: number;
+}
+
+export interface BitqueryAnalysisSummary {
+  total_trades: number;
+  valid_rows: number;
+  wallets_count: number;
+  buy_trades_count: number;
+  sell_trades_count: number;
+  errors: ImportValidationError[];
+}
+
+export interface BitqueryTradePreview {
+  tx_hash: string;
+  block_time: string;
+  wallet: string;
+  side: "buy" | "sell";
+  token_amount: string | number;
+  usd_amount: string | number;
+  price_usd?: string | number | null;
+  pool_address?: string | null;
+  dex?: string | null;
+  source: "bitquery";
+}
+
+export type BitqueryWalletAnalysis = ImportedWalletAnalysis;
+
+export interface BitqueryPreviewResponse {
+  provider: "bitquery";
+  data_mode: "mock" | "real";
+  success: boolean;
+  summary: BitqueryPreviewSummary;
+  trades_preview: BitqueryTradePreview[];
+  warnings: string[];
+  error: BitqueryProviderError | null;
+}
+
+export interface BitqueryAnalysisResponse {
+  provider: "bitquery";
+  data_mode: "mock" | "real";
+  success: boolean;
+  summary: BitqueryAnalysisSummary;
+  wallets: BitqueryWalletAnalysis[];
+  trades_preview: BitqueryTradePreview[];
+  preview_limit: number;
+  has_more_wallets: boolean;
+  warnings: string[];
+  error: BitqueryProviderError | null;
+  analysis_note: string;
+}
