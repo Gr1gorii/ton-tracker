@@ -82,6 +82,9 @@ class BitqueryAdapter:
 
         This intentionally only prepares the future real-provider request. It
         does not perform any network calls or require a configured API key.
+        Bitquery V2 exposes TON under the uppercase ``Ton`` root with the
+        ``DEXTrades`` cube; the older lowercase ``ton/dexTrades`` shape is not
+        valid against the active RootQuery.
         """
         if not token_address or not str(token_address).strip():
             raise ValueError("token_address is required")
@@ -91,41 +94,70 @@ class BitqueryAdapter:
 
         query = """
 query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
-  ton(network: ton) {
-    dexTrades(
-      options: {asc: "block.timestamp.time"}
-      date: {since: $start, till: $end}
-      any: [
-        {buyCurrency: {address: {is: $token}}},
-        {sellCurrency: {address: {is: $token}}}
-      ]
+  Ton(network: ton) {
+    DEXTrades(
+      orderBy: {ascending: Block_Time}
+      where: {
+        Block: {Time: {since: $start, till: $end}}
+        any: [
+          {
+            Trade: {
+              Buy: {
+                Currency: {
+                  SmartContract: {Address: {is: $token}}
+                }
+              }
+            }
+          }
+          {
+            Trade: {
+              Sell: {
+                Currency: {
+                  SmartContract: {Address: {is: $token}}
+                }
+              }
+            }
+          }
+        ]
+      }
     ) {
-      transaction {
-        hash
+      Block {
+        Time
       }
-      block {
-        timestamp {
-          time
+      Transaction {
+        Hash
+      }
+      Trade {
+        Buy {
+          Amount
+          AmountInUSD
+          Buyer {
+            Address
+          }
+          Currency {
+            SmartContract {
+              Address
+            }
+          }
         }
-      }
-      buyer {
-        address
-      }
-      seller {
-        address
-      }
-      buyCurrency {
-        address
-      }
-      sellCurrency {
-        address
-      }
-      buyAmount
-      sellAmount
-      tradeAmount(in: USD)
-      protocol
-      pool {
-        address
+        Sell {
+          Amount
+          AmountInUSD
+          Seller {
+            Address
+          }
+          Currency {
+            SmartContract {
+              Address
+            }
+          }
+        }
+        Dex {
+          ProtocolName
+          SmartContract {
+            Address
+          }
+        }
       }
     }
   }
@@ -317,6 +349,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
         buy_token = cls._required_string(
             raw_trade,
             "buy token address",
+            ("Trade", "Buy", "Currency", "SmartContract", "Address"),
             ("buyCurrency", "address"),
             ("buy_currency", "address"),
             ("buy_token_address",),
@@ -325,6 +358,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
         sell_token = cls._required_string(
             raw_trade,
             "sell token address",
+            ("Trade", "Sell", "Currency", "SmartContract", "Address"),
             ("sellCurrency", "address"),
             ("sell_currency", "address"),
             ("sell_token_address",),
@@ -336,6 +370,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             wallet = cls._required_string(
                 raw_trade,
                 "buyer wallet",
+                ("Trade", "Buy", "Buyer", "Address"),
                 ("buyer", "address"),
                 ("buyer_address",),
                 ("buyer",),
@@ -343,16 +378,32 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             token_amount = cls._decimal_value(
                 cls._first_value(
                     raw_trade,
+                    ("Trade", "Buy", "Amount"),
                     ("buyAmount",),
                     ("buy_amount",),
                 ),
                 "buy amount",
+            )
+            usd_paths = (
+                ("Trade", "Buy", "AmountInUSD"),
+                ("Trade", "AmountInUSD"),
+                ("tradeAmount",),
+                ("tradeAmount(in: USD)",),
+                ("amount_usd",),
+                ("usd_amount",),
+            )
+            price_paths = (
+                ("Trade", "Buy", "PriceInUSD"),
+                ("price_usd",),
+                ("priceUsd",),
+                ("priceUSD",),
             )
         elif sell_token == target:
             side = "sell"
             wallet = cls._required_string(
                 raw_trade,
                 "seller wallet",
+                ("Trade", "Sell", "Seller", "Address"),
                 ("seller", "address"),
                 ("seller_address",),
                 ("seller",),
@@ -360,10 +411,25 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             token_amount = cls._decimal_value(
                 cls._first_value(
                     raw_trade,
+                    ("Trade", "Sell", "Amount"),
                     ("sellAmount",),
                     ("sell_amount",),
                 ),
                 "sell amount",
+            )
+            usd_paths = (
+                ("Trade", "Sell", "AmountInUSD"),
+                ("Trade", "AmountInUSD"),
+                ("tradeAmount",),
+                ("tradeAmount(in: USD)",),
+                ("amount_usd",),
+                ("usd_amount",),
+            )
+            price_paths = (
+                ("Trade", "Sell", "PriceInUSD"),
+                ("price_usd",),
+                ("priceUsd",),
+                ("priceUSD",),
             )
         else:
             raise ValueError(
@@ -371,23 +437,12 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             )
 
         usd_amount = cls._decimal_value(
-            cls._first_value(
-                raw_trade,
-                ("tradeAmount",),
-                ("tradeAmount(in: USD)",),
-                ("amount_usd",),
-                ("usd_amount",),
-            ),
+            cls._first_value(raw_trade, *usd_paths),
             "USD amount",
             allow_zero=True,
         )
         price_usd = cls._optional_decimal_value(
-            cls._first_value(
-                raw_trade,
-                ("price_usd",),
-                ("priceUsd",),
-                ("priceUSD",),
-            ),
+            cls._first_value(raw_trade, *price_paths),
             "price USD",
         )
         if price_usd is None:
@@ -397,6 +452,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             "tx_hash": cls._required_string(
                 raw_trade,
                 "transaction hash",
+                ("Transaction", "Hash"),
                 ("transaction", "hash"),
                 ("tx_hash",),
                 ("transaction_hash",),
@@ -404,6 +460,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             "block_time": cls._required_string(
                 raw_trade,
                 "block time",
+                ("Block", "Time"),
                 ("block", "timestamp", "time"),
                 ("block_time",),
                 ("timestamp",),
@@ -416,6 +473,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             "pool_address": cls._string_value(
                 cls._first_value(
                     raw_trade,
+                    ("Trade", "Dex", "SmartContract", "Address"),
                     ("pool", "address"),
                     ("pool_address",),
                 )
@@ -423,6 +481,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             "dex": cls._string_value(
                 cls._first_value(
                     raw_trade,
+                    ("Trade", "Dex", "ProtocolName"),
                     ("dex",),
                     ("protocol",),
                 )
@@ -444,7 +503,9 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
         elif isinstance(payload, dict):
             trades = cls._first_value(
                 payload,
+                ("Ton", "DEXTrades"),
                 ("ton", "dexTrades"),
+                ("DEXTrades",),
                 ("dexTrades",),
                 ("trades",),
             )
@@ -454,7 +515,7 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             raise ValueError("Bitquery trades response must be a dict or list")
 
         if not isinstance(trades, list):
-            raise ValueError("Bitquery dexTrades response must be a list")
+            raise ValueError("Bitquery DEXTrades response must be a list")
 
         normalized = []
         for index, raw_trade in enumerate(trades):
