@@ -54,6 +54,24 @@ def _real_settings(**overrides) -> Settings:
     return _settings("real", **base)
 
 
+def _raw_trade(**overrides) -> dict:
+    base = {
+        "transaction": {"hash": "tx1"},
+        "block": {"timestamp": {"time": "2026-01-01T00:00:00Z"}},
+        "buyer": {"address": "EQbuyer"},
+        "seller": {"address": "EQseller"},
+        "buyCurrency": {"address": "EQtok"},
+        "sellCurrency": {"address": "EQton"},
+        "buyAmount": "5",
+        "sellAmount": "2",
+        "tradeAmount": "12.50",
+        "protocol": "stonfi",
+        "pool": {"address": "EQpool"},
+    }
+    base.update(overrides)
+    return base
+
+
 def test_build_token_trades_query_returns_query_and_variables():
     adapter = BitqueryAdapter(_settings())
 
@@ -216,6 +234,122 @@ def test_real_configured_trade_fetch_does_not_make_network_calls(monkeypatch):
     assert payload["variables"]["token"] == "EQtok"
     assert result.ok is False
     assert result.error == ERROR_NOT_IMPLEMENTED
+
+
+def test_normalize_trade_buy_side_for_target_token():
+    adapter = BitqueryAdapter(_settings())
+
+    trade = adapter.normalize_trade(_raw_trade(), "EQtok")
+
+    assert trade == {
+        "tx_hash": "tx1",
+        "block_time": "2026-01-01T00:00:00Z",
+        "wallet": "EQbuyer",
+        "side": "buy",
+        "token_amount": "5",
+        "usd_amount": "12.50",
+        "price_usd": "2.50",
+        "pool_address": "EQpool",
+        "dex": "stonfi",
+        "source": "bitquery",
+    }
+
+
+def test_normalize_trade_sell_side_for_target_token():
+    adapter = BitqueryAdapter(_settings())
+    raw = _raw_trade(
+        buyCurrency={"address": "EQton"},
+        sellCurrency={"address": "EQtok"},
+        buyAmount="2",
+        sellAmount="4",
+        tradeAmount="10",
+    )
+
+    trade = adapter.normalize_trade(raw, "EQtok")
+
+    assert trade["side"] == "sell"
+    assert trade["wallet"] == "EQseller"
+    assert trade["token_amount"] == "4"
+    assert trade["usd_amount"] == "10"
+    assert trade["price_usd"] == "2.5"
+
+
+def test_normalize_trade_uses_direct_price_when_available():
+    adapter = BitqueryAdapter(_settings())
+
+    trade = adapter.normalize_trade(_raw_trade(price_usd="3.125"), "EQtok")
+
+    assert trade["price_usd"] == "3.125"
+
+
+def test_normalize_trade_missing_required_field_fails_cleanly():
+    adapter = BitqueryAdapter(_settings())
+    raw = _raw_trade()
+    raw.pop("transaction")
+
+    with pytest.raises(ValueError, match="transaction hash"):
+        adapter.normalize_trade(raw, "EQtok")
+
+
+def test_normalize_trade_target_not_in_buy_or_sell_side_fails_cleanly():
+    adapter = BitqueryAdapter(_settings())
+
+    with pytest.raises(ValueError, match="Target token is not present"):
+        adapter.normalize_trade(_raw_trade(), "EQother")
+
+
+def test_normalize_token_trades_response_returns_multiple_trades():
+    adapter = BitqueryAdapter(_settings())
+    payload = {
+        "ton": {
+            "dexTrades": [
+                _raw_trade(transaction={"hash": "tx1"}),
+                _raw_trade(
+                    transaction={"hash": "tx2"},
+                    buyCurrency={"address": "EQton"},
+                    sellCurrency={"address": "EQtok"},
+                    buyAmount="3",
+                    sellAmount="6",
+                    tradeAmount="9",
+                ),
+            ]
+        }
+    }
+
+    trades = adapter.normalize_token_trades_response(payload, "EQtok")
+
+    assert len(trades) == 2
+    assert trades[0]["tx_hash"] == "tx1"
+    assert trades[0]["side"] == "buy"
+    assert trades[1]["tx_hash"] == "tx2"
+    assert trades[1]["side"] == "sell"
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"ton": {"dexTrades": []}}])
+def test_normalize_token_trades_response_empty_payload_returns_empty_list(payload):
+    adapter = BitqueryAdapter(_settings())
+
+    assert adapter.normalize_token_trades_response(payload, "EQtok") == []
+
+
+def test_normalize_token_trades_response_invalid_trade_fails_cleanly():
+    adapter = BitqueryAdapter(_settings())
+    payload = {"ton": {"dexTrades": [_raw_trade(transaction={})]}}
+
+    with pytest.raises(ValueError, match="Invalid Bitquery trade at index 0"):
+        adapter.normalize_token_trades_response(payload, "EQtok")
+
+
+def test_normalize_trade_does_not_make_network_calls(monkeypatch):
+    def forbidden_urlopen(*args, **kwargs):
+        raise AssertionError("normalization must not call Bitquery")
+
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden_urlopen)
+
+    adapter = BitqueryAdapter(_real_settings())
+    trade = adapter.normalize_trade(_raw_trade(), "EQtok")
+
+    assert trade["source"] == "bitquery"
 
 
 def test_execute_graphql_mock_mode_does_not_make_network_call(monkeypatch):
