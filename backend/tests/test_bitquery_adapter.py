@@ -70,6 +70,42 @@ def _raw_trade(**overrides) -> dict:
     return base
 
 
+def _raw_v2_trade(
+    tx_hash: str = "tx-v2",
+    buy_token: str = "EQtok",
+    sell_token: str = "EQton",
+    buy_amount: str = "5",
+    sell_amount: str = "2",
+    usd_amount: str = "12.50",
+) -> dict:
+    return {
+        "Transaction": {"Hash": tx_hash},
+        "Block": {"Time": "2026-01-01T00:00:00Z"},
+        "Trade": {
+            "Buy": {
+                "Amount": buy_amount,
+                "AmountInUSD": usd_amount,
+                "Buyer": {"Address": "EQbuyer"},
+                "Currency": {
+                    "SmartContract": {"Address": buy_token},
+                },
+            },
+            "Sell": {
+                "Amount": sell_amount,
+                "AmountInUSD": usd_amount,
+                "Seller": {"Address": "EQseller"},
+                "Currency": {
+                    "SmartContract": {"Address": sell_token},
+                },
+            },
+            "Dex": {
+                "ProtocolName": "stonfi",
+                "SmartContract": {"Address": "EQpool"},
+            },
+        },
+    }
+
+
 def test_build_token_trades_query_returns_query_and_variables():
     adapter = BitqueryAdapter(_settings())
 
@@ -108,24 +144,41 @@ def test_build_token_trades_query_includes_future_trade_fields():
     )["query"]
 
     for text in (
-        "dexTrades",
-        "buyCurrency",
-        "sellCurrency",
-        "transaction",
-        "hash",
-        "block",
-        "timestamp",
-        "time",
-        "buyer",
-        "seller",
-        "address",
-        "buyAmount",
-        "sellAmount",
-        "tradeAmount(in: USD)",
-        "protocol",
-        "pool",
+        "DEXTrades",
+        "Block",
+        "Time",
+        "Transaction",
+        "Hash",
+        "Trade",
+        "Buy",
+        "Sell",
+        "Buyer",
+        "Seller",
+        "Currency",
+        "SmartContract",
+        "Address",
+        "Amount",
+        "AmountInUSD",
+        "Dex",
+        "ProtocolName",
     ):
         assert text in query
+
+
+def test_build_token_trades_query_uses_bitquery_v2_ton_root():
+    adapter = BitqueryAdapter(_settings())
+
+    query = adapter.build_token_trades_query(
+        "EQtok",
+        "2026-01-01T00:00:00Z",
+        "2026-01-02T00:00:00Z",
+    )["query"]
+
+    assert "\n  ton(" not in query
+    assert "\n  ton {" not in query
+    assert "\n  Ton(network: ton) {" in query
+    assert "DEXTrades(" in query
+    assert "dexTrades(" not in query
 
 
 def test_build_token_trades_query_filters_buy_or_sell_token():
@@ -137,8 +190,9 @@ def test_build_token_trades_query_filters_buy_or_sell_token():
         "2026-01-02T00:00:00Z",
     )["query"]
 
-    assert "{buyCurrency: {address: {is: $token}}}" in query
-    assert "{sellCurrency: {address: {is: $token}}}" in query
+    assert "Buy" in query
+    assert "Sell" in query
+    assert query.count("SmartContract: {Address: {is: $token}}") == 2
 
 
 @pytest.mark.parametrize("token_address", ["", "   ", None])
@@ -319,16 +373,16 @@ def test_get_token_trades_real_success_returns_normalized_buy_and_sell(monkeypat
     def fake_urlopen(request, timeout):
         payload = {
             "data": {
-                "ton": {
-                    "dexTrades": [
-                        _raw_trade(transaction={"hash": "tx-buy"}),
-                        _raw_trade(
-                            transaction={"hash": "tx-sell"},
-                            buyCurrency={"address": "EQton"},
-                            sellCurrency={"address": "EQtok"},
-                            buyAmount="3",
-                            sellAmount="6",
-                            tradeAmount="9",
+                "Ton": {
+                    "DEXTrades": [
+                        _raw_v2_trade(tx_hash="tx-buy"),
+                        _raw_v2_trade(
+                            tx_hash="tx-sell",
+                            buy_token="EQton",
+                            sell_token="EQtok",
+                            buy_amount="3",
+                            sell_amount="6",
+                            usd_amount="9",
                         ),
                     ]
                 }
@@ -382,7 +436,7 @@ def test_get_token_trades_execute_graphql_error_is_propagated(monkeypatch):
 
 def test_get_token_trades_malformed_payload_returns_provider_error(monkeypatch):
     def fake_urlopen(request, timeout):
-        payload = {"data": {"ton": {"dexTrades": {"bad": "shape"}}}}
+        payload = {"data": {"Ton": {"DEXTrades": {"bad": "shape"}}}}
         return FakeResponse(json.dumps(payload))
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
@@ -403,6 +457,25 @@ def test_normalize_trade_buy_side_for_target_token():
 
     assert trade == {
         "tx_hash": "tx1",
+        "block_time": "2026-01-01T00:00:00Z",
+        "wallet": "EQbuyer",
+        "side": "buy",
+        "token_amount": "5",
+        "usd_amount": "12.50",
+        "price_usd": "2.50",
+        "pool_address": "EQpool",
+        "dex": "stonfi",
+        "source": "bitquery",
+    }
+
+
+def test_normalize_trade_supports_bitquery_v2_ton_response_shape():
+    adapter = BitqueryAdapter(_settings())
+
+    trade = adapter.normalize_trade(_raw_v2_trade(), "EQtok")
+
+    assert trade == {
+        "tx_hash": "tx-v2",
         "block_time": "2026-01-01T00:00:00Z",
         "wallet": "EQbuyer",
         "side": "buy",
@@ -461,16 +534,16 @@ def test_normalize_trade_target_not_in_buy_or_sell_side_fails_cleanly():
 def test_normalize_token_trades_response_returns_multiple_trades():
     adapter = BitqueryAdapter(_settings())
     payload = {
-        "ton": {
-            "dexTrades": [
-                _raw_trade(transaction={"hash": "tx1"}),
-                _raw_trade(
-                    transaction={"hash": "tx2"},
-                    buyCurrency={"address": "EQton"},
-                    sellCurrency={"address": "EQtok"},
-                    buyAmount="3",
-                    sellAmount="6",
-                    tradeAmount="9",
+        "Ton": {
+            "DEXTrades": [
+                _raw_v2_trade(tx_hash="tx1"),
+                _raw_v2_trade(
+                    tx_hash="tx2",
+                    buy_token="EQton",
+                    sell_token="EQtok",
+                    buy_amount="3",
+                    sell_amount="6",
+                    usd_amount="9",
                 ),
             ]
         }
@@ -485,7 +558,7 @@ def test_normalize_token_trades_response_returns_multiple_trades():
     assert trades[1]["side"] == "sell"
 
 
-@pytest.mark.parametrize("payload", [None, {}, {"ton": {"dexTrades": []}}])
+@pytest.mark.parametrize("payload", [None, {}, {"Ton": {"DEXTrades": []}}])
 def test_normalize_token_trades_response_empty_payload_returns_empty_list(payload):
     adapter = BitqueryAdapter(_settings())
 
@@ -494,7 +567,7 @@ def test_normalize_token_trades_response_empty_payload_returns_empty_list(payloa
 
 def test_normalize_token_trades_response_invalid_trade_fails_cleanly():
     adapter = BitqueryAdapter(_settings())
-    payload = {"ton": {"dexTrades": [_raw_trade(transaction={})]}}
+    payload = {"Ton": {"DEXTrades": [_raw_v2_trade(tx_hash="")]}}
 
     with pytest.raises(ValueError, match="Invalid Bitquery trade at index 0"):
         adapter.normalize_token_trades_response(payload, "EQtok")
@@ -689,7 +762,7 @@ def test_execute_graphql_missing_data_returns_provider_error(monkeypatch):
 
 def test_execute_graphql_successful_json_returns_data_payload(monkeypatch):
     def fake_urlopen(request, timeout):
-        return FakeResponse('{"data": {"ton": {"dexTrades": [{"id": "t1"}]}}}')
+        return FakeResponse('{"data": {"Ton": {"DEXTrades": [{"id": "t1"}]}}}')
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
@@ -698,4 +771,4 @@ def test_execute_graphql_successful_json_returns_data_payload(monkeypatch):
 
     assert result.ok is True
     assert result.source == "real"
-    assert result.data == {"ton": {"dexTrades": [{"id": "t1"}]}}
+    assert result.data == {"Ton": {"DEXTrades": [{"id": "t1"}]}}
