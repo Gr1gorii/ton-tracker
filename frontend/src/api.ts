@@ -1,6 +1,9 @@
 import type {
   AnalysisResult,
   AnalyzeRequest,
+  BitqueryAnalysisResponse,
+  BitqueryPreviewResponse,
+  BitqueryTokenTradesRequest,
   ImportedTradesAnalysisResponse,
   ImportPreviewRequest,
   ImportPreviewResponse,
@@ -110,6 +113,54 @@ export async function analyzeImportedTrades(
   }
 
   return (await res.json()) as ImportedTradesAnalysisResponse;
+}
+
+export async function previewBitqueryTokenTrades(
+  req: BitqueryTokenTradesRequest,
+): Promise<BitqueryPreviewResponse> {
+  const res = await fetch(`${API_BASE}/api/bitquery/token-trades/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Bitquery preview request failed"));
+  }
+
+  return (await res.json()) as BitqueryPreviewResponse;
+}
+
+export async function analyzeBitqueryTokenTrades(
+  req: BitqueryTokenTradesRequest,
+): Promise<BitqueryAnalysisResponse> {
+  const res = await fetch(`${API_BASE}/api/bitquery/token-trades/analyze`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Bitquery analysis request failed"));
+  }
+
+  return (await res.json()) as BitqueryAnalysisResponse;
+}
+
+async function responseError(res: Response, fallback: string): Promise<string> {
+  let detail = `${fallback} (${res.status})`;
+  try {
+    const body = await res.json();
+    if (body && typeof body.detail === "string") {
+      detail = body.detail;
+    } else if (Array.isArray(body?.detail) && body.detail.length > 0) {
+      const first = body.detail[0];
+      if (typeof first?.msg === "string") detail = first.msg;
+    }
+  } catch {
+    // non-JSON error body; keep the generic message
+  }
+  return detail;
 }
 
 export async function checkHealth(): Promise<boolean> {
