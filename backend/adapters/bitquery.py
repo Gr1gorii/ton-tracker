@@ -16,10 +16,15 @@ future real implementation will satisfy without touching callers.
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Optional
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from config import (
     ERROR_NOT_IMPLEMENTED,
+    ERROR_PROVIDER_ERROR,
     ERROR_PROVIDER_NOT_CONFIGURED,
     ProviderResult,
     Settings,
@@ -55,6 +60,10 @@ class BitqueryAdapter:
             "v0.2.",
             source="real",
         )
+
+    def _provider_error(self, message: str) -> ProviderResult:
+        return ProviderResult.failure(ERROR_PROVIDER_ERROR, message,
+                                      source="real")
 
     # -- Query building --------------------------------------------------
 
@@ -130,6 +139,82 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
                 "end": end_value,
             },
         }
+
+    # -- Request client --------------------------------------------------
+
+    def _validated_api_url(self) -> str | None:
+        api_url = (self.settings.bitquery_api_url or "").strip()
+        parsed = urllib.parse.urlparse(api_url)
+        if not api_url or parsed.scheme not in ("http", "https") or not parsed.netloc:
+            return None
+        return api_url
+
+    def execute_graphql(self, query: str, variables: dict) -> ProviderResult:
+        """Execute a Bitquery GraphQL request in real mode.
+
+        Mock mode never sends a request. Real trade-fetching methods still do
+        not call this method until the schema is finalized.
+        """
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {"query": query, "variables": variables},
+                source="mock",
+                message="Mock mode: Bitquery request not sent.",
+            )
+        if not self.is_configured():
+            return self._not_configured()
+
+        api_url = self._validated_api_url()
+        if not api_url:
+            return self._provider_error(
+                "Bitquery API URL is missing or invalid."
+            )
+
+        body = json.dumps({"query": query, "variables": variables}).encode(
+            "utf-8"
+        )
+        request = urllib.request.Request(
+            api_url,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.settings.bitquery_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                raw_body = response.read().decode("utf-8")
+            payload = json.loads(raw_body)
+        except urllib.error.HTTPError as exc:
+            return self._provider_error(
+                f"Bitquery HTTP error: {exc.code} {exc.reason}."
+            )
+        except urllib.error.URLError as exc:
+            return self._provider_error(
+                f"Bitquery network error: {exc.reason}."
+            )
+        except OSError as exc:
+            return self._provider_error(f"Bitquery network error: {exc}.")
+        except json.JSONDecodeError:
+            return self._provider_error("Bitquery returned invalid JSON.")
+
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        if errors:
+            return self._provider_error(
+                f"Bitquery GraphQL error: {errors}."
+            )
+        if not isinstance(payload, dict) or "data" not in payload:
+            return self._provider_error(
+                "Bitquery response is missing data."
+            )
+
+        return ProviderResult.success(
+            payload["data"],
+            source="real",
+            message="Bitquery GraphQL request succeeded.",
+        )
 
     # -- Normalization ---------------------------------------------------
 
