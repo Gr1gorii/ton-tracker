@@ -175,7 +175,12 @@ def test_build_token_trades_query_missing_end_fails_cleanly():
         )
 
 
-def test_status_behavior_remains_unchanged():
+def test_status_behavior_by_mode(monkeypatch):
+    def forbidden_urlopen(*args, **kwargs):
+        raise AssertionError("provider status must not probe Bitquery")
+
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden_urlopen)
+
     mock_status = BitqueryAdapter(_settings("mock")).status()
     assert mock_status == {
         "configured": False,
@@ -193,15 +198,32 @@ def test_status_behavior_remains_unchanged():
         ),
     }
 
-    real_configured_status = BitqueryAdapter(
+    real_missing_url_status = BitqueryAdapter(
         _settings("real", bitquery_api_key="test-key")
+    ).status()
+    assert real_missing_url_status == {
+        "configured": False,
+        "available": False,
+        "message": (
+            "Bitquery API URL is missing or invalid. Historical DEX trades "
+            "are unavailable."
+        ),
+    }
+
+    real_configured_status = BitqueryAdapter(
+        _settings(
+            "real",
+            bitquery_api_url="https://streaming.bitquery.io/graphql",
+            bitquery_api_key="test-key",
+        )
     ).status()
     assert real_configured_status == {
         "configured": True,
-        "available": False,
+        "available": True,
         "message": (
-            "Real mode: Bitquery key present, but real trade fetching is "
-            "not implemented in v0.2."
+            "Real mode: Bitquery is configured. Token trade preview/analyze "
+            "endpoints can attempt live DEX trade fetching. Live availability "
+            "is checked when those endpoints are called."
         ),
     }
 

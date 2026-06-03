@@ -569,21 +569,40 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
     # -- Status ----------------------------------------------------------
 
     def status(self) -> dict:
-        configured = self.is_configured()
         if self.settings.is_mock:
             return {
-                "configured": configured,
+                "configured": self.is_configured(),
                 "available": True,
                 "message": "Mock mode: synthesizing mock DEX trades.",
             }
+
+        if not self.is_configured():
+            return {
+                "configured": False,
+                "available": False,
+                "message": (
+                    "Bitquery API key is missing. Historical DEX trades are "
+                    "unavailable."
+                ),
+            }
+
+        if not self._validated_api_url():
+            return {
+                "configured": False,
+                "available": False,
+                "message": (
+                    "Bitquery API URL is missing or invalid. Historical DEX "
+                    "trades are unavailable."
+                ),
+            }
+
         return {
-            "configured": configured,
-            "available": False,
+            "configured": True,
+            "available": True,
             "message": (
-                "Real mode: Bitquery key present, but real trade fetching is "
-                "not implemented in v0.2."
-                if configured
-                else "Bitquery API key is missing. Historical DEX trades are "
-                "unavailable."
+                "Real mode: Bitquery is configured. Token trade "
+                "preview/analyze endpoints can attempt live DEX trade "
+                "fetching. Live availability is checked when those endpoints "
+                "are called."
             ),
         }
