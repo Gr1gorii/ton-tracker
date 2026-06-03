@@ -16,8 +16,9 @@ future real implementation will satisfy without touching callers.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 import json
-from typing import Optional
+from typing import Any, Optional
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -219,12 +220,8 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
     # -- Normalization ---------------------------------------------------
 
     @staticmethod
-    def normalize_trade(raw_trade: dict) -> dict:
-        """Map a raw trade record into the canonical normalized shape.
-
-        Accepts either an already-normalized mock trade or a loosely-shaped
-        raw provider record, filling sensible defaults for missing keys.
-        """
+    def _normalize_legacy_trade(raw_trade: dict) -> dict:
+        """Map old mock/provider rows into the v0.2 canonical shape."""
         return {
             "wallet_address": raw_trade.get("wallet_address")
             or raw_trade.get("maker")
@@ -237,6 +234,242 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             "price_usd": float(raw_trade.get("price_usd", 0) or 0),
             "timestamp": raw_trade.get("timestamp"),
         }
+
+    @staticmethod
+    def _string_value(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            for key in ("address", "name", "fullName", "value"):
+                nested = BitqueryAdapter._string_value(value.get(key))
+                if nested is not None:
+                    return nested
+            return None
+        cleaned = str(value).strip()
+        return cleaned or None
+
+    @staticmethod
+    def _first_value(raw_trade: dict, *paths: tuple[str, ...]) -> Any:
+        for path in paths:
+            current: Any = raw_trade
+            for key in path:
+                if not isinstance(current, dict) or key not in current:
+                    current = None
+                    break
+                current = current[key]
+            if current is not None:
+                return current
+        return None
+
+    @classmethod
+    def _required_string(cls, raw_trade: dict, field_name: str,
+                         *paths: tuple[str, ...]) -> str:
+        value = cls._string_value(cls._first_value(raw_trade, *paths))
+        if value is None:
+            raise ValueError(f"Bitquery trade is missing {field_name}")
+        return value
+
+    @staticmethod
+    def _decimal_value(value: Any, field_name: str,
+                       allow_zero: bool = False) -> Decimal:
+        text = BitqueryAdapter._string_value(value)
+        if text is None:
+            raise ValueError(f"Bitquery trade is missing {field_name}")
+        try:
+            parsed = Decimal(text)
+        except (InvalidOperation, ValueError):
+            raise ValueError(
+                f"Bitquery trade has invalid {field_name}"
+            ) from None
+        if not parsed.is_finite():
+            raise ValueError(f"Bitquery trade has invalid {field_name}")
+        if parsed < 0 or (parsed == 0 and not allow_zero):
+            raise ValueError(f"Bitquery trade has invalid {field_name}")
+        return parsed
+
+    @staticmethod
+    def _optional_decimal_value(value: Any, field_name: str) -> Decimal | None:
+        if BitqueryAdapter._string_value(value) is None:
+            return None
+        return BitqueryAdapter._decimal_value(value, field_name,
+                                              allow_zero=True)
+
+    @staticmethod
+    def _decimal_string(value: Decimal) -> str:
+        return str(value)
+
+    @classmethod
+    def normalize_trade(cls, raw_trade: dict,
+                        target_token_address: str | None = None) -> dict:
+        """Map a raw trade record into the canonical normalized shape.
+
+        Without ``target_token_address``, this preserves the legacy mock-trade
+        shape used by the existing provider scaffolding. With a target token,
+        it maps Bitquery DEX trades into the imported-trade shape.
+        """
+        if target_token_address is None:
+            return cls._normalize_legacy_trade(raw_trade)
+
+        target = cls._string_value(target_token_address)
+        if target is None:
+            raise ValueError("target_token_address is required")
+
+        buy_token = cls._required_string(
+            raw_trade,
+            "buy token address",
+            ("buyCurrency", "address"),
+            ("buy_currency", "address"),
+            ("buy_token_address",),
+            ("buyToken", "address"),
+        )
+        sell_token = cls._required_string(
+            raw_trade,
+            "sell token address",
+            ("sellCurrency", "address"),
+            ("sell_currency", "address"),
+            ("sell_token_address",),
+            ("sellToken", "address"),
+        )
+
+        if buy_token == target:
+            side = "buy"
+            wallet = cls._required_string(
+                raw_trade,
+                "buyer wallet",
+                ("buyer", "address"),
+                ("buyer_address",),
+                ("buyer",),
+            )
+            token_amount = cls._decimal_value(
+                cls._first_value(
+                    raw_trade,
+                    ("buyAmount",),
+                    ("buy_amount",),
+                ),
+                "buy amount",
+            )
+        elif sell_token == target:
+            side = "sell"
+            wallet = cls._required_string(
+                raw_trade,
+                "seller wallet",
+                ("seller", "address"),
+                ("seller_address",),
+                ("seller",),
+            )
+            token_amount = cls._decimal_value(
+                cls._first_value(
+                    raw_trade,
+                    ("sellAmount",),
+                    ("sell_amount",),
+                ),
+                "sell amount",
+            )
+        else:
+            raise ValueError(
+                "Target token is not present in Bitquery trade buy/sell side"
+            )
+
+        usd_amount = cls._decimal_value(
+            cls._first_value(
+                raw_trade,
+                ("tradeAmount",),
+                ("tradeAmount(in: USD)",),
+                ("amount_usd",),
+                ("usd_amount",),
+            ),
+            "USD amount",
+            allow_zero=True,
+        )
+        price_usd = cls._optional_decimal_value(
+            cls._first_value(
+                raw_trade,
+                ("price_usd",),
+                ("priceUsd",),
+                ("priceUSD",),
+            ),
+            "price USD",
+        )
+        if price_usd is None:
+            price_usd = usd_amount / token_amount
+
+        return {
+            "tx_hash": cls._required_string(
+                raw_trade,
+                "transaction hash",
+                ("transaction", "hash"),
+                ("tx_hash",),
+                ("transaction_hash",),
+            ),
+            "block_time": cls._required_string(
+                raw_trade,
+                "block time",
+                ("block", "timestamp", "time"),
+                ("block_time",),
+                ("timestamp",),
+            ),
+            "wallet": wallet,
+            "side": side,
+            "token_amount": cls._decimal_string(token_amount),
+            "usd_amount": cls._decimal_string(usd_amount),
+            "price_usd": cls._decimal_string(price_usd),
+            "pool_address": cls._string_value(
+                cls._first_value(
+                    raw_trade,
+                    ("pool", "address"),
+                    ("pool_address",),
+                )
+            ),
+            "dex": cls._string_value(
+                cls._first_value(
+                    raw_trade,
+                    ("dex",),
+                    ("protocol",),
+                )
+            ),
+            "source": "bitquery",
+        }
+
+    @classmethod
+    def normalize_token_trades_response(
+        cls,
+        payload: dict | list | None,
+        target_token_address: str,
+    ) -> list[dict]:
+        """Normalize a Bitquery token-trades payload into trade rows."""
+        if payload is None:
+            return []
+        if isinstance(payload, list):
+            trades = payload
+        elif isinstance(payload, dict):
+            trades = cls._first_value(
+                payload,
+                ("ton", "dexTrades"),
+                ("dexTrades",),
+                ("trades",),
+            )
+            if trades is None:
+                return []
+        else:
+            raise ValueError("Bitquery trades response must be a dict or list")
+
+        if not isinstance(trades, list):
+            raise ValueError("Bitquery dexTrades response must be a list")
+
+        normalized = []
+        for index, raw_trade in enumerate(trades):
+            if not isinstance(raw_trade, dict):
+                raise ValueError(
+                    f"Invalid Bitquery trade at index {index}: expected dict"
+                )
+            try:
+                normalized.append(cls.normalize_trade(raw_trade,
+                                                      target_token_address))
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid Bitquery trade at index {index}: {exc}"
+                ) from exc
+        return normalized
 
     # -- Mock trade synthesis -------------------------------------------
 
