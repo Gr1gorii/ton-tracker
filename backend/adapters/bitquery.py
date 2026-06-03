@@ -527,7 +527,31 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             )
         if not self.is_configured():
             return self._not_configured()
-        return self._not_implemented()
+
+        try:
+            request = self.build_token_trades_query(token_address, start, end)
+        except ValueError as exc:
+            return self._provider_error(f"Bitquery query error: {exc}.")
+
+        result = self.execute_graphql(request["query"], request["variables"])
+        if not result.ok:
+            return result
+
+        try:
+            trades = self.normalize_token_trades_response(
+                result.data,
+                token_address,
+            )
+        except ValueError as exc:
+            return self._provider_error(
+                f"Bitquery normalization error: {exc}."
+            )
+
+        return ProviderResult.success(
+            trades,
+            source="real",
+            message="Bitquery DEX trades fetched and normalized.",
+        )
 
     def get_wallet_token_trades(self, wallet_address: str, token_address: str,
                                 start: datetime,

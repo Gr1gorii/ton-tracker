@@ -1,9 +1,7 @@
 """Tests for the Bitquery adapter query builder."""
 
 from datetime import datetime, timezone
-import http.client
 import json
-import socket
 import urllib.error
 import urllib.request
 
@@ -11,9 +9,9 @@ import pytest
 
 from adapters.bitquery import BitqueryAdapter
 from config import (
-    ERROR_NOT_IMPLEMENTED,
     ERROR_PROVIDER_ERROR,
     ERROR_PROVIDER_NOT_CONFIGURED,
+    ProviderResult,
     Settings,
 )
 
@@ -208,32 +206,172 @@ def test_status_behavior_remains_unchanged():
     }
 
 
-def test_real_configured_trade_fetch_does_not_make_network_calls(monkeypatch):
-    def forbidden_network_call(*args, **kwargs):
-        raise AssertionError("network calls are not allowed in Bitquery tests")
+def test_get_token_trades_mock_mode_does_not_make_network_call(monkeypatch):
+    def forbidden_urlopen(*args, **kwargs):
+        raise AssertionError("mock mode must not call Bitquery")
 
-    monkeypatch.setattr(socket, "create_connection", forbidden_network_call)
-    monkeypatch.setattr(
-        http.client.HTTPConnection,
-        "connect",
-        forbidden_network_call,
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden_urlopen)
+
+    adapter = BitqueryAdapter(_settings("mock"))
+    now = datetime.now(timezone.utc)
+    result = adapter.get_token_trades("EQtok", now, now)
+
+    assert result.ok is True
+    assert result.source == "mock"
+    assert len(result.data) > 0
+    assert "wallet_address" in result.data[0]
+
+
+def test_get_token_trades_real_missing_key_does_not_make_network_call(monkeypatch):
+    def forbidden_urlopen(*args, **kwargs):
+        raise AssertionError("missing key must not call Bitquery")
+
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden_urlopen)
 
     adapter = BitqueryAdapter(
         _settings(
             "real",
             bitquery_api_url="https://streaming.bitquery.io/graphql",
-            bitquery_api_key="test-key",
+            bitquery_api_key="",
         )
     )
     now = datetime.now(timezone.utc)
-
-    payload = adapter.build_token_trades_query("EQtok", now, now)
     result = adapter.get_token_trades("EQtok", now, now)
 
-    assert payload["variables"]["token"] == "EQtok"
     assert result.ok is False
-    assert result.error == ERROR_NOT_IMPLEMENTED
+    assert result.error == ERROR_PROVIDER_NOT_CONFIGURED
+
+
+def test_get_token_trades_real_calls_build_execute_normalize(monkeypatch):
+    adapter = BitqueryAdapter(_real_settings())
+    now = datetime.now(timezone.utc)
+    calls = {}
+    normalized = [
+        {
+            "tx_hash": "tx1",
+            "block_time": "2026-01-01T00:00:00Z",
+            "wallet": "EQbuyer",
+            "side": "buy",
+            "token_amount": "5",
+            "usd_amount": "12.50",
+            "price_usd": "2.50",
+            "pool_address": "EQpool",
+            "dex": "stonfi",
+            "source": "bitquery",
+        }
+    ]
+
+    def fake_build(token_address, start, end):
+        calls["build"] = (token_address, start, end)
+        return {
+            "query": "query Built",
+            "variables": {"token": token_address, "start": "s", "end": "e"},
+        }
+
+    def fake_execute(query, variables):
+        calls["execute"] = (query, variables)
+        return ProviderResult.success({"payload": True}, source="real")
+
+    def fake_normalize(payload, target_token_address):
+        calls["normalize"] = (payload, target_token_address)
+        return normalized
+
+    monkeypatch.setattr(adapter, "build_token_trades_query", fake_build)
+    monkeypatch.setattr(adapter, "execute_graphql", fake_execute)
+    monkeypatch.setattr(adapter, "normalize_token_trades_response", fake_normalize)
+
+    result = adapter.get_token_trades("EQtok", now, now)
+
+    assert result.ok is True
+    assert result.source == "real"
+    assert result.data == normalized
+    assert calls["build"] == ("EQtok", now, now)
+    assert calls["execute"] == (
+        "query Built",
+        {"token": "EQtok", "start": "s", "end": "e"},
+    )
+    assert calls["normalize"] == ({"payload": True}, "EQtok")
+
+
+def test_get_token_trades_real_success_returns_normalized_buy_and_sell(monkeypatch):
+    def fake_urlopen(request, timeout):
+        payload = {
+            "data": {
+                "ton": {
+                    "dexTrades": [
+                        _raw_trade(transaction={"hash": "tx-buy"}),
+                        _raw_trade(
+                            transaction={"hash": "tx-sell"},
+                            buyCurrency={"address": "EQton"},
+                            sellCurrency={"address": "EQtok"},
+                            buyAmount="3",
+                            sellAmount="6",
+                            tradeAmount="9",
+                        ),
+                    ]
+                }
+            }
+        }
+        return FakeResponse(json.dumps(payload))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    adapter = BitqueryAdapter(_real_settings())
+    now = datetime.now(timezone.utc)
+    result = adapter.get_token_trades("EQtok", now, now)
+
+    assert result.ok is True
+    assert result.source == "real"
+    assert result.message == "Bitquery DEX trades fetched and normalized."
+    assert result.data[0]["tx_hash"] == "tx-buy"
+    assert result.data[0]["side"] == "buy"
+    assert result.data[0]["source"] == "bitquery"
+    assert result.data[1]["tx_hash"] == "tx-sell"
+    assert result.data[1]["side"] == "sell"
+    assert result.data[1]["token_amount"] == "6"
+
+
+def test_get_token_trades_execute_graphql_error_is_propagated(monkeypatch):
+    adapter = BitqueryAdapter(_real_settings())
+    now = datetime.now(timezone.utc)
+    error = ProviderResult.failure(
+        ERROR_PROVIDER_ERROR,
+        "Bitquery network error: timeout.",
+        source="real",
+    )
+
+    def fake_execute(query, variables):
+        return error
+
+    def forbidden_normalize(*args, **kwargs):
+        raise AssertionError("failed GraphQL result must not be normalized")
+
+    monkeypatch.setattr(adapter, "execute_graphql", fake_execute)
+    monkeypatch.setattr(
+        adapter,
+        "normalize_token_trades_response",
+        forbidden_normalize,
+    )
+
+    result = adapter.get_token_trades("EQtok", now, now)
+
+    assert result is error
+
+
+def test_get_token_trades_malformed_payload_returns_provider_error(monkeypatch):
+    def fake_urlopen(request, timeout):
+        payload = {"data": {"ton": {"dexTrades": {"bad": "shape"}}}}
+        return FakeResponse(json.dumps(payload))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    adapter = BitqueryAdapter(_real_settings())
+    now = datetime.now(timezone.utc)
+    result = adapter.get_token_trades("EQtok", now, now)
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_ERROR
+    assert "normalization error" in (result.message or "").lower()
 
 
 def test_normalize_trade_buy_side_for_target_token():
