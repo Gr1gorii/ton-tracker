@@ -15,6 +15,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from adapters.stonfi import StonfiAdapter
+from adapters.tonapi import TonapiAdapter
 from config import get_settings
 from database import get_session, init_db
 from models import AnalysisRun
@@ -92,6 +93,7 @@ def get_api_providers_status(settings=None) -> dict:
     settings = settings or get_settings()
     status = get_providers_status(settings)
     status["stonfi"] = StonfiAdapter(settings).status()
+    status["tonapi"] = TonapiAdapter(settings).status()
     return status
 
 

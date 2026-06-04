@@ -47,6 +47,7 @@ def test_providers_status_endpoint_includes_stonfi(monkeypatch):
         "ton_provider",
         "bitquery",
         "stonfi",
+        "tonapi",
     }
     assert set(body["stonfi"]) == {"configured", "available", "message"}
 

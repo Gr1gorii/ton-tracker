@@ -98,17 +98,17 @@ class TonapiAdapter:
         else:
             auth_note = (
                 "TONAPI_API_KEY is not configured; public TonAPI requests can "
-                "be attempted but rate limits may apply."
+                "be attempted in public mode, but rate limits may apply."
             )
 
         return {
             "configured": True,
             "available": True,
             "message": (
-                "Real mode: TonAPI requests can be attempted at provider call "
-                f"time. {auth_note} TonAPI is for account-level TON and "
-                "jetton data; it is not connected to dashboard wallet "
-                "intelligence yet."
+                "Real mode: TonAPI is configured. Account jetton preview "
+                "endpoints can attempt live TonAPI requests. "
+                f"{auth_note} Scope is account jetton preview only, not full "
+                "wallet intelligence."
             ),
         }
 

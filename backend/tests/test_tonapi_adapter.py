@@ -89,9 +89,8 @@ def test_status_real_mode_valid_base_url_without_api_key(monkeypatch):
     assert status["available"] is True
     assert "public TonAPI requests" in status["message"]
     assert "rate limits may apply" in status["message"]
-    assert "not connected to dashboard wallet intelligence yet" in status[
-        "message"
-    ]
+    assert "account jetton preview only" in status["message"]
+    assert "not full wallet intelligence" in status["message"]
 
 
 def test_status_real_mode_valid_base_url_with_api_key(monkeypatch):
@@ -104,6 +103,7 @@ def test_status_real_mode_valid_base_url_with_api_key(monkeypatch):
     assert status["configured"] is True
     assert status["available"] is True
     assert "TONAPI_API_KEY is configured" in status["message"]
+    assert "account jetton preview only" in status["message"]
     assert "secret-key" not in status["message"]
 
 
