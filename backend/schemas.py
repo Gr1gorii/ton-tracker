@@ -97,6 +97,18 @@ class BitqueryTokenTradesAnalysisResponse(BaseModel):
     analysis_note: str
 
 
+class StonfiPoolsPreviewResponse(BaseModel):
+    provider: Literal["stonfi"]
+    data_mode: Literal["mock", "real"]
+    source: Literal["mock", "real"]
+    success: bool
+    summary: dict[str, Any]
+    pools_preview: list[dict[str, Any]]
+    warnings: list[str]
+    message: str
+    error: dict[str, Any] | None
+
+
 class ImportTradesPreviewRequest(BaseModel):
     format: Literal["csv", "json"]
     content: Any
