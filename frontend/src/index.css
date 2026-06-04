@@ -423,6 +423,72 @@ body {
   gap: 8px;
 }
 
+/* STON.fi pools preview --------------------------------------------- */
+.stonfi-panel {
+  margin-bottom: 24px;
+}
+
+.stonfi-note {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--cyan);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.stonfi-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+  gap: 16px;
+  align-items: end;
+}
+
+.stonfi-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.stonfi-state {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.stonfi-results {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.stonfi-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stonfi-provider-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.stonfi-provider-error {
+  padding: 16px;
+}
+
+.stonfi-warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 /* State boxes -------------------------------------------------------- */
 .state-box {
   border-radius: var(--radius);
@@ -1093,6 +1159,9 @@ body {
     grid-template-columns: 1fr;
   }
   .bitquery-form {
+    grid-template-columns: 1fr;
+  }
+  .stonfi-form {
     grid-template-columns: 1fr;
   }
   .two-col {
