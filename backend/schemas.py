@@ -49,6 +49,7 @@ class ProvidersStatusResponse(BaseModel):
     ton_provider: ProviderStatus
     bitquery: ProviderStatus
     stonfi: ProviderStatus
+    tonapi: ProviderStatus
 
 
 class BitqueryTokenTradesPreviewRequest(BaseModel):
