@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
+from adapters.stonfi import StonfiAdapter
 from config import get_settings
 from database import get_session, init_db
 from models import AnalysisRun
@@ -77,7 +78,19 @@ def health() -> HealthResponse:
 
 @app.get("/api/providers/status", response_model=ProvidersStatusResponse)
 def providers_status() -> dict:
-    return get_providers_status()
+    return get_api_providers_status()
+
+
+def get_api_providers_status(settings=None) -> dict:
+    """Provider status payload for the public status endpoint.
+
+    This intentionally augments the endpoint response without changing the
+    analysis service's provider-status payload.
+    """
+    settings = settings or get_settings()
+    status = get_providers_status(settings)
+    status["stonfi"] = StonfiAdapter(settings).status()
+    return status
 
 
 @app.post("/api/analyze", response_model=AnalyzeResponse)

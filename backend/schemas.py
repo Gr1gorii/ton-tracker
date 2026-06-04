@@ -48,6 +48,7 @@ class ProvidersStatusResponse(BaseModel):
     geckoterminal: ProviderStatus
     ton_provider: ProviderStatus
     bitquery: ProviderStatus
+    stonfi: ProviderStatus
 
 
 class BitqueryTokenTradesPreviewRequest(BaseModel):

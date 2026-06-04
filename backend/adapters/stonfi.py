@@ -75,8 +75,8 @@ class StonfiAdapter:
                 "configured": configured,
                 "available": True,
                 "message": (
-                    "Mock mode: STON.fi is not actively queried. STON.fi "
-                    "provider methods return mock/offline responses only."
+                    "Mock mode: STON.fi is not actively queried. STON.fi pool "
+                    "preview responses are mock/offline only."
                 ),
             }
 
@@ -85,8 +85,9 @@ class StonfiAdapter:
                 "configured": False,
                 "available": False,
                 "message": (
-                    "STON.fi base URL is missing or invalid. STON.fi DEX "
-                    "requests cannot be attempted."
+                    "STON.fi provider is not configured: base URL is missing "
+                    "or invalid. STON.fi DEX pool preview requests cannot be "
+                    "attempted."
                 ),
             }
 
@@ -94,9 +95,9 @@ class StonfiAdapter:
             "configured": True,
             "available": True,
             "message": (
-                "Real mode: STON.fi requests can be attempted at provider "
-                "call time. STON.fi covers STON.fi DEX pools, swaps, "
-                "liquidity, and market data only, not all TON DeFi."
+                "Real mode: STON.fi is configured. STON.fi pool preview "
+                "endpoints can attempt live STON.fi DEX pool fetching. "
+                "Coverage is limited to STON.fi DEX data, not all TON DeFi."
             ),
         }
 
