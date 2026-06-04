@@ -21,6 +21,7 @@ DEFAULT_GECKOTERMINAL_BASE_URL = "https://api.geckoterminal.com/api/v2"
 # Machine-readable provider error codes.
 ERROR_PROVIDER_NOT_CONFIGURED = "provider_not_configured"
 ERROR_PROVIDER_ERROR = "provider_error"
+ERROR_PROVIDER_COVERAGE_UNAVAILABLE = "provider_coverage_unavailable"
 ERROR_NOT_IMPLEMENTED = "real_not_implemented"
 
 
@@ -107,6 +108,7 @@ class ProviderResult:
     error: Optional[str] = None
     message: Optional[str] = None
     source: str = "mock"
+    diagnostic: Optional[str] = None
 
     @classmethod
     def success(cls, data: Any, source: str = "mock",
@@ -115,8 +117,15 @@ class ProviderResult:
 
     @classmethod
     def failure(cls, error: str, message: str,
-                source: str = "real") -> "ProviderResult":
-        return cls(ok=False, error=error, message=message, source=source)
+                source: str = "real",
+                diagnostic: Optional[str] = None) -> "ProviderResult":
+        return cls(
+            ok=False,
+            error=error,
+            message=message,
+            source=source,
+            diagnostic=diagnostic,
+        )
 
     def to_dict(self) -> dict:
         return {
@@ -125,4 +134,5 @@ class ProviderResult:
             "error": self.error,
             "message": self.message,
             "source": self.source,
+            "diagnostic": self.diagnostic,
         }

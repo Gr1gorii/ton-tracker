@@ -3,8 +3,15 @@
 from fastapi.testclient import TestClient
 import urllib.request
 
-from adapters.bitquery import BitqueryAdapter
-from config import ERROR_PROVIDER_ERROR, ProviderResult
+from adapters.bitquery import (
+    BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE,
+    BitqueryAdapter,
+)
+from config import (
+    ERROR_PROVIDER_COVERAGE_UNAVAILABLE,
+    ERROR_PROVIDER_ERROR,
+    ProviderResult,
+)
 from main import app, get_session
 
 
@@ -217,6 +224,39 @@ def test_adapter_error_returns_success_false_with_warning(monkeypatch):
         "message": "Bitquery normalization error: bad payload.",
     }
     assert "Bitquery provider warning" in body["warnings"][0]
+
+
+def test_ton_schema_unavailable_error_returns_clear_diagnostic(monkeypatch):
+    diagnostic = 'Cannot query field "Ton" on type "RootQuery".'
+
+    def fake_get_token_trades(self, token_address, start, end):
+        return ProviderResult.failure(
+            ERROR_PROVIDER_COVERAGE_UNAVAILABLE,
+            BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE,
+            source="real",
+            diagnostic=diagnostic,
+        )
+
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setattr(BitqueryAdapter, "get_token_trades", fake_get_token_trades)
+
+    response = _client().post(
+        "/api/bitquery/token-trades/analyze",
+        json=_payload(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is False
+    assert body["error"] == {
+        "code": ERROR_PROVIDER_COVERAGE_UNAVAILABLE,
+        "message": BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE,
+        "diagnostic": diagnostic,
+    }
+    assert body["warnings"] == [
+        f"Bitquery provider warning: {BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE}",
+        f"Bitquery diagnostic: {diagnostic}",
+    ]
 
 
 def test_invalid_preview_limit_zero_returns_422():

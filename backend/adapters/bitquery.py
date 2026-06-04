@@ -25,6 +25,7 @@ import urllib.request
 
 from config import (
     ERROR_NOT_IMPLEMENTED,
+    ERROR_PROVIDER_COVERAGE_UNAVAILABLE,
     ERROR_PROVIDER_ERROR,
     ERROR_PROVIDER_NOT_CONFIGURED,
     ProviderResult,
@@ -32,6 +33,12 @@ from config import (
     get_settings,
 )
 from services import mock_data
+
+BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE = (
+    "Bitquery is configured, but this account/endpoint does not expose the TON "
+    "schema. TON DEXTrades may require different Bitquery access, plan, "
+    "endpoint, or chain coverage."
+)
 
 
 class BitqueryAdapter:
@@ -66,6 +73,14 @@ class BitqueryAdapter:
         return ProviderResult.failure(ERROR_PROVIDER_ERROR, message,
                                       source="real")
 
+    def _ton_schema_unavailable(self, diagnostic: str | None) -> ProviderResult:
+        return ProviderResult.failure(
+            ERROR_PROVIDER_COVERAGE_UNAVAILABLE,
+            BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE,
+            source="real",
+            diagnostic=diagnostic,
+        )
+
     # -- Query building --------------------------------------------------
 
     @staticmethod
@@ -85,6 +100,10 @@ class BitqueryAdapter:
         Bitquery V2 exposes TON under the uppercase ``Ton`` root with the
         ``DEXTrades`` cube; the older lowercase ``ton/dexTrades`` shape is not
         valid against the active RootQuery.
+
+        Some configured Bitquery accounts/endpoints may still not expose the
+        TON root field. That is provider/account chain coverage, not a
+        ``DATA_MODE`` configuration error.
         """
         if not token_address or not str(token_address).strip():
             raise ValueError("token_address is required")
@@ -235,8 +254,12 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
 
         errors = payload.get("errors") if isinstance(payload, dict) else None
         if errors:
+            messages = self._graphql_error_messages(errors)
+            diagnostic = "; ".join(messages) if messages else None
+            if self._is_ton_schema_unavailable(messages):
+                return self._ton_schema_unavailable(diagnostic)
             return self._provider_error(
-                f"Bitquery GraphQL error: {errors}."
+                f"Bitquery GraphQL error: {messages or errors}."
             )
         if not isinstance(payload, dict) or "data" not in payload:
             return self._provider_error(
@@ -247,6 +270,42 @@ query TonTokenDexTrades($token: String!, $start: DateTime!, $end: DateTime!) {
             payload["data"],
             source="real",
             message="Bitquery GraphQL request succeeded.",
+        )
+
+    def _graphql_error_messages(self, errors: Any) -> list[str]:
+        if isinstance(errors, list):
+            raw_messages = [
+                error.get("message") if isinstance(error, dict) else error
+                for error in errors
+            ]
+        elif isinstance(errors, dict):
+            raw_messages = [errors.get("message") or errors]
+        else:
+            raw_messages = [errors]
+
+        messages = []
+        for message in raw_messages:
+            text = self._sanitize_diagnostic(message)
+            if text:
+                messages.append(text)
+        return messages
+
+    def _sanitize_diagnostic(self, value: Any) -> str | None:
+        text = self._string_value(value)
+        if text is None:
+            return None
+        api_key = self.settings.bitquery_api_key
+        if api_key:
+            text = text.replace(api_key, "[redacted]")
+        return text[:500]
+
+    @staticmethod
+    def _is_ton_schema_unavailable(messages: list[str]) -> bool:
+        combined = " ".join(messages).lower()
+        return (
+            "cannot query field" in combined
+            and '"ton"' in combined
+            and "rootquery" in combined
         )
 
     # -- Normalization ---------------------------------------------------

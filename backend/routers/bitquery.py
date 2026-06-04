@@ -122,6 +122,14 @@ def analyze_token_trades(
 def _error_response(data_mode: str, result: ProviderResult) -> dict[str, Any]:
     message = result.message or "Bitquery provider returned an error."
     warning = f"Bitquery provider warning: {message}"
+    warnings = [warning]
+    error = {
+        "code": result.error,
+        "message": message,
+    }
+    if result.diagnostic:
+        warnings.append(f"Bitquery diagnostic: {result.diagnostic}")
+        error["diagnostic"] = result.diagnostic
     return {
         "provider": "bitquery",
         "data_mode": data_mode,
@@ -131,11 +139,8 @@ def _error_response(data_mode: str, result: ProviderResult) -> dict[str, Any]:
             "preview_count": 0,
         },
         "trades_preview": [],
-        "warnings": [warning],
-        "error": {
-            "code": result.error,
-            "message": message,
-        },
+        "warnings": warnings,
+        "error": error,
     }
 
 
@@ -146,6 +151,14 @@ def _analysis_error_response(
 ) -> dict[str, Any]:
     message = result.message or "Bitquery provider returned an error."
     warning = f"Bitquery provider warning: {message}"
+    warnings = [warning]
+    error = {
+        "code": result.error,
+        "message": message,
+    }
+    if result.diagnostic:
+        warnings.append(f"Bitquery diagnostic: {result.diagnostic}")
+        error["diagnostic"] = result.diagnostic
     return {
         "provider": "bitquery",
         "data_mode": data_mode,
@@ -162,11 +175,8 @@ def _analysis_error_response(
         "trades_preview": [],
         "preview_limit": preview_limit,
         "has_more_wallets": False,
-        "warnings": [warning],
-        "error": {
-            "code": result.error,
-            "message": message,
-        },
+        "warnings": warnings,
+        "error": error,
         "analysis_note": BITQUERY_ANALYSIS_NOTE,
     }
 
