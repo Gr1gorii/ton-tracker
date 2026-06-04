@@ -8,6 +8,7 @@ import type {
   ImportPreviewRequest,
   ImportPreviewResponse,
   ProvidersStatus,
+  StonfiPoolsPreviewResponse,
 } from "./types";
 
 // API base URL. Override with VITE_API_BASE at build/dev time.
@@ -145,6 +146,19 @@ export async function analyzeBitqueryTokenTrades(
   }
 
   return (await res.json()) as BitqueryAnalysisResponse;
+}
+
+export async function previewStonfiPools(
+  limit: number,
+): Promise<StonfiPoolsPreviewResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(`${API_BASE}/api/stonfi/pools/preview?${params}`);
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "STON.fi pools preview failed"));
+  }
+
+  return (await res.json()) as StonfiPoolsPreviewResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {

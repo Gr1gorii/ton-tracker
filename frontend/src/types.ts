@@ -308,3 +308,49 @@ export interface BitqueryAnalysisResponse {
   error: BitqueryProviderError | null;
   analysis_note: string;
 }
+
+export interface StonfiProviderError {
+  code: string | null;
+  message: string;
+}
+
+export interface StonfiPoolsPreviewSummary {
+  total_pools: number;
+  preview_count: number;
+  requested_limit: number;
+}
+
+export interface StonfiPoolPreview {
+  address?: string | null;
+  router_address?: string | null;
+  token0_address?: string | null;
+  token1_address?: string | null;
+  token0_symbol?: string | null;
+  token1_symbol?: string | null;
+  reserve0?: string | number | null;
+  reserve1?: string | number | null;
+  token0_balance?: string | number | null;
+  token1_balance?: string | number | null;
+  lp_total_supply_usd?: string | number | null;
+  liquidity_usd?: string | number | null;
+  volume_24h_usd?: string | number | null;
+  apy_1d?: string | number | null;
+  apy_7d?: string | number | null;
+  apy_30d?: string | number | null;
+  deprecated?: boolean;
+  tags?: string[];
+  source?: string | null;
+  [key: string]: unknown;
+}
+
+export interface StonfiPoolsPreviewResponse {
+  provider: "stonfi";
+  data_mode: "mock" | "real";
+  source: "mock" | "real";
+  success: boolean;
+  summary: StonfiPoolsPreviewSummary;
+  pools_preview: StonfiPoolPreview[];
+  warnings: string[];
+  message: string;
+  error: StonfiProviderError | null;
+}
