@@ -112,6 +112,8 @@ export interface ProvidersStatus {
   geckoterminal: ProviderStatusInfo;
   ton_provider: ProviderStatusInfo;
   bitquery: ProviderStatusInfo;
+  stonfi?: ProviderStatusInfo;
+  tonapi?: ProviderStatusInfo;
 }
 
 export interface DataQualityComponents {
@@ -353,4 +355,44 @@ export interface StonfiPoolsPreviewResponse {
   warnings: string[];
   message: string;
   error: StonfiProviderError | null;
+}
+
+export interface TonapiProviderError {
+  code: string | null;
+  message: string;
+  diagnostic?: string | null;
+}
+
+export interface TonapiAccountJettonsPreviewSummary {
+  total_jettons: number;
+  preview_count: number;
+  requested_limit: number;
+}
+
+export interface TonapiJettonPreview {
+  wallet_address?: string | null;
+  jetton_address?: string | null;
+  jetton_name?: string | null;
+  jetton_symbol?: string | null;
+  balance?: string | number | null;
+  decimals?: string | number | null;
+  image?: string | null;
+  price?: string | number | null;
+  price_usd?: string | number | null;
+  wallet_contract_address?: string | null;
+  source?: string | null;
+  [key: string]: unknown;
+}
+
+export interface TonapiAccountJettonsPreviewResponse {
+  provider: "tonapi";
+  data_mode: "mock" | "real";
+  source: "mock" | "real";
+  success: boolean;
+  summary: TonapiAccountJettonsPreviewSummary;
+  account_address: string;
+  jettons_preview: TonapiJettonPreview[];
+  warnings: string[];
+  message: string;
+  error: TonapiProviderError | null;
 }

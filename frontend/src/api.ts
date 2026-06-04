@@ -9,6 +9,7 @@ import type {
   ImportPreviewResponse,
   ProvidersStatus,
   StonfiPoolsPreviewResponse,
+  TonapiAccountJettonsPreviewResponse,
 } from "./types";
 
 // API base URL. Override with VITE_API_BASE at build/dev time.
@@ -159,6 +160,27 @@ export async function previewStonfiPools(
   }
 
   return (await res.json()) as StonfiPoolsPreviewResponse;
+}
+
+export async function previewTonapiAccountJettons(
+  accountAddress: string,
+  limit: number,
+): Promise<TonapiAccountJettonsPreviewResponse> {
+  const params = new URLSearchParams({
+    account_address: accountAddress,
+    limit: String(limit),
+  });
+  const res = await fetch(
+    `${API_BASE}/api/tonapi/account-jettons/preview?${params}`,
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "TonAPI account jettons preview failed"),
+    );
+  }
+
+  return (await res.json()) as TonapiAccountJettonsPreviewResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {
