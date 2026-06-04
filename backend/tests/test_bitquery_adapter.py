@@ -7,8 +7,12 @@ import urllib.request
 
 import pytest
 
-from adapters.bitquery import BitqueryAdapter
+from adapters.bitquery import (
+    BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE,
+    BitqueryAdapter,
+)
 from config import (
+    ERROR_PROVIDER_COVERAGE_UNAVAILABLE,
     ERROR_PROVIDER_ERROR,
     ERROR_PROVIDER_NOT_CONFIGURED,
     ProviderResult,
@@ -744,6 +748,40 @@ def test_execute_graphql_graphql_errors_return_provider_error(monkeypatch):
     assert result.ok is False
     assert result.error == ERROR_PROVIDER_ERROR
     assert "graphql error" in (result.message or "").lower()
+
+
+def test_execute_graphql_ton_schema_error_returns_clear_coverage_error(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return FakeResponse(
+            json.dumps(
+                {
+                    "errors": [
+                        {
+                            "message": (
+                                'Cannot query field "Ton" on type '
+                                '"RootQuery". Did you mean "Tron"? '
+                                "test-key"
+                            )
+                        }
+                    ]
+                }
+            )
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    adapter = BitqueryAdapter(_real_settings(bitquery_api_key="test-key"))
+    result = adapter.execute_graphql("query Real", {})
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_COVERAGE_UNAVAILABLE
+    assert result.message == BITQUERY_TON_SCHEMA_UNAVAILABLE_MESSAGE
+    assert 'Cannot query field "Ton" on type "RootQuery"' in (
+        result.diagnostic or ""
+    )
+    assert "test-key" not in (result.message or "")
+    assert "test-key" not in (result.diagnostic or "")
+    assert "[redacted]" in (result.diagnostic or "")
 
 
 def test_execute_graphql_missing_data_returns_provider_error(monkeypatch):
