@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 DEFAULT_GECKOTERMINAL_BASE_URL = "https://api.geckoterminal.com/api/v2"
+DEFAULT_STONFI_BASE_URL = "https://api.ston.fi"
 
 # Machine-readable provider error codes.
 ERROR_PROVIDER_NOT_CONFIGURED = "provider_not_configured"
@@ -58,6 +59,7 @@ class Settings:
     ton_api_key: str
     bitquery_api_url: str
     bitquery_api_key: str
+    stonfi_base_url: str = DEFAULT_STONFI_BASE_URL
 
     @property
     def is_mock(self) -> bool:
@@ -91,6 +93,8 @@ def get_settings() -> Settings:
         ton_api_key=_env("TON_API_KEY"),
         bitquery_api_url=_env("BITQUERY_API_URL"),
         bitquery_api_key=_env("BITQUERY_API_KEY"),
+        stonfi_base_url=_env("STONFI_BASE_URL", DEFAULT_STONFI_BASE_URL)
+        or DEFAULT_STONFI_BASE_URL,
     )
 
 
