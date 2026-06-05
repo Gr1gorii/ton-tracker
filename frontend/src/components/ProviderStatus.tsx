@@ -56,6 +56,12 @@ function providerShortMessage(label: string, info: ProviderStatusInfo): string {
   return "Legacy/provider status";
 }
 
+function providerStateLine(info: ProviderStatusInfo): string {
+  if (info.configured && info.available) return "configured and available";
+  if (info.configured) return "configured, unavailable";
+  return "not configured";
+}
+
 function ProviderRow({
   label,
   info,
@@ -71,10 +77,7 @@ function ProviderRow({
         <span className="provider-name">{label}</span>
         <span className={providerChipClass(chip)}>{chip}</span>
       </div>
-      <span className="provider-health-line">
-        configured {info.configured ? "yes" : "no"} / available{" "}
-        {info.available ? "yes" : "no"}
-      </span>
+      <span className="provider-health-line">{providerStateLine(info)}</span>
       <span className="provider-msg muted small">
         {providerShortMessage(label, info)}
       </span>

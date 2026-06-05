@@ -8,6 +8,9 @@ import type {
 const SCOPE_NOTE =
   "STON.fi data covers STON.fi DEX pools only, not all TON DeFi.";
 
+const PANEL_SCOPE_NOTE =
+  "Scope: STON.fi DEX pools only. Full coverage limitations remain in Evidence & limitations.";
+
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
@@ -48,6 +51,12 @@ function reserveValue(pool: StonfiPoolPreview): string {
   const reserve1 = pool.reserve1 ?? pool.token1_balance;
   if (reserve0 === undefined && reserve1 === undefined) return "-";
   return `${displayValue(reserve0)} / ${displayValue(reserve1)}`;
+}
+
+function compactWarnings(warnings: string[]): string[] {
+  return warnings.filter(
+    (warning, index) => warning !== SCOPE_NOTE && warnings.indexOf(warning) === index,
+  );
 }
 
 export default function StonfiPoolsPreviewPanel() {
@@ -95,7 +104,7 @@ export default function StonfiPoolsPreviewPanel() {
         )}
       </div>
 
-      <div className="stonfi-note">{SCOPE_NOTE}</div>
+      <div className="stonfi-note">{PANEL_SCOPE_NOTE}</div>
 
       <div className="stonfi-form">
         <div className="field stonfi-limit-field">
@@ -213,7 +222,9 @@ function ProviderMessages({
   warnings: string[];
   error: { code: string | null; message: string } | null;
 }) {
-  if (warnings.length === 0 && !error) return null;
+  const visibleWarnings = compactWarnings(warnings);
+
+  if (visibleWarnings.length === 0 && !error) return null;
 
   return (
     <div className="stonfi-provider-messages">
@@ -225,9 +236,9 @@ function ProviderMessages({
           </div>
         </div>
       )}
-      {warnings.length > 0 && (
+      {visibleWarnings.length > 0 && (
         <div className="stonfi-warning-list">
-          {warnings.map((warning, index) => (
+          {visibleWarnings.map((warning, index) => (
             <div className="import-analysis-note" key={`${warning}:${index}`}>
               {warning}
             </div>

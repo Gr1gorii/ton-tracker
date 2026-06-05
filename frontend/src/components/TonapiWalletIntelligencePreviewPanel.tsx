@@ -13,6 +13,9 @@ const SCOPE_NOTE =
 const LIMIT_NOTE =
   "It does not include full transaction history, PnL, DEX swaps, current TON balance, or full on-chain behavior.";
 
+const PANEL_SCOPE_NOTE =
+  "Scope: TonAPI account jetton preview only. Full limitations remain in Evidence & limitations.";
+
 const PUBLIC_MODE_WARNING =
   "TonAPI API key is not configured; public mode may be rate limited.";
 
@@ -28,14 +31,13 @@ function clampLimit(value: string): number | null {
   return Math.min(100, Math.max(1, Math.trunc(parsed)));
 }
 
-function ensureWarnings(warnings: string[]): string[] {
-  const result = [...warnings];
-  if (!result.includes(SCOPE_NOTE)) result.unshift(SCOPE_NOTE);
-  if (!result.includes(LIMIT_NOTE)) {
-    const insertAt = result.includes(SCOPE_NOTE) ? 1 : 0;
-    result.splice(insertAt, 0, LIMIT_NOTE);
-  }
-  return result;
+function compactWarnings(warnings: string[]): string[] {
+  return warnings.filter(
+    (warning, index) =>
+      warning !== SCOPE_NOTE &&
+      warning !== LIMIT_NOTE &&
+      warnings.indexOf(warning) === index,
+  );
 }
 
 function listValue(values: string[] | undefined): string {
@@ -146,8 +148,7 @@ export default function TonapiWalletIntelligencePreviewPanel() {
       </div>
 
       <div className="tonapi-wallet-note">
-        <div>{SCOPE_NOTE}</div>
-        <div>{LIMIT_NOTE}</div>
+        <div>{PANEL_SCOPE_NOTE}</div>
       </div>
 
       <div className="tonapi-wallet-form">
@@ -337,7 +338,9 @@ function ProviderMessages({
   warnings: string[];
   error: TonapiProviderError | null;
 }) {
-  const visibleWarnings = ensureWarnings(warnings);
+  const visibleWarnings = compactWarnings(warnings);
+
+  if (visibleWarnings.length === 0 && !error) return null;
 
   return (
     <div className="tonapi-wallet-provider-messages">
@@ -352,20 +355,22 @@ function ProviderMessages({
           )}
         </div>
       )}
-      <div className="tonapi-wallet-warning-list">
-        {visibleWarnings.map((warning, index) => (
-          <div
-            className={
-              warning === PUBLIC_MODE_WARNING
-                ? "import-analysis-note tonapi-public-warning"
-                : "import-analysis-note"
-            }
-            key={`${warning}:${index}`}
-          >
-            {warning}
-          </div>
-        ))}
-      </div>
+      {visibleWarnings.length > 0 && (
+        <div className="tonapi-wallet-warning-list">
+          {visibleWarnings.map((warning, index) => (
+            <div
+              className={
+                warning === PUBLIC_MODE_WARNING
+                  ? "import-analysis-note tonapi-public-warning"
+                  : "import-analysis-note"
+              }
+              key={`${warning}:${index}`}
+            >
+              {warning}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
