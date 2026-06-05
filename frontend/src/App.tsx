@@ -19,11 +19,28 @@ import TonapiWalletIntelligencePreviewPanel from "./components/TonapiWalletIntel
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
 
+const navItems = [
+  "Dashboard",
+  "Providers",
+  "Pools",
+  "Wallets",
+  "Intelligence",
+  "Reports",
+  "Watchlist",
+];
+
+type WorkspaceView = "wallet" | "jettons" | "pools";
+
 export default function App() {
   const [poolUrl, setPoolUrl] = useState(SAMPLE_URL);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+
+  const [workspaceAccount, setWorkspaceAccount] = useState("");
+  const [workspaceLimit, setWorkspaceLimit] = useState("10");
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("wallet");
+  const [workspaceHint, setWorkspaceHint] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,18 +59,30 @@ export default function App() {
   }, []);
 
   const dataMode = result?.data_quality.mode ?? providers?.data_mode ?? "unknown";
+  const providerSnapshot = result?.providers ?? providers;
+  const availableProviders = providerSnapshot
+    ? [
+        providerSnapshot.geckoterminal,
+        providerSnapshot.stonfi,
+        providerSnapshot.tonapi,
+        providerSnapshot.bitquery,
+        providerSnapshot.ton_provider,
+      ].filter((item) => item?.available).length
+    : 0;
+  const providerTotal = providerSnapshot ? 5 : 0;
   const dataBadge =
     dataMode === "mock"
-      ? { label: "MOCK DATA", className: "badge badge-mock" }
+      ? { label: "DATA MODE mock", className: "badge badge-mock" }
       : dataMode === "real"
-        ? { label: "MIXED DATA", className: "badge badge-real" }
-        : { label: "DATA MODE UNKNOWN", className: "badge badge-group" };
+        ? { label: "DATA MODE real", className: "badge badge-real" }
+        : { label: "DATA MODE unknown", className: "badge badge-group" };
+  const sourceLabel = dataMode === "real" ? "live/preview" : "mock/offline";
   const bannerText =
     dataMode === "mock"
-      ? "v0.2.1 — mock mode is active. No real on-chain wallet data is used."
+      ? "v0.2.1 - mock mode is active. No real on-chain wallet data is used."
       : dataMode === "real"
-        ? "v0.2.1 — pool/token data may be real through GeckoTerminal, but wallets, balances, PnL and clusters are still mock."
-        : "v0.2.1 — pool/token data may be real in real mode, but wallet buyers, balances, PnL and clusters remain mock.";
+        ? "v0.2.1 - pool/token data may be real through GeckoTerminal, but wallets, balances, PnL and clusters are still mock."
+        : "v0.2.1 - pool/token data may be real in real mode, but wallet buyers, balances, PnL and clusters remain mock.";
 
   async function handleAnalyze() {
     if (!poolUrl.trim()) {
@@ -95,177 +124,445 @@ export default function App() {
     }
   }
 
+  function handleWorkspacePreview() {
+    const target =
+      workspaceView === "wallet"
+        ? "TonAPI Wallet Intelligence Preview"
+        : workspaceView === "jettons"
+          ? "TonAPI Account Jettons Preview"
+          : "STON.fi Pools Preview";
+    setWorkspaceHint(
+      `${target} remains available in its module below. Use the module action to run the existing provider preview endpoint.`,
+    );
+  }
+
+  function clearWorkspaceControl() {
+    setWorkspaceAccount("");
+    setWorkspaceLimit("10");
+    setWorkspaceView("wallet");
+    setWorkspaceHint(null);
+  }
+
   return (
-    <div className="app dashboard-app">
-      <header className="dashboard-hero">
-        <div className="hero-copy">
-          <span className="hero-eyebrow">TON intelligence console</span>
-          <h1>TON Tracker</h1>
-          <p className="hero-tagline">
-            Data-honest intelligence for TON wallets and tokens
-          </p>
-          <p className="hero-text">
-            Real provider previews, provider limitations, imported data, and
-            mock dashboard analysis are separated so every result keeps its
-            source and scope visible.
-          </p>
-        </div>
-        <div className="hero-status-panel">
-          <span className={dataBadge.className}>{dataBadge.label}</span>
-          <div className="hero-status-copy">
-            <span className="muted small">Current data mode</span>
-            <strong>{dataMode}</strong>
+    <div className="evidence-shell">
+      <aside className="workspace-sidebar">
+        <div className="sidebar-brand">
+          <span className="sidebar-logo">T</span>
+          <div>
+            <strong>TON Tracker</strong>
+            <span>TON intelligence workspace</span>
           </div>
         </div>
-      </header>
 
-      <div className="dashboard-truth-grid">
-        <div className="truth-card">
-          <span className="truth-label">Provider previews</span>
-          <strong>Real when configured</strong>
-          <p>STON.fi and TonAPI previews stay scoped to their provider data.</p>
+        <nav className="sidebar-nav" aria-label="Workspace navigation">
+          {navItems.map((item) => (
+            <button
+              className={item === "Dashboard" ? "nav-item nav-active" : "nav-item"}
+              key={item}
+              type="button"
+            >
+              <span className="nav-icon">{item.slice(0, 1)}</span>
+              {item}
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebar-status">
+          <span>Data mode</span>
+          <strong>{dataMode}</strong>
+          <small>Real data labels enabled</small>
         </div>
-        <div className="truth-card">
-          <span className="truth-label">Dashboard analysis</span>
-          <strong>Mixed or mock-limited</strong>
-          <p>{bannerText}</p>
+      </aside>
+
+      <div className="workspace-frame">
+        <header className="workspace-header">
+          <div>
+            <h1>TON Tracker</h1>
+            <p>Data-honest intelligence for TON wallets and tokens</p>
+          </div>
+          <div className="header-badges">
+            <span className={dataBadge.className}>{dataBadge.label}</span>
+            <span className="badge badge-provider">
+              providers {availableProviders}/{providerTotal || "-"}
+            </span>
+            <span className="badge badge-provider">ENV mainnet</span>
+            <span className="badge badge-real">SOURCE {sourceLabel}</span>
+          </div>
+        </header>
+
+        <main className="workspace-grid">
+          <div className="workspace-main">
+            <WorkspaceControl
+              account={workspaceAccount}
+              limit={workspaceLimit}
+              view={workspaceView}
+              hint={workspaceHint}
+              onAccountChange={(value) => {
+                setWorkspaceAccount(value);
+                setWorkspaceHint(null);
+              }}
+              onLimitChange={(value) => {
+                setWorkspaceLimit(value);
+                setWorkspaceHint(null);
+              }}
+              onViewChange={(value) => {
+                setWorkspaceView(value);
+                setWorkspaceHint(null);
+              }}
+              onPreview={handleWorkspacePreview}
+              onClear={clearWorkspaceControl}
+            />
+
+            <DashboardSection
+              eyebrow="Provider Health"
+              title="Provider Status"
+              description="Configured provider readiness and limitations are shown before any preview output."
+            >
+              <ProviderStatus
+                providers={providerSnapshot}
+                dataQuality={result?.data_quality ?? null}
+                error={providersError}
+              />
+            </DashboardSection>
+
+            <DashboardSection
+              eyebrow="Wallet Intelligence"
+              title="TonAPI Wallet Intelligence Preview"
+              description="Lightweight intelligence based on TonAPI account jetton data."
+            >
+              <TonapiWalletIntelligencePreviewPanel />
+            </DashboardSection>
+
+            <div className="workspace-preview-grid">
+              <DashboardSection
+                eyebrow="Wallet Jettons"
+                title="TonAPI Account Jettons Preview"
+                description="Provider preview rows from TonAPI account jetton data."
+              >
+                <TonapiAccountJettonsPreviewPanel />
+              </DashboardSection>
+
+              <DashboardSection
+                eyebrow="DEX Pools"
+                title="STON.fi Pools Preview"
+                description="STON.fi data covers STON.fi DEX pools only, not all TON DeFi."
+              >
+                <StonfiPoolsPreviewPanel />
+              </DashboardSection>
+            </div>
+
+            <DashboardSection
+              eyebrow="Dashboard report"
+              title="Token and Wallet Clustering Report"
+              description="Legacy report workspace remains mock-aware and separate from provider previews."
+            >
+              <div className="dashboard-workbench">
+                <div className="dashboard-workbench-head">
+                  <div>
+                    <span className="section-eyebrow">Dashboard analysis</span>
+                    <h3>Token and wallet clustering report</h3>
+                  </div>
+                  <span className="badge badge-provider">mock-aware</span>
+                </div>
+
+                <div className="controls-card">
+                  <PoolUrlInput
+                    value={poolUrl}
+                    onChange={setPoolUrl}
+                    disabled={loading}
+                  />
+                  <TimeWindowPicker
+                    value={timeWindow}
+                    onChange={setTimeWindow}
+                    customStart={customStart}
+                    customEnd={customEnd}
+                    onCustomStartChange={setCustomStart}
+                    onCustomEndChange={setCustomEnd}
+                    disabled={loading}
+                  />
+                  <div className="controls-actions">
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleAnalyze}
+                      disabled={loading}
+                    >
+                      {loading ? "Analyzing..." : "Analyze"}
+                    </button>
+                    {result && (
+                      <ExportButtons
+                        poolUrl={result.pool_url}
+                        timeWindow={result.time_window}
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="state-box error-box dashboard-state">
+                    <strong>Request failed.</strong> {error}
+                    <div className="muted small">
+                      Is the backend running at <code>{API_BASE}</code>? Start it
+                      with <code>uvicorn main:app --reload</code>.
+                    </div>
+                  </div>
+                )}
+
+                {loading && (
+                  <div className="state-box loading-box dashboard-state">
+                    <span className="spinner" /> Crunching mock wallet data...
+                  </div>
+                )}
+
+                {!loading && !result && !error && (
+                  <div className="state-box empty-box dashboard-state">
+                    Enter a TON pool URL and pick a time window, then press{" "}
+                    <strong>Analyze</strong> to generate a mock-aware
+                    intelligence report.
+                  </div>
+                )}
+
+                {!loading && result && (
+                  <main className="results">
+                    <TokenOverview result={result} />
+                    <TokenStatsDivider />
+                    <BuyersTable wallets={result.wallets} />
+                    <WalletGroups groups={result.groups} />
+                    <div className="two-col">
+                      <CommonHoldings holdings={result.common_holdings} />
+                      <InterestingWallets wallets={result.interesting_wallets} />
+                    </div>
+                    <footer className="app-footer muted small">
+                      {result.disclaimer}
+                    </footer>
+                  </main>
+                )}
+              </div>
+            </DashboardSection>
+
+            <DashboardSection
+              eyebrow="Provider-limited / Experimental tools"
+              title="Provider-limited / Experimental tools"
+              description="Bitquery TON coverage and manual/import workflows remain explicitly scoped and experimental."
+            >
+              <BitqueryTokenTradesPanel />
+              <ImportPreviewPanel />
+            </DashboardSection>
+          </div>
+
+          <EvidenceColumn dataMode={dataMode} bannerText={bannerText} />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceControl({
+  account,
+  limit,
+  view,
+  hint,
+  onAccountChange,
+  onLimitChange,
+  onViewChange,
+  onPreview,
+  onClear,
+}: {
+  account: string;
+  limit: string;
+  view: WorkspaceView;
+  hint: string | null;
+  onAccountChange: (value: string) => void;
+  onLimitChange: (value: string) => void;
+  onViewChange: (value: WorkspaceView) => void;
+  onPreview: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <section className="workspace-control">
+      <div className="workspace-control-grid">
+        <div className="field">
+          <label className="field-label" htmlFor="workspace-account">
+            Account address
+          </label>
+          <input
+            id="workspace-account"
+            className="text-input"
+            type="text"
+            value={account}
+            placeholder="Paste TON wallet address"
+            onChange={(event) => onAccountChange(event.target.value)}
+          />
         </div>
-        <div className="truth-card truth-card-warning">
-          <span className="truth-label">Interpretation</span>
-          <strong>No proof of ownership</strong>
-          <p>
-            Wallet clustering is probabilistic and is not proof of common
-            ownership.
-          </p>
+
+        <div className="field">
+          <label className="field-label" htmlFor="workspace-limit">
+            Limit (jettons)
+          </label>
+          <input
+            id="workspace-limit"
+            className="text-input"
+            type="number"
+            min={1}
+            max={100}
+            value={limit}
+            onChange={(event) => onLimitChange(event.target.value)}
+          />
+          <span className="field-sublabel">1-100</span>
+        </div>
+
+        <div className="field workspace-view-field">
+          <span className="field-label">View</span>
+          <div className="workspace-segmented">
+            <button
+              className={
+                view === "wallet"
+                  ? "workspace-segment workspace-segment-active"
+                  : "workspace-segment"
+              }
+              type="button"
+              onClick={() => onViewChange("wallet")}
+            >
+              Wallet intelligence
+            </button>
+            <button
+              className={
+                view === "jettons"
+                  ? "workspace-segment workspace-segment-active"
+                  : "workspace-segment"
+              }
+              type="button"
+              onClick={() => onViewChange("jettons")}
+            >
+              Account jettons
+            </button>
+            <button
+              className={
+                view === "pools"
+                  ? "workspace-segment workspace-segment-active"
+                  : "workspace-segment"
+              }
+              type="button"
+              onClick={() => onViewChange("pools")}
+            >
+              STON.fi pools
+            </button>
+          </div>
+        </div>
+
+        <div className="workspace-actions">
+          <button className="btn btn-primary" type="button" onClick={onPreview}>
+            Preview wallet intelligence
+          </button>
+          <button className="btn btn-ghost" type="button" onClick={onClear}>
+            Clear
+          </button>
         </div>
       </div>
 
-      <DashboardSection
-        eyebrow="Provider Health"
-        title="Provider Health"
-        description="Live readiness, mock mode, and provider scope are surfaced before any analysis tools."
-      >
-        <ProviderStatus
-          providers={result?.providers ?? providers}
-          dataQuality={result?.data_quality ?? null}
-          error={providersError}
-        />
-      </DashboardSection>
+      <div className="workspace-control-note">
+        Wallet intelligence preview is based only on account jetton data.
+        {hint && <span>{hint}</span>}
+      </div>
+    </section>
+  );
+}
 
-      <DashboardSection
-        eyebrow="Wallet Intelligence"
-        title="Wallet Intelligence"
-        description="Jetton-preview intelligence is separate from the legacy dashboard report and does not imply full wallet history."
-      >
-        <TonapiWalletIntelligencePreviewPanel />
-
-        <div className="dashboard-workbench">
-          <div className="dashboard-workbench-head">
-            <div>
-              <span className="section-eyebrow">Dashboard analysis</span>
-              <h3>Token and wallet clustering report</h3>
-            </div>
-            <span className="badge badge-provider">mock-aware</span>
-          </div>
-
-          <div className="controls-card">
-            <PoolUrlInput
-              value={poolUrl}
-              onChange={setPoolUrl}
-              disabled={loading}
-            />
-            <TimeWindowPicker
-              value={timeWindow}
-              onChange={setTimeWindow}
-              customStart={customStart}
-              customEnd={customEnd}
-              onCustomStartChange={setCustomStart}
-              onCustomEndChange={setCustomEnd}
-              disabled={loading}
-            />
-            <div className="controls-actions">
-              <button
-                className="btn btn-primary"
-                onClick={handleAnalyze}
-                disabled={loading}
-              >
-                {loading ? "Analyzing…" : "Analyze"}
-              </button>
-              {result && (
-                <ExportButtons
-                  poolUrl={result.pool_url}
-                  timeWindow={result.time_window}
-                />
-              )}
-            </div>
-          </div>
-
-          {error && (
-            <div className="state-box error-box dashboard-state">
-              <strong>Request failed.</strong> {error}
-              <div className="muted small">
-                Is the backend running at <code>{API_BASE}</code>? Start it
-                with <code>uvicorn main:app --reload</code>.
-              </div>
-            </div>
-          )}
-
-          {loading && (
-            <div className="state-box loading-box dashboard-state">
-              <span className="spinner" /> Crunching mock wallet data…
-            </div>
-          )}
-
-          {!loading && !result && !error && (
-            <div className="state-box empty-box dashboard-state">
-              Enter a TON pool URL and pick a time window, then press{" "}
-              <strong>Analyze</strong> to generate a mock-aware intelligence
-              report.
-            </div>
-          )}
-
-          {!loading && result && (
-            <main className="results">
-              <TokenOverview result={result} />
-              <TokenStatsDivider />
-              <BuyersTable wallets={result.wallets} />
-              <WalletGroups groups={result.groups} />
-              <div className="two-col">
-                <CommonHoldings holdings={result.common_holdings} />
-                <InterestingWallets wallets={result.interesting_wallets} />
-              </div>
-              <footer className="app-footer muted small">
-                {result.disclaimer}
-              </footer>
-            </main>
-          )}
+function EvidenceColumn({
+  dataMode,
+  bannerText,
+}: {
+  dataMode: string;
+  bannerText: string;
+}) {
+  return (
+    <aside className="evidence-column">
+      <section className="evidence-card">
+        <div className="evidence-card-head">
+          <h2>Evidence & limitations</h2>
+          <span className="badge badge-provider">visible scope</span>
         </div>
-      </DashboardSection>
+        <EvidenceItem
+          tone="warning"
+          title="Based only on account jetton data"
+          text="Uses jetton wallet states for this account."
+        />
+        <EvidenceItem
+          tone="warning"
+          title="Not full wallet intelligence"
+          text="Does not include full wallet activities or behavior."
+        />
+        <EvidenceItem
+          tone="warning"
+          title="No transaction history, PnL, or swaps"
+          text="No transfers, swaps, or PnL calculations."
+        />
+        <EvidenceItem
+          tone="info"
+          title="Public mode may be rate limited"
+          text="High-load periods may affect response times."
+        />
+        <EvidenceItem
+          tone="warning"
+          title="STON.fi DEX pools only"
+          text="STON.fi data covers STON.fi DEX pools only, not all TON DeFi."
+        />
+        <EvidenceItem
+          tone="danger"
+          title="Bitquery TON coverage unavailable"
+          text="Current Bitquery schema does not expose TON."
+        />
+      </section>
 
-      <DashboardSection
-        eyebrow="Wallet Jettons"
-        title="Wallet Jettons"
-        description="TonAPI account jetton rows are shown as provider preview data, not full wallet inventory."
-      >
-        <TonapiAccountJettonsPreviewPanel />
-      </DashboardSection>
+      <section className="evidence-card data-quality-card">
+        <div className="evidence-card-head">
+          <h2>Data Quality</h2>
+          <span className="badge badge-provider">{dataMode}</span>
+        </div>
+        <QualityRow label="Completeness" value="Medium" tone="warning" />
+        <QualityRow label="Freshness" value="High" tone="success" />
+        <QualityRow label="Reliability" value="Medium" tone="warning" />
+        <div className="quality-note">
+          <span>Notes</span>
+          <p>Based on available provider data. {bannerText}</p>
+        </div>
+      </section>
+    </aside>
+  );
+}
 
-      <DashboardSection
-        eyebrow="DEX Pools"
-        title="DEX Pools"
-        description="STON.fi pool previews are limited to STON.fi DEX data and are not all TON DeFi."
-      >
-        <StonfiPoolsPreviewPanel />
-      </DashboardSection>
+function EvidenceItem({
+  tone,
+  title,
+  text,
+}: {
+  tone: "warning" | "info" | "danger";
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className={`evidence-item evidence-${tone}`}>
+      <span className="evidence-icon">!</span>
+      <div>
+        <strong>{title}</strong>
+        <p>{text}</p>
+      </div>
+    </div>
+  );
+}
 
-      <DashboardSection
-        eyebrow="Provider-limited / Experimental tools"
-        title="Provider-limited / Experimental tools"
-        description="Bitquery TON coverage and manual/import workflows remain explicitly scoped and experimental."
-      >
-        <BitqueryTokenTradesPanel />
-        <ImportPreviewPanel />
-      </DashboardSection>
+function QualityRow({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "success" | "warning";
+}) {
+  return (
+    <div className="quality-row">
+      <span>{label}</span>
+      <strong className={`quality-${tone}`}>{value}</strong>
     </div>
   );
 }

@@ -19,6 +19,43 @@ function dotClass(info: ProviderStatusInfo): string {
   return "dot dot-gray";
 }
 
+function providerChip(label: string, info: ProviderStatusInfo): string {
+  const message = info.message.toLowerCase();
+  if (!info.configured || !info.available) return "unavailable";
+  if (message.includes("mock")) return "mock/offline";
+  if (message.includes("public mode") || message.includes("rate limit")) {
+    return "public mode";
+  }
+  if (label === "Bitquery" && message.includes("coverage")) return "limited";
+  return "real";
+}
+
+function providerChipClass(chip: string): string {
+  if (chip === "real") return "provider-chip provider-chip-real";
+  if (chip === "public mode") return "provider-chip provider-chip-warning";
+  if (chip === "limited") return "provider-chip provider-chip-warning";
+  if (chip === "mock/offline") return "provider-chip provider-chip-muted";
+  return "provider-chip provider-chip-error";
+}
+
+function providerShortMessage(label: string, info: ProviderStatusInfo): string {
+  const message = info.message.toLowerCase();
+  if (!info.configured || !info.available) {
+    if (label === "Bitquery" && message.includes("ton")) {
+      return "TON coverage unavailable";
+    }
+    return info.message;
+  }
+  if (label === "STON.fi") return "Real STON.fi pools source";
+  if (label === "TonAPI" && message.includes("api key is not configured")) {
+    return "Public mode may be rate limited";
+  }
+  if (label === "TonAPI") return "Account jetton preview provider";
+  if (label === "Bitquery") return "Provider-limited TON coverage";
+  if (label === "GeckoTerminal") return "Market data provider";
+  return "Legacy/provider status";
+}
+
 function ProviderRow({
   label,
   info,
@@ -26,11 +63,21 @@ function ProviderRow({
   label: string;
   info: ProviderStatusInfo;
 }) {
+  const chip = providerChip(label, info);
   return (
-    <div className="provider-row">
-      <span className={dotClass(info)} />
-      <span className="provider-name">{label}</span>
-      <span className="provider-msg muted small">{info.message}</span>
+    <div className="provider-row" title={info.message}>
+      <div className="provider-row-top">
+        <span className={dotClass(info)} />
+        <span className="provider-name">{label}</span>
+        <span className={providerChipClass(chip)}>{chip}</span>
+      </div>
+      <span className="provider-health-line">
+        configured {info.configured ? "yes" : "no"} / available{" "}
+        {info.available ? "yes" : "no"}
+      </span>
+      <span className="provider-msg muted small">
+        {providerShortMessage(label, info)}
+      </span>
     </div>
   );
 }
@@ -92,14 +139,14 @@ export default function ProviderStatus({
       {providers && (
         <div className="provider-rows">
           <ProviderRow label="GeckoTerminal" info={providers.geckoterminal} />
-          <ProviderRow label="TON provider" info={providers.ton_provider} />
-          <ProviderRow label="Bitquery" info={providers.bitquery} />
           {providers.stonfi && (
             <ProviderRow label="STON.fi" info={providers.stonfi} />
           )}
           {providers.tonapi && (
             <ProviderRow label="TonAPI" info={providers.tonapi} />
           )}
+          <ProviderRow label="Bitquery" info={providers.bitquery} />
+          <ProviderRow label="TON provider" info={providers.ton_provider} />
         </div>
       )}
 
