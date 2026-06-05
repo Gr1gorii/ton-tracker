@@ -576,6 +576,109 @@ body {
   display: block;
 }
 
+/* TonAPI wallet intelligence preview -------------------------------- */
+.tonapi-wallet-panel {
+  margin-bottom: 24px;
+}
+
+.tonapi-wallet-note {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--cyan);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tonapi-wallet-form {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(120px, 160px) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.tonapi-wallet-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tonapi-wallet-state {
+  margin-top: 16px;
+  padding: 18px;
+}
+
+.tonapi-wallet-results {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.tonapi-wallet-result-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tonapi-wallet-provider-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tonapi-wallet-provider-error {
+  padding: 16px;
+}
+
+.tonapi-wallet-warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tonapi-intelligence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.tonapi-intelligence-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 14px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.tonapi-basic-notes {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tonapi-basic-notes li {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
 /* State boxes -------------------------------------------------------- */
 .state-box {
   border-radius: var(--radius);
@@ -1252,6 +1355,9 @@ body {
     grid-template-columns: 1fr;
   }
   .tonapi-form {
+    grid-template-columns: 1fr;
+  }
+  .tonapi-wallet-form {
     grid-template-columns: 1fr;
   }
   .two-col {

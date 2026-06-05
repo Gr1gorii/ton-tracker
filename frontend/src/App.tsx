@@ -14,6 +14,7 @@ import ImportPreviewPanel from "./components/ImportPreviewPanel";
 import BitqueryTokenTradesPanel from "./components/BitqueryTokenTradesPanel";
 import StonfiPoolsPreviewPanel from "./components/StonfiPoolsPreviewPanel";
 import TonapiAccountJettonsPreviewPanel from "./components/TonapiAccountJettonsPreviewPanel";
+import TonapiWalletIntelligencePreviewPanel from "./components/TonapiWalletIntelligencePreviewPanel";
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
@@ -150,6 +151,7 @@ export default function App() {
       <BitqueryTokenTradesPanel />
       <StonfiPoolsPreviewPanel />
       <TonapiAccountJettonsPreviewPanel />
+      <TonapiWalletIntelligencePreviewPanel />
 
       {error && (
         <div className="state-box error-box">
