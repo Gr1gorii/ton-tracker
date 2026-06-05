@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { analyze, API_BASE, getProvidersStatus } from "./api";
 import type { AnalysisResult, ProvidersStatus, TimeWindow } from "./types";
 import PoolUrlInput from "./components/PoolUrlInput";
@@ -96,103 +96,205 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="brand">
-          <span className="brand-mark">◈</span>
-          <div>
-            <h1>TON Wallet Intelligence</h1>
-            <span className="brand-sub">Dashboard · v0.2.1</span>
+    <div className="app dashboard-app">
+      <header className="dashboard-hero">
+        <div className="hero-copy">
+          <span className="hero-eyebrow">TON intelligence console</span>
+          <h1>TON Tracker</h1>
+          <p className="hero-tagline">
+            Data-honest intelligence for TON wallets and tokens
+          </p>
+          <p className="hero-text">
+            Real provider previews, provider limitations, imported data, and
+            mock dashboard analysis are separated so every result keeps its
+            source and scope visible.
+          </p>
+        </div>
+        <div className="hero-status-panel">
+          <span className={dataBadge.className}>{dataBadge.label}</span>
+          <div className="hero-status-copy">
+            <span className="muted small">Current data mode</span>
+            <strong>{dataMode}</strong>
           </div>
         </div>
-        <span className={dataBadge.className}>{dataBadge.label}</span>
       </header>
 
-      <div className="banner">
-        {bannerText} Wallet clustering is <strong>probabilistic</strong> and is
-        not proof of common ownership.
+      <div className="dashboard-truth-grid">
+        <div className="truth-card">
+          <span className="truth-label">Provider previews</span>
+          <strong>Real when configured</strong>
+          <p>STON.fi and TonAPI previews stay scoped to their provider data.</p>
+        </div>
+        <div className="truth-card">
+          <span className="truth-label">Dashboard analysis</span>
+          <strong>Mixed or mock-limited</strong>
+          <p>{bannerText}</p>
+        </div>
+        <div className="truth-card truth-card-warning">
+          <span className="truth-label">Interpretation</span>
+          <strong>No proof of ownership</strong>
+          <p>
+            Wallet clustering is probabilistic and is not proof of common
+            ownership.
+          </p>
+        </div>
       </div>
 
-      <ProviderStatus
-        providers={result?.providers ?? providers}
-        dataQuality={result?.data_quality ?? null}
-        error={providersError}
-      />
-
-      <div className="controls-card">
-        <PoolUrlInput value={poolUrl} onChange={setPoolUrl} disabled={loading} />
-        <TimeWindowPicker
-          value={timeWindow}
-          onChange={setTimeWindow}
-          customStart={customStart}
-          customEnd={customEnd}
-          onCustomStartChange={setCustomStart}
-          onCustomEndChange={setCustomEnd}
-          disabled={loading}
+      <DashboardSection
+        eyebrow="Provider Health"
+        title="Provider Health"
+        description="Live readiness, mock mode, and provider scope are surfaced before any analysis tools."
+      >
+        <ProviderStatus
+          providers={result?.providers ?? providers}
+          dataQuality={result?.data_quality ?? null}
+          error={providersError}
         />
-        <div className="controls-actions">
-          <button
-            className="btn btn-primary"
-            onClick={handleAnalyze}
-            disabled={loading}
-          >
-            {loading ? "Analyzing…" : "Analyze"}
-          </button>
-          {result && (
-            <ExportButtons
-              poolUrl={result.pool_url}
-              timeWindow={result.time_window}
+      </DashboardSection>
+
+      <DashboardSection
+        eyebrow="Wallet Intelligence"
+        title="Wallet Intelligence"
+        description="Jetton-preview intelligence is separate from the legacy dashboard report and does not imply full wallet history."
+      >
+        <TonapiWalletIntelligencePreviewPanel />
+
+        <div className="dashboard-workbench">
+          <div className="dashboard-workbench-head">
+            <div>
+              <span className="section-eyebrow">Dashboard analysis</span>
+              <h3>Token and wallet clustering report</h3>
+            </div>
+            <span className="badge badge-provider">mock-aware</span>
+          </div>
+
+          <div className="controls-card">
+            <PoolUrlInput
+              value={poolUrl}
+              onChange={setPoolUrl}
+              disabled={loading}
             />
+            <TimeWindowPicker
+              value={timeWindow}
+              onChange={setTimeWindow}
+              customStart={customStart}
+              customEnd={customEnd}
+              onCustomStartChange={setCustomStart}
+              onCustomEndChange={setCustomEnd}
+              disabled={loading}
+            />
+            <div className="controls-actions">
+              <button
+                className="btn btn-primary"
+                onClick={handleAnalyze}
+                disabled={loading}
+              >
+                {loading ? "Analyzing…" : "Analyze"}
+              </button>
+              {result && (
+                <ExportButtons
+                  poolUrl={result.pool_url}
+                  timeWindow={result.time_window}
+                />
+              )}
+            </div>
+          </div>
+
+          {error && (
+            <div className="state-box error-box dashboard-state">
+              <strong>Request failed.</strong> {error}
+              <div className="muted small">
+                Is the backend running at <code>{API_BASE}</code>? Start it
+                with <code>uvicorn main:app --reload</code>.
+              </div>
+            </div>
+          )}
+
+          {loading && (
+            <div className="state-box loading-box dashboard-state">
+              <span className="spinner" /> Crunching mock wallet data…
+            </div>
+          )}
+
+          {!loading && !result && !error && (
+            <div className="state-box empty-box dashboard-state">
+              Enter a TON pool URL and pick a time window, then press{" "}
+              <strong>Analyze</strong> to generate a mock-aware intelligence
+              report.
+            </div>
+          )}
+
+          {!loading && result && (
+            <main className="results">
+              <TokenOverview result={result} />
+              <TokenStatsDivider />
+              <BuyersTable wallets={result.wallets} />
+              <WalletGroups groups={result.groups} />
+              <div className="two-col">
+                <CommonHoldings holdings={result.common_holdings} />
+                <InterestingWallets wallets={result.interesting_wallets} />
+              </div>
+              <footer className="app-footer muted small">
+                {result.disclaimer}
+              </footer>
+            </main>
           )}
         </div>
-      </div>
+      </DashboardSection>
 
-      <ImportPreviewPanel />
-      <BitqueryTokenTradesPanel />
-      <StonfiPoolsPreviewPanel />
-      <TonapiAccountJettonsPreviewPanel />
-      <TonapiWalletIntelligencePreviewPanel />
+      <DashboardSection
+        eyebrow="Wallet Jettons"
+        title="Wallet Jettons"
+        description="TonAPI account jetton rows are shown as provider preview data, not full wallet inventory."
+      >
+        <TonapiAccountJettonsPreviewPanel />
+      </DashboardSection>
 
-      {error && (
-        <div className="state-box error-box">
-          <strong>Request failed.</strong> {error}
-          <div className="muted small">
-            Is the backend running at <code>{API_BASE}</code>? Start it with{" "}
-            <code>uvicorn main:app --reload</code>.
-          </div>
-        </div>
-      )}
+      <DashboardSection
+        eyebrow="DEX Pools"
+        title="DEX Pools"
+        description="STON.fi pool previews are limited to STON.fi DEX data and are not all TON DeFi."
+      >
+        <StonfiPoolsPreviewPanel />
+      </DashboardSection>
 
-      {loading && (
-        <div className="state-box loading-box">
-          <span className="spinner" /> Crunching mock wallet data…
-        </div>
-      )}
-
-      {!loading && !result && !error && (
-        <div className="state-box empty-box">
-          Enter a TON pool URL and pick a time window, then press{" "}
-          <strong>Analyze</strong> to generate a mock intelligence report.
-        </div>
-      )}
-
-      {!loading && result && (
-        <main className="results">
-          <TokenOverview result={result} />
-          <TokenStatsDivider />
-          <BuyersTable wallets={result.wallets} />
-          <WalletGroups groups={result.groups} />
-          <div className="two-col">
-            <CommonHoldings holdings={result.common_holdings} />
-            <InterestingWallets wallets={result.interesting_wallets} />
-          </div>
-          <footer className="app-footer muted small">{result.disclaimer}</footer>
-        </main>
-      )}
+      <DashboardSection
+        eyebrow="Provider-limited / Experimental tools"
+        title="Provider-limited / Experimental tools"
+        description="Bitquery TON coverage and manual/import workflows remain explicitly scoped and experimental."
+      >
+        <BitqueryTokenTradesPanel />
+        <ImportPreviewPanel />
+      </DashboardSection>
     </div>
   );
 }
 
 function TokenStatsDivider() {
   return <div className="divider" />;
+}
+
+function DashboardSection({
+  eyebrow,
+  title,
+  description,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="dashboard-section">
+      <div className="dashboard-section-head">
+        <div>
+          <span className="section-eyebrow">{eyebrow}</span>
+          <h2>{title}</h2>
+        </div>
+        <p>{description}</p>
+      </div>
+      <div className="dashboard-section-body">{children}</div>
+    </section>
+  );
 }

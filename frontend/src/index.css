@@ -35,16 +35,205 @@ body,
 
 body {
   background:
-    radial-gradient(1200px 600px at 80% -10%, #16203a 0%, transparent 60%),
-    var(--bg);
+    linear-gradient(180deg, #0d1320 0%, #090d14 42%, #070a10 100%);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
 
 .app {
-  max-width: 1500px;
+  max-width: 1540px;
   margin: 0 auto;
-  padding: 24px 28px 64px;
+  padding: 28px 32px 72px;
+}
+
+.dashboard-app {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+/* Dashboard shell ---------------------------------------------------- */
+.dashboard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  gap: 28px;
+  align-items: end;
+  padding: 14px 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.hero-copy {
+  max-width: 860px;
+}
+
+.hero-eyebrow,
+.section-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  color: var(--cyan);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.hero-copy h1 {
+  font-size: 42px;
+  line-height: 1;
+  margin: 10px 0 8px;
+  letter-spacing: 0;
+}
+
+.hero-tagline {
+  margin: 0;
+  font-size: 18px;
+  color: #dbeafe;
+  font-weight: 650;
+}
+
+.hero-text {
+  margin: 12px 0 0;
+  color: var(--muted);
+  max-width: 720px;
+  line-height: 1.6;
+  font-size: 14px;
+}
+
+.hero-status-panel {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  background: rgba(18, 23, 36, 0.78);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.hero-status-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: right;
+}
+
+.hero-status-copy strong {
+  color: var(--text);
+  text-transform: uppercase;
+  font-size: 13px;
+  letter-spacing: 0.6px;
+}
+
+.dashboard-truth-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.truth-card {
+  background: rgba(18, 23, 36, 0.78);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.truth-card-warning {
+  border-color: rgba(245, 166, 35, 0.32);
+  background: rgba(245, 166, 35, 0.08);
+}
+
+.truth-label {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.7px;
+  text-transform: uppercase;
+  margin-bottom: 7px;
+}
+
+.truth-card strong {
+  display: block;
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.truth-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+  font-size: 12.5px;
+}
+
+.dashboard-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dashboard-section-head {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.45fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: end;
+  padding-top: 4px;
+}
+
+.dashboard-section-head h2 {
+  margin: 6px 0 0;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.dashboard-section-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+  font-size: 13px;
+  max-width: 820px;
+}
+
+.dashboard-section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dashboard-section .section,
+.dashboard-section .provider-status-card,
+.dashboard-section .bitquery-panel,
+.dashboard-section .stonfi-panel,
+.dashboard-section .tonapi-panel,
+.dashboard-section .tonapi-wallet-panel,
+.dashboard-section .import-preview-panel {
+  margin-bottom: 0;
+}
+
+.dashboard-workbench {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.dashboard-workbench-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  border-top: 1px solid var(--border-soft);
+  padding-top: 18px;
+}
+
+.dashboard-workbench-head h3 {
+  margin: 5px 0 0;
+  font-size: 16px;
+}
+
+.dashboard-state {
+  padding: 18px;
 }
 
 /* Header ------------------------------------------------------------- */
@@ -99,15 +288,15 @@ body {
 
 /* Controls ----------------------------------------------------------- */
 .controls-card {
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(18, 23, 36, 0.96), #111827);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 10px;
   padding: 20px;
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 20px 28px;
   align-items: end;
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 .field {
@@ -132,7 +321,7 @@ body {
   background: var(--panel-3);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 9px;
+  border-radius: 8px;
   padding: 11px 13px;
   font-size: 14px;
   outline: none;
@@ -196,7 +385,7 @@ body {
 
 /* Buttons ------------------------------------------------------------ */
 .btn {
-  border-radius: 9px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -209,8 +398,9 @@ body {
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
   color: #fff;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -321,7 +511,7 @@ body {
 .import-analysis-note {
   background: var(--panel-2);
   border: 1px solid var(--border-soft);
-  border-radius: 9px;
+  border-radius: 8px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
@@ -681,7 +871,7 @@ body {
 
 /* State boxes -------------------------------------------------------- */
 .state-box {
-  border-radius: var(--radius);
+  border-radius: 10px;
   padding: 28px;
   text-align: center;
   font-size: 14px;
@@ -737,10 +927,11 @@ body {
 }
 
 .section {
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(18, 23, 36, 0.98), #101624);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 10px;
   padding: 20px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.16);
 }
 
 .section-head {
@@ -755,6 +946,7 @@ body {
 .section-head h2 {
   font-size: 16px;
   margin: 0;
+  letter-spacing: 0;
 }
 
 .muted {
@@ -791,7 +983,7 @@ body {
 .stat-card {
   background: var(--panel-2);
   border: 1px solid var(--border-soft);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 14px;
 }
 
@@ -817,7 +1009,7 @@ body {
 /* Table -------------------------------------------------------------- */
 .table-wrap {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: 8px;
   border: 1px solid var(--border-soft);
 }
 
@@ -890,7 +1082,7 @@ body {
   gap: 4px;
   font-size: 11px;
   font-weight: 700;
-  padding: 3px 9px;
+  padding: 2px 8px;
   border-radius: 999px;
   white-space: nowrap;
 }
@@ -1173,11 +1365,12 @@ body {
 
 /* Provider status block --------------------------------------------- */
 .provider-status-card {
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(18, 23, 36, 0.98), #101624);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 10px;
   padding: 16px 20px;
   margin-bottom: 20px;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.16);
 }
 
 .provider-status-head {
@@ -1206,23 +1399,31 @@ body {
 .provider-rows {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 8px 20px;
+  gap: 10px;
 }
 
 .provider-row {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: auto minmax(84px, max-content) minmax(0, 1fr);
+  align-items: start;
   gap: 8px;
   font-size: 13px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px;
+  min-width: 0;
 }
 
 .provider-name {
   font-weight: 600;
-  min-width: 104px;
+  min-width: 0;
+  color: var(--text);
 }
 
 .provider-msg {
-  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
 }
 
 .dot {
@@ -1230,6 +1431,7 @@ body {
   height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
+  margin-top: 4px;
 }
 
 .dot-green {
@@ -1342,6 +1544,26 @@ body {
 }
 
 @media (max-width: 900px) {
+  .app {
+    padding: 22px 18px 56px;
+  }
+  .dashboard-hero {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+  .hero-copy h1 {
+    font-size: 34px;
+  }
+  .hero-status-panel {
+    justify-self: stretch;
+  }
+  .dashboard-truth-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-section-head {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
   .controls-card {
     grid-template-columns: 1fr;
   }
@@ -1365,5 +1587,14 @@ body {
   }
   .controls-actions {
     align-items: stretch;
+  }
+}
+
+@media (min-width: 901px) and (max-width: 1180px) {
+  .dashboard-truth-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .dashboard-truth-grid .truth-card-warning {
+    grid-column: 1 / -1;
   }
 }

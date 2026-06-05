@@ -94,6 +94,12 @@ export default function ProviderStatus({
           <ProviderRow label="GeckoTerminal" info={providers.geckoterminal} />
           <ProviderRow label="TON provider" info={providers.ton_provider} />
           <ProviderRow label="Bitquery" info={providers.bitquery} />
+          {providers.stonfi && (
+            <ProviderRow label="STON.fi" info={providers.stonfi} />
+          )}
+          {providers.tonapi && (
+            <ProviderRow label="TonAPI" info={providers.tonapi} />
+          )}
         </div>
       )}
 
