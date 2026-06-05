@@ -125,14 +125,24 @@ export default function App() {
   }
 
   function handleWorkspacePreview() {
+    const targetId =
+      workspaceView === "wallet"
+        ? "wallet-intelligence-preview"
+        : workspaceView === "jettons"
+          ? "account-jettons-preview"
+          : "stonfi-pools-preview";
     const target =
       workspaceView === "wallet"
         ? "TonAPI Wallet Intelligence Preview"
         : workspaceView === "jettons"
           ? "TonAPI Account Jettons Preview"
           : "STON.fi Pools Preview";
+    document.getElementById(targetId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
     setWorkspaceHint(
-      `${target} remains available in its module below. Use the module action to run the existing provider preview endpoint.`,
+      `${target} selected. Run the provider request from that module's own action button.`,
     );
   }
 
@@ -214,6 +224,7 @@ export default function App() {
             />
 
             <DashboardSection
+              id="provider-status"
               eyebrow="Provider Health"
               title="Provider Status"
               description="Configured provider readiness and limitations are shown before any preview output."
@@ -226,6 +237,7 @@ export default function App() {
             </DashboardSection>
 
             <DashboardSection
+              id="wallet-intelligence-preview"
               eyebrow="Wallet Intelligence"
               title="TonAPI Wallet Intelligence Preview"
               description="Lightweight intelligence based on TonAPI account jetton data."
@@ -235,6 +247,7 @@ export default function App() {
 
             <div className="workspace-preview-grid">
               <DashboardSection
+                id="account-jettons-preview"
                 eyebrow="Wallet Jettons"
                 title="TonAPI Account Jettons Preview"
                 description="Provider preview rows from TonAPI account jetton data."
@@ -243,6 +256,7 @@ export default function App() {
               </DashboardSection>
 
               <DashboardSection
+                id="stonfi-pools-preview"
                 eyebrow="DEX Pools"
                 title="STON.fi Pools Preview"
                 description="STON.fi data covers STON.fi DEX pools only, not all TON DeFi."
@@ -252,14 +266,18 @@ export default function App() {
             </div>
 
             <DashboardSection
-              eyebrow="Dashboard report"
-              title="Token and Wallet Clustering Report"
+              className="dashboard-section-secondary"
+              id="legacy-dashboard-report"
+              eyebrow="Legacy / mock-aware analysis"
+              title="Legacy Token and Wallet Clustering Report"
               description="Legacy report workspace remains mock-aware and separate from provider previews."
             >
               <div className="dashboard-workbench">
                 <div className="dashboard-workbench-head">
                   <div>
-                    <span className="section-eyebrow">Dashboard analysis</span>
+                    <span className="section-eyebrow">
+                      Legacy / mock-aware analysis
+                    </span>
                     <h3>Token and wallet clustering report</h3>
                   </div>
                   <span className="badge badge-provider">mock-aware</span>
@@ -340,6 +358,7 @@ export default function App() {
             </DashboardSection>
 
             <DashboardSection
+              id="experimental-tools"
               eyebrow="Provider-limited / Experimental tools"
               title="Provider-limited / Experimental tools"
               description="Bitquery TON coverage and manual/import workflows remain explicitly scoped and experimental."
@@ -379,10 +398,18 @@ function WorkspaceControl({
 }) {
   return (
     <section className="workspace-control">
+      <div className="workspace-control-head">
+        <div>
+          <span className="section-eyebrow">Workspace quick jump</span>
+          <h2>Orient provider preview modules</h2>
+        </div>
+        <span className="badge badge-provider">does not fetch data</span>
+      </div>
+
       <div className="workspace-control-grid">
         <div className="field">
           <label className="field-label" htmlFor="workspace-account">
-            Account address
+            Draft account address
           </label>
           <input
             id="workspace-account"
@@ -396,7 +423,7 @@ function WorkspaceControl({
 
         <div className="field">
           <label className="field-label" htmlFor="workspace-limit">
-            Limit (jettons)
+            Draft limit
           </label>
           <input
             id="workspace-limit"
@@ -451,7 +478,7 @@ function WorkspaceControl({
 
         <div className="workspace-actions">
           <button className="btn btn-primary" type="button" onClick={onPreview}>
-            Preview wallet intelligence
+            Go to selected module
           </button>
           <button className="btn btn-ghost" type="button" onClick={onClear}>
             Clear
@@ -460,7 +487,8 @@ function WorkspaceControl({
       </div>
 
       <div className="workspace-control-note">
-        Wallet intelligence preview is based only on account jetton data.
+        Quick jump only. Provider-specific panels below run the existing API
+        calls and keep their own inputs.
         {hint && <span>{hint}</span>}
       </div>
     </section>
@@ -572,18 +600,27 @@ function TokenStatsDivider() {
 }
 
 function DashboardSection({
+  id,
+  className,
   eyebrow,
   title,
   description,
   children,
 }: {
+  id?: string;
+  className?: string;
   eyebrow: string;
   title: string;
   description: string;
   children: ReactNode;
 }) {
   return (
-    <section className="dashboard-section">
+    <section
+      className={
+        className ? `dashboard-section ${className}` : "dashboard-section"
+      }
+      id={id}
+    >
       <div className="dashboard-section-head">
         <div>
           <span className="section-eyebrow">{eyebrow}</span>

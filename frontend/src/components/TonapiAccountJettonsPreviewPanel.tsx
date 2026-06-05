@@ -9,6 +9,9 @@ import type {
 const SCOPE_NOTE =
   "TonAPI preview shows account jetton data only; it is not full wallet intelligence yet.";
 
+const PANEL_SCOPE_NOTE =
+  "Scope: TonAPI account jetton preview only. Full wallet limitations remain in Evidence & limitations.";
+
 const PUBLIC_MODE_WARNING =
   "TonAPI API key is not configured; public mode may be rate limited.";
 
@@ -44,6 +47,12 @@ function jettonLabel(jetton: TonapiJettonPreview): string {
 
 function priceValue(jetton: TonapiJettonPreview): string {
   return displayValue(jetton.price_usd ?? jetton.price);
+}
+
+function compactWarnings(warnings: string[]): string[] {
+  return warnings.filter(
+    (warning, index) => warning !== SCOPE_NOTE && warnings.indexOf(warning) === index,
+  );
 }
 
 export default function TonapiAccountJettonsPreviewPanel() {
@@ -108,7 +117,7 @@ export default function TonapiAccountJettonsPreviewPanel() {
         )}
       </div>
 
-      <div className="tonapi-note">{SCOPE_NOTE}</div>
+      <div className="tonapi-note">{PANEL_SCOPE_NOTE}</div>
 
       <div className="tonapi-form">
         <div className="field tonapi-account-field">
@@ -249,9 +258,9 @@ function ProviderMessages({
   warnings: string[];
   error: TonapiProviderError | null;
 }) {
-  const visibleWarnings = warnings.includes(SCOPE_NOTE)
-    ? warnings
-    : [SCOPE_NOTE, ...warnings];
+  const visibleWarnings = compactWarnings(warnings);
+
+  if (visibleWarnings.length === 0 && !error) return null;
 
   return (
     <div className="tonapi-provider-messages">

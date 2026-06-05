@@ -1727,7 +1727,21 @@ body {
     linear-gradient(180deg, rgba(13, 22, 35, 0.98), rgba(8, 15, 26, 0.98));
   border: 1px solid rgba(71, 85, 105, 0.34);
   border-radius: 8px;
-  padding: 14px;
+  padding: 13px;
+}
+
+.workspace-control-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.workspace-control-head h2 {
+  margin: 4px 0 0;
+  font-size: 15px;
+  letter-spacing: 0;
 }
 
 .workspace-control-grid {
@@ -1787,7 +1801,7 @@ body {
   margin-top: 11px;
   padding-top: 11px;
   border-top: 1px solid var(--border-soft);
-  color: #f3d29a;
+  color: #b6c2d8;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -1800,16 +1814,19 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .evidence-column {
   position: sticky;
-  top: 16px;
+  top: 18px;
   display: flex;
   flex-direction: column;
   gap: 14px;
   min-width: 0;
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  scrollbar-width: thin;
 }
 
 .evidence-card {
@@ -1980,7 +1997,11 @@ body {
 }
 
 .evidence-shell .provider-status-card {
-  padding: 14px;
+  padding: 12px;
+}
+
+.evidence-shell .provider-status-head {
+  margin-bottom: 8px;
 }
 
 .evidence-shell .provider-status-head h3 {
@@ -1999,12 +2020,12 @@ body {
 .evidence-shell .provider-row {
   display: flex;
   flex-direction: column;
-  gap: 7px;
+  gap: 5px;
   border: none;
   border-right: 1px solid var(--border-soft);
   border-radius: 0;
   background: rgba(255, 255, 255, 0.018);
-  padding: 12px;
+  padding: 9px 10px;
 }
 
 .evidence-shell .provider-row:last-child {
@@ -2022,8 +2043,7 @@ body {
 .provider-health-line {
   color: #64748b;
   font-size: 10.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.45px;
+  letter-spacing: 0;
 }
 
 .provider-chip {
@@ -2063,7 +2083,7 @@ body {
 }
 
 .evidence-shell .provider-msg {
-  min-height: 32px;
+  min-height: 0;
 }
 
 .evidence-shell .dq-critical,
@@ -2132,6 +2152,98 @@ body {
 .evidence-shell .btn-primary {
   background: linear-gradient(180deg, #0891b2, #2563eb);
   box-shadow: none;
+}
+
+.evidence-shell .tonapi-note,
+.evidence-shell .stonfi-note,
+.evidence-shell .tonapi-wallet-note,
+.evidence-shell .bitquery-note {
+  padding: 8px 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.workspace-preview-grid > .dashboard-section,
+.workspace-preview-grid .dashboard-section-body,
+.workspace-preview-grid .tonapi-panel,
+.workspace-preview-grid .stonfi-panel {
+  height: 100%;
+}
+
+.workspace-preview-grid .tonapi-panel,
+.workspace-preview-grid .stonfi-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.workspace-preview-grid .section-head {
+  min-height: 30px;
+  margin-bottom: 12px;
+}
+
+.workspace-preview-grid .tonapi-note,
+.workspace-preview-grid .stonfi-note {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+}
+
+.workspace-preview-grid .tonapi-form,
+.workspace-preview-grid .stonfi-form {
+  min-height: 78px;
+  align-items: end;
+}
+
+.workspace-preview-grid .tonapi-actions,
+.workspace-preview-grid .stonfi-actions {
+  min-height: 43px;
+}
+
+.workspace-preview-grid .tonapi-state,
+.workspace-preview-grid .stonfi-state {
+  min-height: 82px;
+  margin-top: 12px;
+}
+
+.workspace-preview-grid .tonapi-results,
+.workspace-preview-grid .stonfi-results {
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.workspace-preview-grid .tonapi-result-head,
+.workspace-preview-grid .stonfi-result-head {
+  min-height: 24px;
+}
+
+.workspace-preview-grid .import-subhead {
+  min-height: 28px;
+  margin-bottom: 8px;
+}
+
+.dashboard-section-secondary {
+  opacity: 0.84;
+  margin-top: 4px;
+}
+
+.dashboard-section-secondary .dashboard-section-head {
+  border-top: 1px solid rgba(71, 85, 105, 0.28);
+  padding-top: 14px;
+}
+
+.dashboard-section-secondary .dashboard-section-head h2,
+.dashboard-section-secondary .dashboard-workbench-head h3 {
+  color: #c7d2e8;
+  font-size: 14px;
+}
+
+.dashboard-section-secondary .dashboard-section-body {
+  filter: saturate(0.82);
+}
+
+.dashboard-section-secondary .controls-card {
+  background: rgba(8, 15, 26, 0.7);
 }
 
 @media (max-width: 900px) {
