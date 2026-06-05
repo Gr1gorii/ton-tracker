@@ -124,6 +124,20 @@ class TonapiAccountJettonsPreviewResponse(BaseModel):
     error: dict[str, Any] | None
 
 
+class TonapiWalletIntelligencePreviewResponse(BaseModel):
+    provider: Literal["tonapi"]
+    data_mode: Literal["mock", "real"]
+    source: Literal["mock", "real"]
+    success: bool
+    account_address: str
+    summary: dict[str, Any]
+    intelligence: dict[str, Any]
+    jettons_preview: list[dict[str, Any]]
+    warnings: list[str]
+    message: str
+    error: dict[str, Any] | None
+
+
 class ImportTradesPreviewRequest(BaseModel):
     format: Literal["csv", "json"]
     content: Any
