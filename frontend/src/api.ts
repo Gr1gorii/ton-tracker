@@ -10,6 +10,7 @@ import type {
   ProvidersStatus,
   StonfiPoolsPreviewResponse,
   TonapiAccountJettonsPreviewResponse,
+  TonapiWalletIntelligencePreviewResponse,
 } from "./types";
 
 // API base URL. Override with VITE_API_BASE at build/dev time.
@@ -181,6 +182,27 @@ export async function previewTonapiAccountJettons(
   }
 
   return (await res.json()) as TonapiAccountJettonsPreviewResponse;
+}
+
+export async function previewTonapiWalletIntelligence(
+  accountAddress: string,
+  limit: number,
+): Promise<TonapiWalletIntelligencePreviewResponse> {
+  const params = new URLSearchParams({
+    account_address: accountAddress,
+    limit: String(limit),
+  });
+  const res = await fetch(
+    `${API_BASE}/api/tonapi/wallet-intelligence/preview?${params}`,
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "TonAPI wallet intelligence preview failed"),
+    );
+  }
+
+  return (await res.json()) as TonapiWalletIntelligencePreviewResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {

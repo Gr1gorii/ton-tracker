@@ -396,3 +396,55 @@ export interface TonapiAccountJettonsPreviewResponse {
   message: string;
   error: TonapiProviderError | null;
 }
+
+export interface TonapiWalletIntelligenceSummary {
+  total_jettons: number;
+  preview_count: number;
+  requested_limit: number;
+  non_zero_balance_count?: number;
+  jettons_with_price_count?: number;
+  stablecoin_like_count?: number;
+}
+
+export interface TonapiTopJettonPreview {
+  jetton_address?: string | null;
+  jetton_name?: string | null;
+  jetton_symbol?: string | null;
+  balance?: string | number | null;
+  decimals?: string | number | null;
+  display_balance?: string | number | null;
+  price?: string | number | null;
+  price_usd?: string | number | null;
+  wallet_contract_address?: string | null;
+  source?: string | null;
+  [key: string]: unknown;
+}
+
+export interface TonapiWalletIntelligence {
+  scope?: string;
+  data_sources?: string[];
+  account_address?: string;
+  total_jettons?: number;
+  preview_count?: number;
+  requested_limit?: number;
+  non_zero_balance_count?: number;
+  jettons_with_price_count?: number;
+  stablecoin_like_count?: number;
+  top_jettons_by_display_balance?: TonapiTopJettonPreview[];
+  basic_notes?: string[];
+  [key: string]: unknown;
+}
+
+export interface TonapiWalletIntelligencePreviewResponse {
+  provider: "tonapi";
+  data_mode: "mock" | "real";
+  source: "mock" | "real";
+  success: boolean;
+  account_address: string;
+  summary: TonapiWalletIntelligenceSummary;
+  intelligence: TonapiWalletIntelligence;
+  jettons_preview: TonapiJettonPreview[];
+  warnings: string[];
+  message: string;
+  error: TonapiProviderError | null;
+}
