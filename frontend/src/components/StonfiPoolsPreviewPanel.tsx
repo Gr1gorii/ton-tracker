@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { previewStonfiPools } from "../api";
 import type {
   StonfiPoolPreview,
   StonfiPoolsPreviewResponse,
 } from "../types";
+import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
 
 const SCOPE_NOTE =
   "STON.fi data covers STON.fi DEX pools only, not all TON DeFi.";
@@ -25,6 +26,11 @@ interface ProviderPreviewRunUpdate {
   limit?: string;
 }
 
+interface PreviewRequestSnapshot {
+  limit: string;
+  requestedAt: string;
+}
+
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
@@ -35,6 +41,20 @@ function clampLimit(value: string): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
   return Math.min(100, Math.max(1, Math.trunc(parsed)));
+}
+
+function currentLimitLabel(value: string): string {
+  const safeLimit = clampLimit(value);
+  if (safeLimit === null) return value.trim() || "Invalid";
+  return String(safeLimit);
+}
+
+function formatPreviewRequestedAt(date: Date): string {
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function poolKey(pool: StonfiPoolPreview, index: number): string {
@@ -91,10 +111,12 @@ export default function StonfiPoolsPreviewPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StonfiPoolsPreviewResponse | null>(null);
+  const [resultSnapshot, setResultSnapshot] =
+    useState<PreviewRequestSnapshot | null>(null);
+  const activeRequestId = useRef(0);
 
   useEffect(() => {
     setError(null);
-    setResult(null);
   }, [limit]);
 
   useEffect(() => {
@@ -107,6 +129,7 @@ export default function StonfiPoolsPreviewPanel({
     setLoading(false);
     setError(null);
     setResult(null);
+    setResultSnapshot(null);
     onPreviewRunStateChange?.({
       status: "idle",
       message: "STON.fi pools preview cleared.",
@@ -117,7 +140,6 @@ export default function StonfiPoolsPreviewPanel({
 
   async function handlePreview() {
     setError(null);
-    setResult(null);
     const safeLimit = clampLimit(limit);
     if (safeLimit === null) {
       const message = "Limit must be a number from 1 to 100.";
@@ -133,6 +155,10 @@ export default function StonfiPoolsPreviewPanel({
 
     const normalizedLimit = String(safeLimit);
     onLimitChange(normalizedLimit);
+    const requestId = activeRequestId.current + 1;
+    activeRequestId.current = requestId;
+    setResult(null);
+    setResultSnapshot(null);
     setLoading(true);
     onPreviewRunStateChange?.({
       status: "running",
@@ -142,7 +168,12 @@ export default function StonfiPoolsPreviewPanel({
     });
     try {
       const data = await previewStonfiPools(safeLimit);
+      if (activeRequestId.current !== requestId) return;
       setResult(data);
+      setResultSnapshot({
+        limit: normalizedLimit,
+        requestedAt: formatPreviewRequestedAt(new Date()),
+      });
       onPreviewRunStateChange?.({
         status: "success",
         message: `STON.fi returned ${data.summary.preview_count} pool preview rows. Scope remains STON.fi pools only.`,
@@ -150,6 +181,7 @@ export default function StonfiPoolsPreviewPanel({
         limit: normalizedLimit,
       });
     } catch (e) {
+      if (activeRequestId.current !== requestId) return;
       const message =
         e instanceof Error ? e.message : "Unknown STON.fi preview error";
       setError(message);
@@ -160,9 +192,16 @@ export default function StonfiPoolsPreviewPanel({
         limit: normalizedLimit,
       });
     } finally {
-      setLoading(false);
+      if (activeRequestId.current === requestId) {
+        setLoading(false);
+      }
     }
   }
+
+  const currentLimit = currentLimitLabel(limit);
+  const resultIsStale = resultSnapshot
+    ? resultSnapshot.limit !== currentLimit
+    : false;
 
   return (
     <section className="section stonfi-panel">
@@ -193,7 +232,6 @@ export default function StonfiPoolsPreviewPanel({
             onChange={(e) => {
               onLimitChange(e.target.value);
               setError(null);
-              setResult(null);
             }}
           />
         </div>
@@ -228,7 +266,17 @@ export default function StonfiPoolsPreviewPanel({
         <PreviewEmptyState />
       )}
 
-      {!loading && result && <StonfiPreviewResults result={result} />}
+      {!loading && result && resultSnapshot && (
+        <StonfiPreviewResults
+          result={result}
+          freshness={{
+            isStale: resultIsStale,
+            requestedAt: resultSnapshot.requestedAt,
+            requestedLimit: resultSnapshot.limit,
+            currentLimit,
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -273,8 +321,15 @@ function PreviewErrorState({ message }: { message: string }) {
 
 function StonfiPreviewResults({
   result,
+  freshness,
 }: {
   result: StonfiPoolsPreviewResponse;
+  freshness: {
+    isStale: boolean;
+    requestedAt: string;
+    requestedLimit: string;
+    currentLimit: string;
+  };
 }) {
   return (
     <div className="stonfi-results">
@@ -291,6 +346,28 @@ function StonfiPreviewResults({
         <span className="badge badge-provider">SOURCE {result.source}</span>
         <span className="badge badge-warning">STON.fi POOLS ONLY</span>
       </div>
+
+      <PreviewFreshnessStrip
+        isStale={freshness.isStale}
+        requestedAt={freshness.requestedAt}
+        message={
+          freshness.isStale
+            ? "Displayed STON.fi pools belong to the requested limit below. Run again for current shared limit."
+            : "Displayed STON.fi pools match the current shared limit."
+        }
+        items={[
+          {
+            label: "Limit",
+            requestedValue: freshness.requestedLimit,
+            currentValue: freshness.currentLimit,
+          },
+          {
+            label: "Account",
+            requestedValue: "Not used",
+            currentValue: "Not used",
+          },
+        ]}
+      />
 
       <div className="scope-strip">{result.message || SCOPE_NOTE}</div>
 

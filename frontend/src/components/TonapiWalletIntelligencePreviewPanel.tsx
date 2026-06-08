@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { previewTonapiWalletIntelligence } from "../api";
 import type {
   TonapiJettonPreview,
@@ -6,6 +6,7 @@ import type {
   TonapiTopJettonPreview,
   TonapiWalletIntelligencePreviewResponse,
 } from "../types";
+import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
 
 const SCOPE_NOTE =
   "TonAPI wallet intelligence preview is based only on account jetton data; it is not full wallet intelligence.";
@@ -49,6 +50,12 @@ interface ProviderPreviewRunUpdate {
   limit?: string;
 }
 
+interface PreviewRequestSnapshot {
+  accountAddress: string;
+  limit: string;
+  requestedAt: string;
+}
+
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
@@ -59,6 +66,24 @@ function clampLimit(value: string): number | null {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return null;
   return Math.min(100, Math.max(1, Math.trunc(parsed)));
+}
+
+function currentLimitLabel(value: string): string {
+  const safeLimit = clampLimit(value);
+  if (safeLimit === null) return value.trim() || "Invalid";
+  return String(safeLimit);
+}
+
+function accountLabel(value: string): string {
+  return value.trim() || "-";
+}
+
+function formatPreviewRequestedAt(date: Date): string {
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 function compactWarnings(warnings: string[]): string[] {
@@ -122,10 +147,12 @@ export default function TonapiWalletIntelligencePreviewPanel({
   const [requestError, setRequestError] = useState<string | null>(null);
   const [result, setResult] =
     useState<TonapiWalletIntelligencePreviewResponse | null>(null);
+  const [resultSnapshot, setResultSnapshot] =
+    useState<PreviewRequestSnapshot | null>(null);
+  const activeRequestId = useRef(0);
 
   useEffect(() => {
     setRequestError(null);
-    setResult(null);
   }, [accountAddress, limit]);
 
   useEffect(() => {
@@ -136,6 +163,7 @@ export default function TonapiWalletIntelligencePreviewPanel({
   function clearResults() {
     setRequestError(null);
     setResult(null);
+    setResultSnapshot(null);
   }
 
   function clearPanel() {
@@ -153,7 +181,6 @@ export default function TonapiWalletIntelligencePreviewPanel({
 
   async function handlePreview() {
     setRequestError(null);
-    setResult(null);
 
     const cleanedAccount = accountAddress.trim();
     if (!cleanedAccount) {
@@ -184,6 +211,10 @@ export default function TonapiWalletIntelligencePreviewPanel({
     const normalizedLimit = String(safeLimit);
     onAccountAddressChange(cleanedAccount);
     onLimitChange(normalizedLimit);
+    const requestId = activeRequestId.current + 1;
+    activeRequestId.current = requestId;
+    setResult(null);
+    setResultSnapshot(null);
     setLoading(true);
     onPreviewRunStateChange?.({
       status: "running",
@@ -197,7 +228,13 @@ export default function TonapiWalletIntelligencePreviewPanel({
         cleanedAccount,
         safeLimit,
       );
+      if (activeRequestId.current !== requestId) return;
       setResult(data);
+      setResultSnapshot({
+        accountAddress: cleanedAccount,
+        limit: normalizedLimit,
+        requestedAt: formatPreviewRequestedAt(new Date()),
+      });
       onPreviewRunStateChange?.({
         status: "success",
         message: `TonAPI wallet intelligence returned ${data.summary.preview_count} jetton preview rows. Scope remains jetton-only.`,
@@ -205,6 +242,7 @@ export default function TonapiWalletIntelligencePreviewPanel({
         limit: normalizedLimit,
       });
     } catch (e) {
+      if (activeRequestId.current !== requestId) return;
       const message =
         e instanceof Error
           ? e.message
@@ -217,9 +255,18 @@ export default function TonapiWalletIntelligencePreviewPanel({
         limit: normalizedLimit,
       });
     } finally {
-      setLoading(false);
+      if (activeRequestId.current === requestId) {
+        setLoading(false);
+      }
     }
   }
+
+  const currentAccount = accountAddress.trim();
+  const currentLimit = currentLimitLabel(limit);
+  const resultIsStale = resultSnapshot
+    ? resultSnapshot.accountAddress !== currentAccount ||
+      resultSnapshot.limit !== currentLimit
+    : false;
 
   return (
     <section className="section tonapi-wallet-panel wallet-intelligence-console">
@@ -277,7 +324,7 @@ export default function TonapiWalletIntelligencePreviewPanel({
             placeholder="EQ..."
             onChange={(e) => {
               onAccountAddressChange(e.target.value);
-              clearResults();
+              setRequestError(null);
             }}
           />
         </div>
@@ -299,7 +346,7 @@ export default function TonapiWalletIntelligencePreviewPanel({
             disabled={loading}
             onChange={(e) => {
               onLimitChange(e.target.value);
-              clearResults();
+              setRequestError(null);
             }}
           />
         </div>
@@ -334,15 +381,36 @@ export default function TonapiWalletIntelligencePreviewPanel({
         <WalletEmptyState />
       )}
 
-      {!loading && result && <WalletIntelligenceResults result={result} />}
+      {!loading && result && resultSnapshot && (
+        <WalletIntelligenceResults
+          result={result}
+          freshness={{
+            isStale: resultIsStale,
+            requestedAt: resultSnapshot.requestedAt,
+            requestedAccount: resultSnapshot.accountAddress,
+            currentAccount: accountLabel(currentAccount),
+            requestedLimit: resultSnapshot.limit,
+            currentLimit,
+          }}
+        />
+      )}
     </section>
   );
 }
 
 function WalletIntelligenceResults({
   result,
+  freshness,
 }: {
   result: TonapiWalletIntelligencePreviewResponse;
+  freshness: {
+    isStale: boolean;
+    requestedAt: string;
+    requestedAccount: string;
+    currentAccount: string;
+    requestedLimit: string;
+    currentLimit: string;
+  };
 }) {
   const intelligence = result.intelligence ?? {};
   const topJettons = intelligence.top_jettons_by_display_balance ?? [];
@@ -362,6 +430,28 @@ function WalletIntelligenceResults({
         </span>
         <span className="badge badge-provider">SOURCE {result.source}</span>
       </div>
+
+      <PreviewFreshnessStrip
+        isStale={freshness.isStale}
+        requestedAt={freshness.requestedAt}
+        message={
+          freshness.isStale
+            ? "Displayed wallet intelligence belongs to the requested snapshot below. Run again for current shared inputs."
+            : "Displayed wallet intelligence matches the current shared inputs."
+        }
+        items={[
+          {
+            label: "Account",
+            requestedValue: freshness.requestedAccount,
+            currentValue: freshness.currentAccount,
+          },
+          {
+            label: "Limit",
+            requestedValue: freshness.requestedLimit,
+            currentValue: freshness.currentLimit,
+          },
+        ]}
+      />
 
       <div className="scope-strip">{result.message || SCOPE_NOTE}</div>
 
