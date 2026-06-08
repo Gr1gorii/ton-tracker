@@ -15,6 +15,7 @@ import BitqueryTokenTradesPanel from "./components/BitqueryTokenTradesPanel";
 import StonfiPoolsPreviewPanel from "./components/StonfiPoolsPreviewPanel";
 import TonapiAccountJettonsPreviewPanel from "./components/TonapiAccountJettonsPreviewPanel";
 import TonapiWalletIntelligencePreviewPanel from "./components/TonapiWalletIntelligencePreviewPanel";
+import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils";
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
@@ -45,13 +46,6 @@ interface WorkspaceRunState {
   accountLabel: string;
   limitLabel: string;
   updatedAt: string;
-}
-
-interface ProviderPreviewRunUpdate {
-  status: "idle" | "running" | "success" | "error";
-  message: string;
-  accountAddress?: string;
-  limit?: string;
 }
 
 const workspaceTargets: Record<
