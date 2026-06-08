@@ -3164,3 +3164,277 @@ body {
     gap: 8px;
   }
 }
+
+/* Wallet Intelligence panel v0.8.6 --------------------------------- */
+.wallet-intelligence-console {
+  position: relative;
+  overflow: hidden;
+}
+
+.wallet-intelligence-console::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.62), transparent);
+  pointer-events: none;
+}
+
+.wallet-intelligence-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 14px;
+}
+
+.wallet-intelligence-head h2 {
+  margin: 5px 0 0;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.wallet-intelligence-head p {
+  max-width: 720px;
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.wallet-intelligence-badges {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.wallet-scope-board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.wallet-scope-column {
+  background: rgba(2, 6, 4, 0.44);
+  border: 1px solid rgba(33, 74, 49, 0.72);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.wallet-scope-column > span,
+.state-kicker,
+.wallet-metric span,
+.wallet-evidence-card > span {
+  color: var(--primary-green);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.75px;
+  text-transform: uppercase;
+}
+
+.wallet-scope-warning > span {
+  color: var(--warning);
+}
+
+.wallet-scope-column ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wallet-scope-column li {
+  position: relative;
+  min-width: 0;
+  padding-left: 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.wallet-scope-column li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary-green);
+  box-shadow: 0 0 8px rgba(0, 230, 118, 0.42);
+}
+
+.wallet-scope-warning li::before {
+  background: var(--warning);
+  box-shadow: 0 0 8px rgba(230, 180, 80, 0.35);
+}
+
+.wallet-query-card {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(2, 6, 4, 0.34);
+  border: 1px solid rgba(33, 74, 49, 0.68);
+  border-radius: 8px;
+}
+
+.wallet-intelligence-state {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  text-align: left;
+}
+
+.wallet-intelligence-state.loading-box {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  justify-content: start;
+}
+
+.wallet-intelligence-state strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.wallet-intelligence-state p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.wallet-result-overview {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.9fr) minmax(0, 1.35fr);
+  gap: 12px;
+}
+
+.wallet-account-card,
+.wallet-metric,
+.wallet-evidence-card {
+  background: rgba(2, 6, 4, 0.46);
+  border: 1px solid rgba(33, 74, 49, 0.72);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.wallet-account-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wallet-account-card strong {
+  color: var(--peak-green);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.wallet-account-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.wallet-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wallet-metric {
+  min-width: 0;
+}
+
+.wallet-metric strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--text);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.wallet-metric-muted strong {
+  color: var(--text-secondary);
+}
+
+.wallet-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.wallet-evidence-card {
+  min-width: 0;
+}
+
+.wallet-evidence-card strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--text);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.wallet-evidence-card p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wallet-notes-section .tonapi-basic-notes li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.note-index {
+  color: var(--primary-green);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+@media (max-width: 1120px) {
+  .wallet-result-overview,
+  .wallet-evidence-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .wallet-intelligence-head,
+  .wallet-scope-board,
+  .wallet-scope-column ul,
+  .wallet-metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-intelligence-badges {
+    justify-content: flex-start;
+  }
+
+  .wallet-query-card {
+    padding: 10px;
+  }
+
+  .wallet-intelligence-state.loading-box {
+    grid-template-columns: 1fr;
+  }
+}

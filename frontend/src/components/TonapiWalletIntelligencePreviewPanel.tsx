@@ -19,6 +19,20 @@ const PANEL_SCOPE_NOTE =
 const PUBLIC_MODE_WARNING =
   "TonAPI API key is not configured; public mode may be rate limited.";
 
+const LIMITATION_ITEMS = [
+  "No transaction history",
+  "No PnL calculation",
+  "No DEX swaps",
+  "No current TON balance",
+];
+
+const SUPPORTED_SCOPE_ITEMS = [
+  "Account jettons",
+  "Priced assets",
+  "Non-zero balances",
+  "Stablecoin-like markers",
+];
+
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
   return String(value);
@@ -137,21 +151,45 @@ export default function TonapiWalletIntelligencePreviewPanel() {
   }
 
   return (
-    <section className="section tonapi-wallet-panel">
-      <div className="section-head">
-        <h2>TonAPI Wallet Intelligence Preview</h2>
-        {result && (
-          <div className="muted small">
-            {result.data_mode} mode - {result.source} source
-          </div>
-        )}
+    <section className="section tonapi-wallet-panel wallet-intelligence-console">
+      <div className="wallet-intelligence-head">
+        <div>
+          <span className="section-eyebrow">Jetton-only intelligence</span>
+          <h2>TonAPI Wallet Intelligence Preview</h2>
+          <p>
+            Lightweight intelligence based on TonAPI account jetton data. This
+            panel does not fetch all wallet activity.
+          </p>
+        </div>
+        <div className="wallet-intelligence-badges">
+          <span className="badge badge-provider">PREVIEW</span>
+          <span className="badge badge-warning">JETTON ONLY</span>
+          {result && (
+            <span
+              className={
+                result.data_mode === "mock" ? "badge badge-mock" : "badge badge-real"
+              }
+            >
+              {result.data_mode}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="wallet-scope-board" aria-label="Wallet intelligence scope">
+        <ScopeColumn
+          title="Can show"
+          tone="success"
+          items={SUPPORTED_SCOPE_ITEMS}
+        />
+        <ScopeColumn title="Cannot show yet" tone="warning" items={LIMITATION_ITEMS} />
       </div>
 
       <div className="tonapi-wallet-note">
         <div>{PANEL_SCOPE_NOTE}</div>
       </div>
 
-      <div className="tonapi-wallet-form">
+      <div className="tonapi-wallet-form wallet-query-card">
         <div className="field tonapi-wallet-account-field">
           <label
             className="field-label"
@@ -216,23 +254,13 @@ export default function TonapiWalletIntelligencePreviewPanel() {
       </div>
 
       {requestError && (
-        <div className="state-box error-box tonapi-wallet-state">
-          <strong>TonAPI request failed.</strong> {requestError}
-        </div>
+        <WalletErrorState message={requestError} />
       )}
 
-      {loading && (
-        <div className="state-box loading-box tonapi-wallet-state">
-          <span className="spinner" />
-          REQUESTING_TONAPI_PREVIEW
-        </div>
-      )}
+      {loading && <WalletLoadingState />}
 
       {!loading && !result && !requestError && (
-        <div className="state-box empty-box tonapi-wallet-state">
-          Enter an account address to preview TonAPI jetton-based wallet
-          signals. This panel does not fetch all wallet activity.
-        </div>
+        <WalletEmptyState />
       )}
 
       {!loading && result && <WalletIntelligenceResults result={result} />}
@@ -268,65 +296,150 @@ function WalletIntelligenceResults({
 
       <ProviderMessages warnings={result.warnings} error={result.error} />
 
-      <div className="stat-grid">
-        <div className="stat-card">
-          <div className="stat-label">Account</div>
-          <div className="stat-value mono tonapi-account-stat">
+      <div className="wallet-result-overview">
+        <div className="wallet-account-card">
+          <span className="section-eyebrow">Preview account</span>
+          <strong className="mono tonapi-account-stat">
             {displayValue(result.account_address)}
-          </div>
+          </strong>
+          <p>
+            Account identity is shown only as the requested TonAPI preview
+            target. It is not a behavioral profile.
+          </p>
         </div>
-        <div className="stat-card">
-          <div className="stat-label">Total jettons</div>
-          <div className="stat-value">{result.summary.total_jettons}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Preview count</div>
-          <div className="stat-value">{result.summary.preview_count}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Requested limit</div>
-          <div className="stat-value">{result.summary.requested_limit}</div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Non-zero balances</div>
-          <div className="stat-value">
-            {displayValue(result.summary.non_zero_balance_count)}
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Jettons with price</div>
-          <div className="stat-value">
-            {displayValue(result.summary.jettons_with_price_count)}
-          </div>
-        </div>
-        <div className="stat-card">
-          <div className="stat-label">Stablecoin-like</div>
-          <div className="stat-value">
-            {displayValue(result.summary.stablecoin_like_count)}
-          </div>
+
+        <div className="wallet-metric-grid">
+          <WalletMetric label="Total jettons" value={result.summary.total_jettons} />
+          <WalletMetric label="Preview count" value={result.summary.preview_count} />
+          <WalletMetric
+            label="Non-zero balances"
+            value={displayValue(result.summary.non_zero_balance_count)}
+          />
+          <WalletMetric
+            label="Priced jettons"
+            value={displayValue(result.summary.jettons_with_price_count)}
+          />
+          <WalletMetric
+            label="Stablecoin-like"
+            value={displayValue(result.summary.stablecoin_like_count)}
+          />
+          <WalletMetric label="Requested limit" value={result.summary.requested_limit} muted />
         </div>
       </div>
 
-      <div className="tonapi-intelligence-grid">
-        <div className="tonapi-intelligence-card">
-          <div className="stat-label">Scope</div>
-          <div className="mono">{displayValue(intelligence.scope)}</div>
-        </div>
-        <div className="tonapi-intelligence-card">
-          <div className="stat-label">Data sources</div>
-          <div>{listValue(intelligence.data_sources)}</div>
-        </div>
-        <div className="tonapi-intelligence-card">
-          <div className="stat-label">Account address</div>
-          <div className="mono tonapi-account-stat">
-            {displayValue(intelligence.account_address)}
-          </div>
-        </div>
+      <div className="wallet-evidence-grid">
+        <EvidenceCard
+          label="Scope"
+          value={displayValue(intelligence.scope)}
+          text="Jetton account data only."
+        />
+        <EvidenceCard
+          label="Data sources"
+          value={listValue(intelligence.data_sources)}
+          text="Source labels are preserved from the provider response."
+        />
+        <EvidenceCard
+          label="Unavailable signals"
+          value={LIMITATION_ITEMS.join(" / ")}
+          text="These are intentionally not inferred or fabricated."
+        />
       </div>
 
       <BasicNotes notes={basicNotes} />
       <TopJettonsList jettons={topJettons} />
       <JettonsPreviewTable jettons={result.jettons_preview} />
+    </div>
+  );
+}
+
+function ScopeColumn({
+  title,
+  tone,
+  items,
+}: {
+  title: string;
+  tone: "success" | "warning";
+  items: string[];
+}) {
+  return (
+    <div className={`wallet-scope-column wallet-scope-${tone}`}>
+      <span>{title}</span>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function WalletMetric({
+  label,
+  value,
+  muted,
+}: {
+  label: string;
+  value: string | number;
+  muted?: boolean;
+}) {
+  return (
+    <div className={muted ? "wallet-metric wallet-metric-muted" : "wallet-metric"}>
+      <span>{label}</span>
+      <strong>{displayValue(value)}</strong>
+    </div>
+  );
+}
+
+function EvidenceCard({
+  label,
+  value,
+  text,
+}: {
+  label: string;
+  value: string;
+  text: string;
+}) {
+  return (
+    <div className="wallet-evidence-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <p>{text}</p>
+    </div>
+  );
+}
+
+function WalletEmptyState() {
+  return (
+    <div className="state-box empty-box tonapi-wallet-state wallet-intelligence-state">
+      <span className="state-kicker">NO_ACCOUNT_SELECTED</span>
+      <strong>Enter account address to preview jetton-based signals.</strong>
+      <p>
+        The request returns TonAPI account jetton data only. It does not fetch
+        transactions, PnL, swaps, current TON balance, or full wallet behavior.
+      </p>
+    </div>
+  );
+}
+
+function WalletLoadingState() {
+  return (
+    <div className="state-box loading-box tonapi-wallet-state wallet-intelligence-state">
+      <span className="spinner" />
+      <div>
+        <span className="state-kicker">REQUESTING_TONAPI_PREVIEW</span>
+        <strong>Requesting TonAPI jetton preview.</strong>
+        <p>Provider response will be shown with scope and limitation labels.</p>
+      </div>
+    </div>
+  );
+}
+
+function WalletErrorState({ message }: { message: string }) {
+  return (
+    <div className="state-box error-box tonapi-wallet-state wallet-intelligence-state">
+      <span className="state-kicker">TONAPI_REQUEST_FAILED</span>
+      <strong>TonAPI request failed.</strong>
+      <p>{message}</p>
     </div>
   );
 }
@@ -377,7 +490,7 @@ function ProviderMessages({
 
 function BasicNotes({ notes }: { notes: string[] }) {
   return (
-    <div>
+    <div className="wallet-notes-section">
       <div className="section-head import-subhead">
         <h2>Basic notes</h2>
         <div className="muted small">{notes.length} notes</div>
@@ -389,7 +502,10 @@ function BasicNotes({ notes }: { notes: string[] }) {
       ) : (
         <ul className="tonapi-basic-notes">
           {notes.map((note, index) => (
-            <li key={`${note}:${index}`}>{note}</li>
+            <li key={`${note}:${index}`}>
+              <span className="note-index">{String(index + 1).padStart(2, "0")}</span>
+              <span>{note}</span>
+            </li>
           ))}
         </ul>
       )}
