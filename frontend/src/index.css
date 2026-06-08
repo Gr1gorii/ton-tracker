@@ -2147,6 +2147,40 @@ body {
   line-height: 1.5;
 }
 
+.workspace-scope-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.workspace-scope-item {
+  min-width: 0;
+  padding: 9px 10px;
+  background: rgba(2, 6, 4, 0.44);
+  border: 1px solid rgba(33, 74, 49, 0.44);
+  border-radius: 6px;
+}
+
+.workspace-scope-item span {
+  display: block;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.workspace-scope-item strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .workspace-orchestration-queued,
 .workspace-orchestration-running {
   border-color: rgba(0, 230, 118, 0.42);
@@ -2787,7 +2821,7 @@ body {
   }
 }
 
-/* Matrix Evidence Workspace v0.8.5 --------------------------------- */
+/* Matrix Evidence Workspace ---------------------------------------- */
 .evidence-shell {
   grid-template-columns: 240px minmax(0, 1fr);
   width: 100%;
@@ -4097,6 +4131,7 @@ input {
 .workspace-main,
 .evidence-column,
 .workspace-preview-grid,
+.workspace-scope-strip,
 .dashboard-section-body,
 .tonapi-results,
 .stonfi-results,
@@ -4122,6 +4157,10 @@ input {
   }
 
   .workspace-orchestration {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workspace-scope-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -4194,6 +4233,10 @@ input {
   }
 
   .workspace-orchestration {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-scope-strip {
     grid-template-columns: 1fr;
   }
 

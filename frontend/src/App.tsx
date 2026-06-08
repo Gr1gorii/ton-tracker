@@ -141,10 +141,10 @@ export default function App() {
   const sourceLabel = dataMode === "real" ? "LIVE/PREVIEW" : "MOCK/OFFLINE";
   const bannerText =
     dataMode === "mock"
-      ? "v0.8.5 - mock mode is active. No real on-chain wallet data is used."
+      ? "Mock mode is active. No real on-chain wallet data is used."
       : dataMode === "real"
-        ? "v0.8.5 - provider previews may use real sources, while legacy wallet buyers, PnL and clusters remain mock-aware."
-        : "v0.8.5 - provider previews are scoped. Legacy wallet buyers, PnL and clusters remain mock-aware.";
+        ? "Provider previews may use real sources, while legacy wallet buyers, PnL and clusters remain mock-aware."
+        : "Provider previews are scoped. Legacy wallet buyers, PnL and clusters remain mock-aware.";
 
   async function handleAnalyze() {
     if (!poolUrl.trim()) {
@@ -616,16 +616,19 @@ function WorkspaceControl({
     ? account.trim() || "Required for TonAPI"
     : "Not used by STON.fi";
   const limitLabel = limit.trim() || "10";
+  const selectedInputScope = target.requiresAccount
+    ? "Address + limit required"
+    : "Limit only; account ignored";
   const isRunBusy = statusLabel === "queued" || statusLabel === "running";
 
   return (
     <section className="workspace-control">
       <div className="workspace-control-head">
         <div>
-          <span className="section-eyebrow">Workspace preview router</span>
-          <h2>Shared provider preview inputs</h2>
+          <span className="section-eyebrow">Shared workspace control</span>
+          <h2>Provider preview command center</h2>
         </div>
-        <span className="badge badge-provider">does not fetch all activity</span>
+        <span className="badge badge-provider">scoped previews only</span>
       </div>
 
       <div className="workspace-control-grid">
@@ -740,10 +743,25 @@ function WorkspaceControl({
         <p>{statusMessage}</p>
       </div>
 
+      <div className="workspace-scope-strip" aria-label="Shared workspace scope">
+        <div className="workspace-scope-item">
+          <span>Selected input scope</span>
+          <strong>{selectedInputScope}</strong>
+        </div>
+        <div className="workspace-scope-item">
+          <span>Result contract</span>
+          <strong>Provider preview, not full analysis</strong>
+        </div>
+        <div className="workspace-scope-item">
+          <span>Evidence state</span>
+          <strong>Unavailable data remains visible</strong>
+        </div>
+      </div>
+
       <div className="workspace-control-note">
-        Shared input layer only. TonAPI wallet intelligence and account jettons
-        use the same wallet address and limit; STON.fi uses the same limit.
-        Provider panels still run scoped preview requests only.
+        One shared input layer. TonAPI wallet intelligence and account jettons
+        use address plus limit; STON.fi uses limit only. Every run stays scoped
+        to a provider preview request.
         {hint && <span>{hint}</span>}
       </div>
     </section>
@@ -775,6 +793,11 @@ function EvidenceColumn({
           title="Can show provider preview rows"
           text="Provider status, TonAPI jettons, lightweight jetton signals, and STON.fi pool previews."
         />
+        <EvidenceItem
+          tone="info"
+          title="Workspace inputs are shared"
+          text="TonAPI panels use address and limit; STON.fi uses limit only."
+        />
         <div className="evidence-group-label">Cannot show yet</div>
         <EvidenceItem
           tone="warning"
@@ -785,6 +808,11 @@ function EvidenceColumn({
           tone="warning"
           title="No transaction history, PnL, or swaps"
           text="No transfers, swaps, or PnL calculations."
+        />
+        <EvidenceItem
+          tone="warning"
+          title="No hidden fallback data"
+          text="Unavailable provider data remains explicit instead of being inferred."
         />
         <div className="evidence-group-label">Provider limitations</div>
         <EvidenceItem
@@ -809,9 +837,9 @@ function EvidenceColumn({
           <h2>Data confidence</h2>
           <span className="badge badge-provider">{dataMode.toUpperCase()}</span>
         </div>
-        <QualityRow label="Completeness" value="Medium" tone="warning" />
-        <QualityRow label="Freshness" value="High" tone="success" />
-        <QualityRow label="Reliability" value="Medium" tone="warning" />
+        <QualityRow label="Completeness" value="Scoped" tone="warning" />
+        <QualityRow label="Freshness" value="Run-scoped" tone="success" />
+        <QualityRow label="Reliability" value="Provider-limited" tone="warning" />
         <div className="quality-note">
           <span>Notes</span>
           <p>Based on available provider data. {bannerText}</p>
