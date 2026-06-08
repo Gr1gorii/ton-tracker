@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { previewStonfiPools } from "../api";
 import type {
   StonfiPoolPreview,
@@ -10,6 +10,11 @@ const SCOPE_NOTE =
 
 const PANEL_SCOPE_NOTE =
   "Scope: STON.fi DEX pools only. This is not complete TON DeFi coverage.";
+
+interface StonfiPoolsPreviewPanelProps {
+  limit: string;
+  onLimitChange: (value: string) => void;
+}
 
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
@@ -68,14 +73,21 @@ function compactWarnings(warnings: string[]): string[] {
   );
 }
 
-export default function StonfiPoolsPreviewPanel() {
-  const [limit, setLimit] = useState("10");
+export default function StonfiPoolsPreviewPanel({
+  limit,
+  onLimitChange,
+}: StonfiPoolsPreviewPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StonfiPoolsPreviewResponse | null>(null);
 
+  useEffect(() => {
+    setError(null);
+    setResult(null);
+  }, [limit]);
+
   function clearPanel() {
-    setLimit("10");
+    onLimitChange("10");
     setLoading(false);
     setError(null);
     setResult(null);
@@ -90,7 +102,7 @@ export default function StonfiPoolsPreviewPanel() {
       return;
     }
 
-    setLimit(String(safeLimit));
+    onLimitChange(String(safeLimit));
     setLoading(true);
     try {
       const data = await previewStonfiPools(safeLimit);
@@ -118,7 +130,7 @@ export default function StonfiPoolsPreviewPanel() {
       <div className="stonfi-form">
         <div className="field stonfi-limit-field">
           <label className="field-label" htmlFor="stonfi-preview-limit">
-            Limit
+            Shared limit
           </label>
           <input
             id="stonfi-preview-limit"
@@ -129,7 +141,7 @@ export default function StonfiPoolsPreviewPanel() {
             value={limit}
             disabled={loading}
             onChange={(e) => {
-              setLimit(e.target.value);
+              onLimitChange(e.target.value);
               setError(null);
               setResult(null);
             }}

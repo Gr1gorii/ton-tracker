@@ -142,7 +142,7 @@ export default function App() {
       block: "start",
     });
     setWorkspaceHint(
-      `${target} selected. Run the provider request from that module's own action button.`,
+      `${target} selected. Shared inputs are already synced; run the provider request from that module's action button.`,
     );
   }
 
@@ -242,7 +242,18 @@ export default function App() {
               title="TonAPI Wallet Intelligence Preview"
               description="Lightweight intelligence based on TonAPI account jetton data."
             >
-              <TonapiWalletIntelligencePreviewPanel />
+              <TonapiWalletIntelligencePreviewPanel
+                accountAddress={workspaceAccount}
+                limit={workspaceLimit}
+                onAccountAddressChange={(value) => {
+                  setWorkspaceAccount(value);
+                  setWorkspaceHint(null);
+                }}
+                onLimitChange={(value) => {
+                  setWorkspaceLimit(value);
+                  setWorkspaceHint(null);
+                }}
+              />
             </DashboardSection>
 
             <div className="workspace-preview-grid">
@@ -252,7 +263,18 @@ export default function App() {
                 title="TonAPI Account Jettons Preview"
                 description="Provider preview rows from TonAPI account jetton data."
               >
-                <TonapiAccountJettonsPreviewPanel />
+                <TonapiAccountJettonsPreviewPanel
+                  accountAddress={workspaceAccount}
+                  limit={workspaceLimit}
+                  onAccountAddressChange={(value) => {
+                    setWorkspaceAccount(value);
+                    setWorkspaceHint(null);
+                  }}
+                  onLimitChange={(value) => {
+                    setWorkspaceLimit(value);
+                    setWorkspaceHint(null);
+                  }}
+                />
               </DashboardSection>
 
               <DashboardSection
@@ -261,7 +283,13 @@ export default function App() {
                 title="STON.fi Pools Preview"
                 description="STON.fi data covers STON.fi DEX pools only, not all TON DeFi."
               >
-                <StonfiPoolsPreviewPanel />
+                <StonfiPoolsPreviewPanel
+                  limit={workspaceLimit}
+                  onLimitChange={(value) => {
+                    setWorkspaceLimit(value);
+                    setWorkspaceHint(null);
+                  }}
+                />
               </DashboardSection>
             </div>
 
@@ -401,7 +429,7 @@ function WorkspaceControl({
       <div className="workspace-control-head">
         <div>
           <span className="section-eyebrow">Workspace preview router</span>
-          <h2>Orient provider preview modules</h2>
+          <h2>Shared provider preview inputs</h2>
         </div>
         <span className="badge badge-provider">does not fetch all activity</span>
       </div>
@@ -409,7 +437,7 @@ function WorkspaceControl({
       <div className="workspace-control-grid">
         <div className="field">
           <label className="field-label" htmlFor="workspace-account">
-            Draft account address
+            Shared account address
           </label>
           <input
             id="workspace-account"
@@ -423,7 +451,7 @@ function WorkspaceControl({
 
         <div className="field">
           <label className="field-label" htmlFor="workspace-limit">
-            Draft limit
+            Shared limit
           </label>
           <input
             id="workspace-limit"
@@ -487,9 +515,9 @@ function WorkspaceControl({
       </div>
 
       <div className="workspace-control-note">
-        Quick jump only. Provider-specific panels below run existing API calls
-        and keep their own inputs. This panel does not fetch all wallet
-        activity.
+        Shared input layer only. TonAPI wallet intelligence and account jettons
+        use the same wallet address and limit; STON.fi uses the same limit.
+        Provider panels still run scoped preview requests only.
         {hint && <span>{hint}</span>}
       </div>
     </section>
