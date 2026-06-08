@@ -1824,6 +1824,126 @@ body {
   color: var(--muted);
 }
 
+.workspace-orchestration {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.05fr) minmax(150px, 0.8fr) minmax(96px, 0.45fr) max-content;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 12px;
+  padding: 10px;
+  background: rgba(2, 6, 4, 0.48);
+  border: 1px solid rgba(33, 74, 49, 0.68);
+  border-radius: 8px;
+}
+
+.workspace-orchestration-item,
+.workspace-orchestration-status {
+  min-width: 0;
+  border: 1px solid rgba(33, 74, 49, 0.52);
+  border-radius: 6px;
+  padding: 8px 9px;
+  background: rgba(8, 17, 11, 0.62);
+}
+
+.workspace-orchestration-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.workspace-orchestration-item span,
+.workspace-orchestration-status span {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.workspace-orchestration-item strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-orchestration-status {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.workspace-orchestration-status strong {
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.workspace-status-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.workspace-orchestration p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-orchestration-queued,
+.workspace-orchestration-running {
+  border-color: rgba(0, 230, 118, 0.42);
+}
+
+.workspace-orchestration-queued .workspace-status-dot,
+.workspace-orchestration-running .workspace-status-dot {
+  background: var(--peak-green);
+  box-shadow: 0 0 10px rgba(0, 255, 136, 0.42);
+}
+
+.workspace-orchestration-queued .workspace-orchestration-status strong,
+.workspace-orchestration-running .workspace-orchestration-status strong,
+.workspace-orchestration-success .workspace-orchestration-status strong {
+  color: var(--peak-green);
+}
+
+.workspace-orchestration-error {
+  border-color: rgba(255, 92, 92, 0.42);
+}
+
+.workspace-orchestration-error .workspace-status-dot {
+  background: var(--error);
+  box-shadow: 0 0 10px rgba(255, 92, 92, 0.35);
+}
+
+.workspace-orchestration-error .workspace-orchestration-status strong {
+  color: #ff9c9c;
+}
+
+.workspace-orchestration-stale {
+  border-color: rgba(230, 180, 80, 0.42);
+}
+
+.workspace-orchestration-stale .workspace-status-dot {
+  background: var(--warning);
+  box-shadow: 0 0 10px rgba(230, 180, 80, 0.3);
+}
+
+.workspace-orchestration-stale .workspace-orchestration-status strong {
+  color: var(--warning);
+}
+
 .workspace-preview-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3750,6 +3870,10 @@ input {
     grid-template-columns: 1fr;
   }
 
+  .workspace-orchestration {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .workspace-preview-grid .tonapi-note,
   .workspace-preview-grid .stonfi-note,
   .workspace-preview-grid .tonapi-form,
@@ -3812,6 +3936,14 @@ input {
   .evidence-shell .provider-status-card,
   .evidence-card {
     padding: 12px;
+  }
+
+  .workspace-orchestration {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-orchestration-status {
+    justify-content: flex-start;
   }
 
   .btn,

@@ -30,6 +30,68 @@ const navItems = [
 ];
 
 type WorkspaceView = "wallet" | "jettons" | "pools";
+type WorkspaceRunStatus =
+  | "idle"
+  | "queued"
+  | "running"
+  | "success"
+  | "error"
+  | "stale";
+
+interface WorkspaceRunState {
+  target: WorkspaceView;
+  status: WorkspaceRunStatus;
+  message: string;
+  accountLabel: string;
+  limitLabel: string;
+  updatedAt: string;
+}
+
+interface ProviderPreviewRunUpdate {
+  status: "idle" | "running" | "success" | "error";
+  message: string;
+  accountAddress?: string;
+  limit?: string;
+}
+
+const workspaceTargets: Record<
+  WorkspaceView,
+  {
+    label: string;
+    targetId: string;
+    requiresAccount: boolean;
+  }
+> = {
+  wallet: {
+    label: "TonAPI Wallet Intelligence Preview",
+    targetId: "wallet-intelligence-preview",
+    requiresAccount: true,
+  },
+  jettons: {
+    label: "TonAPI Account Jettons Preview",
+    targetId: "account-jettons-preview",
+    requiresAccount: true,
+  },
+  pools: {
+    label: "STON.fi Pools Preview",
+    targetId: "stonfi-pools-preview",
+    requiresAccount: false,
+  },
+};
+
+function clampWorkspaceLimit(value: string): number | null {
+  if (!value.trim()) return 10;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.min(100, Math.max(1, Math.trunc(parsed)));
+}
+
+function formatRunTime(date: Date): string {
+  return date.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export default function App() {
   const [poolUrl, setPoolUrl] = useState(SAMPLE_URL);
@@ -41,6 +103,12 @@ export default function App() {
   const [workspaceLimit, setWorkspaceLimit] = useState("10");
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("wallet");
   const [workspaceHint, setWorkspaceHint] = useState<string | null>(null);
+  const [workspaceRunRequest, setWorkspaceRunRequest] = useState({
+    target: "wallet" as WorkspaceView,
+    id: 0,
+  });
+  const [workspaceRunState, setWorkspaceRunState] =
+    useState<WorkspaceRunState | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,26 +192,130 @@ export default function App() {
     }
   }
 
+  function markWorkspaceInputsChanged(nextAccount: string, nextLimit: string) {
+    const target = workspaceTargets[workspaceView];
+
+    setWorkspaceHint(null);
+    setWorkspaceRunState((current) =>
+      current
+        ? {
+            ...current,
+            status: "stale",
+            message:
+              "Shared inputs changed. Run the selected preview again for current scoped data.",
+            accountLabel: target.requiresAccount
+              ? nextAccount.trim() || "Required for TonAPI"
+              : "Not used",
+            limitLabel: nextLimit.trim() || "10",
+            updatedAt: formatRunTime(new Date()),
+          }
+        : current,
+    );
+  }
+
+  function handleWorkspaceAccountChange(value: string) {
+    setWorkspaceAccount(value);
+    markWorkspaceInputsChanged(value, workspaceLimit);
+  }
+
+  function handleWorkspaceLimitChange(value: string) {
+    setWorkspaceLimit(value);
+    markWorkspaceInputsChanged(workspaceAccount, value);
+  }
+
+  function handleWorkspaceViewChange(value: WorkspaceView) {
+    setWorkspaceView(value);
+    setWorkspaceHint(null);
+  }
+
   function handleWorkspacePreview() {
-    const targetId =
-      workspaceView === "wallet"
-        ? "wallet-intelligence-preview"
-        : workspaceView === "jettons"
-          ? "account-jettons-preview"
-          : "stonfi-pools-preview";
-    const target =
-      workspaceView === "wallet"
-        ? "TonAPI Wallet Intelligence Preview"
-        : workspaceView === "jettons"
-          ? "TonAPI Account Jettons Preview"
-          : "STON.fi Pools Preview";
-    document.getElementById(targetId)?.scrollIntoView({
+    const target = workspaceTargets[workspaceView];
+    document.getElementById(target.targetId)?.scrollIntoView({
       behavior: "smooth",
       block: "start",
     });
     setWorkspaceHint(
-      `${target} selected. Shared inputs are already synced; run the provider request from that module's action button.`,
+      `${target.label} selected. Shared inputs are already synced; run one scoped request from the workspace or provider panel.`,
     );
+  }
+
+  function handleWorkspaceRunPreview() {
+    const target = workspaceTargets[workspaceView];
+    const cleanedAccount = workspaceAccount.trim();
+    const safeLimit = clampWorkspaceLimit(workspaceLimit);
+    const now = formatRunTime(new Date());
+
+    if (target.requiresAccount && !cleanedAccount) {
+      const message = `${target.label} requires a TON account address.`;
+      setWorkspaceHint(message);
+      setWorkspaceRunState({
+        target: workspaceView,
+        status: "error",
+        message,
+        accountLabel: "Required",
+        limitLabel: workspaceLimit.trim() || "10",
+        updatedAt: now,
+      });
+      return;
+    }
+
+    if (safeLimit === null) {
+      const message = "Shared limit must be a number from 1 to 100.";
+      setWorkspaceHint(message);
+      setWorkspaceRunState({
+        target: workspaceView,
+        status: "error",
+        message,
+        accountLabel: target.requiresAccount ? cleanedAccount || "Required" : "Not used",
+        limitLabel: "Invalid",
+        updatedAt: now,
+      });
+      return;
+    }
+
+    const nextLimit = String(safeLimit);
+    setWorkspaceAccount(cleanedAccount);
+    setWorkspaceLimit(nextLimit);
+    setWorkspaceRunState({
+      target: workspaceView,
+      status: "queued",
+      message: `${target.label} queued from shared workspace inputs. This runs one scoped provider preview only.`,
+      accountLabel: target.requiresAccount ? cleanedAccount : "Not used",
+      limitLabel: nextLimit,
+      updatedAt: now,
+    });
+    setWorkspaceHint(
+      `${target.label} is running from shared workspace inputs. This is not full wallet activity analysis.`,
+    );
+    document.getElementById(target.targetId)?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
+    });
+    setWorkspaceRunRequest((current) => ({
+      target: workspaceView,
+      id: current.id + 1,
+    }));
+  }
+
+  function handlePreviewRunStateChange(
+    targetView: WorkspaceView,
+    update: ProviderPreviewRunUpdate,
+  ) {
+    const target = workspaceTargets[targetView];
+    const accountLabel =
+      update.accountAddress ??
+      (target.requiresAccount ? workspaceAccount.trim() || "-" : "Not used");
+    const limitLabel = update.limit ?? (workspaceLimit.trim() || "10");
+
+    setWorkspaceRunState({
+      target: targetView,
+      status: update.status,
+      message: update.message,
+      accountLabel,
+      limitLabel,
+      updatedAt: formatRunTime(new Date()),
+    });
+    setWorkspaceHint(update.message);
   }
 
   function clearWorkspaceControl() {
@@ -151,6 +323,7 @@ export default function App() {
     setWorkspaceLimit("10");
     setWorkspaceView("wallet");
     setWorkspaceHint(null);
+    setWorkspaceRunState(null);
   }
 
   return (
@@ -207,19 +380,12 @@ export default function App() {
               limit={workspaceLimit}
               view={workspaceView}
               hint={workspaceHint}
-              onAccountChange={(value) => {
-                setWorkspaceAccount(value);
-                setWorkspaceHint(null);
-              }}
-              onLimitChange={(value) => {
-                setWorkspaceLimit(value);
-                setWorkspaceHint(null);
-              }}
-              onViewChange={(value) => {
-                setWorkspaceView(value);
-                setWorkspaceHint(null);
-              }}
+              runState={workspaceRunState}
+              onAccountChange={handleWorkspaceAccountChange}
+              onLimitChange={handleWorkspaceLimitChange}
+              onViewChange={handleWorkspaceViewChange}
               onPreview={handleWorkspacePreview}
+              onRunPreview={handleWorkspaceRunPreview}
               onClear={clearWorkspaceControl}
             />
 
@@ -245,13 +411,19 @@ export default function App() {
               <TonapiWalletIntelligencePreviewPanel
                 accountAddress={workspaceAccount}
                 limit={workspaceLimit}
+                runRequestId={
+                  workspaceRunRequest.target === "wallet"
+                    ? workspaceRunRequest.id
+                    : 0
+                }
                 onAccountAddressChange={(value) => {
-                  setWorkspaceAccount(value);
-                  setWorkspaceHint(null);
+                  handleWorkspaceAccountChange(value);
                 }}
                 onLimitChange={(value) => {
-                  setWorkspaceLimit(value);
-                  setWorkspaceHint(null);
+                  handleWorkspaceLimitChange(value);
+                }}
+                onPreviewRunStateChange={(update) => {
+                  handlePreviewRunStateChange("wallet", update);
                 }}
               />
             </DashboardSection>
@@ -266,13 +438,19 @@ export default function App() {
                 <TonapiAccountJettonsPreviewPanel
                   accountAddress={workspaceAccount}
                   limit={workspaceLimit}
+                  runRequestId={
+                    workspaceRunRequest.target === "jettons"
+                      ? workspaceRunRequest.id
+                      : 0
+                  }
                   onAccountAddressChange={(value) => {
-                    setWorkspaceAccount(value);
-                    setWorkspaceHint(null);
+                    handleWorkspaceAccountChange(value);
                   }}
                   onLimitChange={(value) => {
-                    setWorkspaceLimit(value);
-                    setWorkspaceHint(null);
+                    handleWorkspaceLimitChange(value);
+                  }}
+                  onPreviewRunStateChange={(update) => {
+                    handlePreviewRunStateChange("jettons", update);
                   }}
                 />
               </DashboardSection>
@@ -285,9 +463,16 @@ export default function App() {
               >
                 <StonfiPoolsPreviewPanel
                   limit={workspaceLimit}
+                  runRequestId={
+                    workspaceRunRequest.target === "pools"
+                      ? workspaceRunRequest.id
+                      : 0
+                  }
                   onLimitChange={(value) => {
-                    setWorkspaceLimit(value);
-                    setWorkspaceHint(null);
+                    handleWorkspaceLimitChange(value);
+                  }}
+                  onPreviewRunStateChange={(update) => {
+                    handlePreviewRunStateChange("pools", update);
                   }}
                 />
               </DashboardSection>
@@ -408,22 +593,37 @@ function WorkspaceControl({
   limit,
   view,
   hint,
+  runState,
   onAccountChange,
   onLimitChange,
   onViewChange,
   onPreview,
+  onRunPreview,
   onClear,
 }: {
   account: string;
   limit: string;
   view: WorkspaceView;
   hint: string | null;
+  runState: WorkspaceRunState | null;
   onAccountChange: (value: string) => void;
   onLimitChange: (value: string) => void;
   onViewChange: (value: WorkspaceView) => void;
   onPreview: () => void;
+  onRunPreview: () => void;
   onClear: () => void;
 }) {
+  const target = workspaceTargets[view];
+  const statusLabel = runState?.status ?? "idle";
+  const statusMessage =
+    runState?.message ??
+    "Ready to run one selected provider preview from shared workspace inputs.";
+  const accountLabel = target.requiresAccount
+    ? account.trim() || "Required for TonAPI"
+    : "Not used by STON.fi";
+  const limitLabel = limit.trim() || "10";
+  const isRunBusy = statusLabel === "queued" || statusLabel === "running";
+
   return (
     <section className="workspace-control">
       <div className="workspace-control-head">
@@ -505,13 +705,45 @@ function WorkspaceControl({
         </div>
 
         <div className="workspace-actions">
-          <button className="btn btn-primary" type="button" onClick={onPreview}>
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={onRunPreview}
+            disabled={isRunBusy}
+          >
+            {isRunBusy ? "Running selected preview" : "Run selected preview"}
+          </button>
+          <button className="btn btn-ghost" type="button" onClick={onPreview}>
             Open selected preview
           </button>
           <button className="btn btn-ghost" type="button" onClick={onClear}>
             Clear
           </button>
         </div>
+      </div>
+
+      <div
+        className={`workspace-orchestration workspace-orchestration-${statusLabel}`}
+        aria-live="polite"
+      >
+        <div className="workspace-orchestration-item">
+          <span>Selected module</span>
+          <strong>{target.label}</strong>
+        </div>
+        <div className="workspace-orchestration-item">
+          <span>Account</span>
+          <strong>{runState?.accountLabel ?? accountLabel}</strong>
+        </div>
+        <div className="workspace-orchestration-item">
+          <span>Limit</span>
+          <strong>{runState?.limitLabel ?? limitLabel}</strong>
+        </div>
+        <div className="workspace-orchestration-status">
+          <span className="workspace-status-dot" />
+          <strong>{statusLabel.toUpperCase()}</strong>
+          {runState?.updatedAt && <span>{runState.updatedAt}</span>}
+        </div>
+        <p>{statusMessage}</p>
       </div>
 
       <div className="workspace-control-note">
