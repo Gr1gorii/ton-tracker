@@ -10,7 +10,7 @@ const SCOPE_NOTE =
   "TonAPI preview shows account jetton data only; it is not full wallet intelligence yet.";
 
 const PANEL_SCOPE_NOTE =
-  "Scope: TonAPI account jetton preview only. Full wallet limitations remain in Evidence & limitations.";
+  "Scope: TonAPI account jetton preview only. No full wallet intelligence, no transaction history, no PnL, no swaps.";
 
 const PUBLIC_MODE_WARNING =
   "TonAPI API key is not configured; public mode may be rate limited.";
@@ -164,7 +164,7 @@ export default function TonapiAccountJettonsPreviewPanel() {
             onClick={handlePreview}
             disabled={loading}
           >
-            {loading ? "Previewing..." : "Preview account jettons"}
+            {loading ? "REQUESTING_TONAPI_JETTONS" : "Preview account jettons"}
           </button>
           <button
             type="button"
@@ -186,13 +186,13 @@ export default function TonapiAccountJettonsPreviewPanel() {
       {loading && (
         <div className="state-box loading-box tonapi-state">
           <span className="spinner" />
-          Previewing TonAPI account jettons...
+          REQUESTING_TONAPI_JETTONS
         </div>
       )}
 
       {!loading && !result && !requestError && (
         <div className="state-box empty-box tonapi-state">
-          Enter an account address to preview TonAPI account jettons.
+          Enter account address to preview TonAPI jetton-based signals.
         </div>
       )}
 
@@ -209,8 +209,8 @@ function TonapiPreviewResults({
   return (
     <div className="tonapi-results">
       <div className="tonapi-result-head">
-        <span className="badge badge-group">success: {String(result.success)}</span>
-        <span className="badge badge-provider">Provider: {result.provider}</span>
+        <span className="badge badge-group">SUCCESS {String(result.success)}</span>
+        <span className="badge badge-provider">PROVIDER {result.provider}</span>
         <span
           className={
             result.data_mode === "mock" ? "badge badge-mock" : "badge badge-real"
@@ -218,10 +218,10 @@ function TonapiPreviewResults({
         >
           {result.data_mode}
         </span>
-        <span className="badge badge-provider">source: {result.source}</span>
+        <span className="badge badge-provider">SOURCE {result.source}</span>
       </div>
 
-      <div className="import-analysis-note">{result.message || SCOPE_NOTE}</div>
+      <div className="scope-strip">{result.message || SCOPE_NOTE}</div>
 
       <ProviderMessages warnings={result.warnings} error={result.error} />
 
@@ -311,13 +311,11 @@ function JettonsPreviewTable({ jettons }: { jettons: TonapiJettonPreview[] }) {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Image</th>
-                <th>Wallet address</th>
-                <th>Jetton</th>
-                <th>Jetton address</th>
+                <th>Symbol</th>
+                <th>Name</th>
                 <th className="num">Balance</th>
-                <th className="num">Decimals</th>
                 <th className="num">Price</th>
+                <th>Jetton address</th>
                 <th>Wallet contract</th>
                 <th>Source</th>
               </tr>
@@ -325,38 +323,22 @@ function JettonsPreviewTable({ jettons }: { jettons: TonapiJettonPreview[] }) {
             <tbody>
               {jettons.map((jetton, index) => (
                 <tr key={jettonKey(jetton, index)}>
-                  <td>
-                    {jetton.image ? (
-                      <img
-                        className="tonapi-jetton-image"
-                        src={jetton.image}
-                        alt=""
-                        loading="lazy"
-                      />
-                    ) : (
-                      "-"
-                    )}
-                  </td>
-                  <td className="mono" title={displayValue(jetton.wallet_address)}>
-                    {displayValue(jetton.wallet_address)}
-                  </td>
                   <td title={jettonLabel(jetton)}>
-                    <div>{jettonLabel(jetton)}</div>
-                    <div className="cell-sub">
-                      {displayValue(jetton.jetton_name)}
-                    </div>
+                    <strong>{displayValue(jetton.jetton_symbol)}</strong>
                   </td>
+                  <td title={displayValue(jetton.jetton_name)}>
+                    {displayValue(jetton.jetton_name)}
+                  </td>
+                  <td className="num">{displayValue(jetton.balance)}</td>
+                  <td className="num">{priceValue(jetton)}</td>
                   <td
-                    className="mono"
+                    className="mono copy-cell"
                     title={displayValue(jetton.jetton_address)}
                   >
                     {displayValue(jetton.jetton_address)}
                   </td>
-                  <td className="num">{displayValue(jetton.balance)}</td>
-                  <td className="num">{displayValue(jetton.decimals)}</td>
-                  <td className="num">{priceValue(jetton)}</td>
                   <td
-                    className="mono"
+                    className="mono copy-cell"
                     title={displayValue(jetton.wallet_contract_address)}
                   >
                     {displayValue(jetton.wallet_contract_address)}

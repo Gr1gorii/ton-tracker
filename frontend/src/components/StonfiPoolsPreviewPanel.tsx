@@ -9,7 +9,7 @@ const SCOPE_NOTE =
   "STON.fi data covers STON.fi DEX pools only, not all TON DeFi.";
 
 const PANEL_SCOPE_NOTE =
-  "Scope: STON.fi DEX pools only. Full coverage limitations remain in Evidence & limitations.";
+  "Scope: STON.fi DEX pools only. This is not complete TON DeFi coverage.";
 
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
@@ -134,7 +134,7 @@ export default function StonfiPoolsPreviewPanel() {
             onClick={handlePreview}
             disabled={loading}
           >
-            {loading ? "Previewing..." : "Preview STON.fi pools"}
+            {loading ? "REQUESTING_STONFI_POOLS" : "Preview STON.fi pools"}
           </button>
           <button
             type="button"
@@ -156,7 +156,7 @@ export default function StonfiPoolsPreviewPanel() {
       {loading && (
         <div className="state-box loading-box stonfi-state">
           <span className="spinner" />
-          Previewing STON.fi pools...
+          REQUESTING_STONFI_POOLS
         </div>
       )}
 
@@ -179,8 +179,8 @@ function StonfiPreviewResults({
   return (
     <div className="stonfi-results">
       <div className="stonfi-result-head">
-        <span className="badge badge-group">success: {String(result.success)}</span>
-        <span className="badge badge-provider">Provider: {result.provider}</span>
+        <span className="badge badge-group">SUCCESS {String(result.success)}</span>
+        <span className="badge badge-provider">PROVIDER {result.provider}</span>
         <span
           className={
             result.data_mode === "mock" ? "badge badge-mock" : "badge badge-real"
@@ -188,10 +188,11 @@ function StonfiPreviewResults({
         >
           {result.data_mode}
         </span>
-        <span className="badge badge-provider">source: {result.source}</span>
+        <span className="badge badge-provider">SOURCE {result.source}</span>
+        <span className="badge badge-warning">STON.fi POOLS ONLY</span>
       </div>
 
-      <div className="import-analysis-note">{result.message || SCOPE_NOTE}</div>
+      <div className="scope-strip">{result.message || SCOPE_NOTE}</div>
 
       <ProviderMessages warnings={result.warnings} error={result.error} />
 
@@ -253,7 +254,10 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
   return (
     <div>
       <div className="section-head import-subhead">
-        <h2>STON.fi pools</h2>
+        <div className="table-title-row">
+          <h2>STON.fi pools</h2>
+          <span className="badge badge-warning">STON.fi pools only</span>
+        </div>
         <div className="muted small">{pools.length} rows</div>
       </div>
       {pools.length === 0 ? (
@@ -266,8 +270,8 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
             <thead>
               <tr>
                 <th>Pool address</th>
+                <th>Pair</th>
                 <th>Router</th>
-                <th>Token pair</th>
                 <th className="num">TVL / liquidity USD</th>
                 <th className="num">Volume 24h USD</th>
                 <th>Reserves</th>
@@ -279,17 +283,17 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
             <tbody>
               {pools.map((pool, index) => (
                 <tr key={poolKey(pool, index)}>
-                  <td className="mono" title={displayValue(pool.address)}>
+                  <td className="mono copy-cell" title={displayValue(pool.address)}>
                     {displayValue(pool.address)}
                     {pool.deprecated && (
                       <div className="cell-sub">deprecated</div>
                     )}
                   </td>
-                  <td className="mono" title={displayValue(pool.router_address)}>
-                    {displayValue(pool.router_address)}
-                  </td>
                   <td className="mono" title={tokenPair(pool)}>
                     {tokenPair(pool)}
+                  </td>
+                  <td className="mono copy-cell" title={displayValue(pool.router_address)}>
+                    {displayValue(pool.router_address)}
                   </td>
                   <td className="num">{liquidityValue(pool)}</td>
                   <td className="num">{displayValue(pool.volume_24h_usd)}</td>

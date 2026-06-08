@@ -14,7 +14,7 @@ const LIMIT_NOTE =
   "It does not include full transaction history, PnL, DEX swaps, current TON balance, or full on-chain behavior.";
 
 const PANEL_SCOPE_NOTE =
-  "Scope: TonAPI account jetton preview only. Full limitations remain in Evidence & limitations.";
+  "Lightweight intelligence based on TonAPI account jetton data. No transactions, no PnL, no DEX swaps, no current TON balance.";
 
 const PUBLIC_MODE_WARNING =
   "TonAPI API key is not configured; public mode may be rate limited.";
@@ -202,7 +202,7 @@ export default function TonapiWalletIntelligencePreviewPanel() {
             onClick={handlePreview}
             disabled={loading}
           >
-            {loading ? "Previewing..." : "Preview wallet intelligence"}
+            {loading ? "REQUESTING_TONAPI_PREVIEW" : "Preview wallet intelligence"}
           </button>
           <button
             type="button"
@@ -224,14 +224,14 @@ export default function TonapiWalletIntelligencePreviewPanel() {
       {loading && (
         <div className="state-box loading-box tonapi-wallet-state">
           <span className="spinner" />
-          Previewing TonAPI wallet intelligence...
+          REQUESTING_TONAPI_PREVIEW
         </div>
       )}
 
       {!loading && !result && !requestError && (
         <div className="state-box empty-box tonapi-wallet-state">
           Enter an account address to preview TonAPI jetton-based wallet
-          signals.
+          signals. This panel does not fetch all wallet activity.
         </div>
       )}
 
@@ -252,8 +252,8 @@ function WalletIntelligenceResults({
   return (
     <div className="tonapi-wallet-results">
       <div className="tonapi-wallet-result-head">
-        <span className="badge badge-group">success: {String(result.success)}</span>
-        <span className="badge badge-provider">Provider: {result.provider}</span>
+        <span className="badge badge-group">SUCCESS {String(result.success)}</span>
+        <span className="badge badge-provider">PROVIDER {result.provider}</span>
         <span
           className={
             result.data_mode === "mock" ? "badge badge-mock" : "badge badge-real"
@@ -261,10 +261,10 @@ function WalletIntelligenceResults({
         >
           {result.data_mode}
         </span>
-        <span className="badge badge-provider">source: {result.source}</span>
+        <span className="badge badge-provider">SOURCE {result.source}</span>
       </div>
 
-      <div className="import-analysis-note">{result.message || SCOPE_NOTE}</div>
+      <div className="scope-strip">{result.message || SCOPE_NOTE}</div>
 
       <ProviderMessages warnings={result.warnings} error={result.error} />
 
@@ -475,11 +475,12 @@ function JettonsPreviewTable({ jettons }: { jettons: TonapiJettonPreview[] }) {
           <table className="data-table">
             <thead>
               <tr>
-                <th>Jetton</th>
-                <th>Jetton address</th>
+                <th>Symbol</th>
+                <th>Name</th>
                 <th className="num">Balance</th>
-                <th className="num">Decimals</th>
                 <th className="num">Price</th>
+                <th>Jetton address</th>
+                <th>Wallet contract</th>
                 <th>Source</th>
               </tr>
             </thead>
@@ -487,20 +488,25 @@ function JettonsPreviewTable({ jettons }: { jettons: TonapiJettonPreview[] }) {
               {jettons.map((jetton, index) => (
                 <tr key={jettonKey(jetton, index)}>
                   <td title={jettonLabel(jetton)}>
-                    <div>{jettonLabel(jetton)}</div>
-                    <div className="cell-sub">
-                      {displayValue(jetton.jetton_name)}
-                    </div>
+                    <strong>{displayValue(jetton.jetton_symbol)}</strong>
                   </td>
+                  <td title={displayValue(jetton.jetton_name)}>
+                    {displayValue(jetton.jetton_name)}
+                  </td>
+                  <td className="num">{displayValue(jetton.balance)}</td>
+                  <td className="num">{priceValue(jetton)}</td>
                   <td
-                    className="mono"
+                    className="mono copy-cell"
                     title={displayValue(jetton.jetton_address)}
                   >
                     {displayValue(jetton.jetton_address)}
                   </td>
-                  <td className="num">{displayValue(jetton.balance)}</td>
-                  <td className="num">{displayValue(jetton.decimals)}</td>
-                  <td className="num">{priceValue(jetton)}</td>
+                  <td
+                    className="mono copy-cell"
+                    title={displayValue(jetton.wallet_contract_address)}
+                  >
+                    {displayValue(jetton.wallet_contract_address)}
+                  </td>
                   <td>{displayValue(jetton.source)}</td>
                 </tr>
               ))}
