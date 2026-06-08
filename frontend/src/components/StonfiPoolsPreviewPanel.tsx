@@ -13,7 +13,16 @@ const PANEL_SCOPE_NOTE =
 
 interface StonfiPoolsPreviewPanelProps {
   limit: string;
+  runRequestId: number;
   onLimitChange: (value: string) => void;
+  onPreviewRunStateChange?: (update: ProviderPreviewRunUpdate) => void;
+}
+
+interface ProviderPreviewRunUpdate {
+  status: "idle" | "running" | "success" | "error";
+  message: string;
+  accountAddress?: string;
+  limit?: string;
 }
 
 function displayValue(value: string | number | boolean | null | undefined): string {
@@ -75,7 +84,9 @@ function compactWarnings(warnings: string[]): string[] {
 
 export default function StonfiPoolsPreviewPanel({
   limit,
+  runRequestId,
   onLimitChange,
+  onPreviewRunStateChange,
 }: StonfiPoolsPreviewPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,11 +97,22 @@ export default function StonfiPoolsPreviewPanel({
     setResult(null);
   }, [limit]);
 
+  useEffect(() => {
+    if (runRequestId <= 0) return;
+    void handlePreview();
+  }, [runRequestId]);
+
   function clearPanel() {
     onLimitChange("10");
     setLoading(false);
     setError(null);
     setResult(null);
+    onPreviewRunStateChange?.({
+      status: "idle",
+      message: "STON.fi pools preview cleared.",
+      accountAddress: "Not used",
+      limit: "10",
+    });
   }
 
   async function handlePreview() {
@@ -98,17 +120,45 @@ export default function StonfiPoolsPreviewPanel({
     setResult(null);
     const safeLimit = clampLimit(limit);
     if (safeLimit === null) {
-      setError("Limit must be a number from 1 to 100.");
+      const message = "Limit must be a number from 1 to 100.";
+      setError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: "Not used",
+        limit,
+      });
       return;
     }
 
-    onLimitChange(String(safeLimit));
+    const normalizedLimit = String(safeLimit);
+    onLimitChange(normalizedLimit);
     setLoading(true);
+    onPreviewRunStateChange?.({
+      status: "running",
+      message: "Requesting STON.fi pools from the shared workspace limit.",
+      accountAddress: "Not used",
+      limit: normalizedLimit,
+    });
     try {
       const data = await previewStonfiPools(safeLimit);
       setResult(data);
+      onPreviewRunStateChange?.({
+        status: "success",
+        message: `STON.fi returned ${data.summary.preview_count} pool preview rows. Scope remains STON.fi pools only.`,
+        accountAddress: "Not used",
+        limit: normalizedLimit,
+      });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown STON.fi preview error");
+      const message =
+        e instanceof Error ? e.message : "Unknown STON.fi preview error";
+      setError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: "Not used",
+        limit: normalizedLimit,
+      });
     } finally {
       setLoading(false);
     }

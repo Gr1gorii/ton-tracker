@@ -36,8 +36,17 @@ const SUPPORTED_SCOPE_ITEMS = [
 interface TonapiWalletIntelligencePreviewPanelProps {
   accountAddress: string;
   limit: string;
+  runRequestId: number;
   onAccountAddressChange: (value: string) => void;
   onLimitChange: (value: string) => void;
+  onPreviewRunStateChange?: (update: ProviderPreviewRunUpdate) => void;
+}
+
+interface ProviderPreviewRunUpdate {
+  status: "idle" | "running" | "success" | "error";
+  message: string;
+  accountAddress?: string;
+  limit?: string;
 }
 
 function displayValue(value: string | number | boolean | null | undefined): string {
@@ -104,8 +113,10 @@ function jettonLabel(
 export default function TonapiWalletIntelligencePreviewPanel({
   accountAddress,
   limit,
+  runRequestId,
   onAccountAddressChange,
   onLimitChange,
+  onPreviewRunStateChange,
 }: TonapiWalletIntelligencePreviewPanelProps) {
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -117,6 +128,11 @@ export default function TonapiWalletIntelligencePreviewPanel({
     setResult(null);
   }, [accountAddress, limit]);
 
+  useEffect(() => {
+    if (runRequestId <= 0) return;
+    void handlePreview();
+  }, [runRequestId]);
+
   function clearResults() {
     setRequestError(null);
     setResult(null);
@@ -127,6 +143,12 @@ export default function TonapiWalletIntelligencePreviewPanel({
     onLimitChange("10");
     setLoading(false);
     clearResults();
+    onPreviewRunStateChange?.({
+      status: "idle",
+      message: "Wallet intelligence preview cleared.",
+      accountAddress: "",
+      limit: "10",
+    });
   }
 
   async function handlePreview() {
@@ -135,31 +157,65 @@ export default function TonapiWalletIntelligencePreviewPanel({
 
     const cleanedAccount = accountAddress.trim();
     if (!cleanedAccount) {
-      setRequestError("Account address is required.");
+      const message = "Account address is required.";
+      setRequestError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: cleanedAccount,
+        limit,
+      });
       return;
     }
 
     const safeLimit = clampLimit(limit);
     if (safeLimit === null) {
-      setRequestError("Limit must be a number from 1 to 100.");
+      const message = "Limit must be a number from 1 to 100.";
+      setRequestError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: cleanedAccount,
+        limit,
+      });
       return;
     }
 
+    const normalizedLimit = String(safeLimit);
     onAccountAddressChange(cleanedAccount);
-    onLimitChange(String(safeLimit));
+    onLimitChange(normalizedLimit);
     setLoading(true);
+    onPreviewRunStateChange?.({
+      status: "running",
+      message:
+        "Requesting TonAPI wallet intelligence preview from shared workspace inputs.",
+      accountAddress: cleanedAccount,
+      limit: normalizedLimit,
+    });
     try {
       const data = await previewTonapiWalletIntelligence(
         cleanedAccount,
         safeLimit,
       );
       setResult(data);
+      onPreviewRunStateChange?.({
+        status: "success",
+        message: `TonAPI wallet intelligence returned ${data.summary.preview_count} jetton preview rows. Scope remains jetton-only.`,
+        accountAddress: cleanedAccount,
+        limit: normalizedLimit,
+      });
     } catch (e) {
-      setRequestError(
+      const message =
         e instanceof Error
           ? e.message
-          : "Unknown TonAPI wallet intelligence preview error",
-      );
+          : "Unknown TonAPI wallet intelligence preview error";
+      setRequestError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: cleanedAccount,
+        limit: normalizedLimit,
+      });
     } finally {
       setLoading(false);
     }

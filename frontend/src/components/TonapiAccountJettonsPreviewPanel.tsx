@@ -18,8 +18,17 @@ const PUBLIC_MODE_WARNING =
 interface TonapiAccountJettonsPreviewPanelProps {
   accountAddress: string;
   limit: string;
+  runRequestId: number;
   onAccountAddressChange: (value: string) => void;
   onLimitChange: (value: string) => void;
+  onPreviewRunStateChange?: (update: ProviderPreviewRunUpdate) => void;
+}
+
+interface ProviderPreviewRunUpdate {
+  status: "idle" | "running" | "success" | "error";
+  message: string;
+  accountAddress?: string;
+  limit?: string;
 }
 
 function displayValue(value: string | number | boolean | null | undefined): string {
@@ -74,8 +83,10 @@ function compactWarnings(warnings: string[]): string[] {
 export default function TonapiAccountJettonsPreviewPanel({
   accountAddress,
   limit,
+  runRequestId,
   onAccountAddressChange,
   onLimitChange,
+  onPreviewRunStateChange,
 }: TonapiAccountJettonsPreviewPanelProps) {
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
@@ -87,6 +98,11 @@ export default function TonapiAccountJettonsPreviewPanel({
     setResult(null);
   }, [accountAddress, limit]);
 
+  useEffect(() => {
+    if (runRequestId <= 0) return;
+    void handlePreview();
+  }, [runRequestId]);
+
   function clearResults() {
     setRequestError(null);
     setResult(null);
@@ -97,6 +113,12 @@ export default function TonapiAccountJettonsPreviewPanel({
     onLimitChange("10");
     setLoading(false);
     clearResults();
+    onPreviewRunStateChange?.({
+      status: "idle",
+      message: "TonAPI account jettons preview cleared.",
+      accountAddress: "",
+      limit: "10",
+    });
   }
 
   async function handlePreview() {
@@ -105,26 +127,59 @@ export default function TonapiAccountJettonsPreviewPanel({
 
     const cleanedAccount = accountAddress.trim();
     if (!cleanedAccount) {
-      setRequestError("Account address is required.");
+      const message = "Account address is required.";
+      setRequestError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: cleanedAccount,
+        limit,
+      });
       return;
     }
 
     const safeLimit = clampLimit(limit);
     if (safeLimit === null) {
-      setRequestError("Limit must be a number from 1 to 100.");
+      const message = "Limit must be a number from 1 to 100.";
+      setRequestError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: cleanedAccount,
+        limit,
+      });
       return;
     }
 
+    const normalizedLimit = String(safeLimit);
     onAccountAddressChange(cleanedAccount);
-    onLimitChange(String(safeLimit));
+    onLimitChange(normalizedLimit);
     setLoading(true);
+    onPreviewRunStateChange?.({
+      status: "running",
+      message: "Requesting TonAPI account jettons from shared workspace inputs.",
+      accountAddress: cleanedAccount,
+      limit: normalizedLimit,
+    });
     try {
       const data = await previewTonapiAccountJettons(cleanedAccount, safeLimit);
       setResult(data);
+      onPreviewRunStateChange?.({
+        status: "success",
+        message: `TonAPI account jettons returned ${data.summary.preview_count} preview rows. Scope remains account jettons only.`,
+        accountAddress: cleanedAccount,
+        limit: normalizedLimit,
+      });
     } catch (e) {
-      setRequestError(
-        e instanceof Error ? e.message : "Unknown TonAPI preview error",
-      );
+      const message =
+        e instanceof Error ? e.message : "Unknown TonAPI preview error";
+      setRequestError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: cleanedAccount,
+        limit: normalizedLimit,
+      });
     } finally {
       setLoading(false);
     }
