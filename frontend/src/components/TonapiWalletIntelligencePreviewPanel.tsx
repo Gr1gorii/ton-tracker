@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { previewTonapiWalletIntelligence } from "../api";
 import type {
   TonapiJettonPreview,
@@ -32,6 +32,13 @@ const SUPPORTED_SCOPE_ITEMS = [
   "Non-zero balances",
   "Stablecoin-like markers",
 ];
+
+interface TonapiWalletIntelligencePreviewPanelProps {
+  accountAddress: string;
+  limit: string;
+  onAccountAddressChange: (value: string) => void;
+  onLimitChange: (value: string) => void;
+}
 
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
@@ -94,13 +101,21 @@ function jettonLabel(
   return displayValue(symbol ?? name);
 }
 
-export default function TonapiWalletIntelligencePreviewPanel() {
-  const [accountAddress, setAccountAddress] = useState("");
-  const [limit, setLimit] = useState("10");
+export default function TonapiWalletIntelligencePreviewPanel({
+  accountAddress,
+  limit,
+  onAccountAddressChange,
+  onLimitChange,
+}: TonapiWalletIntelligencePreviewPanelProps) {
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [result, setResult] =
     useState<TonapiWalletIntelligencePreviewResponse | null>(null);
+
+  useEffect(() => {
+    setRequestError(null);
+    setResult(null);
+  }, [accountAddress, limit]);
 
   function clearResults() {
     setRequestError(null);
@@ -108,8 +123,8 @@ export default function TonapiWalletIntelligencePreviewPanel() {
   }
 
   function clearPanel() {
-    setAccountAddress("");
-    setLimit("10");
+    onAccountAddressChange("");
+    onLimitChange("10");
     setLoading(false);
     clearResults();
   }
@@ -130,8 +145,8 @@ export default function TonapiWalletIntelligencePreviewPanel() {
       return;
     }
 
-    setAccountAddress(cleanedAccount);
-    setLimit(String(safeLimit));
+    onAccountAddressChange(cleanedAccount);
+    onLimitChange(String(safeLimit));
     setLoading(true);
     try {
       const data = await previewTonapiWalletIntelligence(
@@ -195,7 +210,7 @@ export default function TonapiWalletIntelligencePreviewPanel() {
             className="field-label"
             htmlFor="tonapi-wallet-intelligence-account-address"
           >
-            Account address
+            Shared account address
           </label>
           <input
             id="tonapi-wallet-intelligence-account-address"
@@ -205,7 +220,7 @@ export default function TonapiWalletIntelligencePreviewPanel() {
             disabled={loading}
             placeholder="EQ..."
             onChange={(e) => {
-              setAccountAddress(e.target.value);
+              onAccountAddressChange(e.target.value);
               clearResults();
             }}
           />
@@ -216,7 +231,7 @@ export default function TonapiWalletIntelligencePreviewPanel() {
             className="field-label"
             htmlFor="tonapi-wallet-intelligence-limit"
           >
-            Limit
+            Shared limit
           </label>
           <input
             id="tonapi-wallet-intelligence-limit"
@@ -227,7 +242,7 @@ export default function TonapiWalletIntelligencePreviewPanel() {
             value={limit}
             disabled={loading}
             onChange={(e) => {
-              setLimit(e.target.value);
+              onLimitChange(e.target.value);
               clearResults();
             }}
           />

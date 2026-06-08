@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { previewTonapiAccountJettons } from "../api";
 import type {
   TonapiAccountJettonsPreviewResponse,
@@ -14,6 +14,13 @@ const PANEL_SCOPE_NOTE =
 
 const PUBLIC_MODE_WARNING =
   "TonAPI API key is not configured; public mode may be rate limited.";
+
+interface TonapiAccountJettonsPreviewPanelProps {
+  accountAddress: string;
+  limit: string;
+  onAccountAddressChange: (value: string) => void;
+  onLimitChange: (value: string) => void;
+}
 
 function displayValue(value: string | number | boolean | null | undefined): string {
   if (value === null || value === undefined || value === "") return "-";
@@ -64,13 +71,21 @@ function compactWarnings(warnings: string[]): string[] {
   );
 }
 
-export default function TonapiAccountJettonsPreviewPanel() {
-  const [accountAddress, setAccountAddress] = useState("");
-  const [limit, setLimit] = useState("10");
+export default function TonapiAccountJettonsPreviewPanel({
+  accountAddress,
+  limit,
+  onAccountAddressChange,
+  onLimitChange,
+}: TonapiAccountJettonsPreviewPanelProps) {
   const [loading, setLoading] = useState(false);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [result, setResult] =
     useState<TonapiAccountJettonsPreviewResponse | null>(null);
+
+  useEffect(() => {
+    setRequestError(null);
+    setResult(null);
+  }, [accountAddress, limit]);
 
   function clearResults() {
     setRequestError(null);
@@ -78,8 +93,8 @@ export default function TonapiAccountJettonsPreviewPanel() {
   }
 
   function clearPanel() {
-    setAccountAddress("");
-    setLimit("10");
+    onAccountAddressChange("");
+    onLimitChange("10");
     setLoading(false);
     clearResults();
   }
@@ -100,8 +115,8 @@ export default function TonapiAccountJettonsPreviewPanel() {
       return;
     }
 
-    setAccountAddress(cleanedAccount);
-    setLimit(String(safeLimit));
+    onAccountAddressChange(cleanedAccount);
+    onLimitChange(String(safeLimit));
     setLoading(true);
     try {
       const data = await previewTonapiAccountJettons(cleanedAccount, safeLimit);
@@ -131,7 +146,7 @@ export default function TonapiAccountJettonsPreviewPanel() {
       <div className="tonapi-form">
         <div className="field tonapi-account-field">
           <label className="field-label" htmlFor="tonapi-account-address">
-            Account address
+            Shared account address
           </label>
           <input
             id="tonapi-account-address"
@@ -141,7 +156,7 @@ export default function TonapiAccountJettonsPreviewPanel() {
             disabled={loading}
             placeholder="EQ..."
             onChange={(e) => {
-              setAccountAddress(e.target.value);
+              onAccountAddressChange(e.target.value);
               clearResults();
             }}
           />
@@ -149,7 +164,7 @@ export default function TonapiAccountJettonsPreviewPanel() {
 
         <div className="field tonapi-limit-field">
           <label className="field-label" htmlFor="tonapi-preview-limit">
-            Limit
+            Shared limit
           </label>
           <input
             id="tonapi-preview-limit"
@@ -160,7 +175,7 @@ export default function TonapiAccountJettonsPreviewPanel() {
             value={limit}
             disabled={loading}
             onChange={(e) => {
-              setLimit(e.target.value);
+              onLimitChange(e.target.value);
               clearResults();
             }}
           />
