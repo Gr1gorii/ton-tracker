@@ -5,6 +5,9 @@ import type {
   StonfiPoolsPreviewResponse,
 } from "../types";
 import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
+import PreviewReadinessStrip, {
+  type PreviewReadinessTone,
+} from "./PreviewReadinessStrip";
 
 const SCOPE_NOTE =
   "STON.fi data covers STON.fi DEX pools only, not all TON DeFi.";
@@ -199,9 +202,52 @@ export default function StonfiPoolsPreviewPanel({
   }
 
   const currentLimit = currentLimitLabel(limit);
+  const limitIsValid = clampLimit(limit) !== null;
   const resultIsStale = resultSnapshot
     ? resultSnapshot.limit !== currentLimit
     : false;
+  const canRequestPreview = limitIsValid && !loading;
+  const readiness: {
+    tone: PreviewReadinessTone;
+    label: string;
+    message: string;
+  } = loading
+    ? {
+        tone: "running",
+        label: "REQUEST RUNNING",
+        message: "STON.fi pools preview is requesting scoped pool rows.",
+      }
+    : error
+      ? {
+          tone: "error",
+          label: "REQUEST ERROR",
+          message: error,
+        }
+      : !limitIsValid
+        ? {
+            tone: "error",
+            label: "LIMIT INVALID",
+            message: "Shared limit must be a number from 1 to 100.",
+          }
+        : resultIsStale
+          ? {
+              tone: "stale",
+              label: "RESULT STALE",
+              message:
+                "A previous STON.fi result is still visible; run again for current shared limit.",
+            }
+          : result
+            ? {
+                tone: "fresh",
+                label: "RESULT FRESH",
+                message: "Displayed STON.fi pool rows match current shared limit.",
+              }
+            : {
+                tone: "ready",
+                label: "READY",
+                message:
+                  "Ready to request STON.fi DEX pool rows only. This is not complete TON DeFi.",
+              };
 
   return (
     <section className="section stonfi-panel">
@@ -215,6 +261,26 @@ export default function StonfiPoolsPreviewPanel({
       </div>
 
       <div className="stonfi-note">{PANEL_SCOPE_NOTE}</div>
+
+      <PreviewReadinessStrip
+        tone={readiness.tone}
+        label={readiness.label}
+        message={readiness.message}
+        items={[
+          {
+            label: "Provider",
+            value: "STON.fi",
+          },
+          {
+            label: "Account",
+            value: "Not used",
+          },
+          {
+            label: "Limit",
+            value: limitIsValid ? currentLimit : "Invalid",
+          },
+        ]}
+      />
 
       <div className="stonfi-form">
         <div className="field stonfi-limit-field">
@@ -241,9 +307,9 @@ export default function StonfiPoolsPreviewPanel({
             type="button"
             className="btn btn-primary"
             onClick={handlePreview}
-            disabled={loading}
+            disabled={!canRequestPreview}
           >
-            {loading ? "REQUESTING_STONFI_POOLS" : "Preview STON.fi pools"}
+            {loading ? "Requesting pools" : "Preview STON.fi pools"}
           </button>
           <button
             type="button"

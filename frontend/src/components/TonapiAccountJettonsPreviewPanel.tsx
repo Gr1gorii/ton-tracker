@@ -6,6 +6,9 @@ import type {
   TonapiProviderError,
 } from "../types";
 import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
+import PreviewReadinessStrip, {
+  type PreviewReadinessTone,
+} from "./PreviewReadinessStrip";
 
 const SCOPE_NOTE =
   "TonAPI preview shows account jetton data only; it is not full wallet intelligence yet.";
@@ -227,10 +230,61 @@ export default function TonapiAccountJettonsPreviewPanel({
 
   const currentAccount = accountAddress.trim();
   const currentLimit = currentLimitLabel(limit);
+  const limitIsValid = clampLimit(limit) !== null;
+  const accountIsReady = currentAccount.length > 0;
   const resultIsStale = resultSnapshot
     ? resultSnapshot.accountAddress !== currentAccount ||
       resultSnapshot.limit !== currentLimit
     : false;
+  const canRequestPreview = accountIsReady && limitIsValid && !loading;
+  const readiness: {
+    tone: PreviewReadinessTone;
+    label: string;
+    message: string;
+  } = loading
+    ? {
+        tone: "running",
+        label: "REQUEST RUNNING",
+        message: "TonAPI account jettons preview is requesting scoped rows.",
+      }
+    : requestError
+      ? {
+          tone: "error",
+          label: "REQUEST ERROR",
+          message: requestError,
+        }
+      : !accountIsReady
+        ? {
+            tone: "warning",
+            label: "ACCOUNT REQUIRED",
+            message:
+              "Enter a shared TON account address before requesting account jettons.",
+          }
+        : !limitIsValid
+          ? {
+              tone: "error",
+              label: "LIMIT INVALID",
+              message: "Shared limit must be a number from 1 to 100.",
+            }
+          : resultIsStale
+            ? {
+                tone: "stale",
+                label: "RESULT STALE",
+                message:
+                  "A previous result is still visible; run again for current shared inputs.",
+              }
+            : result
+              ? {
+                  tone: "fresh",
+                  label: "RESULT FRESH",
+                  message: "Displayed account jettons match current shared inputs.",
+                }
+              : {
+                  tone: "ready",
+                  label: "READY",
+                  message:
+                    "Ready to request TonAPI account jetton rows only. No full wallet behavior.",
+                };
 
   return (
     <section className="section tonapi-panel">
@@ -244,6 +298,26 @@ export default function TonapiAccountJettonsPreviewPanel({
       </div>
 
       <div className="tonapi-note">{PANEL_SCOPE_NOTE}</div>
+
+      <PreviewReadinessStrip
+        tone={readiness.tone}
+        label={readiness.label}
+        message={readiness.message}
+        items={[
+          {
+            label: "Provider",
+            value: "TonAPI",
+          },
+          {
+            label: "Account",
+            value: accountIsReady ? currentAccount : "Required",
+          },
+          {
+            label: "Limit",
+            value: limitIsValid ? currentLimit : "Invalid",
+          },
+        ]}
+      />
 
       <div className="tonapi-form">
         <div className="field tonapi-account-field">
@@ -288,9 +362,9 @@ export default function TonapiAccountJettonsPreviewPanel({
             type="button"
             className="btn btn-primary"
             onClick={handlePreview}
-            disabled={loading}
+            disabled={!canRequestPreview}
           >
-            {loading ? "REQUESTING_TONAPI_JETTONS" : "Preview account jettons"}
+            {loading ? "Requesting jettons" : "Preview account jettons"}
           </button>
           <button
             type="button"
