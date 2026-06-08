@@ -3438,3 +3438,198 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* Jettons + STON.fi tables v0.8.7 ---------------------------------- */
+.intelligence-table-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.table-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.table-toolbar-main {
+  min-width: 0;
+}
+
+.table-toolbar-main h2 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.table-toolbar-main p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.table-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.intelligence-table {
+  min-width: 980px;
+  table-layout: fixed;
+}
+
+.pools-table {
+  min-width: 1180px;
+}
+
+.intelligence-table thead th {
+  height: 34px;
+}
+
+.intelligence-table td {
+  height: 44px;
+}
+
+.asset-cell,
+.pair-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.asset-cell strong,
+.pair-cell strong {
+  color: var(--text);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.address-cell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.address-value {
+  display: block;
+  min-width: 0;
+  max-width: none;
+  color: var(--primary-green);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.address-copy {
+  border: 1px solid rgba(0, 230, 118, 0.24);
+  border-radius: 5px;
+  background: rgba(0, 230, 118, 0.075);
+  color: var(--primary-green);
+  cursor: pointer;
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 900;
+  line-height: 1;
+  padding: 5px 6px;
+}
+
+.address-copy:hover:not(:disabled) {
+  border-color: rgba(0, 255, 136, 0.5);
+  color: var(--peak-green);
+}
+
+.address-copy:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  border: 1px solid rgba(95, 122, 104, 0.3);
+  background: rgba(95, 122, 104, 0.1);
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1.35;
+  padding: 2px 7px;
+  text-transform: uppercase;
+}
+
+.source-real {
+  border-color: rgba(0, 230, 118, 0.42);
+  background: rgba(0, 230, 118, 0.1);
+  color: var(--peak-green);
+}
+
+.source-mock {
+  border-color: rgba(230, 180, 80, 0.36);
+  background: rgba(230, 180, 80, 0.1);
+  color: var(--warning);
+}
+
+.source-unknown {
+  color: var(--text-secondary);
+}
+
+.table-empty-state {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  min-height: 106px;
+  text-align: left;
+}
+
+.table-empty-state strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.table-empty-state p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.reserve-cell {
+  color: var(--text-secondary);
+}
+
+.apy-cell .cell-sub {
+  text-align: right;
+}
+
+.pool-flag {
+  color: var(--warning);
+}
+
+@media (max-width: 760px) {
+  .table-toolbar {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .table-meta {
+    justify-content: flex-start;
+  }
+
+  .address-cell {
+    grid-template-columns: minmax(130px, 1fr) auto;
+  }
+}

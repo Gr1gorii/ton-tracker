@@ -53,6 +53,15 @@ function reserveValue(pool: StonfiPoolPreview): string {
   return `${displayValue(reserve0)} / ${displayValue(reserve1)}`;
 }
 
+function sourceClass(source: string | null | undefined): string {
+  const normalized = displayValue(source).toLowerCase();
+  if (normalized === "real" || normalized.includes("ston")) {
+    return "source-badge source-real";
+  }
+  if (normalized === "mock") return "source-badge source-mock";
+  return "source-badge source-unknown";
+}
+
 function compactWarnings(warnings: string[]): string[] {
   return warnings.filter(
     (warning, index) => warning !== SCOPE_NOTE && warnings.indexOf(warning) === index,
@@ -252,21 +261,30 @@ function ProviderMessages({
 
 function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
   return (
-    <div>
-      <div className="section-head import-subhead">
-        <div className="table-title-row">
+    <div className="intelligence-table-block stonfi-table-block">
+      <div className="table-toolbar">
+        <div className="table-toolbar-main">
+          <span className="section-eyebrow">DEX pool rows</span>
           <h2>STON.fi pools</h2>
+          <p>Real provider preview scoped to STON.fi DEX pools only.</p>
+        </div>
+        <div className="table-meta">
+          <span className="badge badge-provider">{pools.length} rows</span>
           <span className="badge badge-warning">STON.fi pools only</span>
         </div>
-        <div className="muted small">{pools.length} rows</div>
       </div>
       {pools.length === 0 ? (
-        <div className="state-box empty-box stonfi-state">
-          No STON.fi pools to preview.
+        <div className="state-box empty-box stonfi-state table-empty-state">
+          <span className="state-kicker">NO_STONFI_POOL_ROWS</span>
+          <strong>No STON.fi pools to preview.</strong>
+          <p>
+            The provider returned no pool rows for this limit. This does not
+            imply complete TON DeFi coverage.
+          </p>
         </div>
       ) : (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table intelligence-table pools-table">
             <thead>
               <tr>
                 <th>Pool address</th>
@@ -283,22 +301,31 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
             <tbody>
               {pools.map((pool, index) => (
                 <tr key={poolKey(pool, index)}>
-                  <td className="mono copy-cell" title={displayValue(pool.address)}>
-                    {displayValue(pool.address)}
+                  <td>
+                    <AddressCell
+                      label="pool address"
+                      value={displayValue(pool.address)}
+                    />
                     {pool.deprecated && (
-                      <div className="cell-sub">deprecated</div>
+                      <div className="cell-sub pool-flag">deprecated</div>
                     )}
                   </td>
-                  <td className="mono" title={tokenPair(pool)}>
-                    {tokenPair(pool)}
+                  <td title={tokenPair(pool)}>
+                    <div className="pair-cell">
+                      <strong>{tokenPair(pool)}</strong>
+                      <span className="cell-sub">STON.fi pair</span>
+                    </div>
                   </td>
-                  <td className="mono copy-cell" title={displayValue(pool.router_address)}>
-                    {displayValue(pool.router_address)}
+                  <td>
+                    <AddressCell
+                      label="router address"
+                      value={displayValue(pool.router_address)}
+                    />
                   </td>
                   <td className="num">{liquidityValue(pool)}</td>
                   <td className="num">{displayValue(pool.volume_24h_usd)}</td>
-                  <td className="mono">{reserveValue(pool)}</td>
-                  <td>
+                  <td className="mono reserve-cell">{reserveValue(pool)}</td>
+                  <td className="num apy-cell">
                     <div>{displayValue(pool.apy_1d)} 1d</div>
                     <div className="cell-sub">
                       {displayValue(pool.apy_7d)} 7d /{" "}
@@ -318,13 +345,50 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
                       "-"
                     )}
                   </td>
-                  <td>{displayValue(pool.source)}</td>
+                  <td>
+                    <span className={sourceClass(pool.source)}>
+                      {displayValue(pool.source)}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function AddressCell({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const canCopy = value !== "-";
+
+  async function handleCopy() {
+    if (!canCopy) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="address-cell">
+      <span className="mono address-value" title={value}>
+        {value}
+      </span>
+      <button
+        className="address-copy"
+        type="button"
+        onClick={handleCopy}
+        disabled={!canCopy}
+        aria-label={`Copy ${label}`}
+      >
+        {copied ? "COPIED" : "COPY"}
+      </button>
     </div>
   );
 }

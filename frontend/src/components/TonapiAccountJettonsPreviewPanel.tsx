@@ -49,6 +49,15 @@ function priceValue(jetton: TonapiJettonPreview): string {
   return displayValue(jetton.price_usd ?? jetton.price);
 }
 
+function sourceClass(source: string | null | undefined): string {
+  const normalized = displayValue(source).toLowerCase();
+  if (normalized === "real" || normalized.includes("tonapi")) {
+    return "source-badge source-real";
+  }
+  if (normalized === "mock") return "source-badge source-mock";
+  return "source-badge source-unknown";
+}
+
 function compactWarnings(warnings: string[]): string[] {
   return warnings.filter(
     (warning, index) => warning !== SCOPE_NOTE && warnings.indexOf(warning) === index,
@@ -297,18 +306,30 @@ function ProviderMessages({
 
 function JettonsPreviewTable({ jettons }: { jettons: TonapiJettonPreview[] }) {
   return (
-    <div>
-      <div className="section-head import-subhead">
-        <h2>TonAPI account jettons</h2>
-        <div className="muted small">{jettons.length} rows</div>
+    <div className="intelligence-table-block jettons-table-block">
+      <div className="table-toolbar">
+        <div className="table-toolbar-main">
+          <span className="section-eyebrow">Jetton rows</span>
+          <h2>TonAPI account jettons</h2>
+          <p>Compact preview rows from TonAPI account jetton data only.</p>
+        </div>
+        <div className="table-meta">
+          <span className="badge badge-provider">{jettons.length} rows</span>
+          <span className="badge badge-warning">jetton data only</span>
+        </div>
       </div>
       {jettons.length === 0 ? (
-        <div className="state-box empty-box tonapi-state">
-          No TonAPI account jettons to preview.
+        <div className="state-box empty-box tonapi-state table-empty-state">
+          <span className="state-kicker">NO_JETTON_ROWS</span>
+          <strong>No TonAPI account jettons to preview.</strong>
+          <p>
+            The provider returned no preview rows for this account and limit.
+            No wallet behavior is inferred from missing rows.
+          </p>
         </div>
       ) : (
         <div className="table-wrap">
-          <table className="data-table">
+          <table className="data-table intelligence-table">
             <thead>
               <tr>
                 <th>Symbol</th>
@@ -324,32 +345,72 @@ function JettonsPreviewTable({ jettons }: { jettons: TonapiJettonPreview[] }) {
               {jettons.map((jetton, index) => (
                 <tr key={jettonKey(jetton, index)}>
                   <td title={jettonLabel(jetton)}>
-                    <strong>{displayValue(jetton.jetton_symbol)}</strong>
+                    <div className="asset-cell">
+                      <strong>{displayValue(jetton.jetton_symbol)}</strong>
+                      <span className="cell-sub">jetton</span>
+                    </div>
                   </td>
                   <td title={displayValue(jetton.jetton_name)}>
                     {displayValue(jetton.jetton_name)}
                   </td>
                   <td className="num">{displayValue(jetton.balance)}</td>
                   <td className="num">{priceValue(jetton)}</td>
-                  <td
-                    className="mono copy-cell"
-                    title={displayValue(jetton.jetton_address)}
-                  >
-                    {displayValue(jetton.jetton_address)}
+                  <td>
+                    <AddressCell
+                      label="jetton address"
+                      value={displayValue(jetton.jetton_address)}
+                    />
                   </td>
-                  <td
-                    className="mono copy-cell"
-                    title={displayValue(jetton.wallet_contract_address)}
-                  >
-                    {displayValue(jetton.wallet_contract_address)}
+                  <td>
+                    <AddressCell
+                      label="wallet contract"
+                      value={displayValue(jetton.wallet_contract_address)}
+                    />
                   </td>
-                  <td>{displayValue(jetton.source)}</td>
+                  <td>
+                    <span className={sourceClass(jetton.source)}>
+                      {displayValue(jetton.source)}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+function AddressCell({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  const canCopy = value !== "-";
+
+  async function handleCopy() {
+    if (!canCopy) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1200);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="address-cell">
+      <span className="mono address-value" title={value}>
+        {value}
+      </span>
+      <button
+        className="address-copy"
+        type="button"
+        onClick={handleCopy}
+        disabled={!canCopy}
+        aria-label={`Copy ${label}`}
+      >
+        {copied ? "COPIED" : "COPY"}
+      </button>
     </div>
   );
 }
