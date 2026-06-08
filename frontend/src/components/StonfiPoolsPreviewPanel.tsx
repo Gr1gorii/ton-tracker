@@ -157,26 +157,55 @@ export default function StonfiPoolsPreviewPanel() {
       </div>
 
       {error && (
-        <div className="state-box error-box stonfi-state">
-          <strong>STON.fi preview failed.</strong> {error}
-        </div>
+        <PreviewErrorState message={error} />
       )}
 
-      {loading && (
-        <div className="state-box loading-box stonfi-state">
-          <span className="spinner" />
-          REQUESTING_STONFI_POOLS
-        </div>
-      )}
+      {loading && <PreviewLoadingState />}
 
       {!loading && !result && !error && (
-        <div className="state-box empty-box stonfi-state">
-          Choose a preview limit and request STON.fi pool data.
-        </div>
+        <PreviewEmptyState />
       )}
 
       {!loading && result && <StonfiPreviewResults result={result} />}
     </section>
+  );
+}
+
+function PreviewEmptyState() {
+  return (
+    <div className="state-box empty-box stonfi-state preview-state-card">
+      <span className="state-kicker">NO_POOL_REQUEST</span>
+      <strong>Choose a limit and request STON.fi pool data.</strong>
+      <p>
+        This preview covers STON.fi DEX pools only. It is not complete TON DeFi
+        coverage.
+      </p>
+    </div>
+  );
+}
+
+function PreviewLoadingState() {
+  return (
+    <div className="state-box loading-box stonfi-state preview-loading-card">
+      <div className="preview-loading-head">
+        <span className="spinner" />
+        <div>
+          <span className="state-kicker">REQUESTING_STONFI_POOLS</span>
+          <strong>Requesting STON.fi pool preview rows.</strong>
+        </div>
+      </div>
+      <SkeletonRows rows={4} />
+    </div>
+  );
+}
+
+function PreviewErrorState({ message }: { message: string }) {
+  return (
+    <div className="state-box error-box stonfi-state preview-state-card">
+      <span className="state-kicker">STONFI_POOLS_FAILED</span>
+      <strong>STON.fi preview failed.</strong>
+      <p>{message}</p>
+    </div>
   );
 }
 
@@ -389,6 +418,21 @@ function AddressCell({ value, label }: { value: string; label: string }) {
       >
         {copied ? "COPIED" : "COPY"}
       </button>
+    </div>
+  );
+}
+
+function SkeletonRows({ rows }: { rows: number }) {
+  return (
+    <div className="skeleton-table" aria-hidden="true">
+      {Array.from({ length: rows }, (_, index) => (
+        <div className="skeleton-row" key={index}>
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      ))}
     </div>
   );
 }

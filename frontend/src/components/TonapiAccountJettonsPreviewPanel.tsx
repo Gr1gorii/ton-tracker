@@ -187,22 +187,13 @@ export default function TonapiAccountJettonsPreviewPanel() {
       </div>
 
       {requestError && (
-        <div className="state-box error-box tonapi-state">
-          <strong>TonAPI request failed.</strong> {requestError}
-        </div>
+        <PreviewErrorState message={requestError} />
       )}
 
-      {loading && (
-        <div className="state-box loading-box tonapi-state">
-          <span className="spinner" />
-          REQUESTING_TONAPI_JETTONS
-        </div>
-      )}
+      {loading && <PreviewLoadingState />}
 
       {!loading && !result && !requestError && (
-        <div className="state-box empty-box tonapi-state">
-          Enter account address to preview TonAPI jetton-based signals.
-        </div>
+        <PreviewEmptyState />
       )}
 
       {!loading && result && <TonapiPreviewResults result={result} />}
@@ -256,6 +247,44 @@ function TonapiPreviewResults({
       </div>
 
       <JettonsPreviewTable jettons={result.jettons_preview} />
+    </div>
+  );
+}
+
+function PreviewEmptyState() {
+  return (
+    <div className="state-box empty-box tonapi-state preview-state-card">
+      <span className="state-kicker">NO_ACCOUNT_SELECTED</span>
+      <strong>Enter account address to preview TonAPI account jettons.</strong>
+      <p>
+        This preview returns account jetton rows only. It does not fetch wallet
+        transactions, swaps, PnL, or full wallet behavior.
+      </p>
+    </div>
+  );
+}
+
+function PreviewLoadingState() {
+  return (
+    <div className="state-box loading-box tonapi-state preview-loading-card">
+      <div className="preview-loading-head">
+        <span className="spinner" />
+        <div>
+          <span className="state-kicker">REQUESTING_TONAPI_JETTONS</span>
+          <strong>Requesting TonAPI account jettons.</strong>
+        </div>
+      </div>
+      <SkeletonRows rows={4} />
+    </div>
+  );
+}
+
+function PreviewErrorState({ message }: { message: string }) {
+  return (
+    <div className="state-box error-box tonapi-state preview-state-card">
+      <span className="state-kicker">TONAPI_JETTONS_FAILED</span>
+      <strong>TonAPI request failed.</strong>
+      <p>{message}</p>
     </div>
   );
 }
@@ -411,6 +440,21 @@ function AddressCell({ value, label }: { value: string; label: string }) {
       >
         {copied ? "COPIED" : "COPY"}
       </button>
+    </div>
+  );
+}
+
+function SkeletonRows({ rows }: { rows: number }) {
+  return (
+    <div className="skeleton-table" aria-hidden="true">
+      {Array.from({ length: rows }, (_, index) => (
+        <div className="skeleton-row" key={index}>
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+      ))}
     </div>
   );
 }

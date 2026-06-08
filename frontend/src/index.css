@@ -3633,3 +3633,228 @@ body {
     grid-template-columns: minmax(130px, 1fr) auto;
   }
 }
+
+/* Responsive polish + empty/loading states v0.8.8 ------------------- */
+html,
+body {
+  width: 100%;
+  overflow-x: hidden;
+}
+
+button,
+input {
+  max-width: 100%;
+}
+
+.preview-state-card {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  min-height: 112px;
+  text-align: left;
+}
+
+.preview-state-card strong {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.preview-state-card p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.preview-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  min-height: 136px;
+  text-align: left;
+}
+
+.preview-loading-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.preview-loading-head strong {
+  display: block;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.skeleton-table {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+}
+
+.skeleton-row {
+  display: grid;
+  grid-template-columns: 0.65fr 1fr 0.48fr 0.72fr;
+  gap: 10px;
+  align-items: center;
+  min-height: 24px;
+}
+
+.skeleton-row span {
+  height: 9px;
+  overflow: hidden;
+  position: relative;
+  border-radius: 999px;
+  background: rgba(33, 74, 49, 0.45);
+}
+
+.skeleton-row span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(0, 255, 136, 0.18), transparent);
+  animation: skeleton-scan 1.4s linear infinite;
+}
+
+@keyframes skeleton-scan {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.workspace-control,
+.workspace-main,
+.evidence-column,
+.workspace-preview-grid,
+.dashboard-section-body,
+.tonapi-results,
+.stonfi-results,
+.tonapi-wallet-results,
+.intelligence-table-block {
+  min-width: 0;
+}
+
+.header-badges .badge,
+.table-meta .badge,
+.wallet-intelligence-badges .badge {
+  max-width: 100%;
+}
+
+@media (max-width: 1320px) {
+  .workspace-preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-preview-grid .tonapi-note,
+  .workspace-preview-grid .stonfi-note,
+  .workspace-preview-grid .tonapi-form,
+  .workspace-preview-grid .stonfi-form,
+  .workspace-preview-grid .tonapi-state,
+  .workspace-preview-grid .stonfi-state {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .workspace-frame {
+    padding-inline: 14px;
+  }
+
+  .workspace-control-head,
+  .evidence-card-head,
+  .provider-status-head,
+  .section-head {
+    align-items: flex-start;
+  }
+
+  .workspace-control-head,
+  .provider-status-head {
+    flex-direction: column;
+  }
+
+  .header-badges {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .workspace-frame {
+    padding-inline: 10px;
+  }
+
+  .workspace-sidebar {
+    padding: 14px 10px;
+  }
+
+  .sidebar-brand,
+  .sidebar-status {
+    margin-inline: 0;
+    width: 100%;
+  }
+
+  .sidebar-nav {
+    margin-inline: 0;
+    padding-bottom: 4px;
+  }
+
+  .workspace-header h1 {
+    font-size: 21px;
+  }
+
+  .workspace-control,
+  .evidence-shell .section,
+  .evidence-shell .provider-status-card,
+  .evidence-card {
+    padding: 12px;
+  }
+
+  .btn,
+  .evidence-shell .btn {
+    justify-content: center;
+    min-height: 40px;
+    width: 100%;
+  }
+
+  .tonapi-actions,
+  .stonfi-actions,
+  .tonapi-wallet-actions,
+  .bitquery-actions,
+  .import-preview-actions,
+  .controls-actions {
+    align-items: stretch;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .tonapi-form,
+  .stonfi-form,
+  .tonapi-wallet-form,
+  .bitquery-form,
+  .import-preview-form,
+  .controls-card {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-grid,
+  .evidence-shell .stat-grid,
+  .tonapi-intelligence-grid,
+  .evidence-shell .tonapi-intelligence-grid,
+  .component-provenance {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-loading-head,
+  .skeleton-row {
+    grid-template-columns: 1fr;
+  }
+
+  .table-wrap {
+    max-width: 100%;
+  }
+}
