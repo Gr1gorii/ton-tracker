@@ -20,13 +20,13 @@ const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
 
 const navItems = [
-  "Dashboard",
-  "Providers",
-  "Pools",
-  "Wallets",
-  "Intelligence",
-  "Reports",
-  "Watchlist",
+  "DASHBOARD",
+  "PROVIDERS",
+  "WALLETS",
+  "JETTONS",
+  "STON.fi",
+  "REPORTS",
+  "SETTINGS",
 ];
 
 type WorkspaceView = "wallet" | "jettons" | "pools";
@@ -72,17 +72,17 @@ export default function App() {
   const providerTotal = providerSnapshot ? 5 : 0;
   const dataBadge =
     dataMode === "mock"
-      ? { label: "DATA MODE mock", className: "badge badge-mock" }
+      ? { label: "DATA MODE MOCK", className: "badge badge-mock" }
       : dataMode === "real"
-        ? { label: "DATA MODE real", className: "badge badge-real" }
-        : { label: "DATA MODE unknown", className: "badge badge-group" };
-  const sourceLabel = dataMode === "real" ? "live/preview" : "mock/offline";
+        ? { label: "DATA MODE REAL", className: "badge badge-real" }
+        : { label: "DATA MODE UNKNOWN", className: "badge badge-provider" };
+  const sourceLabel = dataMode === "real" ? "LIVE/PREVIEW" : "MOCK/OFFLINE";
   const bannerText =
     dataMode === "mock"
-      ? "v0.2.1 - mock mode is active. No real on-chain wallet data is used."
+      ? "v0.8.5 - mock mode is active. No real on-chain wallet data is used."
       : dataMode === "real"
-        ? "v0.2.1 - pool/token data may be real through GeckoTerminal, but wallets, balances, PnL and clusters are still mock."
-        : "v0.2.1 - pool/token data may be real in real mode, but wallet buyers, balances, PnL and clusters remain mock.";
+        ? "v0.8.5 - provider previews may use real sources, while legacy wallet buyers, PnL and clusters remain mock-aware."
+        : "v0.8.5 - provider previews are scoped. Legacy wallet buyers, PnL and clusters remain mock-aware.";
 
   async function handleAnalyze() {
     if (!poolUrl.trim()) {
@@ -167,11 +167,11 @@ export default function App() {
         <nav className="sidebar-nav" aria-label="Workspace navigation">
           {navItems.map((item) => (
             <button
-              className={item === "Dashboard" ? "nav-item nav-active" : "nav-item"}
+              className={item === "DASHBOARD" ? "nav-item nav-active" : "nav-item"}
               key={item}
               type="button"
             >
-              <span className="nav-icon">{item.slice(0, 1)}</span>
+              <span className="nav-prefix">&gt;</span>
               {item}
             </button>
           ))}
@@ -193,9 +193,9 @@ export default function App() {
           <div className="header-badges">
             <span className={dataBadge.className}>{dataBadge.label}</span>
             <span className="badge badge-provider">
-              providers {availableProviders}/{providerTotal || "-"}
+              PROVIDERS {availableProviders}/{providerTotal || "-"}
             </span>
-            <span className="badge badge-provider">ENV mainnet</span>
+            <span className="badge badge-provider">ENV MAINNET</span>
             <span className="badge badge-real">SOURCE {sourceLabel}</span>
           </div>
         </header>
@@ -400,10 +400,10 @@ function WorkspaceControl({
     <section className="workspace-control">
       <div className="workspace-control-head">
         <div>
-          <span className="section-eyebrow">Workspace quick jump</span>
+          <span className="section-eyebrow">Workspace preview router</span>
           <h2>Orient provider preview modules</h2>
         </div>
-        <span className="badge badge-provider">does not fetch data</span>
+        <span className="badge badge-provider">does not fetch all activity</span>
       </div>
 
       <div className="workspace-control-grid">
@@ -416,7 +416,7 @@ function WorkspaceControl({
             className="text-input"
             type="text"
             value={account}
-            placeholder="Paste TON wallet address"
+            placeholder="Paste TON wallet address for preview"
             onChange={(event) => onAccountChange(event.target.value)}
           />
         </div>
@@ -478,7 +478,7 @@ function WorkspaceControl({
 
         <div className="workspace-actions">
           <button className="btn btn-primary" type="button" onClick={onPreview}>
-            Go to selected module
+            Open selected preview
           </button>
           <button className="btn btn-ghost" type="button" onClick={onClear}>
             Clear
@@ -487,8 +487,9 @@ function WorkspaceControl({
       </div>
 
       <div className="workspace-control-note">
-        Quick jump only. Provider-specific panels below run the existing API
-        calls and keep their own inputs.
+        Quick jump only. Provider-specific panels below run existing API calls
+        and keep their own inputs. This panel does not fetch all wallet
+        activity.
         {hint && <span>{hint}</span>}
       </div>
     </section>
@@ -507,13 +508,20 @@ function EvidenceColumn({
       <section className="evidence-card">
         <div className="evidence-card-head">
           <h2>Evidence & limitations</h2>
-          <span className="badge badge-provider">visible scope</span>
+          <span className="badge badge-provider">VISIBLE SCOPE</span>
         </div>
+        <div className="evidence-group-label">Current data scope</div>
         <EvidenceItem
           tone="warning"
           title="Based only on account jetton data"
           text="Uses jetton wallet states for this account."
         />
+        <EvidenceItem
+          tone="info"
+          title="Can show provider preview rows"
+          text="Provider status, TonAPI jettons, lightweight jetton signals, and STON.fi pool previews."
+        />
+        <div className="evidence-group-label">Cannot show yet</div>
         <EvidenceItem
           tone="warning"
           title="Not full wallet intelligence"
@@ -524,6 +532,7 @@ function EvidenceColumn({
           title="No transaction history, PnL, or swaps"
           text="No transfers, swaps, or PnL calculations."
         />
+        <div className="evidence-group-label">Provider limitations</div>
         <EvidenceItem
           tone="info"
           title="Public mode may be rate limited"
@@ -543,8 +552,8 @@ function EvidenceColumn({
 
       <section className="evidence-card data-quality-card">
         <div className="evidence-card-head">
-          <h2>Data Quality</h2>
-          <span className="badge badge-provider">{dataMode}</span>
+          <h2>Data confidence</h2>
+          <span className="badge badge-provider">{dataMode.toUpperCase()}</span>
         </div>
         <QualityRow label="Completeness" value="Medium" tone="warning" />
         <QualityRow label="Freshness" value="High" tone="success" />

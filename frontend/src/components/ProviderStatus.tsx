@@ -11,30 +11,28 @@ interface Props {
   error?: string | null;
 }
 
-// Pick a status dot color: green = available, amber = configured but not
-// available, gray = not configured.
 function dotClass(info: ProviderStatusInfo): string {
   if (info.available) return "dot dot-green";
   if (info.configured) return "dot dot-amber";
   return "dot dot-gray";
 }
 
-function providerChip(label: string, info: ProviderStatusInfo): string {
+function providerMode(label: string, info: ProviderStatusInfo): string {
   const message = info.message.toLowerCase();
+  if (label === "Bitquery" && message.includes("coverage")) return "limited";
   if (!info.configured || !info.available) return "unavailable";
-  if (message.includes("mock")) return "mock/offline";
+  if (message.includes("mock")) return "preview";
   if (message.includes("public mode") || message.includes("rate limit")) {
     return "public mode";
   }
-  if (label === "Bitquery" && message.includes("coverage")) return "limited";
   return "real";
 }
 
-function providerChipClass(chip: string): string {
-  if (chip === "real") return "provider-chip provider-chip-real";
-  if (chip === "public mode") return "provider-chip provider-chip-warning";
-  if (chip === "limited") return "provider-chip provider-chip-warning";
-  if (chip === "mock/offline") return "provider-chip provider-chip-muted";
+function providerChipClass(mode: string): string {
+  if (mode === "real") return "provider-chip provider-chip-real";
+  if (mode === "public mode") return "provider-chip provider-chip-warning";
+  if (mode === "limited") return "provider-chip provider-chip-warning";
+  if (mode === "preview") return "provider-chip provider-chip-muted";
   return "provider-chip provider-chip-error";
 }
 
@@ -57,9 +55,15 @@ function providerShortMessage(label: string, info: ProviderStatusInfo): string {
 }
 
 function providerStateLine(info: ProviderStatusInfo): string {
-  if (info.configured && info.available) return "configured and available";
-  if (info.configured) return "configured, unavailable";
-  return "not configured";
+  if (info.configured && info.available) return "online";
+  if (info.configured) return "degraded";
+  return "offline";
+}
+
+function providerStatusClass(info: ProviderStatusInfo): string {
+  if (info.available) return "provider-status-value provider-status-online";
+  if (info.configured) return "provider-status-value provider-status-degraded";
+  return "provider-status-value provider-status-offline";
 }
 
 function ProviderRow({
@@ -69,16 +73,20 @@ function ProviderRow({
   label: string;
   info: ProviderStatusInfo;
 }) {
-  const chip = providerChip(label, info);
+  const mode = providerMode(label, info);
   return (
-    <div className="provider-row" title={info.message}>
-      <div className="provider-row-top">
+    <div className="provider-matrix-row" title={info.message} role="row">
+      <div className="provider-source-cell" role="cell">
         <span className={dotClass(info)} />
         <span className="provider-name">{label}</span>
-        <span className={providerChipClass(chip)}>{chip}</span>
       </div>
-      <span className="provider-health-line">{providerStateLine(info)}</span>
-      <span className="provider-msg muted small">
+      <span className={providerStatusClass(info)} role="cell">
+        {providerStateLine(info)}
+      </span>
+      <span className={providerChipClass(mode)} role="cell">
+        {mode}
+      </span>
+      <span className="provider-msg muted small" role="cell">
         {providerShortMessage(label, info)}
       </span>
     </div>
@@ -134,13 +142,19 @@ export default function ProviderStatus({
       )}
 
       {error && (
-        <div className="muted small">
+        <div className="state-box error-box provider-status-error">
           Could not load provider status: {error}
         </div>
       )}
 
       {providers && (
-        <div className="provider-rows">
+        <div className="provider-matrix" role="table" aria-label="Provider evidence matrix">
+          <div className="provider-matrix-row provider-matrix-head" role="row">
+            <span role="columnheader">Source</span>
+            <span role="columnheader">Status</span>
+            <span role="columnheader">Mode</span>
+            <span role="columnheader">Limitation</span>
+          </div>
           <ProviderRow label="GeckoTerminal" info={providers.geckoterminal} />
           {providers.stonfi && (
             <ProviderRow label="STON.fi" info={providers.stonfi} />
