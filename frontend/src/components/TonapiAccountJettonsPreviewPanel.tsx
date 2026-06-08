@@ -9,6 +9,15 @@ import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
 import PreviewReadinessStrip, {
   type PreviewReadinessTone,
 } from "./PreviewReadinessStrip";
+import {
+  type AccountPreviewRequestSnapshot,
+  type ProviderPreviewRunUpdate,
+  clampPreviewLimit,
+  displayPreviewValue,
+  formatPreviewRequestedAt,
+  previewAccountLabel,
+  previewLimitLabel,
+} from "./providerPreviewUtils";
 
 const SCOPE_NOTE =
   "TonAPI preview shows account jetton data only; it is not full wallet intelligence yet.";
@@ -28,49 +37,6 @@ interface TonapiAccountJettonsPreviewPanelProps {
   onPreviewRunStateChange?: (update: ProviderPreviewRunUpdate) => void;
 }
 
-interface ProviderPreviewRunUpdate {
-  status: "idle" | "running" | "success" | "error";
-  message: string;
-  accountAddress?: string;
-  limit?: string;
-}
-
-interface PreviewRequestSnapshot {
-  accountAddress: string;
-  limit: string;
-  requestedAt: string;
-}
-
-function displayValue(value: string | number | boolean | null | undefined): string {
-  if (value === null || value === undefined || value === "") return "-";
-  return String(value);
-}
-
-function clampLimit(value: string): number | null {
-  if (!value.trim()) return 10;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  return Math.min(100, Math.max(1, Math.trunc(parsed)));
-}
-
-function currentLimitLabel(value: string): string {
-  const safeLimit = clampLimit(value);
-  if (safeLimit === null) return value.trim() || "Invalid";
-  return String(safeLimit);
-}
-
-function accountLabel(value: string): string {
-  return value.trim() || "-";
-}
-
-function formatPreviewRequestedAt(date: Date): string {
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
 function jettonKey(jetton: TonapiJettonPreview, index: number): string {
   return [
     jetton.wallet_address,
@@ -86,15 +52,15 @@ function jettonLabel(jetton: TonapiJettonPreview): string {
   const symbol = jetton.jetton_symbol;
   const name = jetton.jetton_name;
   if (symbol && name) return `${symbol} - ${name}`;
-  return displayValue(symbol ?? name);
+  return displayPreviewValue(symbol ?? name);
 }
 
 function priceValue(jetton: TonapiJettonPreview): string {
-  return displayValue(jetton.price_usd ?? jetton.price);
+  return displayPreviewValue(jetton.price_usd ?? jetton.price);
 }
 
 function sourceClass(source: string | null | undefined): string {
-  const normalized = displayValue(source).toLowerCase();
+  const normalized = displayPreviewValue(source).toLowerCase();
   if (normalized === "real" || normalized.includes("tonapi")) {
     return "source-badge source-real";
   }
@@ -121,7 +87,7 @@ export default function TonapiAccountJettonsPreviewPanel({
   const [result, setResult] =
     useState<TonapiAccountJettonsPreviewResponse | null>(null);
   const [resultSnapshot, setResultSnapshot] =
-    useState<PreviewRequestSnapshot | null>(null);
+    useState<AccountPreviewRequestSnapshot | null>(null);
   const activeRequestId = useRef(0);
 
   useEffect(() => {
@@ -168,7 +134,7 @@ export default function TonapiAccountJettonsPreviewPanel({
       return;
     }
 
-    const safeLimit = clampLimit(limit);
+    const safeLimit = clampPreviewLimit(limit);
     if (safeLimit === null) {
       const message = "Limit must be a number from 1 to 100.";
       setRequestError(message);
@@ -229,8 +195,8 @@ export default function TonapiAccountJettonsPreviewPanel({
   }
 
   const currentAccount = accountAddress.trim();
-  const currentLimit = currentLimitLabel(limit);
-  const limitIsValid = clampLimit(limit) !== null;
+  const currentLimit = previewLimitLabel(limit);
+  const limitIsValid = clampPreviewLimit(limit) !== null;
   const accountIsReady = currentAccount.length > 0;
   const resultIsStale = resultSnapshot
     ? resultSnapshot.accountAddress !== currentAccount ||
@@ -394,7 +360,7 @@ export default function TonapiAccountJettonsPreviewPanel({
             isStale: resultIsStale,
             requestedAt: resultSnapshot.requestedAt,
             requestedAccount: resultSnapshot.accountAddress,
-            currentAccount: accountLabel(currentAccount),
+            currentAccount: previewAccountLabel(currentAccount),
             requestedLimit: resultSnapshot.limit,
             currentLimit,
           }}
@@ -463,7 +429,7 @@ function TonapiPreviewResults({
         <div className="stat-card">
           <div className="stat-label">Account</div>
           <div className="stat-value mono tonapi-account-stat">
-            {displayValue(result.account_address)}
+            {displayPreviewValue(result.account_address)}
           </div>
         </div>
         <div className="stat-card">
@@ -540,7 +506,7 @@ function ProviderMessages({
         <div className="state-box error-box tonapi-provider-error">
           <strong>Provider returned an error.</strong>
           <div className="small">
-            {displayValue(error.code)}: {error.message}
+            {displayPreviewValue(error.code)}: {error.message}
           </div>
           {error.diagnostic && (
             <div className="small">Diagnostic: {error.diagnostic}</div>
@@ -609,30 +575,30 @@ function JettonsPreviewTable({ jettons }: { jettons: TonapiJettonPreview[] }) {
                 <tr key={jettonKey(jetton, index)}>
                   <td title={jettonLabel(jetton)}>
                     <div className="asset-cell">
-                      <strong>{displayValue(jetton.jetton_symbol)}</strong>
+                      <strong>{displayPreviewValue(jetton.jetton_symbol)}</strong>
                       <span className="cell-sub">jetton</span>
                     </div>
                   </td>
-                  <td title={displayValue(jetton.jetton_name)}>
-                    {displayValue(jetton.jetton_name)}
+                  <td title={displayPreviewValue(jetton.jetton_name)}>
+                    {displayPreviewValue(jetton.jetton_name)}
                   </td>
-                  <td className="num">{displayValue(jetton.balance)}</td>
+                  <td className="num">{displayPreviewValue(jetton.balance)}</td>
                   <td className="num">{priceValue(jetton)}</td>
                   <td>
                     <AddressCell
                       label="jetton address"
-                      value={displayValue(jetton.jetton_address)}
+                      value={displayPreviewValue(jetton.jetton_address)}
                     />
                   </td>
                   <td>
                     <AddressCell
                       label="wallet contract"
-                      value={displayValue(jetton.wallet_contract_address)}
+                      value={displayPreviewValue(jetton.wallet_contract_address)}
                     />
                   </td>
                   <td>
                     <span className={sourceClass(jetton.source)}>
-                      {displayValue(jetton.source)}
+                      {displayPreviewValue(jetton.source)}
                     </span>
                   </td>
                 </tr>

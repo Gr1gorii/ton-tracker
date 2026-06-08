@@ -8,6 +8,14 @@ import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
 import PreviewReadinessStrip, {
   type PreviewReadinessTone,
 } from "./PreviewReadinessStrip";
+import {
+  type LimitPreviewRequestSnapshot,
+  type ProviderPreviewRunUpdate,
+  clampPreviewLimit,
+  displayPreviewValue,
+  formatPreviewRequestedAt,
+  previewLimitLabel,
+} from "./providerPreviewUtils";
 
 const SCOPE_NOTE =
   "STON.fi data covers STON.fi DEX pools only, not all TON DeFi.";
@@ -20,44 +28,6 @@ interface StonfiPoolsPreviewPanelProps {
   runRequestId: number;
   onLimitChange: (value: string) => void;
   onPreviewRunStateChange?: (update: ProviderPreviewRunUpdate) => void;
-}
-
-interface ProviderPreviewRunUpdate {
-  status: "idle" | "running" | "success" | "error";
-  message: string;
-  accountAddress?: string;
-  limit?: string;
-}
-
-interface PreviewRequestSnapshot {
-  limit: string;
-  requestedAt: string;
-}
-
-function displayValue(value: string | number | boolean | null | undefined): string {
-  if (value === null || value === undefined || value === "") return "-";
-  return String(value);
-}
-
-function clampLimit(value: string): number | null {
-  if (!value.trim()) return 10;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return null;
-  return Math.min(100, Math.max(1, Math.trunc(parsed)));
-}
-
-function currentLimitLabel(value: string): string {
-  const safeLimit = clampLimit(value);
-  if (safeLimit === null) return value.trim() || "Invalid";
-  return String(safeLimit);
-}
-
-function formatPreviewRequestedAt(date: Date): string {
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
 }
 
 function poolKey(pool: StonfiPoolPreview, index: number): string {
@@ -76,22 +46,22 @@ function tokenPair(pool: StonfiPoolPreview): string {
   const token0 = pool.token0_symbol || pool.token0_address;
   const token1 = pool.token1_symbol || pool.token1_address;
   if (!token0 && !token1) return "-";
-  return `${displayValue(token0)} / ${displayValue(token1)}`;
+  return `${displayPreviewValue(token0)} / ${displayPreviewValue(token1)}`;
 }
 
 function liquidityValue(pool: StonfiPoolPreview): string {
-  return displayValue(pool.liquidity_usd ?? pool.lp_total_supply_usd);
+  return displayPreviewValue(pool.liquidity_usd ?? pool.lp_total_supply_usd);
 }
 
 function reserveValue(pool: StonfiPoolPreview): string {
   const reserve0 = pool.reserve0 ?? pool.token0_balance;
   const reserve1 = pool.reserve1 ?? pool.token1_balance;
   if (reserve0 === undefined && reserve1 === undefined) return "-";
-  return `${displayValue(reserve0)} / ${displayValue(reserve1)}`;
+  return `${displayPreviewValue(reserve0)} / ${displayPreviewValue(reserve1)}`;
 }
 
 function sourceClass(source: string | null | undefined): string {
-  const normalized = displayValue(source).toLowerCase();
+  const normalized = displayPreviewValue(source).toLowerCase();
   if (normalized === "real" || normalized.includes("ston")) {
     return "source-badge source-real";
   }
@@ -115,7 +85,7 @@ export default function StonfiPoolsPreviewPanel({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<StonfiPoolsPreviewResponse | null>(null);
   const [resultSnapshot, setResultSnapshot] =
-    useState<PreviewRequestSnapshot | null>(null);
+    useState<LimitPreviewRequestSnapshot | null>(null);
   const activeRequestId = useRef(0);
 
   useEffect(() => {
@@ -143,7 +113,7 @@ export default function StonfiPoolsPreviewPanel({
 
   async function handlePreview() {
     setError(null);
-    const safeLimit = clampLimit(limit);
+    const safeLimit = clampPreviewLimit(limit);
     if (safeLimit === null) {
       const message = "Limit must be a number from 1 to 100.";
       setError(message);
@@ -201,8 +171,8 @@ export default function StonfiPoolsPreviewPanel({
     }
   }
 
-  const currentLimit = currentLimitLabel(limit);
-  const limitIsValid = clampLimit(limit) !== null;
+  const currentLimit = previewLimitLabel(limit);
+  const limitIsValid = clampPreviewLimit(limit) !== null;
   const resultIsStale = resultSnapshot
     ? resultSnapshot.limit !== currentLimit
     : false;
@@ -476,7 +446,7 @@ function ProviderMessages({
         <div className="state-box error-box stonfi-provider-error">
           <strong>Provider returned an error.</strong>
           <div className="small">
-            {displayValue(error.code)}: {error.message}
+            {displayPreviewValue(error.code)}: {error.message}
           </div>
         </div>
       )}
@@ -538,7 +508,7 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
                   <td>
                     <AddressCell
                       label="pool address"
-                      value={displayValue(pool.address)}
+                      value={displayPreviewValue(pool.address)}
                     />
                     {pool.deprecated && (
                       <div className="cell-sub pool-flag">deprecated</div>
@@ -553,17 +523,17 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
                   <td>
                     <AddressCell
                       label="router address"
-                      value={displayValue(pool.router_address)}
+                      value={displayPreviewValue(pool.router_address)}
                     />
                   </td>
                   <td className="num">{liquidityValue(pool)}</td>
-                  <td className="num">{displayValue(pool.volume_24h_usd)}</td>
+                  <td className="num">{displayPreviewValue(pool.volume_24h_usd)}</td>
                   <td className="mono reserve-cell">{reserveValue(pool)}</td>
                   <td className="num apy-cell">
-                    <div>{displayValue(pool.apy_1d)} 1d</div>
+                    <div>{displayPreviewValue(pool.apy_1d)} 1d</div>
                     <div className="cell-sub">
-                      {displayValue(pool.apy_7d)} 7d /{" "}
-                      {displayValue(pool.apy_30d)} 30d
+                      {displayPreviewValue(pool.apy_7d)} 7d /{" "}
+                      {displayPreviewValue(pool.apy_30d)} 30d
                     </div>
                   </td>
                   <td>
@@ -581,7 +551,7 @@ function PoolsPreviewTable({ pools }: { pools: StonfiPoolPreview[] }) {
                   </td>
                   <td>
                     <span className={sourceClass(pool.source)}>
-                      {displayValue(pool.source)}
+                      {displayPreviewValue(pool.source)}
                     </span>
                   </td>
                 </tr>
