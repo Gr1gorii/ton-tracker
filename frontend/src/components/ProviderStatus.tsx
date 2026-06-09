@@ -20,11 +20,11 @@ function dotClass(info: ProviderStatusInfo): string {
 function providerMode(label: string, info: ProviderStatusInfo): string {
   const message = info.message.toLowerCase();
   if (label === "Bitquery" && message.includes("coverage")) return "limited";
-  if (!info.configured || !info.available) return "unavailable";
-  if (message.includes("mock")) return "preview";
+  if (info.available && message.includes("mock")) return "preview";
   if (message.includes("public mode") || message.includes("rate limit")) {
     return "public mode";
   }
+  if (!info.configured || !info.available) return "unavailable";
   return "real";
 }
 
@@ -55,7 +55,7 @@ function providerShortMessage(label: string, info: ProviderStatusInfo): string {
 }
 
 function providerStateLine(info: ProviderStatusInfo): string {
-  if (info.configured && info.available) return "online";
+  if (info.available) return "online";
   if (info.configured) return "degraded";
   return "offline";
 }
@@ -93,6 +93,19 @@ function ProviderRow({
   );
 }
 
+function providerRows(
+  providers: ProvidersStatus,
+): Array<[string, ProviderStatusInfo]> {
+  const rows: Array<[string, ProviderStatusInfo]> = [
+    ["GeckoTerminal", providers.geckoterminal],
+  ];
+  if (providers.stonfi) rows.push(["STON.fi", providers.stonfi]);
+  if (providers.tonapi) rows.push(["TonAPI", providers.tonapi]);
+  rows.push(["Bitquery", providers.bitquery]);
+  rows.push(["TON provider", providers.ton_provider]);
+  return rows;
+}
+
 const componentLabels: Array<[keyof DataQualityComponents, string]> = [
   ["pool_data", "Pool data"],
   ["token_data", "Token data"],
@@ -122,6 +135,15 @@ export default function ProviderStatus({
   const isRealMode = mode === "real";
   const modeLabel =
     mode === "real" ? "Real mode" : mode === "mock" ? "Mock mode" : "Unknown mode";
+  const rows = providers ? providerRows(providers) : [];
+  const onlineCount = rows.filter(([, info]) => info.available).length;
+  const degradedCount = rows.filter(
+    ([, info]) => !info.available && info.configured,
+  ).length;
+  const offlineCount = rows.filter(
+    ([, info]) => !info.available && !info.configured,
+  ).length;
+  const endpointSummaryLabel = `Provider status endpoint returned ${rows.length} providers: ${onlineCount} online, ${degradedCount} degraded, ${offlineCount} offline.`;
 
   return (
     <section className="provider-status-card">
@@ -148,23 +170,42 @@ export default function ProviderStatus({
       )}
 
       {providers && (
-        <div className="provider-matrix" role="table" aria-label="Provider evidence matrix">
-          <div className="provider-matrix-row provider-matrix-head" role="row">
-            <span role="columnheader">Source</span>
-            <span role="columnheader">Status</span>
-            <span role="columnheader">Mode</span>
-            <span role="columnheader">Limitation</span>
+        <>
+          <div
+            className="provider-endpoint-summary"
+            role="status"
+            aria-label={endpointSummaryLabel}
+          >
+            <div>
+              <span>Endpoint coverage</span>
+              <strong>{rows.length}/5 providers</strong>
+            </div>
+            <div>
+              <span>Runtime state</span>
+              <strong>
+                {onlineCount} online / {degradedCount} degraded /{" "}
+                {offlineCount} offline
+              </strong>
+            </div>
+            <p>Status endpoint only; no network probe is performed here.</p>
           </div>
-          <ProviderRow label="GeckoTerminal" info={providers.geckoterminal} />
-          {providers.stonfi && (
-            <ProviderRow label="STON.fi" info={providers.stonfi} />
-          )}
-          {providers.tonapi && (
-            <ProviderRow label="TonAPI" info={providers.tonapi} />
-          )}
-          <ProviderRow label="Bitquery" info={providers.bitquery} />
-          <ProviderRow label="TON provider" info={providers.ton_provider} />
-        </div>
+
+          <div
+            className="provider-matrix"
+            role="table"
+            aria-label="Provider evidence matrix"
+          >
+            <div className="provider-matrix-row provider-matrix-head" role="row">
+              <span role="columnheader">Source</span>
+              <span role="columnheader">Status</span>
+              <span role="columnheader">Mode</span>
+              <span role="columnheader">Limitation</span>
+            </div>
+            {rows.map(([label, info]) => (
+              <ProviderRow key={label} label={label} info={info} />
+            ))}
+          </div>
+        </>
       )}
 
       {dataQuality?.components && (

@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.10.1 RC";
+const RELEASE_LABEL = "v0.10.2 RC";
 
 const navItems = [
   "DASHBOARD",
