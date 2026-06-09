@@ -45,7 +45,7 @@ class WalletAccumulator:
             self.total_sold_usd += usd_amount
 
         trade_time = trade["block_time"]
-        trade_dt = datetime.fromisoformat(trade_time)
+        trade_dt = _parse_block_time(trade_time)
         if self.first_trade_dt is None or trade_dt < self.first_trade_dt:
             self.first_trade_dt = trade_dt
             self.first_trade_time = trade_time
@@ -99,6 +99,10 @@ def _build_wallet_rows(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
         wallets,
         key=lambda row: (-Decimal(row["total_bought_usd"]), row["wallet"]),
     )
+
+
+def _parse_block_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _wallet_row(acc: WalletAccumulator) -> dict[str, Any]:
