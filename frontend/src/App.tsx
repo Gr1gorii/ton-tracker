@@ -19,6 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
+const RELEASE_LABEL = "v0.10.0 RC";
 
 const navItems = [
   "DASHBOARD",
@@ -132,6 +133,11 @@ export default function App() {
       ].filter((item) => item?.available).length
     : 0;
   const providerTotal = providerSnapshot ? 5 : 0;
+  const providerBadgeText = providerSnapshot
+    ? `PROVIDERS ${availableProviders}/${providerTotal}`
+    : providersError
+      ? "PROVIDERS ERROR"
+      : "PROVIDERS LOADING";
   const dataBadge =
     dataMode === "mock"
       ? { label: "DATA MODE MOCK", className: "badge badge-mock" }
@@ -349,7 +355,7 @@ export default function App() {
         <div className="sidebar-status">
           <span>Data mode</span>
           <strong>{dataMode}</strong>
-          <small>Real data labels enabled</small>
+          <small>Provider scope visible</small>
         </div>
       </aside>
 
@@ -361,9 +367,8 @@ export default function App() {
           </div>
           <div className="header-badges">
             <span className={dataBadge.className}>{dataBadge.label}</span>
-            <span className="badge badge-provider">
-              PROVIDERS {availableProviders}/{providerTotal || "-"}
-            </span>
+            <span className="badge badge-provider">{providerBadgeText}</span>
+            <span className="badge badge-real">RELEASE {RELEASE_LABEL}</span>
             <span className="badge badge-provider">ENV MAINNET</span>
             <span className="badge badge-real">SOURCE {sourceLabel}</span>
           </div>
@@ -847,7 +852,7 @@ function EvidenceColumn({
       <section className="evidence-card release-readiness-card">
         <div className="evidence-card-head">
           <h2>Release readiness</h2>
-          <span className="badge badge-real">PREVIEW QA</span>
+          <span className="badge badge-real">{RELEASE_LABEL}</span>
         </div>
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />

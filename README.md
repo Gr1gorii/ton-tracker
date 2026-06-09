@@ -1,24 +1,25 @@
-# TON Wallet Intelligence Dashboard — v0.2
+# TON Wallet Intelligence Dashboard — v0.10.0 RC
 
-A local prototype that analyzes wallets which bought a token in a chosen time
-window on a TON pool, computes realised / unrealised PnL, surfaces interesting
-wallets and shared holdings, and groups wallets into **possible** behavioral
-clusters.
+A local crypto intelligence dashboard for TON wallets, provider previews, and
+mock-aware wallet analytics. The current release candidate focuses on a
+data-honest workspace: provider status, shared preview inputs, scoped TonAPI /
+STON.fi previews, explicit unavailable-data states, and legacy mock-aware
+wallet reports.
 
-> **v0.2 status — real data adapter layer.**
-> - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`. Mock mode is fully
->   functional and uses **realistic mock data**.
-> - In `real` mode, **GeckoTerminal pool/token data can be real** (public API,
->   no key). If it fails, the app falls back to mock data and warns — it never
->   crashes.
-> - **Wallet-level analysis (buyers, PnL, clustering) is still mock** in v0.2.
->   TonAPI/Toncenter and Bitquery adapters are scaffolded but not implemented;
->   without keys they return a clear `provider_not_configured` status.
-> - Every analysis response carries a `data_quality` block stating exactly
->   what is real vs mock for that run.
-> - Wallet clustering is **probabilistic** — similarity signals only, **not
->   proof of common ownership**.
-> - The app does **not** perform real on-chain wallet analysis yet.
+> **v0.10.0 RC status — wallet intelligence release candidate.**
+> - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
+> - Provider previews are available for TonAPI account jettons, TonAPI
+>   jettons-only wallet intelligence, and STON.fi pools.
+> - Provider preview panels use shared workspace inputs and show fresh/stale,
+>   ready/running/error, and scoped-data states.
+> - Legacy buyers, PnL, exports, clustering, and interesting-wallet reports
+>   remain mock-aware and separate from provider previews.
+> - Bitquery TON coverage remains limited/unavailable in the current schema;
+>   Bitquery and import tools are marked as experimental/provider-limited.
+> - Every provider-limited surface avoids hidden fallback claims. Missing data
+>   stays visible instead of being inferred.
+> - Wallet clustering is probabilistic: similarity signals only, not proof of
+>   common ownership.
 
 ---
 
@@ -48,16 +49,27 @@ backend/
   schemas.py           Pydantic request/response schemas
   database.py          SQLite engine + session
   conftest.py          Test path setup
+  routers/
+    tonapi.py          TonAPI account jettons + wallet intelligence previews
+    stonfi.py          STON.fi pools preview
+    bitquery.py        Bitquery token trades preview/analysis
+    import_trades.py   CSV/JSON trade import preview/analysis
   services/
     analysis.py        Orchestration + data_quality + provider status
     pnl.py             Decimal-based PnL calculations
     clustering.py      Probabilistic wallet similarity / grouping
     mock_data.py       Hand-crafted mock token/pool/wallet fixtures
     export.py          CSV / JSON serialization
+    import_parser.py   CSV/JSON trade parsing
+    import_analysis.py Imported-trade wallet analysis
+    tonapi_wallet_intelligence.py
+                         Jettons-only wallet intelligence preview builder
   adapters/
     geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
-    ton_provider.py    Wallet balances/transfers — mock or (later) real
-    bitquery.py        DEX trades — mock or (later) real Bitquery
+    tonapi.py          TonAPI account jettons preview adapter
+    stonfi.py          STON.fi pools preview adapter
+    bitquery.py        DEX trades — mock/provider-limited Bitquery
+    ton_provider.py    Legacy TON provider status/scaffold
   tests/               pytest suite (parser, config, data_quality, PnL, clustering)
 
 frontend/
@@ -74,6 +86,13 @@ frontend/
       PoolUrlInput.tsx
       TimeWindowPicker.tsx
       ProviderStatus.tsx
+      PreviewReadinessStrip.tsx
+      PreviewFreshnessStrip.tsx
+      TonapiWalletIntelligencePreviewPanel.tsx
+      TonapiAccountJettonsPreviewPanel.tsx
+      StonfiPoolsPreviewPanel.tsx
+      BitqueryTokenTradesPanel.tsx
+      ImportPreviewPanel.tsx
       TokenOverview.tsx
       BuyersTable.tsx
       WalletGroups.tsx
@@ -126,7 +145,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.2)
+## Data modes & providers (v0.10.0 RC)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -140,29 +159,39 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | `BITQUERY_API_URL`       | Bitquery endpoint (real DEX trades)                |
 | `BITQUERY_API_KEY`       | Bitquery API key                                   |
 
-What is real vs mock in v0.2:
+What is real, preview-only, and mock-aware in the RC:
 
-| Data                              | mock mode | real mode                          |
-| --------------------------------- | --------- | ---------------------------------- |
-| Pool / token info                 | mock      | **real** GeckoTerminal (or fallback) |
-| Buyers, balances, PnL, clustering | mock      | mock (real not implemented)        |
+| Surface                                      | mock mode       | real mode / provider mode                         |
+| -------------------------------------------- | --------------- | ------------------------------------------------- |
+| Pool / token info for legacy analysis        | mock            | GeckoTerminal when available, with fallback notes |
+| TonAPI account jettons preview               | mock/offline    | TonAPI/public API when available                  |
+| TonAPI wallet intelligence preview           | jettons-only    | jettons-only; not full wallet intelligence        |
+| STON.fi pools preview                        | mock/offline    | STON.fi pools only                                |
+| Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
+| Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
+| Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
-**Data mode / Provider status** panel reflecting `GET /api/providers/status`.
-A missing TON/Bitquery key yields a clear `provider_not_configured` status —
-the backend never crashes.
+**Data mode / Provider status** panel reflecting `GET /api/providers/status`,
+plus release-readiness and evidence cards that state current limitations.
+Missing provider coverage is displayed as unavailable/provider-limited instead
+of being silently inferred.
 
 ---
 
 ## API
 
 ### `GET /api/health`
-Returns service status, version, and current `data_mode`.
+Returns service status, backend API version, and current `data_mode`.
+
+Note: the backend `version` field currently remains `0.2.1`; `v0.10.0 RC`
+is the product/release-candidate label for the current frontend and provider
+preview workspace.
 
 ### `GET /api/providers/status`
-Returns `data_mode` plus `{configured, available, message}` for GeckoTerminal,
-the TON provider, and Bitquery.
+Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
+provider, Bitquery, STON.fi, and TonAPI.
 
 ### `POST /api/analyze`
 Request body:
@@ -184,6 +213,35 @@ candidate clusters, common holdings, interesting wallets, a summary, the
 Download placeholders. They run a fresh mock analysis and stream it back as a
 downloadable CSV (wallet table) or JSON (full payload). Optional query params:
 `pool_url`, `time_window`.
+
+### `GET /api/tonapi/account-jettons/preview`
+Returns a scoped TonAPI account jettons preview for `account_address` and
+`limit`. This is account jetton data only.
+
+### `GET /api/tonapi/wallet-intelligence/preview`
+Builds a jettons-only wallet intelligence preview from TonAPI account jetton
+data. It does not include full transaction history, PnL, DEX swaps, current TON
+balance, or full on-chain behavior.
+
+### `GET /api/stonfi/pools/preview`
+Returns a scoped STON.fi pools preview for `limit`. It covers STON.fi DEX pools
+only, not all TON DeFi.
+
+### `POST /api/bitquery/token-trades/preview`
+Returns a Bitquery token-trades preview when provider coverage is available.
+Current TON coverage may be unavailable/provider-limited.
+
+### `POST /api/bitquery/token-trades/analyze`
+Runs imported-trade-style wallet analysis from fetched Bitquery DEX trades.
+It does not fetch wallet balances, current holdings, or full on-chain history.
+
+### `POST /api/import/trades/preview`
+Parses local CSV/JSON trade input and returns validation summary plus preview
+rows.
+
+### `POST /api/import/trades/analyze`
+Parses local CSV/JSON trade input and returns a simple per-wallet imported
+trade analysis.
 
 ---
 
@@ -227,11 +285,29 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Roadmap beyond v0.2
+## Release-candidate checklist
 
-- Implement real `adapters/ton_provider.py` against a TON indexer
-  (TonAPI / Toncenter) for real wallet balances, transactions and transfers.
-- Implement real `adapters/bitquery.py` for historical DEX trades, then derive
-  real per-wallet buy/sell aggregates for PnL + clustering.
+The `v0.10.0` release candidate is considered ready when:
+
+- the frontend builds with `npm run build`;
+- provider status, TonAPI previews, STON.fi preview, Bitquery/import tools, and
+  legacy mock-aware analysis render without layout overflow on desktop/mobile;
+- provider preview panels show ready/running/error/fresh/stale states honestly;
+- unavailable provider data stays visible and is not inferred;
+- accessibility pass remains intact for navigation, segmented controls, status
+  strips, loading states, and dashboard sections;
+- README and UI release labels both identify the product as `v0.10.0 RC`.
+
+## Roadmap beyond v0.10.0 RC
+
+- Promote the RC to a public release after end-to-end QA.
+- Decide whether backend `VERSION` should move from `0.2.1` to the product
+  release line, or remain an API-version field.
+- Implement real full-wallet activity ingestion for transfers, balances, swaps,
+  and transaction history.
+- Connect real wallet activity to buyers, PnL, clustering, and exports instead
+  of mock-aware legacy analysis.
+- Expand Bitquery or alternate DEX coverage for TON trade history.
 - Export specific stored runs by id instead of re-running an analysis.
-- Richer clustering features and confidence calibration.
+- Calibrate clustering confidence with richer features and clearer uncertainty
+  bands.
