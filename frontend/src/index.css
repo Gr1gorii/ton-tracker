@@ -2323,6 +2323,89 @@ body {
   gap: 8px;
 }
 
+.release-readiness-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.release-readiness-card .evidence-card-head {
+  margin-bottom: 0;
+}
+
+.release-readiness-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  background: rgba(0, 230, 118, 0.06);
+  border: 1px solid rgba(0, 230, 118, 0.22);
+  border-radius: 6px;
+}
+
+.release-readiness-led {
+  width: 9px;
+  height: 9px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: var(--peak-green);
+  box-shadow: 0 0 12px rgba(0, 255, 136, 0.42);
+}
+
+.release-readiness-summary strong,
+.release-readiness-item strong {
+  display: block;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+
+.release-readiness-summary p,
+.release-readiness-item p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.release-readiness-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.release-readiness-item {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 9px;
+  padding: 9px 0 0;
+  border-top: 1px solid rgba(71, 85, 105, 0.22);
+}
+
+.release-readiness-item > span {
+  align-self: start;
+  min-width: 0;
+  padding: 4px 5px;
+  border-radius: 999px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+  text-align: center;
+}
+
+.release-readiness-ready > span {
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.28);
+  color: var(--peak-green);
+}
+
+.release-readiness-scoped > span {
+  background: rgba(230, 180, 80, 0.1);
+  border: 1px solid rgba(230, 180, 80, 0.3);
+  color: var(--warning);
+}
+
 .quality-row {
   display: flex;
   align-items: center;
