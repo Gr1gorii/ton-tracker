@@ -28,8 +28,14 @@ export default function TimeWindowPicker({
 }: Props) {
   return (
     <div className="field">
-      <label className="field-label">Time window</label>
-      <div className="segmented">
+      <label className="field-label" id="time-window-label">
+        Time window
+      </label>
+      <div
+        className="segmented"
+        role="group"
+        aria-labelledby="time-window-label"
+      >
         {OPTIONS.map((opt) => (
           <button
             key={opt.value}
@@ -37,6 +43,7 @@ export default function TimeWindowPicker({
             className={`segment ${value === opt.value ? "segment-active" : ""}`}
             onClick={() => onChange(opt.value)}
             disabled={disabled}
+            aria-pressed={value === opt.value}
           >
             {opt.label}
           </button>

@@ -337,6 +337,8 @@ export default function App() {
               className={item === "DASHBOARD" ? "nav-item nav-active" : "nav-item"}
               key={item}
               type="button"
+              aria-current={item === "DASHBOARD" ? "page" : undefined}
+              aria-label={`${item} workspace section`}
             >
               <span className="nav-prefix">&gt;</span>
               {item}
@@ -508,8 +510,11 @@ export default function App() {
                   <div className="controls-actions">
                     <button
                       className="btn btn-primary"
+                      type="button"
                       onClick={handleAnalyze}
                       disabled={loading}
+                      aria-busy={loading}
+                      aria-label="Run mock-aware token and wallet analysis"
                     >
                       {loading ? "Analyzing..." : "Analyze"}
                     </button>
@@ -523,7 +528,10 @@ export default function App() {
                 </div>
 
                 {error && (
-                  <div className="state-box error-box dashboard-state">
+                  <div
+                    className="state-box error-box dashboard-state"
+                    role="alert"
+                  >
                     <strong>Request failed.</strong> {error}
                     <div className="muted small">
                       Is the backend running at <code>{API_BASE}</code>? Start it
@@ -533,13 +541,21 @@ export default function App() {
                 )}
 
                 {loading && (
-                  <div className="state-box loading-box dashboard-state">
-                    <span className="spinner" /> Crunching mock wallet data...
+                  <div
+                    className="state-box loading-box dashboard-state"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="spinner" aria-hidden="true" /> Crunching
+                    mock wallet data...
                   </div>
                 )}
 
                 {!loading && !result && !error && (
-                  <div className="state-box empty-box dashboard-state">
+                  <div
+                    className="state-box empty-box dashboard-state"
+                    role="note"
+                  >
                     Enter a TON pool URL and pick a time window, then press{" "}
                     <strong>Analyze</strong> to generate a mock-aware
                     intelligence report.
@@ -613,6 +629,8 @@ function WorkspaceControl({
   onClear: () => void;
 }) {
   const target = workspaceTargets[view];
+  const titleId = "workspace-control-title";
+  const noteId = "workspace-control-note";
   const statusLabel = runState?.status ?? "idle";
   const statusMessage =
     runState?.message ??
@@ -627,11 +645,16 @@ function WorkspaceControl({
   const isRunBusy = statusLabel === "queued" || statusLabel === "running";
 
   return (
-    <section className="workspace-control">
+    <section
+      className="workspace-control"
+      aria-labelledby={titleId}
+      aria-describedby={noteId}
+      aria-busy={isRunBusy}
+    >
       <div className="workspace-control-head">
         <div>
           <span className="section-eyebrow">Shared workspace control</span>
-          <h2>Provider preview command center</h2>
+          <h2 id={titleId}>Provider preview command center</h2>
         </div>
         <span className="badge badge-provider">scoped previews only</span>
       </div>
@@ -648,7 +671,11 @@ function WorkspaceControl({
             value={account}
             placeholder="Paste TON wallet address for preview"
             onChange={(event) => onAccountChange(event.target.value)}
+            aria-describedby="workspace-account-help"
           />
+          <span className="field-sublabel" id="workspace-account-help">
+            Used by TonAPI previews
+          </span>
         </div>
 
         <div className="field">
@@ -663,13 +690,22 @@ function WorkspaceControl({
             max={100}
             value={limit}
             onChange={(event) => onLimitChange(event.target.value)}
+            aria-describedby="workspace-limit-help"
           />
-          <span className="field-sublabel">1-100</span>
+          <span className="field-sublabel" id="workspace-limit-help">
+            1-100 rows
+          </span>
         </div>
 
         <div className="field workspace-view-field">
-          <span className="field-label">View</span>
-          <div className="workspace-segmented">
+          <span className="field-label" id="workspace-view-label">
+            View
+          </span>
+          <div
+            className="workspace-segmented"
+            role="group"
+            aria-labelledby="workspace-view-label"
+          >
             <button
               className={
                 view === "wallet"
@@ -678,6 +714,7 @@ function WorkspaceControl({
               }
               type="button"
               onClick={() => onViewChange("wallet")}
+              aria-pressed={view === "wallet"}
             >
               Wallet intelligence
             </button>
@@ -689,6 +726,7 @@ function WorkspaceControl({
               }
               type="button"
               onClick={() => onViewChange("jettons")}
+              aria-pressed={view === "jettons"}
             >
               Account jettons
             </button>
@@ -700,6 +738,7 @@ function WorkspaceControl({
               }
               type="button"
               onClick={() => onViewChange("pools")}
+              aria-pressed={view === "pools"}
             >
               STON.fi pools
             </button>
@@ -712,13 +751,25 @@ function WorkspaceControl({
             type="button"
             onClick={onRunPreview}
             disabled={isRunBusy}
+            aria-busy={isRunBusy}
+            aria-label={`Run ${target.label} from shared workspace inputs`}
           >
             {isRunBusy ? "Running selected preview" : "Run selected preview"}
           </button>
-          <button className="btn btn-ghost" type="button" onClick={onPreview}>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={onPreview}
+            aria-label={`Open ${target.label} panel`}
+          >
             Open selected preview
           </button>
-          <button className="btn btn-ghost" type="button" onClick={onClear}>
+          <button
+            className="btn btn-ghost"
+            type="button"
+            onClick={onClear}
+            aria-label="Clear shared workspace inputs"
+          >
             Clear
           </button>
         </div>
@@ -726,7 +777,9 @@ function WorkspaceControl({
 
       <div
         className={`workspace-orchestration workspace-orchestration-${statusLabel}`}
+        role="status"
         aria-live="polite"
+        aria-label={`Workspace run status: ${statusLabel}. ${statusMessage}`}
       >
         <div className="workspace-orchestration-item">
           <span>Selected module</span>
@@ -741,7 +794,7 @@ function WorkspaceControl({
           <strong>{runState?.limitLabel ?? limitLabel}</strong>
         </div>
         <div className="workspace-orchestration-status">
-          <span className="workspace-status-dot" />
+          <span className="workspace-status-dot" aria-hidden="true" />
           <strong>{statusLabel.toUpperCase()}</strong>
           {runState?.updatedAt && <span>{runState.updatedAt}</span>}
         </div>
@@ -763,7 +816,7 @@ function WorkspaceControl({
         </div>
       </div>
 
-      <div className="workspace-control-note">
+      <div className="workspace-control-note" id={noteId}>
         One shared input layer. TonAPI wallet intelligence and account jettons
         use address plus limit; STON.fi uses limit only. Every run stays scoped
         to a provider preview request.
@@ -797,7 +850,7 @@ function EvidenceColumn({
           <span className="badge badge-real">PREVIEW QA</span>
         </div>
         <div className="release-readiness-summary">
-          <span className="release-readiness-led" />
+          <span className="release-readiness-led" aria-hidden="true" />
           <div>
             <strong>Ready for scoped preview review</strong>
             <p>
@@ -933,7 +986,9 @@ function EvidenceItem({
 }) {
   return (
     <div className={`evidence-item evidence-${tone}`}>
-      <span className="evidence-icon">!</span>
+      <span className="evidence-icon" aria-hidden="true">
+        !
+      </span>
       <div>
         <strong>{title}</strong>
         <p>{text}</p>
@@ -978,19 +1033,24 @@ function DashboardSection({
   description: string;
   children: ReactNode;
 }) {
+  const titleId = id ? `${id}-title` : undefined;
+  const descriptionId = id ? `${id}-description` : undefined;
+
   return (
     <section
       className={
         className ? `dashboard-section ${className}` : "dashboard-section"
       }
       id={id}
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
     >
       <div className="dashboard-section-head">
         <div>
           <span className="section-eyebrow">{eyebrow}</span>
-          <h2>{title}</h2>
+          <h2 id={titleId}>{title}</h2>
         </div>
-        <p>{description}</p>
+        <p id={descriptionId}>{description}</p>
       </div>
       <div className="dashboard-section-body">{children}</div>
     </section>
