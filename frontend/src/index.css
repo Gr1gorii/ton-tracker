@@ -3227,6 +3227,45 @@ body {
   background: rgba(2, 6, 4, 0.38);
 }
 
+.provider-endpoint-summary {
+  display: grid;
+  grid-template-columns:
+    minmax(150px, 0.85fr)
+    minmax(220px, 1.1fr)
+    minmax(0, 1.4fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(0, 230, 118, 0.055);
+  border: 1px solid rgba(0, 230, 118, 0.18);
+  border-radius: 8px;
+}
+
+.provider-endpoint-summary span {
+  display: block;
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.provider-endpoint-summary strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.provider-endpoint-summary p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .provider-matrix-row {
   display: grid;
   grid-template-columns: minmax(150px, 1.1fr) minmax(86px, 0.55fr) minmax(112px, 0.7fr) minmax(180px, 1.6fr);
@@ -3602,6 +3641,14 @@ body {
   .provider-matrix-row {
     grid-template-columns: minmax(140px, 1.1fr) minmax(78px, 0.55fr) minmax(100px, 0.7fr) minmax(180px, 1.4fr);
   }
+
+  .provider-endpoint-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .provider-endpoint-summary p {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 760px) {
@@ -3635,6 +3682,14 @@ body {
   .provider-matrix {
     max-width: 100%;
     overflow-x: auto;
+  }
+
+  .provider-endpoint-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .provider-endpoint-summary p {
+    grid-column: auto;
   }
 
   .provider-matrix-row {
