@@ -158,8 +158,8 @@ export default function ProviderStatus({
 
       {isRealMode && (
         <div className="dq-critical">
-          Pool/token data may be real. Wallets, PnL and clusters are mock in
-          v0.2.1. Not real wallet-level analysis yet.
+          Pool/token data may be real. Legacy wallets, PnL and clusters remain
+          mock-aware. Not full real wallet-level analysis yet.
         </div>
       )}
 
