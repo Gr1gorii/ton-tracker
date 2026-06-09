@@ -575,7 +575,12 @@ export default function App() {
             </DashboardSection>
           </div>
 
-          <EvidenceColumn dataMode={dataMode} bannerText={bannerText} />
+          <EvidenceColumn
+            dataMode={dataMode}
+            bannerText={bannerText}
+            providerAvailable={availableProviders}
+            providerTotal={providerTotal}
+          />
         </main>
       </div>
     </div>
@@ -771,12 +776,60 @@ function WorkspaceControl({
 function EvidenceColumn({
   dataMode,
   bannerText,
+  providerAvailable,
+  providerTotal,
 }: {
   dataMode: string;
   bannerText: string;
+  providerAvailable: number;
+  providerTotal: number;
 }) {
+  const providerScopeText =
+    providerTotal > 0
+      ? `${providerAvailable}/${providerTotal} providers reported; missing coverage remains visible.`
+      : "Provider status loads from the backend; unavailable sources remain explicit.";
+
   return (
     <aside className="evidence-column">
+      <section className="evidence-card release-readiness-card">
+        <div className="evidence-card-head">
+          <h2>Release readiness</h2>
+          <span className="badge badge-real">PREVIEW QA</span>
+        </div>
+        <div className="release-readiness-summary">
+          <span className="release-readiness-led" />
+          <div>
+            <strong>Ready for scoped preview review</strong>
+            <p>
+              Core provider-preview flow is visible, bounded, and honest about
+              unavailable analytics.
+            </p>
+          </div>
+        </div>
+        <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Workspace routing"
+            text="Shared account, limit, selected module, and run status are visible before preview output."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Provider scope"
+            text={providerScopeText}
+          />
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Legacy analytics"
+            text="Buyers, PnL, clusters, and full activity history remain mock-aware or deferred."
+          />
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Data contract"
+            text="Preview panels do not infer hidden fallback data when a provider cannot supply it."
+          />
+        </div>
+      </section>
+
       <section className="evidence-card">
         <div className="evidence-card-head">
           <h2>Evidence & limitations</h2>
@@ -846,6 +899,26 @@ function EvidenceColumn({
         </div>
       </section>
     </aside>
+  );
+}
+
+function ReleaseReadinessItem({
+  tone,
+  label,
+  text,
+}: {
+  tone: "ready" | "scoped";
+  label: string;
+  text: string;
+}) {
+  return (
+    <div className={`release-readiness-item release-readiness-${tone}`}>
+      <span>{tone === "ready" ? "READY" : "SCOPED"}</span>
+      <div>
+        <strong>{label}</strong>
+        <p>{text}</p>
+      </div>
+    </div>
   );
 }
 
