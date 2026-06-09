@@ -24,10 +24,12 @@ export default function PreviewFreshnessStrip({
           ? "preview-freshness preview-freshness-stale"
           : "preview-freshness preview-freshness-fresh"
       }
+      role="status"
       aria-live="polite"
+      aria-label={`${isStale ? "Stale result" : "Fresh result"}. ${message}`}
     >
       <div className="preview-freshness-head">
-        <span className="preview-freshness-dot" />
+        <span className="preview-freshness-dot" aria-hidden="true" />
         <strong>{isStale ? "STALE RESULT" : "FRESH RESULT"}</strong>
         <span>Requested {requestedAt}</span>
       </div>
