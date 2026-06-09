@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.10.0 RC";
+const RELEASE_LABEL = "v0.10.1 RC";
 
 const navItems = [
   "DASHBOARD",
@@ -133,24 +133,38 @@ export default function App() {
       ].filter((item) => item?.available).length
     : 0;
   const providerTotal = providerSnapshot ? 5 : 0;
-  const providerBadgeText = providerSnapshot
-    ? `PROVIDERS ${availableProviders}/${providerTotal}`
+  const providerBadge = providerSnapshot
+    ? {
+        label: `PROVIDERS ${availableProviders}/${providerTotal}`,
+        className: "badge badge-provider",
+      }
     : providersError
-      ? "PROVIDERS ERROR"
-      : "PROVIDERS LOADING";
+      ? { label: "PROVIDERS ERROR", className: "badge badge-warning" }
+      : { label: "PROVIDERS LOADING", className: "badge badge-provider" };
   const dataBadge =
     dataMode === "mock"
       ? { label: "DATA MODE MOCK", className: "badge badge-mock" }
       : dataMode === "real"
         ? { label: "DATA MODE REAL", className: "badge badge-real" }
         : { label: "DATA MODE UNKNOWN", className: "badge badge-provider" };
-  const sourceLabel = dataMode === "real" ? "LIVE/PREVIEW" : "MOCK/OFFLINE";
+  const sourceLabel =
+    dataMode === "real"
+      ? "LIVE/PREVIEW"
+      : dataMode === "mock"
+        ? "MOCK/OFFLINE"
+        : "STATUS UNKNOWN";
+  const sourceBadgeClass =
+    dataMode === "real"
+      ? "badge badge-real"
+      : dataMode === "mock"
+        ? "badge badge-mock"
+        : "badge badge-warning";
   const bannerText =
     dataMode === "mock"
       ? "Mock mode is active. No real on-chain wallet data is used."
       : dataMode === "real"
         ? "Provider previews may use real sources, while legacy wallet buyers, PnL and clusters remain mock-aware."
-        : "Provider previews are scoped. Legacy wallet buyers, PnL and clusters remain mock-aware.";
+        : "Provider status is unavailable. Preview scopes remain visible; legacy wallet buyers, PnL and clusters remain mock-aware.";
 
   async function handleAnalyze() {
     if (!poolUrl.trim()) {
@@ -367,10 +381,12 @@ export default function App() {
           </div>
           <div className="header-badges">
             <span className={dataBadge.className}>{dataBadge.label}</span>
-            <span className="badge badge-provider">{providerBadgeText}</span>
+            <span className={providerBadge.className}>
+              {providerBadge.label}
+            </span>
             <span className="badge badge-real">RELEASE {RELEASE_LABEL}</span>
             <span className="badge badge-provider">ENV MAINNET</span>
-            <span className="badge badge-real">SOURCE {sourceLabel}</span>
+            <span className={sourceBadgeClass}>SOURCE {sourceLabel}</span>
           </div>
         </header>
 
