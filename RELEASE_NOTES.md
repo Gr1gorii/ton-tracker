@@ -1,6 +1,6 @@
-# TON Wallet Intelligence Dashboard - v0.10.4 RC
+# TON Wallet Intelligence Dashboard - v0.10.5 RC
 
-Release candidate handoff for the current wallet intelligence workspace.
+Final browser signoff handoff for the current wallet intelligence workspace.
 
 ## Release Scope
 
@@ -11,6 +11,9 @@ Release candidate handoff for the current wallet intelligence workspace.
   counts.
 - Evidence and data honesty cards for unavailable provider data, scoped
   previews, mock-aware legacy analytics, and provider limitations.
+- Final browser signoff marker in the release-readiness panel for desktop and
+  mobile QA.
+- Favicon configured so release browser QA has no missing asset console noise.
 - Legacy mock-aware token/wallet report with buyers, PnL, clustering, common
   holdings, interesting wallets, and exports.
 - Experimental Bitquery and CSV/JSON import tools remain explicitly
@@ -18,7 +21,7 @@ Release candidate handoff for the current wallet intelligence workspace.
 
 ## Current Data Contract
 
-- Product release label: `v0.10.4 RC`.
+- Product release label: `v0.10.5 RC`.
 - Backend API `VERSION` remains `0.2.1` and is documented as a separate API
   version field.
 - `DATA_MODE=mock` remains the default.
@@ -36,13 +39,15 @@ Use this checklist before promoting the RC:
 - `npm run build` from `frontend/`.
 - `.venv/bin/python -m pytest -q` from `backend/`.
 - Browser QA on desktop and mobile widths.
-- Confirm UI shows `RELEASE v0.10.4 RC`.
+- Confirm UI shows `RELEASE v0.10.5 RC`.
 - Confirm Provider Status can show `Endpoint coverage` and `5/5 providers`
   when the backend is running.
 - Confirm provider/source badges distinguish loading, error, mock/offline,
   live, and unknown states.
-- Confirm no user-facing UI copy shows stale product labels such as `v0.2.1`.
+- Confirm no user-facing UI copy shows stale product labels such as
+  `v0.10.4 RC` or `v0.2.1`.
 - Confirm horizontal page overflow is absent on desktop/mobile.
+- Confirm browser console has no runtime errors during initial dashboard load.
 
 ## Known Limitations
 
@@ -55,9 +60,9 @@ Use this checklist before promoting the RC:
 
 ## Recommended Next Step
 
-Promote this RC only after one final end-to-end browser pass with backend
-running. If more polish is needed, use a patch branch such as:
+Promote this RC after the final browser signoff is accepted. If release
+promotion prep needs a separate patch, use:
 
 ```bash
-git checkout -b v0.10.5-rc-final-browser-signoff
+git checkout -b v0.10.6-rc-release-promotion-prep
 ```

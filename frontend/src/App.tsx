@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.10.4 RC";
+const RELEASE_LABEL = "v0.10.5 RC";
 
 const navItems = [
   "DASHBOARD",
@@ -873,14 +873,19 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Ready for scoped preview review</strong>
+            <strong>Final browser signoff candidate</strong>
             <p>
-              Core provider-preview flow is visible, bounded, and honest about
-              unavailable analytics.
+              Core provider-preview flow is ready for desktop/mobile browser
+              verification and remains honest about unavailable analytics.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Browser QA"
+            text="Desktop and mobile signoff checks release labels, overflow, provider status, and console health."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Workspace routing"
