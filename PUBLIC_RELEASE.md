@@ -44,11 +44,12 @@ Before tagging `v0.10.7`, confirm:
 - Provider Status can show `Endpoint coverage` and `5/5 providers` when the
   backend is running.
 
-## Next Track
+## Next Tracks
 
-The next major track is `v0.11.1 SCHEMA`: wallet activity schema scaffolding.
-It should continue from the contract in `REAL_WALLET_INGESTION_PLAN.md` before
-adding provider calls:
+After this public baseline, `v0.11.1 SCHEMA` added wallet activity schema
+scaffolding and `v0.11.2 MOCK INGEST` proves that schema with deterministic
+mock-normalized ingestion. Real provider calls remain deferred behind the
+contract in `REAL_WALLET_INGESTION_PLAN.md`:
 
 - wallet transfers;
 - transaction history;
