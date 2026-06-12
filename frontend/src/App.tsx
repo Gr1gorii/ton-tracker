@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.10.7";
+const RELEASE_LABEL = "v0.11.0 PLAN";
 
 const navItems = [
   "DASHBOARD",
@@ -873,18 +873,18 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Public release polish</strong>
+            <strong>Real wallet ingestion planning</strong>
             <p>
-              Core provider-preview flow is public-release ready, with browser
-              signoff and data-scope limits carried forward.
+              The public-release baseline is stable; the next track defines
+              real wallet activity ingestion without changing data honesty.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
-            label="Public handoff"
-            text="Release notes, verification gates, version contract, and public-release notes are documented for handoff."
+            label="Ingestion plan"
+            text="Transfers, transaction history, swaps, balances, storage, and rollout gates are documented before implementation."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -909,12 +909,12 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Preview panels do not infer hidden fallback data when a provider cannot supply it."
+            text="Planning does not make unavailable wallet data appear real; provider gaps remain explicit."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; the release badge is the product label."
+            text="Backend VERSION remains the API-version field; v0.11.0 PLAN is a product planning label."
           />
         </div>
       </section>
