@@ -1,6 +1,7 @@
-# TON Wallet Intelligence Dashboard - v0.10.7
+# TON Wallet Intelligence Dashboard - v0.11.0 PLAN
 
-Public release polish handoff for the current wallet intelligence workspace.
+Real wallet ingestion planning handoff for the current wallet intelligence
+workspace.
 
 ## Release Scope
 
@@ -16,8 +17,10 @@ Public release polish handoff for the current wallet intelligence workspace.
 - Favicon configured so release browser QA has no missing asset console noise.
 - Release promotion checklist captured in `RELEASE_PROMOTION.md`.
 - Version contract clarified: backend `VERSION=0.2.1` remains the API-version
-  field; `v0.10.7` is the product release label.
-- Public release notes and limitations captured in `PUBLIC_RELEASE.md`.
+  field; `v0.11.0 PLAN` is the product planning label.
+- Real wallet ingestion phases, non-goals, data model, and rollout gates are
+  captured in `REAL_WALLET_INGESTION_PLAN.md`.
+- Public release baseline remains documented in `PUBLIC_RELEASE.md`.
 - Legacy mock-aware token/wallet report with buyers, PnL, clustering, common
   holdings, interesting wallets, and exports.
 - Experimental Bitquery and CSV/JSON import tools remain explicitly
@@ -25,7 +28,7 @@ Public release polish handoff for the current wallet intelligence workspace.
 
 ## Current Data Contract
 
-- Product release label: `v0.10.7`.
+- Product planning label: `v0.11.0 PLAN`.
 - Backend API `VERSION` remains `0.2.1` and is documented as a separate
   API-version field.
 - `DATA_MODE=mock` remains the default.
@@ -35,24 +38,27 @@ Public release polish handoff for the current wallet intelligence workspace.
 - Bitquery TON coverage may be unavailable/provider-limited.
 - Legacy buyers, PnL, clustering, and exports remain mock-aware or deferred.
 - Missing provider data must stay visible and must not be inferred.
+- Full wallet transfers, transaction history, DEX swaps, and current TON
+  balances are planned but not implemented in this milestone.
 
 ## Verification Snapshot
 
-Use this checklist before promoting the public release polish branch:
+Use this checklist before promoting the planning milestone branch:
 
 - `npm run build` from `frontend/`.
 - `.venv/bin/python -m pytest -q` from `backend/`.
 - Browser QA on desktop and mobile widths.
-- Confirm UI shows `RELEASE v0.10.7`.
+- Confirm UI shows `RELEASE v0.11.0 PLAN`.
 - Confirm `RELEASE_PROMOTION.md` lists the promotion gates, commands, and
   rollback notes.
-- Confirm `PUBLIC_RELEASE.md` states public scope and known limitations.
+- Confirm `REAL_WALLET_INGESTION_PLAN.md` states ingestion phases, non-goals,
+  and rollout gates.
 - Confirm Provider Status can show `Endpoint coverage` and `5/5 providers`
   when the backend is running.
 - Confirm provider/source badges distinguish loading, error, mock/offline,
   live, and unknown states.
 - Confirm no user-facing UI copy shows stale product labels such as
-  `v0.10.6 RC`, `v0.10.5 RC`, `v0.10.4 RC`, or `v0.2.1`.
+  `v0.10.7`, `v0.10.6 RC`, `v0.10.5 RC`, `v0.10.4 RC`, or `v0.2.1`.
 - Confirm horizontal page overflow is absent on desktop/mobile.
 - Confirm browser console has no runtime errors during initial dashboard load.
 
@@ -67,9 +73,9 @@ Use this checklist before promoting the public release polish branch:
 
 ## Recommended Next Step
 
-Promote this release branch after the public-release checklist is accepted. If
-the next track begins real wallet ingestion, use:
+Promote this planning branch after the ingestion-plan checklist is accepted. If
+the next track begins schema work, use:
 
 ```bash
-git checkout -b v0.11.0-real-wallet-ingestion-planning
+git checkout -b v0.11.1-wallet-activity-schema-scaffold
 ```
