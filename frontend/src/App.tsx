@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.11.0 PLAN";
+const RELEASE_LABEL = "v0.11.1 SCHEMA";
 
 const navItems = [
   "DASHBOARD",
@@ -873,18 +873,18 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Real wallet ingestion planning</strong>
+            <strong>Wallet activity schema scaffold</strong>
             <p>
-              The public-release baseline is stable; the next track defines
-              real wallet activity ingestion without changing data honesty.
+              Wallet activity persistence and response contracts are scaffolded
+              before provider ingestion or analytics wiring begins.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
-            label="Ingestion plan"
-            text="Transfers, transaction history, swaps, balances, storage, and rollout gates are documented before implementation."
+            label="Schema scaffold"
+            text="Run, transfer, transaction, swap, balance, warning, and provider evidence contracts are defined."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -914,7 +914,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.11.0 PLAN is a product planning label."
+            text="Backend VERSION remains the API-version field; v0.11.1 SCHEMA is a product scaffold label."
           />
         </div>
       </section>

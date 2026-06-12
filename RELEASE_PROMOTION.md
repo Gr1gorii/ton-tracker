@@ -1,16 +1,16 @@
-# TON Wallet Intelligence Dashboard - v0.11.0 PLAN Promotion Checklist
+# TON Wallet Intelligence Dashboard - v0.11.1 SCHEMA Promotion Checklist
 
-Operational checklist for promoting the real wallet ingestion planning
+Operational checklist for promoting the wallet activity schema scaffold
 milestone branch.
 
 ## Promotion Gates
 
-- Product label shows `v0.11.0 PLAN` in the dashboard header and release
+- Product label shows `v0.11.1 SCHEMA` in the dashboard header and release
   readiness card.
 - README, `RELEASE_NOTES.md`, and this promotion checklist all reference
-  `v0.11.0 PLAN`.
-- `REAL_WALLET_INGESTION_PLAN.md` states ingestion phases, non-goals, planned
-  schema direction, provider strategy, and rollout gates.
+  `v0.11.1 SCHEMA`.
+- Wallet activity SQLAlchemy models and Pydantic contracts are covered by
+  `tests/test_wallet_activity_schema.py`.
 - Frontend build passes from `frontend/`:
 
 ```bash
@@ -23,17 +23,24 @@ npm run build
 .venv/bin/python -m pytest -q
 ```
 
+- Wallet activity schema tests pass from `backend/`:
+
+```bash
+.venv/bin/python -m pytest tests/test_wallet_activity_schema.py -q
+```
+
 - Browser QA passes on desktop and mobile:
   - dashboard loads without console errors;
   - no horizontal page overflow;
   - Provider Status shows `Endpoint coverage` and `5/5 providers` when the
     backend is running;
-  - stale product labels such as `v0.10.7`, `v0.10.6 RC`, `v0.10.5 RC`,
-    `v0.10.4 RC`, or `v0.2.1` do not appear as user-facing product labels.
+  - stale product labels such as `v0.11.0 PLAN`, `v0.10.7`, `v0.10.6 RC`,
+    `v0.10.5 RC`, `v0.10.4 RC`, or `v0.2.1` do not appear as user-facing
+    product labels.
 
 ## Version Contract
 
-- `v0.11.0 PLAN` is the product planning label.
+- `v0.11.1 SCHEMA` is the product schema scaffold label.
 - Backend `VERSION=0.2.1` remains the backend API-version field.
 - Do not change backend `VERSION` for this promotion unless the backend API
   contract changes.
@@ -46,7 +53,8 @@ npm run build
 - Bitquery TON coverage remains provider-limited.
 - Legacy buyers, PnL, clustering, and exports remain mock-aware or deferred.
 - Full wallet transfers, transaction history, DEX swaps, and current TON
-  balances remain planned, not implemented.
+  balances have schema scaffolds only.
+- No provider ingestion or analytics wiring is implemented yet.
 - Missing provider data must stay visible and must not be inferred.
 
 ## Promotion Commands
@@ -55,10 +63,10 @@ Run these only after the promotion gates are accepted:
 
 ```bash
 git checkout main
-git merge --no-ff v0.11.0-real-wallet-ingestion-planning -m "Merge v0.11.0 real wallet ingestion planning"
-git tag v0.11.0
+git merge --no-ff v0.11.1-wallet-activity-schema-scaffold -m "Merge v0.11.1 wallet activity schema scaffold"
+git tag v0.11.1
 git push origin main
-git push origin v0.11.0
+git push origin v0.11.1
 ```
 
 ## Rollback Notes
@@ -70,8 +78,8 @@ git push origin v0.11.0
 
 ## Next Branch
 
-If the next track begins wallet activity schema work:
+If the next track begins mock-normalized wallet activity ingestion:
 
 ```bash
-git checkout -b v0.11.1-wallet-activity-schema-scaffold
+git checkout -b v0.11.2-mock-wallet-activity-ingestion
 ```
