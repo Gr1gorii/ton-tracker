@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.10.6 RC";
+const RELEASE_LABEL = "v0.10.7";
 
 const navItems = [
   "DASHBOARD",
@@ -873,18 +873,18 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Release promotion prep</strong>
+            <strong>Public release polish</strong>
             <p>
-              Core provider-preview flow is packaged for release promotion,
-              with browser signoff and data-scope limits carried forward.
+              Core provider-preview flow is public-release ready, with browser
+              signoff and data-scope limits carried forward.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
-            label="Promotion checklist"
-            text="Release notes, verification gates, version contract, and promotion commands are documented for handoff."
+            label="Public handoff"
+            text="Release notes, verification gates, version contract, and public-release notes are documented for handoff."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -914,7 +914,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; the RC badge is the product release label."
+            text="Backend VERSION remains the API-version field; the release badge is the product label."
           />
         </div>
       </section>
