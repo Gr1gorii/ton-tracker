@@ -46,8 +46,9 @@ Before tagging `v0.10.7`, confirm:
 
 ## Next Track
 
-The next major track should not be more release-label polish. Start planning
-real wallet ingestion:
+The next major track is `v0.11.0 PLAN`: real wallet ingestion planning. It
+should start with the contract in `REAL_WALLET_INGESTION_PLAN.md` before adding
+provider calls:
 
 - wallet transfers;
 - transaction history;

@@ -1,12 +1,11 @@
-# TON Wallet Intelligence Dashboard — v0.10.7
+# TON Wallet Intelligence Dashboard — v0.11.0 PLAN
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. The current public release focuses on a data-honest
-workspace: provider status, shared preview inputs, scoped TonAPI / STON.fi
-previews, explicit unavailable-data states, and legacy mock-aware wallet
-reports.
+mock-aware wallet analytics. The current planning milestone defines the next
+real wallet activity ingestion track on top of the stable `v0.10.7` public
+release baseline.
 
-> **v0.10.7 status — public release polish.**
+> **v0.11.0 PLAN status — real wallet ingestion planning.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -22,13 +21,13 @@ reports.
 >   unknown status states.
 > - Provider status shows endpoint coverage and online/degraded/offline counts
 >   without probing network providers from the status endpoint.
-> - User-facing UI copy uses the public release label and avoids stale product
->   version references.
-> - Release notes, public handoff, promotion checklist, and final browser
->   signoff requirements are captured in `RELEASE_NOTES.md`,
->   `RELEASE_PROMOTION.md`, and `PUBLIC_RELEASE.md`.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.10.7` is the
->   product release label.
+> - User-facing UI copy uses the `v0.11.0 PLAN` product label and avoids stale
+>   product version references.
+> - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
+> - Real wallet ingestion phases, non-goals, data model, and rollout gates are
+>   captured in `REAL_WALLET_INGESTION_PLAN.md`.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.0 PLAN` is the
+>   product planning label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -117,6 +116,7 @@ README.md
 RELEASE_NOTES.md
 RELEASE_PROMOTION.md
 PUBLIC_RELEASE.md
+REAL_WALLET_INGESTION_PLAN.md
 ```
 
 ---
@@ -161,7 +161,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.10.7)
+## Data modes & providers (v0.11.0 PLAN)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -175,7 +175,7 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | `BITQUERY_API_URL`       | Bitquery endpoint (real DEX trades)                |
 | `BITQUERY_API_KEY`       | Bitquery API key                                   |
 
-What is real, preview-only, and mock-aware in this release:
+What is real, preview-only, mock-aware, and planned in this milestone:
 
 | Surface                                      | mock mode       | real mode / provider mode                         |
 | -------------------------------------------- | --------------- | ------------------------------------------------- |
@@ -186,6 +186,7 @@ What is real, preview-only, and mock-aware in this release:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
+| Full wallet transfers/history/swaps/balances | not implemented | planned in `REAL_WALLET_INGESTION_PLAN.md`       |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -202,8 +203,8 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.10.7` is the product release label for the current
-frontend and provider preview workspace.
+API-version field, while `v0.11.0 PLAN` is the product planning label for the
+current frontend and provider preview workspace.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
@@ -301,17 +302,17 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Public-release checklist
+## Planning milestone checklist
 
-The `v0.10.7` public release is considered ready when:
+The `v0.11.0` planning milestone is considered ready when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.10.7` on desktop and mobile
+- final browser QA confirms `RELEASE v0.11.0 PLAN` on desktop and mobile
   without console errors or horizontal page overflow;
 - release promotion gates and commands are documented in
   `RELEASE_PROMOTION.md`;
-- public release notes and known limitations are documented in
-  `PUBLIC_RELEASE.md`;
+- real wallet ingestion phases, non-goals, schema direction, provider strategy,
+  and rollout gates are documented in `REAL_WALLET_INGESTION_PLAN.md`;
 - backend `VERSION=0.2.1` is treated as the API-version field, not as the
   user-facing product release label;
 - provider status, TonAPI previews, STON.fi preview, Bitquery/import tools, and
@@ -326,17 +327,18 @@ The `v0.10.7` public release is considered ready when:
 - user-facing UI copy does not show stale product-version labels;
 - accessibility pass remains intact for navigation, segmented controls, status
   strips, loading states, and dashboard sections;
-- README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, `PUBLIC_RELEASE.md`, and
-  UI release labels all identify the product as `v0.10.7`.
+- README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
+  `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
+  product planning milestone as `v0.11.0 PLAN`.
 
-## Roadmap beyond v0.10.7
+## Roadmap beyond v0.11.0 PLAN
 
-- Use the public release as the stable baseline for the next real-data
-  ingestion track.
+- Scaffold the persisted wallet activity schema for transfers, transactions,
+  balances, and swaps.
+- Add adapter interfaces for wallet activity ingestion without connecting them
+  to mock-aware PnL/clustering yet.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.
-- Implement real full-wallet activity ingestion for transfers, balances, swaps,
-  and transaction history.
 - Connect real wallet activity to buyers, PnL, clustering, and exports instead
   of mock-aware legacy analysis.
 - Expand Bitquery or alternate DEX coverage for TON trade history.
