@@ -1,14 +1,14 @@
-# TON Wallet Intelligence Dashboard - v0.10.6 RC Promotion Checklist
+# TON Wallet Intelligence Dashboard - v0.10.7 Promotion Checklist
 
-Operational checklist for promoting the current release candidate to a public
-release.
+Operational checklist for promoting the current public release polish branch.
 
 ## Promotion Gates
 
-- Product label shows `v0.10.6 RC` in the dashboard header and release
+- Product label shows `v0.10.7` in the dashboard header and release
   readiness card.
 - README, `RELEASE_NOTES.md`, and this promotion checklist all reference
-  `v0.10.6 RC`.
+  `v0.10.7`.
+- `PUBLIC_RELEASE.md` states public scope, known limitations, and next track.
 - Frontend build passes from `frontend/`:
 
 ```bash
@@ -26,12 +26,12 @@ npm run build
   - no horizontal page overflow;
   - Provider Status shows `Endpoint coverage` and `5/5 providers` when the
     backend is running;
-  - stale product labels such as `v0.10.5 RC`, `v0.10.4 RC`, or `v0.2.1` do not
-    appear as user-facing product labels.
+  - stale product labels such as `v0.10.6 RC`, `v0.10.5 RC`, `v0.10.4 RC`, or
+    `v0.2.1` do not appear as user-facing product labels.
 
 ## Version Contract
 
-- `v0.10.6 RC` is the product/release-candidate label.
+- `v0.10.7` is the product release label.
 - Backend `VERSION=0.2.1` remains the backend API-version field.
 - Do not change backend `VERSION` for this promotion unless the backend API
   contract changes.
@@ -51,10 +51,10 @@ Run these only after the promotion gates are accepted:
 
 ```bash
 git checkout main
-git merge --no-ff v0.10.6-rc-release-promotion-prep -m "Merge v0.10.6 RC release promotion prep"
-git tag v0.10.6
+git merge --no-ff v0.10.7-public-release-polish -m "Merge v0.10.7 public release polish"
+git tag v0.10.7
 git push origin main
-git push origin v0.10.6
+git push origin v0.10.7
 ```
 
 ## Rollback Notes
@@ -66,8 +66,8 @@ git push origin v0.10.6
 
 ## Next Branch
 
-If public release polish is needed after promotion:
+If the next track begins real wallet ingestion planning:
 
 ```bash
-git checkout -b v0.10.7-public-release-polish
+git checkout -b v0.11.0-real-wallet-ingestion-planning
 ```
