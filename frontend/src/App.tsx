@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.11.1 SCHEMA";
+const RELEASE_LABEL = "v0.11.2 MOCK INGEST";
 
 const navItems = [
   "DASHBOARD",
@@ -873,18 +873,18 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Wallet activity schema scaffold</strong>
+            <strong>Mock wallet activity ingestion</strong>
             <p>
-              Wallet activity persistence and response contracts are scaffolded
-              before provider ingestion or analytics wiring begins.
+              Wallet activity persistence now stores deterministic mock-normalized
+              transfers, transactions, swaps, balances, warnings, and evidence.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
-            label="Schema scaffold"
-            text="Run, transfer, transaction, swap, balance, warning, and provider evidence contracts are defined."
+            label="Mock ingestion"
+            text="Preview, run, and read endpoints prove the wallet activity schema with deterministic normalized rows."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -904,17 +904,17 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Legacy analytics"
-            text="Buyers, PnL, clusters, and full activity history remain mock-aware or deferred."
+            text="Buyers, PnL, clusters, and exports are not wired to ingestion runs yet."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Planning does not make unavailable wallet data appear real; provider gaps remain explicit."
+            text="Mock-normalized ingestion does not make unavailable provider data appear real."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.11.1 SCHEMA is a product scaffold label."
+            text="Backend VERSION remains the API-version field; v0.11.2 MOCK INGEST is a product release label."
           />
         </div>
       </section>

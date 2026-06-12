@@ -1,8 +1,8 @@
-# TON Wallet Intelligence Dashboard - v0.11.1 SCHEMA
+# TON Wallet Intelligence Dashboard - v0.11.2 MOCK INGEST
 
-Planning and schema contract for real wallet activity ingestion. This milestone
-adds backend schema scaffolds; it does not implement real full-wallet analysis
-yet.
+Planning and rollout contract for real wallet activity ingestion. The current
+milestone proves the backend schema with deterministic mock-normalized
+ingestion; it does not implement real full-wallet analysis yet.
 
 ## Objective
 
@@ -17,13 +17,14 @@ The plan must preserve the current data honesty contract:
 - backend `VERSION=0.2.1` remains the API-version field until the API contract
   changes.
 
-## Non-Goals For v0.11.1
+## Non-Goals For v0.11.2
 
 - Do not calculate real wallet PnL yet.
 - Do not connect real wallet activity to clustering yet.
 - Do not replace legacy mock-aware buyers, exports, or interesting-wallet
   reports yet.
 - Do not infer missing swaps, balances, or transfers from partial provider data.
+- Do not claim the mock ingestion rows are real provider data.
 - Do not remove TonAPI/STON.fi/Bitquery provider limitation messaging.
 
 ## Data To Ingest
@@ -32,17 +33,18 @@ Planned wallet activity surfaces:
 
 | Surface | Purpose | Initial status |
 | --- | --- | --- |
-| Wallet transfers | Incoming/outgoing TON and jetton movements | Planned |
-| Transaction history | Ordered account activity timeline | Planned |
-| DEX swaps | Swap-side activity for wallet-level behavior | Planned |
-| Current TON balance | Wallet-level native TON balance | Planned |
-| Jetton balances | Current token holdings | Partially previewed via TonAPI |
+| Wallet transfers | Incoming/outgoing TON and jetton movements | Mock-normalized in v0.11.2 |
+| Transaction history | Ordered account activity timeline | Mock-normalized in v0.11.2 |
+| DEX swaps | Swap-side activity for wallet-level behavior | Mock-normalized in v0.11.2 |
+| Current TON balance | Wallet-level native TON balance | Mock-normalized in v0.11.2 |
+| Jetton balances | Current token holdings | Mock-normalized in v0.11.2; partially previewed via TonAPI |
 | Provider evidence | Source, mode, warnings, freshness, errors | Required |
 
 ## Storage Scaffold
 
 Use explicit, source-aware entities rather than a single opaque JSON blob.
-`v0.11.1` scaffolds these entities in SQLAlchemy:
+`v0.11.1` scaffolds these entities in SQLAlchemy and `v0.11.2` persists
+deterministic mock-normalized rows into them:
 
 - `WalletIngestionRun`: run id, wallet address, requested window, data mode,
   provider summary, status, timestamps.
@@ -60,15 +62,15 @@ provider-limited, stale, unavailable, or mock-aware.
 
 ## API Contract Direction
 
-`v0.11.1` adds Pydantic request/response contract models for these future
-endpoints. The endpoints themselves are intentionally deferred:
+`v0.11.2` implements these endpoints with deterministic mock-normalized data.
+They do not call real providers:
 
 - `POST /api/wallets/ingest/preview`
   - validates wallet address, window, and requested surfaces;
   - returns estimated provider coverage and unavailable surfaces;
   - does not persist a run.
 - `POST /api/wallets/ingest`
-  - starts or performs a source-aware wallet ingestion run;
+  - persists a deterministic mock-normalized wallet ingestion run;
   - returns run id, status, provider coverage, and warnings.
 - `GET /api/wallets/ingest/{run_id}`
   - returns normalized transfers, transactions, swaps, balances, warnings, and
@@ -114,16 +116,16 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
    - Add response schemas without provider calls. Done in `v0.11.1`.
 
 2. Mock-normalized ingestion
-   - Add deterministic mock wallet activity fixtures.
-   - Prove tables, states, and warnings with stable data.
+   - Add deterministic mock wallet activity fixtures. Done in `v0.11.2`.
+   - Prove tables, states, and warnings with stable data. Done in `v0.11.2`.
 
-3. Provider adapter integration
-   - Add real provider calls behind feature/data-mode controls.
-   - Keep partial provider coverage visible.
-
-4. UI wallet ingestion workspace
+3. UI wallet ingestion workspace
    - Add preview/run workflow and activity tables.
    - Keep legacy analytics separate.
+
+4. Provider adapter integration
+   - Add real provider calls behind feature/data-mode controls.
+   - Keep partial provider coverage visible.
 
 5. Analytics integration
    - Connect real wallet activity to PnL, clustering, and exports only after
@@ -131,18 +133,22 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
 
 ## Verification Gates
 
-Before moving from schema scaffold to mock-normalized ingestion:
+Before promoting mock-normalized ingestion:
 
 - `npm run build` passes.
 - `.venv/bin/python -m pytest -q` passes.
+- `.venv/bin/python -m pytest tests/test_wallet_activity_ingestion.py -q`
+  passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_schema.py -q` passes.
-- UI shows `RELEASE v0.11.1 SCHEMA`.
+- UI shows `RELEASE v0.11.2 MOCK INGEST`.
+- `/api/wallets/ingest/preview`, `/api/wallets/ingest`, and
+  `/api/wallets/ingest/{run_id}` return source-aware mock data.
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, and this document all
-  describe the same schema scaffold scope.
+  describe the same mock ingestion scope.
 - No user-facing UI claims real full-wallet analysis exists yet.
 
 ## Next Branch
 
 ```bash
-git checkout -b v0.11.2-mock-wallet-activity-ingestion
+git checkout -b v0.11.3-wallet-ingestion-ui-workspace
 ```

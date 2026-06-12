@@ -31,8 +31,8 @@ class AnalysisRun(Base):
 class WalletIngestionRun(Base):
     """Source-aware wallet activity ingestion run scaffold.
 
-    v0.11.1 defines persistence boundaries only. Provider calls and analytics
-    wiring are intentionally deferred to later milestones.
+    v0.11.1 defined persistence boundaries; v0.11.2 stores deterministic
+    mock-normalized rows. Provider calls and analytics wiring remain deferred.
     """
 
     __tablename__ = "wallet_ingestion_runs"
