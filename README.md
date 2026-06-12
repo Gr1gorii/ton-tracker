@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.10.5 RC
+# TON Wallet Intelligence Dashboard — v0.10.6 RC
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. The current release candidate focuses on a
@@ -6,7 +6,7 @@ data-honest workspace: provider status, shared preview inputs, scoped TonAPI /
 STON.fi previews, explicit unavailable-data states, and legacy mock-aware
 wallet reports.
 
-> **v0.10.5 RC status — wallet intelligence release candidate / final browser signoff.**
+> **v0.10.6 RC status — wallet intelligence release candidate / release promotion prep.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -24,8 +24,11 @@ wallet reports.
 >   without probing network providers from the status endpoint.
 > - User-facing UI copy uses the RC release label and avoids stale product
 >   version references.
-> - Release notes, handoff, and final browser signoff checklist are captured in
->   `RELEASE_NOTES.md`.
+> - Release notes, handoff, promotion checklist, and final browser signoff
+>   requirements are captured in `RELEASE_NOTES.md` and
+>   `RELEASE_PROMOTION.md`.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.10.6 RC` is the
+>   product/release-candidate label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -112,6 +115,7 @@ frontend/
 
 README.md
 RELEASE_NOTES.md
+RELEASE_PROMOTION.md
 ```
 
 ---
@@ -156,7 +160,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.10.5 RC)
+## Data modes & providers (v0.10.6 RC)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -196,9 +200,9 @@ of being silently inferred.
 ### `GET /api/health`
 Returns service status, backend API version, and current `data_mode`.
 
-Note: the backend `version` field currently remains `0.2.1`; `v0.10.5 RC`
-is the product/release-candidate label for the current frontend and provider
-preview workspace.
+Note: the backend `version` field remains `0.2.1` by design in this RC. It is
+the backend API-version field, while `v0.10.6 RC` is the product RC label for
+the current frontend and provider preview workspace.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
@@ -298,11 +302,15 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ## Release-candidate checklist
 
-The `v0.10.5` release candidate is considered ready when:
+The `v0.10.6` release candidate is considered ready when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.10.5 RC` on desktop and mobile
+- final browser QA confirms `RELEASE v0.10.6 RC` on desktop and mobile
   without console errors or horizontal page overflow;
+- release promotion gates and commands are documented in
+  `RELEASE_PROMOTION.md`;
+- backend `VERSION=0.2.1` is treated as the API-version field, not as the
+  user-facing product release label;
 - provider status, TonAPI previews, STON.fi preview, Bitquery/import tools, and
   legacy mock-aware analysis render without layout overflow on desktop/mobile;
 - provider preview panels show ready/running/error/fresh/stale states honestly;
@@ -315,14 +323,15 @@ The `v0.10.5` release candidate is considered ready when:
 - user-facing UI copy does not show stale product-version labels;
 - accessibility pass remains intact for navigation, segmented controls, status
   strips, loading states, and dashboard sections;
-- README, `RELEASE_NOTES.md`, and UI release labels all identify the product as
-  `v0.10.5 RC`.
+- README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, and UI release labels all
+  identify the product as `v0.10.6 RC`.
 
-## Roadmap beyond v0.10.5 RC
+## Roadmap beyond v0.10.6 RC
 
-- Promote the RC to a public release after the final browser signoff is accepted.
-- Decide whether backend `VERSION` should move from `0.2.1` to the product
-  release line, or remain an API-version field.
+- Promote the RC to a public release when the release-promotion checklist is
+  accepted.
+- Keep backend `VERSION` as an API-version field until the backend API contract
+  changes.
 - Implement real full-wallet activity ingestion for transfers, balances, swaps,
   and transaction history.
 - Connect real wallet activity to buyers, PnL, clustering, and exports instead
