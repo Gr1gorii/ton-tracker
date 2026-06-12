@@ -10,7 +10,32 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+WalletIngestionSurface = Literal[
+    "transfers",
+    "transactions",
+    "swaps",
+    "balances",
+    "jettons",
+]
+WalletIngestionStatus = Literal[
+    "planned",
+    "queued",
+    "running",
+    "success",
+    "partial",
+    "error",
+    "stale",
+]
+WalletSourceStatus = Literal[
+    "live",
+    "mock",
+    "offline",
+    "limited",
+    "unavailable",
+    "error",
+]
 
 
 class AnalyzeRequest(BaseModel):
@@ -50,6 +75,160 @@ class ProvidersStatusResponse(BaseModel):
     bitquery: ProviderStatus
     stonfi: ProviderStatus
     tonapi: ProviderStatus
+
+
+class WalletIngestionPreviewRequest(BaseModel):
+    wallet_address: str = Field(
+        ...,
+        description="TON wallet address to inspect before ingestion.",
+    )
+    time_window: Literal["24h", "3d", "7d", "custom"] = Field(
+        default="24h",
+        description="Wallet activity ingestion window.",
+    )
+    custom_start: Optional[str] = Field(
+        None, description="ISO start datetime required when time_window=custom."
+    )
+    custom_end: Optional[str] = Field(
+        None, description="ISO end datetime required when time_window=custom."
+    )
+    surfaces: list[WalletIngestionSurface] = Field(
+        default_factory=lambda: [
+            "transfers",
+            "transactions",
+            "swaps",
+            "balances",
+            "jettons",
+        ],
+        description="Wallet activity surfaces requested for coverage preview.",
+    )
+
+    @field_validator("wallet_address")
+    @classmethod
+    def _wallet_address_required(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("Wallet address is required")
+        return cleaned
+
+    @field_validator("surfaces")
+    @classmethod
+    def _surfaces_required(cls, value: list[WalletIngestionSurface]):
+        if not value:
+            raise ValueError("At least one wallet activity surface is required")
+        return list(dict.fromkeys(value))
+
+    @model_validator(mode="after")
+    def _custom_window_requires_bounds(self):
+        if self.time_window == "custom" and not (
+            self.custom_start and self.custom_end
+        ):
+            raise ValueError(
+                "custom_start and custom_end are required for custom windows"
+            )
+        return self
+
+
+class WalletActivityProviderEvidence(BaseModel):
+    provider: str
+    data_mode: Literal["mock", "real"]
+    source_status: WalletSourceStatus
+    warnings: list[str] = Field(default_factory=list)
+    freshness: str | None = None
+    raw_count: int = Field(default=0, ge=0)
+    normalized_count: int = Field(default=0, ge=0)
+
+    @field_validator("provider")
+    @classmethod
+    def _provider_required(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("Provider is required")
+        return cleaned
+
+
+class WalletIngestionPreviewResponse(BaseModel):
+    success: bool
+    wallet_address: str
+    time_window: str
+    requested_surfaces: list[WalletIngestionSurface]
+    provider_coverage: list[WalletActivityProviderEvidence]
+    unavailable_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    message: str
+
+
+class WalletTransferRecord(BaseModel):
+    tx_hash: str | None = None
+    logical_time: str | None = None
+    timestamp: str | None = None
+    asset: str
+    amount: str | None = None
+    direction: Literal["in", "out", "unknown"]
+    counterparty: str | None = None
+    provider: str
+    source_status: WalletSourceStatus
+    raw: dict[str, Any] | None = None
+
+
+class WalletTransactionRecord(BaseModel):
+    tx_hash: str
+    logical_time: str | None = None
+    timestamp: str | None = None
+    fee_ton: str | None = None
+    success: Literal["success", "failed", "unknown"]
+    provider: str
+    source_status: WalletSourceStatus
+    raw: dict[str, Any] | None = None
+
+
+class WalletSwapRecord(BaseModel):
+    tx_hash: str | None = None
+    timestamp: str | None = None
+    dex: str | None = None
+    token_in: str | None = None
+    amount_in: str | None = None
+    token_out: str | None = None
+    amount_out: str | None = None
+    estimated_usd: str | None = None
+    provider: str
+    source_status: WalletSourceStatus
+    raw: dict[str, Any] | None = None
+
+
+class WalletBalanceSnapshotRecord(BaseModel):
+    asset: str
+    balance: str | None = None
+    balance_usd: str | None = None
+    provider: str
+    source_status: WalletSourceStatus
+    snapshot_at: str | None = None
+    raw: dict[str, Any] | None = None
+
+
+class WalletIngestionWarningRecord(BaseModel):
+    severity: Literal["info", "warning", "error", "critical"]
+    provider: str | None = None
+    message: str
+    evidence_key: str | None = None
+
+
+class WalletIngestionRunResponse(BaseModel):
+    run_id: int | None = None
+    wallet_address: str
+    time_window: str
+    status: WalletIngestionStatus
+    data_mode: Literal["mock", "real"]
+    requested_surfaces: list[WalletIngestionSurface]
+    provider_evidence: list[WalletActivityProviderEvidence] = Field(
+        default_factory=list
+    )
+    transfers: list[WalletTransferRecord] = Field(default_factory=list)
+    transactions: list[WalletTransactionRecord] = Field(default_factory=list)
+    swaps: list[WalletSwapRecord] = Field(default_factory=list)
+    balances: list[WalletBalanceSnapshotRecord] = Field(default_factory=list)
+    warnings: list[WalletIngestionWarningRecord] = Field(default_factory=list)
+    message: str
 
 
 class BitqueryTokenTradesPreviewRequest(BaseModel):

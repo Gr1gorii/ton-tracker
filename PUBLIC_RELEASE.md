@@ -46,9 +46,9 @@ Before tagging `v0.10.7`, confirm:
 
 ## Next Track
 
-The next major track is `v0.11.0 PLAN`: real wallet ingestion planning. It
-should start with the contract in `REAL_WALLET_INGESTION_PLAN.md` before adding
-provider calls:
+The next major track is `v0.11.1 SCHEMA`: wallet activity schema scaffolding.
+It should continue from the contract in `REAL_WALLET_INGESTION_PLAN.md` before
+adding provider calls:
 
 - wallet transfers;
 - transaction history;
