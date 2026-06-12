@@ -1,7 +1,8 @@
-# TON Wallet Intelligence Dashboard - v0.11.0 PLAN
+# TON Wallet Intelligence Dashboard - v0.11.1 SCHEMA
 
-Planning contract for real wallet activity ingestion. This milestone defines
-what should be built next; it does not implement real full-wallet analysis yet.
+Planning and schema contract for real wallet activity ingestion. This milestone
+adds backend schema scaffolds; it does not implement real full-wallet analysis
+yet.
 
 ## Objective
 
@@ -16,7 +17,7 @@ The plan must preserve the current data honesty contract:
 - backend `VERSION=0.2.1` remains the API-version field until the API contract
   changes.
 
-## Non-Goals For v0.11.0
+## Non-Goals For v0.11.1
 
 - Do not calculate real wallet PnL yet.
 - Do not connect real wallet activity to clustering yet.
@@ -38,9 +39,10 @@ Planned wallet activity surfaces:
 | Jetton balances | Current token holdings | Partially previewed via TonAPI |
 | Provider evidence | Source, mode, warnings, freshness, errors | Required |
 
-## Proposed Storage Direction
+## Storage Scaffold
 
-Use explicit, source-aware entities rather than a single opaque JSON blob:
+Use explicit, source-aware entities rather than a single opaque JSON blob.
+`v0.11.1` scaffolds these entities in SQLAlchemy:
 
 - `WalletIngestionRun`: run id, wallet address, requested window, data mode,
   provider summary, status, timestamps.
@@ -56,9 +58,10 @@ Use explicit, source-aware entities rather than a single opaque JSON blob:
 Each record should preserve provenance so the UI can show what is known,
 provider-limited, stale, unavailable, or mock-aware.
 
-## Proposed API Direction
+## API Contract Direction
 
-Plan these endpoints before implementation:
+`v0.11.1` adds Pydantic request/response contract models for these future
+endpoints. The endpoints themselves are intentionally deferred:
 
 - `POST /api/wallets/ingest/preview`
   - validates wallet address, window, and requested surfaces;
@@ -107,8 +110,8 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
 ## Rollout Phases
 
 1. Schema scaffold
-   - Add persisted run/activity models and tests.
-   - Add response schemas without provider calls.
+   - Add persisted run/activity models and tests. Done in `v0.11.1`.
+   - Add response schemas without provider calls. Done in `v0.11.1`.
 
 2. Mock-normalized ingestion
    - Add deterministic mock wallet activity fixtures.
@@ -128,17 +131,18 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
 
 ## Verification Gates
 
-Before moving from planning to schema scaffold:
+Before moving from schema scaffold to mock-normalized ingestion:
 
 - `npm run build` passes.
 - `.venv/bin/python -m pytest -q` passes.
-- UI shows `RELEASE v0.11.0 PLAN`.
+- `.venv/bin/python -m pytest tests/test_wallet_activity_schema.py -q` passes.
+- UI shows `RELEASE v0.11.1 SCHEMA`.
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, and this document all
-  describe the same planning scope.
+  describe the same schema scaffold scope.
 - No user-facing UI claims real full-wallet analysis exists yet.
 
 ## Next Branch
 
 ```bash
-git checkout -b v0.11.1-wallet-activity-schema-scaffold
+git checkout -b v0.11.2-mock-wallet-activity-ingestion
 ```
