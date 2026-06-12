@@ -1,6 +1,6 @@
-# TON Wallet Intelligence Dashboard - v0.10.5 RC
+# TON Wallet Intelligence Dashboard - v0.10.6 RC
 
-Final browser signoff handoff for the current wallet intelligence workspace.
+Release promotion prep handoff for the current wallet intelligence workspace.
 
 ## Release Scope
 
@@ -14,6 +14,9 @@ Final browser signoff handoff for the current wallet intelligence workspace.
 - Final browser signoff marker in the release-readiness panel for desktop and
   mobile QA.
 - Favicon configured so release browser QA has no missing asset console noise.
+- Release promotion checklist captured in `RELEASE_PROMOTION.md`.
+- Version contract clarified: backend `VERSION=0.2.1` remains the API-version
+  field; `v0.10.6 RC` is the product release label.
 - Legacy mock-aware token/wallet report with buyers, PnL, clustering, common
   holdings, interesting wallets, and exports.
 - Experimental Bitquery and CSV/JSON import tools remain explicitly
@@ -21,9 +24,9 @@ Final browser signoff handoff for the current wallet intelligence workspace.
 
 ## Current Data Contract
 
-- Product release label: `v0.10.5 RC`.
-- Backend API `VERSION` remains `0.2.1` and is documented as a separate API
-  version field.
+- Product release label: `v0.10.6 RC`.
+- Backend API `VERSION` remains `0.2.1` and is documented as a separate
+  API-version field.
 - `DATA_MODE=mock` remains the default.
 - TonAPI wallet intelligence preview is jettons-only, not full wallet
   intelligence.
@@ -39,13 +42,15 @@ Use this checklist before promoting the RC:
 - `npm run build` from `frontend/`.
 - `.venv/bin/python -m pytest -q` from `backend/`.
 - Browser QA on desktop and mobile widths.
-- Confirm UI shows `RELEASE v0.10.5 RC`.
+- Confirm UI shows `RELEASE v0.10.6 RC`.
+- Confirm `RELEASE_PROMOTION.md` lists the promotion gates, commands, and
+  rollback notes.
 - Confirm Provider Status can show `Endpoint coverage` and `5/5 providers`
   when the backend is running.
 - Confirm provider/source badges distinguish loading, error, mock/offline,
   live, and unknown states.
 - Confirm no user-facing UI copy shows stale product labels such as
-  `v0.10.4 RC` or `v0.2.1`.
+  `v0.10.5 RC`, `v0.10.4 RC`, or `v0.2.1`.
 - Confirm horizontal page overflow is absent on desktop/mobile.
 - Confirm browser console has no runtime errors during initial dashboard load.
 
@@ -60,9 +65,9 @@ Use this checklist before promoting the RC:
 
 ## Recommended Next Step
 
-Promote this RC after the final browser signoff is accepted. If release
-promotion prep needs a separate patch, use:
+Promote this RC after the release-promotion checklist is accepted. If public
+release polish needs a separate patch after promotion, use:
 
 ```bash
-git checkout -b v0.10.6-rc-release-promotion-prep
+git checkout -b v0.10.7-public-release-polish
 ```

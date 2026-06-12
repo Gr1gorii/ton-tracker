@@ -19,7 +19,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.10.5 RC";
+const RELEASE_LABEL = "v0.10.6 RC";
 
 const navItems = [
   "DASHBOARD",
@@ -873,18 +873,23 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Final browser signoff candidate</strong>
+            <strong>Release promotion prep</strong>
             <p>
-              Core provider-preview flow is ready for desktop/mobile browser
-              verification and remains honest about unavailable analytics.
+              Core provider-preview flow is packaged for release promotion,
+              with browser signoff and data-scope limits carried forward.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
+            label="Promotion checklist"
+            text="Release notes, verification gates, version contract, and promotion commands are documented for handoff."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
             label="Browser QA"
-            text="Desktop and mobile signoff checks release labels, overflow, provider status, and console health."
+            text="Desktop and mobile signoff still checks release labels, overflow, provider status, and console health."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -905,6 +910,11 @@ function EvidenceColumn({
             tone="scoped"
             label="Data contract"
             text="Preview panels do not infer hidden fallback data when a provider cannot supply it."
+          />
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Version contract"
+            text="Backend VERSION remains the API-version field; the RC badge is the product release label."
           />
         </div>
       </section>
