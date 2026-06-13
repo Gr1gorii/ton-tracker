@@ -1,17 +1,21 @@
-# TON Wallet Intelligence Dashboard — v0.11.3 INGEST UI
+# TON Wallet Intelligence Dashboard — v0.11.4 ADAPTERS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. The current milestone adds a dashboard wallet
-activity ingestion workspace on top of the `v0.11.2` mock-normalized ingestion
-endpoints.
+mock-aware wallet analytics. The current milestone adds wallet activity
+adapter interfaces under the dashboard ingestion workflow, while the active
+provider remains deterministic mock data.
 
-> **v0.11.3 INGEST UI status — wallet ingestion workspace.**
+> **v0.11.4 ADAPTERS status — wallet ingestion adapter interfaces.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
 > - Wallet activity ingestion now has a dashboard workspace for coverage
 >   preview, persisted mock runs, run refresh, evidence, warnings, and
 >   normalized activity tables.
+> - Wallet activity preview/run orchestration now goes through
+>   `backend/adapters/wallet_activity.py`.
+> - The current wallet activity adapter is still deterministic mock data; no
+>   real wallet provider calls are made yet.
 > - Provider preview panels use shared workspace inputs and show fresh/stale,
 >   ready/running/error, and scoped-data states.
 > - Legacy buyers, PnL, exports, clustering, and interesting-wallet reports
@@ -24,7 +28,7 @@ endpoints.
 >   unknown status states.
 > - Provider status shows endpoint coverage and online/degraded/offline counts
 >   without probing network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.11.3 INGEST UI` product label and avoids
+> - User-facing UI copy uses the `v0.11.4 ADAPTERS` product label and avoids
 >   stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -32,7 +36,7 @@ endpoints.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.3 INGEST UI`
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.4 ADAPTERS`
 >   is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
@@ -85,6 +89,7 @@ backend/
                          Deterministic mock-normalized wallet activity ingestion
   adapters/
     geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
+    wallet_activity.py Wallet activity adapter contract + mock adapter
     tonapi.py          TonAPI account jettons preview adapter
     stonfi.py          STON.fi pools preview adapter
     bitquery.py        DEX trades — mock/provider-limited Bitquery
@@ -171,7 +176,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.11.3 INGEST UI)
+## Data modes & providers (v0.11.4 ADAPTERS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -214,9 +219,8 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.11.2 MOCK INGEST` is the product release label for
-the previous mock ingestion milestone. The current user-facing release label is
-`v0.11.3 INGEST UI`.
+API-version field, while `v0.11.4 ADAPTERS` is the current user-facing product
+release label.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
@@ -327,12 +331,13 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Ingestion UI checklist
+## Adapter interfaces checklist
 
-The `v0.11.3` wallet ingestion UI milestone is considered ready when:
+The `v0.11.4` wallet ingestion adapter interfaces milestone is considered ready
+when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.11.3 INGEST UI` on desktop and mobile
+- final browser QA confirms `RELEASE v0.11.4 ADAPTERS` on desktop and mobile
   without console errors or horizontal page overflow;
 - release promotion gates and commands are documented in
   `RELEASE_PROMOTION.md`;
@@ -342,6 +347,8 @@ The `v0.11.3` wallet ingestion UI milestone is considered ready when:
 - `POST /api/wallets/ingest/preview`, `POST /api/wallets/ingest`, and
   `GET /api/wallets/ingest/{run_id}` return data-honest mock-normalized
   responses;
+- wallet activity adapter contract tests pass and prove preview/run behavior
+  behind `backend/adapters/wallet_activity.py`;
 - the Wallet Activity Ingestion Workspace can preview coverage, run mock
   ingestion, refresh a stored run, and render transfers, transactions, swaps,
   balances, warnings, and provider evidence;
@@ -359,12 +366,12 @@ The `v0.11.3` wallet ingestion UI milestone is considered ready when:
   strips, loading states, and dashboard sections;
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
-  product milestone as `v0.11.3 INGEST UI`.
+  product milestone as `v0.11.4 ADAPTERS`.
 
-## Roadmap beyond v0.11.3 INGEST UI
+## Roadmap beyond v0.11.4 ADAPTERS
 
-- Add adapter interfaces for wallet activity ingestion after the UI workflow
-  proves the contract.
+- Add provider-specific wallet activity adapter scaffolds behind explicit
+  status and configuration controls.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.
 - Connect real wallet activity to buyers, PnL, clustering, and exports instead
