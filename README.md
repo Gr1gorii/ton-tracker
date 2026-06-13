@@ -1,11 +1,11 @@
-# TON Wallet Intelligence Dashboard — v0.11.1 SCHEMA
+# TON Wallet Intelligence Dashboard — v0.11.2 MOCK INGEST
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. The current schema milestone scaffolds wallet
-activity persistence and response contracts on top of the stable `v0.10.7`
-public release baseline.
+mock-aware wallet analytics. The current milestone proves wallet activity
+ingestion with deterministic mock-normalized rows on top of the `v0.11.1`
+schema scaffold.
 
-> **v0.11.1 SCHEMA status — wallet activity schema scaffold.**
+> **v0.11.2 MOCK INGEST status — mock-normalized wallet activity ingestion.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -21,15 +21,16 @@ public release baseline.
 >   unknown status states.
 > - Provider status shows endpoint coverage and online/degraded/offline counts
 >   without probing network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.11.1 SCHEMA` product label and avoids stale
->   product version references.
+> - User-facing UI copy uses the `v0.11.2 MOCK INGEST` product label and avoids
+>   stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
 >   `REAL_WALLET_INGESTION_PLAN.md`.
-> - Wallet activity run, transfer, transaction, swap, balance, warning, and
->   provider-evidence contracts are scaffolded in backend models/schemas.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.1 SCHEMA` is
->   the product scaffold label.
+> - Wallet activity preview/run/read endpoints persist deterministic
+>   mock-normalized transfers, transactions, swaps, balances, warnings, and
+>   provider evidence.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.2 MOCK INGEST`
+>   is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -57,7 +58,7 @@ backend/
   config.py            Settings (DATA_MODE + providers) + ProviderResult
   .env.example         Provider configuration template
   requirements.txt
-  models.py            SQLAlchemy models (AnalysisRun + wallet activity scaffold)
+  models.py            SQLAlchemy models (AnalysisRun + wallet activity tables)
   schemas.py           Pydantic request/response schemas
   database.py          SQLite engine + session
   conftest.py          Test path setup
@@ -66,6 +67,7 @@ backend/
     stonfi.py          STON.fi pools preview
     bitquery.py        Bitquery token trades preview/analysis
     import_trades.py   CSV/JSON trade import preview/analysis
+    wallet_activity.py Mock-normalized wallet activity ingestion endpoints
   services/
     analysis.py        Orchestration + data_quality + provider status
     pnl.py             Decimal-based PnL calculations
@@ -76,6 +78,8 @@ backend/
     import_analysis.py Imported-trade wallet analysis
     tonapi_wallet_intelligence.py
                          Jettons-only wallet intelligence preview builder
+    wallet_activity_ingestion.py
+                         Deterministic mock-normalized wallet activity ingestion
   adapters/
     geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
     tonapi.py          TonAPI account jettons preview adapter
@@ -163,7 +167,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.11.1 SCHEMA)
+## Data modes & providers (v0.11.2 MOCK INGEST)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -189,7 +193,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Full wallet transfers/history/swaps/balances | schema scaffold | tables/schemas only; no provider ingestion yet   |
+| Full wallet transfers/history/swaps/balances | mock-normalized | mock-normalized rows only; no provider ingestion yet |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -206,8 +210,8 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.11.1 SCHEMA` is the product scaffold label for the
-current frontend and provider preview workspace.
+API-version field, while `v0.11.2 MOCK INGEST` is the product release label for
+the current frontend and provider preview workspace.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
@@ -246,6 +250,19 @@ balance, or full on-chain behavior.
 ### `GET /api/stonfi/pools/preview`
 Returns a scoped STON.fi pools preview for `limit`. It covers STON.fi DEX pools
 only, not all TON DeFi.
+
+### `POST /api/wallets/ingest/preview`
+Returns deterministic mock provider coverage for a wallet activity ingestion
+request. It validates wallet address, time window, and requested surfaces, but
+does not persist a run or call real providers.
+
+### `POST /api/wallets/ingest`
+Persists one deterministic mock-normalized wallet activity run and returns run
+id, status, provider evidence, normalized transfers, transactions, swaps,
+balances, and warnings.
+
+### `GET /api/wallets/ingest/{run_id}`
+Returns one persisted mock-normalized wallet activity run by id.
 
 ### `POST /api/bitquery/token-trades/preview`
 Returns a Bitquery token-trades preview when provider coverage is available.
@@ -305,19 +322,21 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Schema scaffold checklist
+## Mock ingestion checklist
 
-The `v0.11.1` schema scaffold milestone is considered ready when:
+The `v0.11.2` mock-normalized ingestion milestone is considered ready when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.11.1 SCHEMA` on desktop and mobile
+- final browser QA confirms `RELEASE v0.11.2 MOCK INGEST` on desktop and mobile
   without console errors or horizontal page overflow;
 - release promotion gates and commands are documented in
   `RELEASE_PROMOTION.md`;
-- wallet activity SQLAlchemy models and Pydantic contracts are covered by
-  schema tests;
+- wallet activity schema tests and ingestion endpoint tests pass;
 - backend `VERSION=0.2.1` is treated as the API-version field, not as the
   user-facing product release label;
+- `POST /api/wallets/ingest/preview`, `POST /api/wallets/ingest`, and
+  `GET /api/wallets/ingest/{run_id}` return data-honest mock-normalized
+  responses;
 - provider status, TonAPI previews, STON.fi preview, Bitquery/import tools, and
   legacy mock-aware analysis render without layout overflow on desktop/mobile;
 - provider preview panels show ready/running/error/fresh/stale states honestly;
@@ -332,13 +351,14 @@ The `v0.11.1` schema scaffold milestone is considered ready when:
   strips, loading states, and dashboard sections;
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
-  product schema milestone as `v0.11.1 SCHEMA`.
+  product milestone as `v0.11.2 MOCK INGEST`.
 
-## Roadmap beyond v0.11.1 SCHEMA
+## Roadmap beyond v0.11.2 MOCK INGEST
 
-- Add mock-normalized wallet activity ingestion using the schema scaffold.
-- Add adapter interfaces for wallet activity ingestion after mock-normalized
-  fixtures prove the contract.
+- Add a dedicated wallet ingestion UI workspace using the preview/run/read
+  endpoints.
+- Add adapter interfaces for wallet activity ingestion after the UI workflow
+  proves the contract.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.
 - Connect real wallet activity to buyers, PnL, clustering, and exports instead

@@ -29,6 +29,7 @@ from routers.bitquery import router as bitquery_router
 from routers.import_trades import router as import_trades_router
 from routers.stonfi import router as stonfi_router
 from routers.tonapi import router as tonapi_router
+from routers.wallet_activity import router as wallet_activity_router
 from services import export
 from services.analysis import analyze, get_providers_status
 
@@ -61,6 +62,7 @@ app.include_router(bitquery_router)
 app.include_router(import_trades_router)
 app.include_router(stonfi_router)
 app.include_router(tonapi_router)
+app.include_router(wallet_activity_router)
 
 
 @app.on_event("startup")
