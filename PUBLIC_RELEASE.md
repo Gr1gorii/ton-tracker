@@ -47,9 +47,10 @@ Before tagging `v0.10.7`, confirm:
 ## Next Tracks
 
 After this public baseline, `v0.11.1 SCHEMA` added wallet activity schema
-scaffolding and `v0.11.2 MOCK INGEST` proves that schema with deterministic
-mock-normalized ingestion. Real provider calls remain deferred behind the
-contract in `REAL_WALLET_INGESTION_PLAN.md`:
+scaffolding, `v0.11.2 MOCK INGEST` proves that schema with deterministic
+mock-normalized ingestion, and `v0.11.3 INGEST UI` adds the dashboard workflow.
+Real provider calls remain deferred behind the contract in
+`REAL_WALLET_INGESTION_PLAN.md`:
 
 - wallet transfers;
 - transaction history;
