@@ -1,8 +1,8 @@
-# TON Wallet Intelligence Dashboard - v0.11.3 INGEST UI
+# TON Wallet Intelligence Dashboard - v0.11.4 ADAPTERS
 
 Planning and rollout contract for real wallet activity ingestion. The current
-milestone adds the dashboard workspace for deterministic mock-normalized
-ingestion; it does not implement real full-wallet analysis yet.
+milestone adds the backend wallet activity adapter interface under the dashboard
+workspace; it does not implement real full-wallet analysis yet.
 
 ## Objective
 
@@ -17,7 +17,7 @@ The plan must preserve the current data honesty contract:
 - backend `VERSION=0.2.1` remains the API-version field until the API contract
   changes.
 
-## Non-Goals For v0.11.3
+## Non-Goals For v0.11.4
 
 - Do not calculate real wallet PnL yet.
 - Do not connect real wallet activity to clustering yet.
@@ -26,6 +26,7 @@ The plan must preserve the current data honesty contract:
 - Do not infer missing swaps, balances, or transfers from partial provider data.
 - Do not claim the mock ingestion rows are real provider data.
 - Do not wire mock ingestion rows into legacy PnL, clustering, or exports.
+- Do not activate real provider calls from `/api/wallets/ingest/*` yet.
 - Do not remove TonAPI/STON.fi/Bitquery provider limitation messaging.
 
 ## Data To Ingest
@@ -64,8 +65,9 @@ provider-limited, stale, unavailable, or mock-aware.
 ## API Contract Direction
 
 `v0.11.2` implements these endpoints with deterministic mock-normalized data.
-`v0.11.3` adds a dashboard workspace that uses them. They do not call real
-providers:
+`v0.11.3` adds a dashboard workspace that uses them. `v0.11.4` routes preview
+and run orchestration through the backend wallet activity adapter interface.
+They still do not call real providers:
 
 - `POST /api/wallets/ingest/preview`
   - validates wallet address, window, and requested surfaces;
@@ -99,6 +101,15 @@ Every adapter response must include:
 - freshness timestamp when available;
 - raw count and normalized count.
 
+`v0.11.4` adds `backend/adapters/wallet_activity.py` with:
+
+- `WalletActivityAdapter` protocol for `preview` and `ingest`.
+- `WalletActivityAdapterRequest` for wallet, window, requested surfaces, and
+  environment data mode.
+- `WalletActivityAdapterResult` for status, evidence, warnings, unavailable
+  surfaces, and normalized rows.
+- `MockWalletActivityAdapter` as the only active adapter.
+
 ## UI Direction
 
 Add a dedicated wallet ingestion workspace before changing legacy analytics:
@@ -126,7 +137,9 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
    - Keep legacy analytics separate. Done in `v0.11.3`.
 
 4. Provider adapter integration
-   - Add real provider calls behind feature/data-mode controls.
+   - Add adapter protocol and mock adapter boundary. Done in `v0.11.4`.
+   - Add provider-specific scaffolds behind feature/data-mode controls.
+   - Add real provider calls behind explicit feature/data-mode controls.
    - Keep partial provider coverage visible.
 
 5. Analytics integration
@@ -135,24 +148,28 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
 
 ## Verification Gates
 
-Before promoting wallet ingestion UI:
+Before promoting wallet ingestion adapter interfaces:
 
 - `npm run build` passes.
 - `.venv/bin/python -m pytest -q` passes.
+- `.venv/bin/python -m pytest tests/test_wallet_activity_adapter.py -q`
+  passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_ingestion.py -q`
   passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_schema.py -q` passes.
-- UI shows `RELEASE v0.11.3 INGEST UI`.
+- UI shows `RELEASE v0.11.4 ADAPTERS`.
 - `/api/wallets/ingest/preview`, `/api/wallets/ingest`, and
   `/api/wallets/ingest/{run_id}` return source-aware mock data.
+- `DATA_MODE=real` still returns honest mock-normalized warnings until real
+  provider calls are explicitly enabled.
 - Wallet Activity Ingestion Workspace can preview coverage, persist a mock run,
   refresh the stored run, and render activity tables.
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, and this document all
-  describe the same ingestion UI scope.
+  describe the same adapter-interface scope.
 - No user-facing UI claims real full-wallet analysis exists yet.
 
 ## Next Branch
 
 ```bash
-git checkout -b v0.11.4-wallet-ingestion-adapter-interfaces
+git checkout -b v0.11.5-wallet-ingestion-provider-scaffolds
 ```
