@@ -1,14 +1,17 @@
-# TON Wallet Intelligence Dashboard — v0.11.2 MOCK INGEST
+# TON Wallet Intelligence Dashboard — v0.11.3 INGEST UI
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. The current milestone proves wallet activity
-ingestion with deterministic mock-normalized rows on top of the `v0.11.1`
-schema scaffold.
+mock-aware wallet analytics. The current milestone adds a dashboard wallet
+activity ingestion workspace on top of the `v0.11.2` mock-normalized ingestion
+endpoints.
 
-> **v0.11.2 MOCK INGEST status — mock-normalized wallet activity ingestion.**
+> **v0.11.3 INGEST UI status — wallet ingestion workspace.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
+> - Wallet activity ingestion now has a dashboard workspace for coverage
+>   preview, persisted mock runs, run refresh, evidence, warnings, and
+>   normalized activity tables.
 > - Provider preview panels use shared workspace inputs and show fresh/stale,
 >   ready/running/error, and scoped-data states.
 > - Legacy buyers, PnL, exports, clustering, and interesting-wallet reports
@@ -21,7 +24,7 @@ schema scaffold.
 >   unknown status states.
 > - Provider status shows endpoint coverage and online/degraded/offline counts
 >   without probing network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.11.2 MOCK INGEST` product label and avoids
+> - User-facing UI copy uses the `v0.11.3 INGEST UI` product label and avoids
 >   stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -29,7 +32,7 @@ schema scaffold.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.2 MOCK INGEST`
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.3 INGEST UI`
 >   is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
@@ -106,6 +109,7 @@ frontend/
       ProviderStatus.tsx
       PreviewReadinessStrip.tsx
       PreviewFreshnessStrip.tsx
+      WalletIngestionWorkspace.tsx
       TonapiWalletIntelligencePreviewPanel.tsx
       TonapiAccountJettonsPreviewPanel.tsx
       StonfiPoolsPreviewPanel.tsx
@@ -167,7 +171,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.11.2 MOCK INGEST)
+## Data modes & providers (v0.11.3 INGEST UI)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -211,7 +215,8 @@ Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
 API-version field, while `v0.11.2 MOCK INGEST` is the product release label for
-the current frontend and provider preview workspace.
+the previous mock ingestion milestone. The current user-facing release label is
+`v0.11.3 INGEST UI`.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
@@ -322,12 +327,12 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Mock ingestion checklist
+## Ingestion UI checklist
 
-The `v0.11.2` mock-normalized ingestion milestone is considered ready when:
+The `v0.11.3` wallet ingestion UI milestone is considered ready when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.11.2 MOCK INGEST` on desktop and mobile
+- final browser QA confirms `RELEASE v0.11.3 INGEST UI` on desktop and mobile
   without console errors or horizontal page overflow;
 - release promotion gates and commands are documented in
   `RELEASE_PROMOTION.md`;
@@ -337,6 +342,9 @@ The `v0.11.2` mock-normalized ingestion milestone is considered ready when:
 - `POST /api/wallets/ingest/preview`, `POST /api/wallets/ingest`, and
   `GET /api/wallets/ingest/{run_id}` return data-honest mock-normalized
   responses;
+- the Wallet Activity Ingestion Workspace can preview coverage, run mock
+  ingestion, refresh a stored run, and render transfers, transactions, swaps,
+  balances, warnings, and provider evidence;
 - provider status, TonAPI previews, STON.fi preview, Bitquery/import tools, and
   legacy mock-aware analysis render without layout overflow on desktop/mobile;
 - provider preview panels show ready/running/error/fresh/stale states honestly;
@@ -351,12 +359,10 @@ The `v0.11.2` mock-normalized ingestion milestone is considered ready when:
   strips, loading states, and dashboard sections;
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
-  product milestone as `v0.11.2 MOCK INGEST`.
+  product milestone as `v0.11.3 INGEST UI`.
 
-## Roadmap beyond v0.11.2 MOCK INGEST
+## Roadmap beyond v0.11.3 INGEST UI
 
-- Add a dedicated wallet ingestion UI workspace using the preview/run/read
-  endpoints.
 - Add adapter interfaces for wallet activity ingestion after the UI workflow
   proves the contract.
 - Keep backend `VERSION` as an API-version field until the backend API contract

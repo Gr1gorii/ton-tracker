@@ -1,7 +1,7 @@
-# TON Wallet Intelligence Dashboard - v0.11.2 MOCK INGEST
+# TON Wallet Intelligence Dashboard - v0.11.3 INGEST UI
 
 Planning and rollout contract for real wallet activity ingestion. The current
-milestone proves the backend schema with deterministic mock-normalized
+milestone adds the dashboard workspace for deterministic mock-normalized
 ingestion; it does not implement real full-wallet analysis yet.
 
 ## Objective
@@ -17,7 +17,7 @@ The plan must preserve the current data honesty contract:
 - backend `VERSION=0.2.1` remains the API-version field until the API contract
   changes.
 
-## Non-Goals For v0.11.2
+## Non-Goals For v0.11.3
 
 - Do not calculate real wallet PnL yet.
 - Do not connect real wallet activity to clustering yet.
@@ -25,6 +25,7 @@ The plan must preserve the current data honesty contract:
   reports yet.
 - Do not infer missing swaps, balances, or transfers from partial provider data.
 - Do not claim the mock ingestion rows are real provider data.
+- Do not wire mock ingestion rows into legacy PnL, clustering, or exports.
 - Do not remove TonAPI/STON.fi/Bitquery provider limitation messaging.
 
 ## Data To Ingest
@@ -63,7 +64,8 @@ provider-limited, stale, unavailable, or mock-aware.
 ## API Contract Direction
 
 `v0.11.2` implements these endpoints with deterministic mock-normalized data.
-They do not call real providers:
+`v0.11.3` adds a dashboard workspace that uses them. They do not call real
+providers:
 
 - `POST /api/wallets/ingest/preview`
   - validates wallet address, window, and requested surfaces;
@@ -120,8 +122,8 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
    - Prove tables, states, and warnings with stable data. Done in `v0.11.2`.
 
 3. UI wallet ingestion workspace
-   - Add preview/run workflow and activity tables.
-   - Keep legacy analytics separate.
+   - Add preview/run workflow and activity tables. Done in `v0.11.3`.
+   - Keep legacy analytics separate. Done in `v0.11.3`.
 
 4. Provider adapter integration
    - Add real provider calls behind feature/data-mode controls.
@@ -133,22 +135,24 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
 
 ## Verification Gates
 
-Before promoting mock-normalized ingestion:
+Before promoting wallet ingestion UI:
 
 - `npm run build` passes.
 - `.venv/bin/python -m pytest -q` passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_ingestion.py -q`
   passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_schema.py -q` passes.
-- UI shows `RELEASE v0.11.2 MOCK INGEST`.
+- UI shows `RELEASE v0.11.3 INGEST UI`.
 - `/api/wallets/ingest/preview`, `/api/wallets/ingest`, and
   `/api/wallets/ingest/{run_id}` return source-aware mock data.
+- Wallet Activity Ingestion Workspace can preview coverage, persist a mock run,
+  refresh the stored run, and render activity tables.
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, and this document all
-  describe the same mock ingestion scope.
+  describe the same ingestion UI scope.
 - No user-facing UI claims real full-wallet analysis exists yet.
 
 ## Next Branch
 
 ```bash
-git checkout -b v0.11.3-wallet-ingestion-ui-workspace
+git checkout -b v0.11.4-wallet-ingestion-adapter-interfaces
 ```
