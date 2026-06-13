@@ -20,7 +20,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.11.3 INGEST UI";
+const RELEASE_LABEL = "v0.11.4 ADAPTERS";
 
 const navItems = [
   "DASHBOARD",
@@ -920,18 +920,18 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Wallet ingestion UI workspace</strong>
+            <strong>Wallet ingestion adapter interfaces</strong>
             <p>
-              Mock-normalized ingestion is now usable from the dashboard with
-              coverage preview, persisted runs, and activity tables.
+              Wallet activity ingestion now runs through a provider adapter
+              contract while the active adapter remains deterministic mock data.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
-            label="Ingestion UI"
-            text="Dashboard workflow covers preview, persisted run, refresh, evidence, warnings, and activity tables."
+            label="Adapter contract"
+            text="Preview and ingestion orchestration now use a wallet activity adapter interface before persistence."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -961,7 +961,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.11.3 INGEST UI is a product release label."
+            text="Backend VERSION remains the API-version field; v0.11.4 ADAPTERS is a product release label."
           />
         </div>
       </section>
