@@ -222,6 +222,7 @@ body {
 .dashboard-section .stonfi-panel,
 .dashboard-section .tonapi-panel,
 .dashboard-section .tonapi-wallet-panel,
+.dashboard-section .wallet-ingestion-panel,
 .dashboard-section .import-preview-panel {
   margin-bottom: 0;
 }
@@ -2006,14 +2007,14 @@ body {
 
 .workspace-control-grid {
   display: grid;
-  grid-template-columns: minmax(230px, 1fr) minmax(104px, 124px) minmax(320px, 0.82fr) max-content;
+  grid-template-columns: minmax(230px, 1fr) minmax(104px, 124px) minmax(380px, 0.95fr) max-content;
   gap: 12px;
   align-items: end;
 }
 
 .workspace-segmented {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 4px;
   padding: 3px;
   background: rgba(15, 23, 42, 0.92);
@@ -2475,6 +2476,7 @@ body {
 .evidence-shell .stonfi-panel,
 .evidence-shell .tonapi-panel,
 .evidence-shell .tonapi-wallet-panel,
+.evidence-shell .wallet-ingestion-panel,
 .evidence-shell .import-preview-panel,
 .evidence-shell .controls-card {
   background: linear-gradient(180deg, rgba(13, 22, 35, 0.98), rgba(8, 15, 26, 0.98));
@@ -2486,6 +2488,7 @@ body {
 
 .evidence-shell .section,
 .evidence-shell .tonapi-wallet-panel,
+.evidence-shell .wallet-ingestion-panel,
 .evidence-shell .tonapi-panel,
 .evidence-shell .stonfi-panel,
 .evidence-shell .bitquery-panel,
@@ -3014,6 +3017,7 @@ body {
 .tonapi-panel,
 .stonfi-panel,
 .tonapi-wallet-panel,
+.wallet-ingestion-panel,
 .bitquery-panel,
 .import-preview-panel {
   min-width: 0;
@@ -3042,7 +3046,7 @@ body {
 }
 
 .workspace-control-grid {
-  grid-template-columns: minmax(230px, 1fr) minmax(104px, 124px) minmax(270px, 0.9fr);
+  grid-template-columns: minmax(230px, 1fr) minmax(104px, 124px) minmax(360px, 1fr);
 }
 
 .workspace-actions {
@@ -3060,6 +3064,7 @@ body {
 .evidence-shell .stonfi-panel,
 .evidence-shell .tonapi-panel,
 .evidence-shell .tonapi-wallet-panel,
+.evidence-shell .wallet-ingestion-panel,
 .evidence-shell .import-preview-panel,
 .evidence-shell .controls-card {
   background:
@@ -3945,13 +3950,127 @@ body {
   font-weight: 900;
 }
 
+/* Wallet activity ingestion workspace v0.11.3 ---------------------- */
+.wallet-ingestion-panel {
+  margin-bottom: 24px;
+}
+
+.wallet-ingestion-note {
+  margin-bottom: 16px;
+}
+
+.wallet-ingestion-form {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(140px, 180px);
+  gap: 12px;
+  align-items: end;
+}
+
+.wallet-ingestion-address-field {
+  min-width: 0;
+}
+
+.wallet-ingestion-custom-window {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.wallet-ingestion-surfaces {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(164px, 1fr));
+  gap: 8px;
+}
+
+.wallet-surface-toggle {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: start;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(33, 74, 49, 0.68);
+  border-radius: 7px;
+  background: rgba(2, 6, 4, 0.36);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.wallet-surface-toggle:hover {
+  border-color: rgba(0, 230, 118, 0.34);
+  color: var(--text);
+}
+
+.wallet-surface-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 1px 0 0;
+  accent-color: var(--primary-green);
+}
+
+.wallet-surface-toggle span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.wallet-surface-toggle small {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.wallet-surface-toggle-active {
+  border-color: rgba(0, 230, 118, 0.45);
+  background: rgba(0, 230, 118, 0.075);
+}
+
+.wallet-ingestion-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.wallet-ingestion-results,
+.wallet-activity-table-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 18px;
+  min-width: 0;
+}
+
+.wallet-ingestion-metric-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.wallet-ingestion-table {
+  min-width: 900px;
+}
+
+.wallet-ingestion-table td {
+  white-space: nowrap;
+}
+
+.wallet-ingestion-table td:last-child {
+  white-space: normal;
+}
+
 @media (max-width: 1120px) {
   .wallet-result-overview,
   .wallet-evidence-grid {
     grid-template-columns: 1fr;
   }
 
-  .wallet-metric-grid {
+  .wallet-metric-grid,
+  .wallet-ingestion-metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -3960,7 +4079,10 @@ body {
   .wallet-intelligence-head,
   .wallet-scope-board,
   .wallet-scope-column ul,
-  .wallet-metric-grid {
+  .wallet-metric-grid,
+  .wallet-ingestion-metric-grid,
+  .wallet-ingestion-form,
+  .wallet-ingestion-custom-window {
     grid-template-columns: 1fr;
   }
 
@@ -3974,6 +4096,15 @@ body {
 
   .wallet-intelligence-state.loading-box {
     grid-template-columns: 1fr;
+  }
+
+  .wallet-ingestion-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wallet-ingestion-actions .btn {
+    width: 100%;
   }
 }
 
@@ -4274,6 +4405,8 @@ input {
 .tonapi-results,
 .stonfi-results,
 .tonapi-wallet-results,
+.wallet-ingestion-results,
+.wallet-activity-table-stack,
 .preview-readiness,
 .preview-readiness-main,
 .preview-readiness-items,

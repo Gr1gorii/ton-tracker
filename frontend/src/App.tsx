@@ -15,11 +15,12 @@ import BitqueryTokenTradesPanel from "./components/BitqueryTokenTradesPanel";
 import StonfiPoolsPreviewPanel from "./components/StonfiPoolsPreviewPanel";
 import TonapiAccountJettonsPreviewPanel from "./components/TonapiAccountJettonsPreviewPanel";
 import TonapiWalletIntelligencePreviewPanel from "./components/TonapiWalletIntelligencePreviewPanel";
+import WalletIngestionWorkspace from "./components/WalletIngestionWorkspace";
 import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils";
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.11.2 MOCK INGEST";
+const RELEASE_LABEL = "v0.11.3 INGEST UI";
 
 const navItems = [
   "DASHBOARD",
@@ -31,7 +32,7 @@ const navItems = [
   "SETTINGS",
 ];
 
-type WorkspaceView = "wallet" | "jettons" | "pools";
+type WorkspaceView = "ingestion" | "wallet" | "jettons" | "pools";
 type WorkspaceRunStatus =
   | "idle"
   | "queued"
@@ -57,6 +58,11 @@ const workspaceTargets: Record<
     requiresAccount: boolean;
   }
 > = {
+  ingestion: {
+    label: "Wallet Activity Ingestion Workspace",
+    targetId: "wallet-ingestion-workspace",
+    requiresAccount: true,
+  },
   wallet: {
     label: "TonAPI Wallet Intelligence Preview",
     targetId: "wallet-intelligence-preview",
@@ -96,10 +102,10 @@ export default function App() {
 
   const [workspaceAccount, setWorkspaceAccount] = useState("");
   const [workspaceLimit, setWorkspaceLimit] = useState("10");
-  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("wallet");
+  const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("ingestion");
   const [workspaceHint, setWorkspaceHint] = useState<string | null>(null);
   const [workspaceRunRequest, setWorkspaceRunRequest] = useState({
-    target: "wallet" as WorkspaceView,
+    target: "ingestion" as WorkspaceView,
     id: 0,
   });
   const [workspaceRunState, setWorkspaceRunState] =
@@ -293,13 +299,13 @@ export default function App() {
     setWorkspaceRunState({
       target: workspaceView,
       status: "queued",
-      message: `${target.label} queued from shared workspace inputs. This runs one scoped provider preview only.`,
+      message: `${target.label} queued from shared workspace inputs. This runs one scoped request only.`,
       accountLabel: target.requiresAccount ? cleanedAccount : "Not used",
       limitLabel: nextLimit,
       updatedAt: now,
     });
     setWorkspaceHint(
-      `${target.label} is running from shared workspace inputs. This is not full wallet activity analysis.`,
+      `${target.label} is running from shared workspace inputs. Real wallet analytics remain separate.`,
     );
     document.getElementById(target.targetId)?.scrollIntoView({
       behavior: "smooth",
@@ -335,7 +341,7 @@ export default function App() {
   function clearWorkspaceControl() {
     setWorkspaceAccount("");
     setWorkspaceLimit("10");
-    setWorkspaceView("wallet");
+    setWorkspaceView("ingestion");
     setWorkspaceHint(null);
     setWorkspaceRunState(null);
   }
@@ -416,6 +422,28 @@ export default function App() {
                 providers={providerSnapshot}
                 dataQuality={result?.data_quality ?? null}
                 error={providersError}
+              />
+            </DashboardSection>
+
+            <DashboardSection
+              id="wallet-ingestion-workspace"
+              eyebrow="Wallet Activity"
+              title="Wallet Activity Ingestion Workspace"
+              description="Preview coverage, persist mock-normalized activity, and inspect source-aware rows before analytics wiring."
+            >
+              <WalletIngestionWorkspace
+                accountAddress={workspaceAccount}
+                runRequestId={
+                  workspaceRunRequest.target === "ingestion"
+                    ? workspaceRunRequest.id
+                    : 0
+                }
+                onAccountAddressChange={(value) => {
+                  handleWorkspaceAccountChange(value);
+                }}
+                onPreviewRunStateChange={(update) => {
+                  handlePreviewRunStateChange("ingestion", update);
+                }}
               />
             </DashboardSection>
 
@@ -657,12 +685,15 @@ function WorkspaceControl({
     runState?.message ??
     "Ready to run one selected provider preview from shared workspace inputs.";
   const accountLabel = target.requiresAccount
-    ? account.trim() || "Required for TonAPI"
+    ? account.trim() || "Required"
     : "Not used by STON.fi";
   const limitLabel = limit.trim() || "10";
-  const selectedInputScope = target.requiresAccount
-    ? "Address + limit required"
-    : "Limit only; account ignored";
+  const selectedInputScope =
+    view === "ingestion"
+      ? "Address + surfaces in module"
+      : target.requiresAccount
+        ? "Address + limit required"
+        : "Limit only; account ignored";
   const isRunBusy = statusLabel === "queued" || statusLabel === "running";
 
   return (
@@ -727,6 +758,18 @@ function WorkspaceControl({
             role="group"
             aria-labelledby="workspace-view-label"
           >
+            <button
+              className={
+                view === "ingestion"
+                  ? "workspace-segment workspace-segment-active"
+                  : "workspace-segment"
+              }
+              type="button"
+              onClick={() => onViewChange("ingestion")}
+              aria-pressed={view === "ingestion"}
+            >
+              Wallet ingestion
+            </button>
             <button
               className={
                 view === "wallet"
@@ -829,7 +872,11 @@ function WorkspaceControl({
         </div>
         <div className="workspace-scope-item">
           <span>Result contract</span>
-          <strong>Provider preview, not full analysis</strong>
+          <strong>
+            {view === "ingestion"
+              ? "Mock ingestion, not analytics"
+              : "Provider preview, not full analysis"}
+          </strong>
         </div>
         <div className="workspace-scope-item">
           <span>Evidence state</span>
@@ -838,9 +885,9 @@ function WorkspaceControl({
       </div>
 
       <div className="workspace-control-note" id={noteId}>
-        One shared input layer. TonAPI wallet intelligence and account jettons
-        use address plus limit; STON.fi uses limit only. Every run stays scoped
-        to a provider preview request.
+        One shared input layer. Wallet ingestion uses address plus selected
+        surfaces; TonAPI uses address plus limit; STON.fi uses limit only. Every
+        run stays scoped and source-labeled.
         {hint && <span>{hint}</span>}
       </div>
     </section>
@@ -873,18 +920,18 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Mock wallet activity ingestion</strong>
+            <strong>Wallet ingestion UI workspace</strong>
             <p>
-              Wallet activity persistence now stores deterministic mock-normalized
-              transfers, transactions, swaps, balances, warnings, and evidence.
+              Mock-normalized ingestion is now usable from the dashboard with
+              coverage preview, persisted runs, and activity tables.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
-            label="Mock ingestion"
-            text="Preview, run, and read endpoints prove the wallet activity schema with deterministic normalized rows."
+            label="Ingestion UI"
+            text="Dashboard workflow covers preview, persisted run, refresh, evidence, warnings, and activity tables."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -914,7 +961,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.11.2 MOCK INGEST is a product release label."
+            text="Backend VERSION remains the API-version field; v0.11.3 INGEST UI is a product release label."
           />
         </div>
       </section>

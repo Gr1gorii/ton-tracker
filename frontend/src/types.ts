@@ -448,3 +448,127 @@ export interface TonapiWalletIntelligencePreviewResponse {
   message: string;
   error: TonapiProviderError | null;
 }
+
+export type WalletIngestionSurface =
+  | "transfers"
+  | "transactions"
+  | "swaps"
+  | "balances"
+  | "jettons";
+
+export type WalletIngestionStatus =
+  | "planned"
+  | "queued"
+  | "running"
+  | "success"
+  | "partial"
+  | "error"
+  | "stale";
+
+export type WalletSourceStatus =
+  | "live"
+  | "mock"
+  | "offline"
+  | "limited"
+  | "unavailable"
+  | "error";
+
+export interface WalletIngestionRequest {
+  wallet_address: string;
+  time_window: TimeWindow;
+  custom_start?: string;
+  custom_end?: string;
+  surfaces: WalletIngestionSurface[];
+}
+
+export interface WalletActivityProviderEvidence {
+  provider: string;
+  data_mode: "mock" | "real";
+  source_status: WalletSourceStatus;
+  warnings: string[];
+  freshness?: string | null;
+  raw_count: number;
+  normalized_count: number;
+}
+
+export interface WalletIngestionPreviewResponse {
+  success: boolean;
+  wallet_address: string;
+  time_window: string;
+  requested_surfaces: WalletIngestionSurface[];
+  provider_coverage: WalletActivityProviderEvidence[];
+  unavailable_surfaces: WalletIngestionSurface[];
+  warnings: string[];
+  message: string;
+}
+
+export interface WalletTransferRecord {
+  tx_hash?: string | null;
+  logical_time?: string | null;
+  timestamp?: string | null;
+  asset: string;
+  amount?: string | null;
+  direction: "in" | "out" | "unknown";
+  counterparty?: string | null;
+  provider: string;
+  source_status: WalletSourceStatus;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface WalletTransactionRecord {
+  tx_hash: string;
+  logical_time?: string | null;
+  timestamp?: string | null;
+  fee_ton?: string | null;
+  success: "success" | "failed" | "unknown";
+  provider: string;
+  source_status: WalletSourceStatus;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface WalletSwapRecord {
+  tx_hash?: string | null;
+  timestamp?: string | null;
+  dex?: string | null;
+  token_in?: string | null;
+  amount_in?: string | null;
+  token_out?: string | null;
+  amount_out?: string | null;
+  estimated_usd?: string | null;
+  provider: string;
+  source_status: WalletSourceStatus;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface WalletBalanceSnapshotRecord {
+  asset: string;
+  balance?: string | null;
+  balance_usd?: string | null;
+  provider: string;
+  source_status: WalletSourceStatus;
+  snapshot_at?: string | null;
+  raw?: Record<string, unknown> | null;
+}
+
+export interface WalletIngestionWarningRecord {
+  severity: "info" | "warning" | "error" | "critical";
+  provider?: string | null;
+  message: string;
+  evidence_key?: string | null;
+}
+
+export interface WalletIngestionRunResponse {
+  run_id?: number | null;
+  wallet_address: string;
+  time_window: string;
+  status: WalletIngestionStatus;
+  data_mode: "mock" | "real";
+  requested_surfaces: WalletIngestionSurface[];
+  provider_evidence: WalletActivityProviderEvidence[];
+  transfers: WalletTransferRecord[];
+  transactions: WalletTransactionRecord[];
+  swaps: WalletSwapRecord[];
+  balances: WalletBalanceSnapshotRecord[];
+  warnings: WalletIngestionWarningRecord[];
+  message: string;
+}

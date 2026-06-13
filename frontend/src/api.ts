@@ -11,6 +11,9 @@ import type {
   StonfiPoolsPreviewResponse,
   TonapiAccountJettonsPreviewResponse,
   TonapiWalletIntelligencePreviewResponse,
+  WalletIngestionPreviewResponse,
+  WalletIngestionRequest,
+  WalletIngestionRunResponse,
 } from "./types";
 
 // API base URL. Override with VITE_API_BASE at build/dev time.
@@ -203,6 +206,50 @@ export async function previewTonapiWalletIntelligence(
   }
 
   return (await res.json()) as TonapiWalletIntelligencePreviewResponse;
+}
+
+export async function previewWalletIngestion(
+  req: WalletIngestionRequest,
+): Promise<WalletIngestionPreviewResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/ingest/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Wallet ingestion preview failed"));
+  }
+
+  return (await res.json()) as WalletIngestionPreviewResponse;
+}
+
+export async function runWalletIngestion(
+  req: WalletIngestionRequest,
+): Promise<WalletIngestionRunResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/ingest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Wallet ingestion run failed"));
+  }
+
+  return (await res.json()) as WalletIngestionRunResponse;
+}
+
+export async function getWalletIngestionRun(
+  runId: number,
+): Promise<WalletIngestionRunResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}`);
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Wallet ingestion read failed"));
+  }
+
+  return (await res.json()) as WalletIngestionRunResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {
