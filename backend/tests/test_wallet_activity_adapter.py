@@ -3,10 +3,35 @@
 from __future__ import annotations
 
 from adapters.wallet_activity import (
+    BitqueryWalletActivityScaffoldAdapter,
     MockWalletActivityAdapter,
+    TonapiWalletActivityScaffoldAdapter,
     WalletActivityAdapterRequest,
     build_wallet_activity_adapter,
+    get_wallet_activity_provider_status,
 )
+from config import DEFAULT_STONFI_BASE_URL, DEFAULT_TONAPI_BASE_URL, Settings
+
+
+def _settings(
+    mode: str = "mock",
+    provider: str = "mock",
+    **kw,
+) -> Settings:
+    base = dict(
+        data_mode=mode,
+        geckoterminal_base_url="https://api.geckoterminal.com/api/v2",
+        ton_api_base_url="https://tonapi.io",
+        ton_api_key="ton-key",
+        bitquery_api_url="https://graphql.bitquery.io",
+        bitquery_api_key="bitquery-key",
+        stonfi_base_url=DEFAULT_STONFI_BASE_URL,
+        tonapi_base_url=DEFAULT_TONAPI_BASE_URL,
+        tonapi_api_key="",
+        wallet_activity_provider=provider,
+    )
+    base.update(kw)
+    return Settings(**base)
 
 
 def _request(
@@ -82,3 +107,70 @@ def test_wallet_activity_adapter_factory_returns_mock_adapter():
 
     assert isinstance(adapter, MockWalletActivityAdapter)
     assert adapter.provider_name == "mock_wallet_activity"
+
+
+def test_wallet_activity_adapter_factory_defaults_real_mode_to_mock_adapter():
+    adapter = build_wallet_activity_adapter(_settings("real"))
+
+    assert isinstance(adapter, MockWalletActivityAdapter)
+
+
+def test_wallet_activity_adapter_factory_routes_explicit_tonapi_scaffold():
+    adapter = build_wallet_activity_adapter(_settings("real", "tonapi"))
+
+    assert isinstance(adapter, TonapiWalletActivityScaffoldAdapter)
+
+    result = adapter.preview(_request(["jettons", "swaps"], "real"))
+
+    assert result.status == "partial"
+    assert result.data_mode == "real"
+    assert result.provider_evidence[0].provider == "tonapi_wallet_activity_scaffold"
+    assert result.provider_evidence[0].source_status == "limited"
+    assert result.provider_evidence[0].raw_count == 0
+    assert result.provider_evidence[0].normalized_count == 0
+    assert result.unavailable_surfaces == ["jettons", "swaps"]
+    assert result.transfers == []
+    assert result.swaps == []
+    assert "No real wallet activity provider calls" in result.message
+    assert any("scaffold-only" in warning.message for warning in result.warnings)
+
+
+def test_wallet_activity_scaffold_missing_config_is_unavailable():
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "bitquery", bitquery_api_key="")
+    )
+
+    assert isinstance(adapter, BitqueryWalletActivityScaffoldAdapter)
+
+    result = adapter.ingest(_request(["swaps"], "real"))
+
+    assert result.status == "error"
+    assert result.provider_evidence[0].source_status == "unavailable"
+    assert result.unavailable_surfaces == ["swaps"]
+    assert result.swaps == []
+    assert any("BITQUERY_API_KEY" in warning.message for warning in result.warnings)
+
+
+def test_wallet_activity_provider_status_reports_mock_default():
+    status = get_wallet_activity_provider_status(_settings("mock"))
+
+    assert status["configured"] is True
+    assert status["available"] is True
+    assert "deterministic mock adapter" in status["message"]
+
+
+def test_wallet_activity_provider_status_reports_real_scaffold_limited():
+    status = get_wallet_activity_provider_status(_settings("real", "stonfi"))
+
+    assert status["configured"] is True
+    assert status["available"] is False
+    assert "STON.fi wallet activity scaffold" in status["message"]
+    assert "live wallet activity calls are disabled" in status["message"]
+
+
+def test_wallet_activity_provider_status_rejects_unknown_provider():
+    status = get_wallet_activity_provider_status(_settings("real", "banana"))
+
+    assert status["configured"] is False
+    assert status["available"] is False
+    assert "unsupported" in status["message"]

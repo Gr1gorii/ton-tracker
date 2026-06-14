@@ -38,6 +38,7 @@ def client():
 
 def test_wallet_ingestion_preview_returns_mock_coverage(client, monkeypatch):
     monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.delenv("WALLET_ACTIVITY_PROVIDER", raising=False)
 
     response = client.post(
         "/api/wallets/ingest/preview",
@@ -65,11 +66,60 @@ def test_wallet_ingestion_preview_returns_mock_coverage(client, monkeypatch):
     assert evidence["normalized_count"] == 6
 
 
+def test_wallet_ingestion_explicit_provider_scaffold_returns_limited_coverage(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    response = client.post(
+        "/api/wallets/ingest/preview",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["jettons"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["success"] is True
+    assert body["unavailable_surfaces"] == ["jettons"]
+    assert "No real wallet activity provider calls" in body["message"]
+
+    evidence = body["provider_coverage"][0]
+    assert evidence["provider"] == "tonapi_wallet_activity_scaffold"
+    assert evidence["data_mode"] == "real"
+    assert evidence["source_status"] == "limited"
+    assert evidence["raw_count"] == 0
+    assert evidence["normalized_count"] == 0
+
+    run_response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["jettons"],
+        },
+    )
+
+    assert run_response.status_code == 200
+    run_body = run_response.json()
+    assert run_body["status"] == "partial"
+    assert run_body["data_mode"] == "real"
+    assert run_body["provider_evidence"][0]["source_status"] == "limited"
+    assert run_body["balances"] == []
+    assert run_body["warnings"]
+
+
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
     client,
     monkeypatch,
 ):
     monkeypatch.setenv("DATA_MODE", "mock")
+    monkeypatch.delenv("WALLET_ACTIVITY_PROVIDER", raising=False)
 
     response = client.post(
         "/api/wallets/ingest",

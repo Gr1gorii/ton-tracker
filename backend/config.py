@@ -63,6 +63,7 @@ class Settings:
     stonfi_base_url: str = DEFAULT_STONFI_BASE_URL
     tonapi_base_url: str = DEFAULT_TONAPI_BASE_URL
     tonapi_api_key: str = ""
+    wallet_activity_provider: str = "mock"
 
     @property
     def is_mock(self) -> bool:
@@ -101,6 +102,8 @@ def get_settings() -> Settings:
         tonapi_base_url=_env("TONAPI_BASE_URL", DEFAULT_TONAPI_BASE_URL)
         or DEFAULT_TONAPI_BASE_URL,
         tonapi_api_key=_env("TONAPI_API_KEY"),
+        wallet_activity_provider=_env("WALLET_ACTIVITY_PROVIDER", "mock").lower()
+        or "mock",
     )
 
 

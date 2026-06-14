@@ -81,7 +81,7 @@ def persist_mock_wallet_ingestion(
             {
                 "provider_evidence": _provider_evidence(result),
                 "unavailable_surfaces": result.unavailable_surfaces,
-                "adapter_contract": "wallet_activity_adapter_v0.11.4",
+                "adapter_contract": "wallet_activity_adapter_v0.11.5",
             }
         ),
     )

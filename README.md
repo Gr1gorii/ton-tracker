@@ -1,11 +1,12 @@
-# TON Wallet Intelligence Dashboard — v0.11.4 ADAPTERS
+# TON Wallet Intelligence Dashboard — v0.11.5 SCAFFOLDS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. The current milestone adds wallet activity
-adapter interfaces under the dashboard ingestion workflow, while the active
-provider remains deterministic mock data.
+mock-aware wallet analytics. The current milestone adds provider-specific
+wallet activity adapter scaffolds behind explicit configuration/status
+controls, while deterministic mock data remains the default executable
+ingestion path.
 
-> **v0.11.4 ADAPTERS status — wallet ingestion adapter interfaces.**
+> **v0.11.5 SCAFFOLDS status — wallet ingestion provider scaffolds.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -14,8 +15,11 @@ provider remains deterministic mock data.
 >   normalized activity tables.
 > - Wallet activity preview/run orchestration now goes through
 >   `backend/adapters/wallet_activity.py`.
-> - The current wallet activity adapter is still deterministic mock data; no
->   real wallet provider calls are made yet.
+> - `WALLET_ACTIVITY_PROVIDER=mock` remains the default. Explicit
+>   `tonapi`, `ton_provider`, `stonfi`, or `bitquery` values expose
+>   scaffold-only provider coverage metadata in `DATA_MODE=real`.
+> - Provider-specific wallet activity scaffolds do not fetch or persist real
+>   provider rows yet; they return limited/unavailable evidence honestly.
 > - Provider preview panels use shared workspace inputs and show fresh/stale,
 >   ready/running/error, and scoped-data states.
 > - Legacy buyers, PnL, exports, clustering, and interesting-wallet reports
@@ -26,9 +30,10 @@ provider remains deterministic mock data.
 >   stays visible instead of being inferred.
 > - Provider/source badges distinguish loading, error, mock/offline, live, and
 >   unknown status states.
-> - Provider status shows endpoint coverage and online/degraded/offline counts
->   without probing network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.11.4 ADAPTERS` product label and avoids
+> - Provider status shows endpoint coverage and online/degraded/offline counts,
+>   including the wallet activity adapter selection row, without probing
+>   network providers from the status endpoint.
+> - User-facing UI copy uses the `v0.11.5 SCAFFOLDS` product label and avoids
 >   stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -36,7 +41,7 @@ provider remains deterministic mock data.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.4 ADAPTERS`
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.5 SCAFFOLDS`
 >   is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
@@ -86,10 +91,10 @@ backend/
     tonapi_wallet_intelligence.py
                          Jettons-only wallet intelligence preview builder
     wallet_activity_ingestion.py
-                         Deterministic mock-normalized wallet activity ingestion
+                         Adapter-backed wallet activity ingestion persistence
   adapters/
     geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
-    wallet_activity.py Wallet activity adapter contract + mock adapter
+    wallet_activity.py Wallet activity contract + mock/scaffold adapters
     tonapi.py          TonAPI account jettons preview adapter
     stonfi.py          STON.fi pools preview adapter
     bitquery.py        DEX trades — mock/provider-limited Bitquery
@@ -176,7 +181,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.11.4 ADAPTERS)
+## Data modes & providers (v0.11.5 SCAFFOLDS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -189,6 +194,10 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | `TON_API_KEY`            | TON indexer API key                                |
 | `BITQUERY_API_URL`       | Bitquery endpoint (real DEX trades)                |
 | `BITQUERY_API_KEY`       | Bitquery API key                                   |
+| `STONFI_BASE_URL`        | STON.fi API base for pool previews                 |
+| `TONAPI_BASE_URL`        | TonAPI API base for account jetton previews        |
+| `TONAPI_API_KEY`         | Optional TonAPI API key                            |
+| `WALLET_ACTIVITY_PROVIDER` | `mock`, `tonapi`, `ton_provider`, `stonfi`, or `bitquery` |
 
 What is real, preview-only, mock-aware, planned, and scaffolded in this
 milestone:
@@ -202,7 +211,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Full wallet transfers/history/swaps/balances | mock-normalized | mock-normalized rows only; no provider ingestion yet |
+| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit provider scaffolds return limited/unavailable evidence only |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -219,12 +228,12 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.11.4 ADAPTERS` is the current user-facing product
-release label.
+API-version field, while `v0.11.5 SCAFFOLDS` is the current user-facing
+product release label.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
-provider, Bitquery, STON.fi, and TonAPI.
+provider, Bitquery, STON.fi, TonAPI, and the selected wallet activity adapter.
 
 ### `POST /api/analyze`
 Request body:
@@ -331,13 +340,13 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Adapter interfaces checklist
+## Provider scaffolds checklist
 
-The `v0.11.4` wallet ingestion adapter interfaces milestone is considered ready
+The `v0.11.5` wallet ingestion provider scaffolds milestone is considered ready
 when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.11.4 ADAPTERS` on desktop and mobile
+- final browser QA confirms `RELEASE v0.11.5 SCAFFOLDS` on desktop and mobile
   without console errors or horizontal page overflow;
 - release promotion gates and commands are documented in
   `RELEASE_PROMOTION.md`;
@@ -349,6 +358,9 @@ when:
   responses;
 - wallet activity adapter contract tests pass and prove preview/run behavior
   behind `backend/adapters/wallet_activity.py`;
+- explicit `WALLET_ACTIVITY_PROVIDER` scaffold tests prove TonAPI, TON
+  provider, STON.fi, and Bitquery selections return limited/unavailable
+  coverage without real provider calls;
 - the Wallet Activity Ingestion Workspace can preview coverage, run mock
   ingestion, refresh a stored run, and render transfers, transactions, swaps,
   balances, warnings, and provider evidence;
@@ -358,20 +370,20 @@ when:
 - unavailable provider data stays visible and is not inferred;
 - provider/source badges clearly distinguish loading, error, mock/offline,
   live, and unknown states;
-- provider status endpoint coverage displays all five expected provider
-  surfaces when available: GeckoTerminal, STON.fi, TonAPI, Bitquery, and TON
-  provider;
+- provider status endpoint coverage displays all six expected provider
+  surfaces when available: GeckoTerminal, STON.fi, TonAPI, wallet activity,
+  Bitquery, and TON provider;
 - user-facing UI copy does not show stale product-version labels;
 - accessibility pass remains intact for navigation, segmented controls, status
   strips, loading states, and dashboard sections;
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
-  product milestone as `v0.11.4 ADAPTERS`.
+  product milestone as `v0.11.5 SCAFFOLDS`.
 
-## Roadmap beyond v0.11.4 ADAPTERS
+## Roadmap beyond v0.11.5 SCAFFOLDS
 
-- Add provider-specific wallet activity adapter scaffolds behind explicit
-  status and configuration controls.
+- Add the first guarded live wallet activity provider implementation behind
+  explicit feature/config controls and provider-quality evidence.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.
 - Connect real wallet activity to buyers, PnL, clustering, and exports instead
