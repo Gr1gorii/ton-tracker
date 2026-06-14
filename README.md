@@ -1,12 +1,12 @@
-# TON Wallet Intelligence Dashboard — v0.11.5 SCAFFOLDS
+# TON Wallet Intelligence Dashboard — v0.11.6 LIVE GUARDS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. The current milestone adds provider-specific
-wallet activity adapter scaffolds behind explicit configuration/status
-controls, while deterministic mock data remains the default executable
-ingestion path.
+mock-aware wallet analytics. The current milestone adds the first guarded live
+wallet activity provider path: TonAPI account jetton balance snapshots behind
+explicit real-mode flags. Deterministic mock data remains the default
+executable ingestion path.
 
-> **v0.11.5 SCAFFOLDS status — wallet ingestion provider scaffolds.**
+> **v0.11.6 LIVE GUARDS status — guarded TonAPI jetton snapshots.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -16,10 +16,12 @@ ingestion path.
 > - Wallet activity preview/run orchestration now goes through
 >   `backend/adapters/wallet_activity.py`.
 > - `WALLET_ACTIVITY_PROVIDER=mock` remains the default. Explicit
->   `tonapi`, `ton_provider`, `stonfi`, or `bitquery` values expose
->   scaffold-only provider coverage metadata in `DATA_MODE=real`.
-> - Provider-specific wallet activity scaffolds do not fetch or persist real
->   provider rows yet; they return limited/unavailable evidence honestly.
+>   `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
+>   `WALLET_ACTIVITY_LIVE_ENABLED=true` enable the only live wallet activity
+>   path in this release: TonAPI account jetton balance snapshots.
+> - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
+>   remain scaffold/limited coverage paths. They do not fetch or persist live
+>   wallet activity rows.
 > - Provider preview panels use shared workspace inputs and show fresh/stale,
 >   ready/running/error, and scoped-data states.
 > - Legacy buyers, PnL, exports, clustering, and interesting-wallet reports
@@ -33,7 +35,7 @@ ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.11.5 SCAFFOLDS` product label and avoids
+> - User-facing UI copy uses the `v0.11.6 LIVE GUARDS` product label and avoids
 >   stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -41,7 +43,7 @@ ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.5 SCAFFOLDS`
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.6 LIVE GUARDS`
 >   is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
@@ -181,7 +183,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.11.5 SCAFFOLDS)
+## Data modes & providers (v0.11.6 LIVE GUARDS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -198,6 +200,8 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | `TONAPI_BASE_URL`        | TonAPI API base for account jetton previews        |
 | `TONAPI_API_KEY`         | Optional TonAPI API key                            |
 | `WALLET_ACTIVITY_PROVIDER` | `mock`, `tonapi`, `ton_provider`, `stonfi`, or `bitquery` |
+| `WALLET_ACTIVITY_LIVE_ENABLED` | `false` by default; enables the guarded TonAPI live path only when `DATA_MODE=real` and `WALLET_ACTIVITY_PROVIDER=tonapi` |
+| `WALLET_ACTIVITY_LIVE_JETTON_LIMIT` | TonAPI live jetton snapshot limit, clamped to `1..500` |
 
 What is real, preview-only, mock-aware, planned, and scaffolded in this
 milestone:
@@ -211,7 +215,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit provider scaffolds return limited/unavailable evidence only |
+| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns jetton balance snapshots only; transfers, transactions, swaps, native TON balance, PnL, and clustering remain unavailable |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -228,7 +232,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.11.5 SCAFFOLDS` is the current user-facing
+API-version field, while `v0.11.6 LIVE GUARDS` is the current user-facing
 product release label.
 
 ### `GET /api/providers/status`
@@ -270,17 +274,20 @@ Returns a scoped STON.fi pools preview for `limit`. It covers STON.fi DEX pools
 only, not all TON DeFi.
 
 ### `POST /api/wallets/ingest/preview`
-Returns deterministic mock provider coverage for a wallet activity ingestion
-request. It validates wallet address, time window, and requested surfaces, but
-does not persist a run or call real providers.
+Returns provider coverage for a wallet activity ingestion request. The default
+mock path is deterministic. In v0.11.6 the explicit TonAPI live guard can call
+TonAPI for account jetton balance snapshot coverage only; non-jetton surfaces
+remain unavailable.
 
 ### `POST /api/wallets/ingest`
-Persists one deterministic mock-normalized wallet activity run and returns run
-id, status, provider evidence, normalized transfers, transactions, swaps,
-balances, and warnings.
+Persists one adapter-backed wallet activity run and returns run id, status,
+provider evidence, normalized rows, unavailable surfaces, and warnings. The
+default path persists deterministic mock-normalized rows. The v0.11.6 TonAPI
+live guard persists account jetton balance snapshots only.
 
 ### `GET /api/wallets/ingest/{run_id}`
-Returns one persisted mock-normalized wallet activity run by id.
+Returns one persisted wallet activity run by id, including provider evidence,
+unavailable surfaces, normalized rows, and warnings.
 
 ### `POST /api/bitquery/token-trades/preview`
 Returns a Bitquery token-trades preview when provider coverage is available.
@@ -340,13 +347,13 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ---
 
-## Provider scaffolds checklist
+## Live guard checklist
 
-The `v0.11.5` wallet ingestion provider scaffolds milestone is considered ready
+The `v0.11.6` wallet ingestion live-provider guards milestone is considered ready
 when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.11.5 SCAFFOLDS` on desktop and mobile
+- final browser QA confirms `RELEASE v0.11.6 LIVE GUARDS` on desktop and mobile
   without console errors or horizontal page overflow;
 - release promotion gates and commands are documented in
   `RELEASE_PROMOTION.md`;
@@ -358,9 +365,12 @@ when:
   responses;
 - wallet activity adapter contract tests pass and prove preview/run behavior
   behind `backend/adapters/wallet_activity.py`;
-- explicit `WALLET_ACTIVITY_PROVIDER` scaffold tests prove TonAPI, TON
-  provider, STON.fi, and Bitquery selections return limited/unavailable
+- explicit `WALLET_ACTIVITY_PROVIDER` scaffold tests prove TON provider,
+  STON.fi, Bitquery, and unguarded TonAPI selections return limited/unavailable
   coverage without real provider calls;
+- live guard tests prove `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`,
+  and `WALLET_ACTIVITY_LIVE_ENABLED=true` can fetch and persist TonAPI account
+  jetton balance snapshots only;
 - the Wallet Activity Ingestion Workspace can preview coverage, run mock
   ingestion, refresh a stored run, and render transfers, transactions, swaps,
   balances, warnings, and provider evidence;
@@ -378,12 +388,12 @@ when:
   strips, loading states, and dashboard sections;
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
-  product milestone as `v0.11.5 SCAFFOLDS`.
+  product milestone as `v0.11.6 LIVE GUARDS`.
 
-## Roadmap beyond v0.11.5 SCAFFOLDS
+## Roadmap beyond v0.11.6 LIVE GUARDS
 
-- Add the first guarded live wallet activity provider implementation behind
-  explicit feature/config controls and provider-quality evidence.
+- Expand guarded TonAPI balance coverage beyond jetton snapshots, starting
+  with native TON balance if provider evidence is reliable.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.
 - Connect real wallet activity to buyers, PnL, clustering, and exports instead

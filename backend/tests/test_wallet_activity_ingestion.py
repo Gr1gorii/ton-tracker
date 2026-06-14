@@ -8,6 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from config import ProviderResult
 from database import Base, get_session
 from main import app
 
@@ -112,6 +113,70 @@ def test_wallet_ingestion_explicit_provider_scaffold_returns_limited_coverage(
     assert run_body["provider_evidence"][0]["source_status"] == "limited"
     assert run_body["balances"] == []
     assert run_body["warnings"]
+
+
+def test_wallet_ingestion_guarded_tonapi_live_persists_jetton_snapshot(
+    client,
+    monkeypatch,
+):
+    def fake_get_account_jettons_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "jettons": [
+                    {
+                        "jetton_address": "EQjetton",
+                        "jetton_name": "Example Jetton",
+                        "jetton_symbol": "EJT",
+                        "balance": "123450000",
+                        "decimals": 6,
+                        "price_usd": "0.25",
+                        "wallet_contract_address": "EQjettonWallet",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_jettons": 1,
+            },
+            source="real",
+            message="TonAPI account jettons preview fetched.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_jettons_preview",
+        fake_get_account_jettons_preview,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["jettons", "swaps"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "partial"
+    assert body["data_mode"] == "real"
+    assert body["unavailable_surfaces"] == ["swaps"]
+    assert body["provider_evidence"][0]["provider"] == "tonapi_wallet_activity_live"
+    assert body["provider_evidence"][0]["source_status"] == "live"
+    assert body["provider_evidence"][0]["raw_count"] == 1
+    assert body["provider_evidence"][0]["normalized_count"] == 1
+    assert body["transfers"] == []
+    assert body["swaps"] == []
+    assert len(body["balances"]) == 1
+    assert body["balances"][0]["asset"] == "EJT"
+    assert body["balances"][0]["balance"] == "123.450000000000000000"
+    assert body["balances"][0]["balance_usd"] == "30.86250000"
+    assert body["balances"][0]["provider"] == "tonapi"
+    assert body["balances"][0]["source_status"] == "live"
 
 
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(

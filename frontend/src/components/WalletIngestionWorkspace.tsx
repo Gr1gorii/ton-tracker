@@ -526,7 +526,7 @@ export default function WalletIngestionWorkspace({
             onClick={handleRun}
             disabled={!canSubmit}
           >
-            {loadingAction === "run" ? "Running ingestion" : "Run mock ingestion"}
+            {loadingAction === "run" ? "Running ingestion" : "Run ingestion"}
           </button>
           <button
             className="btn btn-ghost"
@@ -1030,7 +1030,7 @@ function BalancesTable({ balances }: { balances: WalletBalanceSnapshotRecord[] }
   return (
     <TableBlock
       title="Balances"
-      description="Native TON and jetton balance snapshots from the mock ingestion run."
+      description="Source-aware native TON or jetton balance snapshots returned by the selected ingestion adapter."
       count={balances.length}
     >
       {balances.length === 0 ? (
@@ -1118,7 +1118,7 @@ function WalletIngestionEmpty() {
   return (
     <div className="state-box empty-box tonapi-wallet-state wallet-intelligence-state">
       <span className="state-kicker">NO_INGESTION_RESULT</span>
-      <strong>Preview coverage or run mock ingestion.</strong>
+      <strong>Preview coverage or run ingestion.</strong>
       <p>
         The workspace will show provider evidence first, then persisted
         normalized activity tables after a run is stored.

@@ -81,7 +81,8 @@ def persist_mock_wallet_ingestion(
             {
                 "provider_evidence": _provider_evidence(result),
                 "unavailable_surfaces": result.unavailable_surfaces,
-                "adapter_contract": "wallet_activity_adapter_v0.11.5",
+                "message": result.message,
+                "adapter_contract": "wallet_activity_adapter_v0.11.6",
             }
         ),
     )
@@ -114,6 +115,16 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
     evidence = provider_summary.get("provider_evidence")
     if not isinstance(evidence, list):
         evidence = []
+    unavailable_surfaces = provider_summary.get("unavailable_surfaces")
+    if not isinstance(unavailable_surfaces, list):
+        unavailable_surfaces = []
+    message = provider_summary.get("message")
+    if not isinstance(message, str) or not message:
+        message = (
+            "Mock-normalized wallet activity ingestion run completed. "
+            "The rows are deterministic fixtures and are not connected to "
+            "legacy PnL or clustering yet."
+        )
 
     return {
         "run_id": run.id,
@@ -123,16 +134,13 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
         "data_mode": run.data_mode,
         "requested_surfaces": requested_surfaces,
         "provider_evidence": evidence,
+        "unavailable_surfaces": unavailable_surfaces,
         "transfers": [_transfer_record(item) for item in run.transfers],
         "transactions": [_transaction_record(item) for item in run.transactions],
         "swaps": [_swap_record(item) for item in run.swaps],
         "balances": [_balance_record(item) for item in run.balance_snapshots],
         "warnings": [_warning_record(item) for item in run.warnings],
-        "message": (
-            "Mock-normalized wallet activity ingestion run completed. "
-            "The rows are deterministic fixtures and are not connected to "
-            "legacy PnL or clustering yet."
-        ),
+        "message": message,
     }
 
 
@@ -314,14 +322,17 @@ def _swap_record(item: WalletSwap) -> dict[str, Any]:
 
 
 def _balance_record(item: WalletBalanceSnapshot) -> dict[str, Any]:
+    raw = _json_loads(item.raw_json)
     return {
         "asset": item.asset,
-        "balance": _decimal_string(item.balance),
-        "balance_usd": _decimal_string(item.balance_usd),
+        "balance": _balance_value_from_raw(raw, "normalized_balance")
+        or _decimal_string(item.balance),
+        "balance_usd": _balance_value_from_raw(raw, "normalized_balance_usd")
+        or _decimal_string(item.balance_usd),
         "provider": item.provider,
         "source_status": item.source_status,
         "snapshot_at": _isoformat(item.snapshot_at),
-        "raw": _json_loads(item.raw_json),
+        "raw": raw,
     }
 
 
@@ -344,6 +355,16 @@ def _decimal_string(value: Decimal | None) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _balance_value_from_raw(raw: Any, key: str) -> str | None:
+    if not isinstance(raw, dict):
+        return None
+    value = raw.get(key)
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
 
 
 def _isoformat(value: datetime | None) -> str | None:

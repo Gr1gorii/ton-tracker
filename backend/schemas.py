@@ -224,6 +224,7 @@ class WalletIngestionRunResponse(BaseModel):
     provider_evidence: list[WalletActivityProviderEvidence] = Field(
         default_factory=list
     )
+    unavailable_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
     transfers: list[WalletTransferRecord] = Field(default_factory=list)
     transactions: list[WalletTransactionRecord] = Field(default_factory=list)
     swaps: list[WalletSwapRecord] = Field(default_factory=list)

@@ -1,14 +1,15 @@
-"""Wallet activity ingestion adapter contracts, mock provider, and scaffolds.
+"""Wallet activity ingestion adapter contracts, mock provider, and live guards.
 
-v0.11.5 keeps deterministic mock data as the default executable adapter and
-adds provider-specific scaffold adapters behind explicit configuration. The
-scaffolds expose status and coverage limits only; they do not perform real
-wallet activity provider calls.
+v0.11.6 keeps deterministic mock data as the default executable adapter, keeps
+provider-specific scaffold adapters behind explicit configuration, and adds a
+guarded TonAPI live path for account jetton balance snapshots only.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
 from typing import Any, Literal, Protocol
 
 from adapters.bitquery import BitqueryAdapter
@@ -63,9 +64,12 @@ WALLET_ACTIVITY_PROVIDER_CHOICES = {
 
 MOCK_ACTIVITY_WARNINGS = [
     "Mock-normalized wallet activity ingestion uses deterministic fixtures only.",
-    "No real transfers, swaps, balances, or transaction history are fetched in v0.11.5.",
+    "No real transfers, swaps, balances, or transaction history are fetched by the default mock adapter in v0.11.6.",
     "Legacy buyers, PnL, clustering, and exports are not wired to this ingestion run yet.",
 ]
+
+BALANCE_QUANT = Decimal("0.000000000000000001")
+USD_QUANT = Decimal("0.00000001")
 
 MOCK_JETTON_SURFACE_WARNING = (
     "Jettons are represented as jetton balance snapshots until a dedicated "
@@ -373,7 +377,8 @@ class MockWalletActivityAdapter:
             warnings=_warning_records(warnings),
             message=(
                 "Mock-normalized wallet activity coverage is available. "
-                "No real provider calls are performed in v0.11.5."
+                "No real provider calls are performed by the default mock "
+                "adapter in v0.11.6."
             ),
         )
 
@@ -457,7 +462,7 @@ class ProviderScaffoldWalletActivityAdapter:
             message=(
                 f"{self.spec.label} scaffold returned {action} metadata only. "
                 "No real wallet activity provider calls are performed in "
-                "v0.11.5."
+                "this scaffold path in v0.11.6."
             ),
         )
 
@@ -474,8 +479,9 @@ class ProviderScaffoldWalletActivityAdapter:
             ),
             (
                 "Provider-specific wallet activity adapters are scaffold-only "
-                "in v0.11.5; they expose status and coverage limits but do not "
-                "fetch or persist real provider rows."
+                "unless an explicit v0.11.6 live guard is enabled; scaffold "
+                "paths expose status and coverage limits but do not fetch or "
+                "persist real provider rows."
             ),
             (
                 f"Planned surface coverage for this scaffold: {planned}. "
@@ -499,6 +505,145 @@ class ProviderScaffoldWalletActivityAdapter:
 class TonapiWalletActivityScaffoldAdapter(ProviderScaffoldWalletActivityAdapter):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings, TONAPI_WALLET_ACTIVITY_SCAFFOLD)
+
+
+class TonapiWalletActivityLiveAdapter:
+    """Guarded live TonAPI adapter for jetton balance snapshots only."""
+
+    provider_name = "tonapi_wallet_activity_live"
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.tonapi = TonapiAdapter(settings)
+
+    def preview(
+        self,
+        request: WalletActivityAdapterRequest,
+    ) -> WalletActivityAdapterResult:
+        return self._fetch_jettons(request, mode="preview")
+
+    def ingest(
+        self,
+        request: WalletActivityAdapterRequest,
+    ) -> WalletActivityAdapterResult:
+        return self._fetch_jettons(request, mode="ingest")
+
+    def _fetch_jettons(
+        self,
+        request: WalletActivityAdapterRequest,
+        mode: Literal["preview", "ingest"],
+    ) -> WalletActivityAdapterResult:
+        requested_surfaces = list(request.surfaces)
+        unavailable_surfaces = [
+            surface for surface in requested_surfaces if surface != "jettons"
+        ]
+        warnings = _tonapi_live_warnings(unavailable_surfaces)
+
+        if "jettons" not in requested_surfaces:
+            warnings.append(
+                "TonAPI live guard has no requested jetton surface to fetch."
+            )
+            return self._live_result(
+                requested_surfaces=requested_surfaces,
+                unavailable_surfaces=unavailable_surfaces,
+                warnings=warnings,
+                status="partial" if unavailable_surfaces else "success",
+                raw_count=0,
+                balances=[],
+                message=(
+                    "Guarded TonAPI live adapter was enabled, but no jetton "
+                    "surface was requested."
+                ),
+            )
+
+        result = self.tonapi.get_account_jettons_preview(
+            request.wallet_address,
+            limit=self.settings.wallet_activity_live_jetton_limit,
+        )
+        if not result.ok:
+            message = result.message or "TonAPI live jetton request failed."
+            warnings.append(f"TonAPI provider warning: {message}")
+            return self._live_result(
+                requested_surfaces=requested_surfaces,
+                unavailable_surfaces=requested_surfaces,
+                warnings=warnings,
+                status="error",
+                raw_count=0,
+                balances=[],
+                message=(
+                    "Guarded TonAPI live adapter could not fetch jetton balance "
+                    "snapshots. No wallet activity rows were persisted."
+                ),
+                source_status="error",
+            )
+
+        data = result.data if isinstance(result.data, dict) else {}
+        jettons = data.get("jettons") if isinstance(data.get("jettons"), list) else []
+        total_jettons = _safe_int(data.get("total_jettons"), len(jettons))
+        preview_count = _safe_int(data.get("preview_count"), len(jettons))
+        if total_jettons > preview_count:
+            warnings.append(
+                f"TonAPI returned {preview_count} of {total_jettons} jettons "
+                "within WALLET_ACTIVITY_LIVE_JETTON_LIMIT."
+            )
+        if total_jettons == 0:
+            warnings.append(
+                "TonAPI returned zero jettons for this guarded fetch. This is "
+                "not evidence that the wallet has no activity."
+            )
+
+        balances = (
+            _tonapi_live_balance_snapshots(jettons)
+            if mode == "ingest"
+            else []
+        )
+        status: WalletIngestionStatus = "partial" if unavailable_surfaces else "success"
+        message = (
+            "Guarded TonAPI live jetton balance snapshots fetched. Scope is "
+            "account jetton balances only; transfers, transactions, swaps, "
+            "native TON balance, PnL, and clustering remain unavailable."
+        )
+        return self._live_result(
+            requested_surfaces=requested_surfaces,
+            unavailable_surfaces=unavailable_surfaces,
+            warnings=warnings,
+            status=status,
+            raw_count=total_jettons,
+            balances=balances,
+            message=message,
+        )
+
+    def _live_result(
+        self,
+        requested_surfaces: list[WalletIngestionSurface],
+        unavailable_surfaces: list[WalletIngestionSurface],
+        warnings: list[str],
+        status: WalletIngestionStatus,
+        raw_count: int,
+        balances: list[WalletActivityBalanceSnapshot],
+        message: str,
+        source_status: WalletSourceStatus = "live",
+    ) -> WalletActivityAdapterResult:
+        return WalletActivityAdapterResult(
+            status=status,
+            data_mode="real",
+            requested_surfaces=requested_surfaces,
+            provider_evidence=[
+                WalletActivityProviderEvidence(
+                    provider=self.provider_name,
+                    data_mode="real",
+                    source_status=source_status,
+                    warnings=warnings,
+                    freshness=_now_utc_iso(),
+                    raw_count=raw_count,
+                    normalized_count=len(balances),
+                )
+            ],
+            unavailable_surfaces=unavailable_surfaces,
+            warnings=_warning_records_for_provider(warnings, self.provider_name),
+            message=message,
+            balances=balances,
+        )
 
 
 class TonProviderWalletActivityScaffoldAdapter(
@@ -542,6 +687,8 @@ def build_wallet_activity_adapter(settings=None) -> WalletActivityAdapter:
     if settings.is_mock or provider_key == WALLET_ACTIVITY_PROVIDER_MOCK:
         return MockWalletActivityAdapter()
     if provider_key == WALLET_ACTIVITY_PROVIDER_TONAPI:
+        if settings.wallet_activity_live_enabled:
+            return TonapiWalletActivityLiveAdapter(settings)
         return TonapiWalletActivityScaffoldAdapter(settings)
     if provider_key == WALLET_ACTIVITY_PROVIDER_TON_PROVIDER:
         return TonProviderWalletActivityScaffoldAdapter(settings)
@@ -610,12 +757,28 @@ def get_wallet_activity_provider_status(settings=None) -> dict[str, Any]:
             ),
         }
 
+    if (
+        provider_key == WALLET_ACTIVITY_PROVIDER_TONAPI
+        and settings.wallet_activity_live_enabled
+    ):
+        return {
+            "configured": True,
+            "available": True,
+            "message": (
+                "Real mode: guarded live TonAPI wallet activity is enabled. "
+                "Only account jetton balance snapshots can be fetched; "
+                "transfers, transactions, swaps, native TON balance, PnL, and "
+                "clustering remain unavailable."
+            ),
+        }
+
     return {
         "configured": True,
         "available": False,
         "message": (
             f"Real mode: {spec.label} scaffold is selected. Configuration is "
-            "present, but live wallet activity calls are disabled in v0.11.5; "
+            "present, but live wallet activity calls are disabled in this "
+            "v0.11.6 scaffold path; "
             "preview/run return limited coverage metadata only."
         ),
     }
@@ -635,6 +798,123 @@ def _provider_scaffold_configured(provider_key: str, settings: Settings) -> bool
     if provider_key == WALLET_ACTIVITY_PROVIDER_BITQUERY:
         return BitqueryAdapter(settings).is_configured()
     return False
+
+
+def _tonapi_live_warnings(
+    unavailable_surfaces: list[WalletIngestionSurface],
+) -> list[str]:
+    warnings = [
+        (
+            "Guarded live TonAPI wallet activity is enabled for account jetton "
+            "balance snapshots only."
+        ),
+        (
+            "Live TonAPI jetton balances are not transaction history, DEX "
+            "swaps, native TON balance, PnL, clustering input, or ownership "
+            "proof."
+        ),
+    ]
+    if unavailable_surfaces:
+        warnings.append(
+            "Requested non-jetton surfaces remain unavailable in the guarded "
+            f"TonAPI live path: {', '.join(unavailable_surfaces)}."
+        )
+    return warnings
+
+
+def _tonapi_live_balance_snapshots(
+    jettons: list[Any],
+) -> list[WalletActivityBalanceSnapshot]:
+    return [
+        _tonapi_live_balance_snapshot(item)
+        for item in jettons
+        if isinstance(item, dict)
+    ]
+
+
+def _tonapi_live_balance_snapshot(item: dict[str, Any]) -> WalletActivityBalanceSnapshot:
+    jetton_address = _optional_string(item.get("jetton_address"))
+    symbol = _optional_string(item.get("jetton_symbol"))
+    asset = symbol or jetton_address or "UNKNOWN_JETTON"
+    balance = _scaled_balance_string(item.get("balance"), item.get("decimals"))
+    price_usd = _optional_decimal(item.get("price_usd"))
+    balance_decimal = _optional_decimal(balance)
+    balance_usd = None
+    if balance_decimal is not None and price_usd is not None:
+        balance_usd = _fixed_decimal_string(balance_decimal * price_usd, USD_QUANT)
+
+    return WalletActivityBalanceSnapshot(
+        asset=asset,
+        balance=balance,
+        balance_usd=balance_usd,
+        provider="tonapi",
+        source_status="live",
+        snapshot_at=_now_utc_iso(),
+        raw={
+            "provider": "tonapi",
+            "surface": "jettons",
+            "jetton_address": jetton_address,
+            "jetton_name": _optional_string(item.get("jetton_name")),
+            "jetton_symbol": symbol,
+            "wallet_contract_address": _optional_string(
+                item.get("wallet_contract_address")
+            ),
+            "price_usd": _optional_string(item.get("price_usd")),
+            "raw_balance": _optional_string(item.get("balance")),
+            "normalized_balance": balance,
+            "normalized_balance_usd": balance_usd,
+            "decimals": item.get("decimals"),
+            "source": item.get("source"),
+        },
+    )
+
+
+def _scaled_balance_string(value: Any, decimals: Any) -> str | None:
+    raw = _optional_decimal(value)
+    if raw is None:
+        return None
+    try:
+        scale = int(decimals)
+    except (TypeError, ValueError):
+        return _fixed_decimal_string(raw, BALANCE_QUANT)
+    if scale < 0:
+        return _fixed_decimal_string(raw, BALANCE_QUANT)
+    return _fixed_decimal_string(raw / (Decimal(10) ** scale), BALANCE_QUANT)
+
+
+def _fixed_decimal_string(value: Decimal, quant: Decimal) -> str:
+    digit_count = len(value.as_tuple().digits)
+    decimal_places = abs(quant.as_tuple().exponent)
+    with localcontext() as context:
+        context.prec = max(60, digit_count + decimal_places + 4)
+        return format(value.quantize(quant, rounding=ROUND_HALF_UP), "f")
+
+
+def _optional_decimal(value: Any) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    return cleaned or None
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _provider_evidence(
@@ -659,7 +939,7 @@ def _warnings_for_request(request: WalletActivityAdapterRequest) -> list[str]:
         warnings.append(
             "DATA_MODE=real is active, but wallet activity ingestion remains "
             "mock-normalized unless WALLET_ACTIVITY_PROVIDER selects a "
-            "v0.11.5 scaffold."
+            "v0.11.6 scaffold or explicit live guard."
         )
     if "jettons" in request.surfaces:
         warnings.append(MOCK_JETTON_SURFACE_WARNING)

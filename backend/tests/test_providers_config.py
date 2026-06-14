@@ -44,6 +44,18 @@ def test_invalid_mode_falls_back_to_mock(monkeypatch):
     assert get_settings().data_mode == "mock"
 
 
+def test_wallet_activity_live_guard_env(monkeypatch):
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_JETTON_LIMIT", "999")
+
+    settings = get_settings()
+
+    assert settings.wallet_activity_provider == "tonapi"
+    assert settings.wallet_activity_live_enabled is True
+    assert settings.wallet_activity_live_jetton_limit == 500
+
+
 def test_ton_real_missing_config_returns_not_configured():
     ton = TonProviderAdapter(_settings("real"))
     assert ton.is_configured() is False

@@ -52,9 +52,11 @@ mock-normalized ingestion, `v0.11.3 INGEST UI` adds the dashboard workflow, and
 `v0.11.4 ADAPTERS` adds the backend wallet activity adapter interface with the
 mock adapter as the default active provider. `v0.11.5 SCAFFOLDS` adds
 provider-specific wallet activity scaffolds behind `WALLET_ACTIVITY_PROVIDER`
-and the public provider status row, without enabling real provider calls. Real
-provider calls remain deferred behind the contract in
-`REAL_WALLET_INGESTION_PLAN.md`:
+and the public provider status row. `v0.11.6 LIVE GUARDS` adds the first
+guarded live wallet activity path: TonAPI account jetton balance snapshots,
+enabled only with `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
+`WALLET_ACTIVITY_LIVE_ENABLED=true`. Broader real provider calls remain
+deferred behind the contract in `REAL_WALLET_INGESTION_PLAN.md`:
 
 - wallet transfers;
 - transaction history;
