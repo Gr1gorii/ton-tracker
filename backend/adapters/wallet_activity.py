@@ -1,13 +1,21 @@
-"""Wallet activity ingestion adapter contracts and mock provider.
+"""Wallet activity ingestion adapter contracts, mock provider, and scaffolds.
 
-v0.11.4 introduces the adapter seam used by future real wallet activity
-providers. The only executable adapter remains deterministic mock data.
+v0.11.5 keeps deterministic mock data as the default executable adapter and
+adds provider-specific scaffold adapters behind explicit configuration. The
+scaffolds expose status and coverage limits only; they do not perform real
+wallet activity provider calls.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
+
+from adapters.bitquery import BitqueryAdapter
+from adapters.stonfi import StonfiAdapter
+from adapters.ton_provider import TonProviderAdapter
+from adapters.tonapi import TonapiAdapter
+from config import Settings, get_settings
 
 WalletIngestionSurface = Literal[
     "transfers",
@@ -40,9 +48,22 @@ MOCK_WALLET_ACTIVITY_FRESHNESS = "2026-06-01T12:00:00Z"
 MOCK_SOURCE_STATUS: WalletSourceStatus = "mock"
 MOCK_DATA_MODE: WalletDataMode = "mock"
 
+WALLET_ACTIVITY_PROVIDER_MOCK = "mock"
+WALLET_ACTIVITY_PROVIDER_TONAPI = "tonapi"
+WALLET_ACTIVITY_PROVIDER_TON_PROVIDER = "ton_provider"
+WALLET_ACTIVITY_PROVIDER_STONFI = "stonfi"
+WALLET_ACTIVITY_PROVIDER_BITQUERY = "bitquery"
+WALLET_ACTIVITY_PROVIDER_CHOICES = {
+    WALLET_ACTIVITY_PROVIDER_MOCK,
+    WALLET_ACTIVITY_PROVIDER_TONAPI,
+    WALLET_ACTIVITY_PROVIDER_TON_PROVIDER,
+    WALLET_ACTIVITY_PROVIDER_STONFI,
+    WALLET_ACTIVITY_PROVIDER_BITQUERY,
+}
+
 MOCK_ACTIVITY_WARNINGS = [
     "Mock-normalized wallet activity ingestion uses deterministic fixtures only.",
-    "No real transfers, swaps, balances, or transaction history are fetched in v0.11.4.",
+    "No real transfers, swaps, balances, or transaction history are fetched in v0.11.5.",
     "Legacy buyers, PnL, clustering, and exports are not wired to this ingestion run yet.",
 ]
 
@@ -287,6 +308,51 @@ class WalletActivityAdapter(Protocol):
         """Return normalized provider rows for persistence."""
 
 
+@dataclass(frozen=True)
+class WalletActivityProviderScaffoldSpec:
+    key: str
+    provider_name: str
+    label: str
+    planned_surfaces: tuple[WalletIngestionSurface, ...]
+    configuration_label: str
+
+
+TONAPI_WALLET_ACTIVITY_SCAFFOLD = WalletActivityProviderScaffoldSpec(
+    key=WALLET_ACTIVITY_PROVIDER_TONAPI,
+    provider_name="tonapi_wallet_activity_scaffold",
+    label="TonAPI wallet activity",
+    planned_surfaces=("jettons",),
+    configuration_label="TONAPI_BASE_URL",
+)
+TON_PROVIDER_WALLET_ACTIVITY_SCAFFOLD = WalletActivityProviderScaffoldSpec(
+    key=WALLET_ACTIVITY_PROVIDER_TON_PROVIDER,
+    provider_name="ton_provider_wallet_activity_scaffold",
+    label="TON provider wallet activity",
+    planned_surfaces=("transfers", "transactions", "balances"),
+    configuration_label="TON_API_BASE_URL + TON_API_KEY",
+)
+STONFI_WALLET_ACTIVITY_SCAFFOLD = WalletActivityProviderScaffoldSpec(
+    key=WALLET_ACTIVITY_PROVIDER_STONFI,
+    provider_name="stonfi_wallet_activity_scaffold",
+    label="STON.fi wallet activity",
+    planned_surfaces=("swaps",),
+    configuration_label="STONFI_BASE_URL",
+)
+BITQUERY_WALLET_ACTIVITY_SCAFFOLD = WalletActivityProviderScaffoldSpec(
+    key=WALLET_ACTIVITY_PROVIDER_BITQUERY,
+    provider_name="bitquery_wallet_activity_scaffold",
+    label="Bitquery wallet activity",
+    planned_surfaces=("swaps",),
+    configuration_label="BITQUERY_API_KEY",
+)
+WALLET_ACTIVITY_SCAFFOLD_SPECS = {
+    TONAPI_WALLET_ACTIVITY_SCAFFOLD.key: TONAPI_WALLET_ACTIVITY_SCAFFOLD,
+    TON_PROVIDER_WALLET_ACTIVITY_SCAFFOLD.key: TON_PROVIDER_WALLET_ACTIVITY_SCAFFOLD,
+    STONFI_WALLET_ACTIVITY_SCAFFOLD.key: STONFI_WALLET_ACTIVITY_SCAFFOLD,
+    BITQUERY_WALLET_ACTIVITY_SCAFFOLD.key: BITQUERY_WALLET_ACTIVITY_SCAFFOLD,
+}
+
+
 class MockWalletActivityAdapter:
     """Deterministic source-aware adapter used until real providers are wired."""
 
@@ -307,7 +373,7 @@ class MockWalletActivityAdapter:
             warnings=_warning_records(warnings),
             message=(
                 "Mock-normalized wallet activity coverage is available. "
-                "No real provider calls are performed in v0.11.4."
+                "No real provider calls are performed in v0.11.5."
             ),
         )
 
@@ -336,13 +402,239 @@ class MockWalletActivityAdapter:
         )
 
 
-def build_wallet_activity_adapter(_settings=None) -> WalletActivityAdapter:
+class ProviderScaffoldWalletActivityAdapter:
+    """Coverage-only wallet activity scaffold for a future real provider."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        spec: WalletActivityProviderScaffoldSpec,
+    ) -> None:
+        self.settings = settings
+        self.spec = spec
+        self.provider_name = spec.provider_name
+
+    def preview(
+        self,
+        request: WalletActivityAdapterRequest,
+    ) -> WalletActivityAdapterResult:
+        return self._result(request, mode="preview")
+
+    def ingest(
+        self,
+        request: WalletActivityAdapterRequest,
+    ) -> WalletActivityAdapterResult:
+        return self._result(request, mode="ingest")
+
+    def _result(
+        self,
+        request: WalletActivityAdapterRequest,
+        mode: Literal["preview", "ingest"],
+    ) -> WalletActivityAdapterResult:
+        configured = _provider_scaffold_configured(self.spec.key, self.settings)
+        source_status: WalletSourceStatus = "limited" if configured else "unavailable"
+        status: WalletIngestionStatus = "partial" if configured else "error"
+        warnings = self._warnings(request, configured)
+        action = "coverage preview" if mode == "preview" else "ingestion run"
+
+        return WalletActivityAdapterResult(
+            status=status,
+            data_mode="real",
+            requested_surfaces=request.surfaces,
+            provider_evidence=[
+                WalletActivityProviderEvidence(
+                    provider=self.provider_name,
+                    data_mode="real",
+                    source_status=source_status,
+                    warnings=warnings,
+                    freshness=None,
+                    raw_count=0,
+                    normalized_count=0,
+                )
+            ],
+            unavailable_surfaces=list(request.surfaces),
+            warnings=_warning_records_for_provider(warnings, self.provider_name),
+            message=(
+                f"{self.spec.label} scaffold returned {action} metadata only. "
+                "No real wallet activity provider calls are performed in "
+                "v0.11.5."
+            ),
+        )
+
+    def _warnings(
+        self,
+        request: WalletActivityAdapterRequest,
+        configured: bool,
+    ) -> list[str]:
+        planned = ", ".join(self.spec.planned_surfaces) or "none"
+        warnings = [
+            (
+                f"{self.spec.label} is selected by "
+                f"WALLET_ACTIVITY_PROVIDER={self.spec.key}."
+            ),
+            (
+                "Provider-specific wallet activity adapters are scaffold-only "
+                "in v0.11.5; they expose status and coverage limits but do not "
+                "fetch or persist real provider rows."
+            ),
+            (
+                f"Planned surface coverage for this scaffold: {planned}. "
+                "Requested surfaces remain unavailable until the live adapter "
+                "implementation is explicitly enabled."
+            ),
+        ]
+        if not configured:
+            warnings.append(
+                f"{self.spec.configuration_label} is missing or invalid for "
+                f"{self.spec.label}."
+            )
+        if request.environment_data_mode != "real":
+            warnings.append(
+                "This scaffold only activates in DATA_MODE=real; mock mode "
+                "continues to use deterministic fixtures."
+            )
+        return warnings
+
+
+class TonapiWalletActivityScaffoldAdapter(ProviderScaffoldWalletActivityAdapter):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings, TONAPI_WALLET_ACTIVITY_SCAFFOLD)
+
+
+class TonProviderWalletActivityScaffoldAdapter(
+    ProviderScaffoldWalletActivityAdapter
+):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings, TON_PROVIDER_WALLET_ACTIVITY_SCAFFOLD)
+
+
+class StonfiWalletActivityScaffoldAdapter(ProviderScaffoldWalletActivityAdapter):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings, STONFI_WALLET_ACTIVITY_SCAFFOLD)
+
+
+class BitqueryWalletActivityScaffoldAdapter(ProviderScaffoldWalletActivityAdapter):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings, BITQUERY_WALLET_ACTIVITY_SCAFFOLD)
+
+
+class UnsupportedWalletActivityProviderAdapter(ProviderScaffoldWalletActivityAdapter):
+    def __init__(self, settings: Settings, provider_key: str) -> None:
+        spec = WalletActivityProviderScaffoldSpec(
+            key=provider_key,
+            provider_name="unsupported_wallet_activity_provider",
+            label="Unsupported wallet activity provider",
+            planned_surfaces=(),
+            configuration_label="WALLET_ACTIVITY_PROVIDER",
+        )
+        super().__init__(settings, spec)
+
+
+def build_wallet_activity_adapter(settings=None) -> WalletActivityAdapter:
     """Return the configured wallet activity adapter.
 
-    v0.11.4 intentionally returns only the mock adapter. Future provider
-    adapters should plug in here behind explicit configuration.
+    Mock remains the default even in DATA_MODE=real. Provider-specific
+    scaffolds activate only when DATA_MODE=real and WALLET_ACTIVITY_PROVIDER is
+    explicitly set to a non-mock provider key.
     """
-    return MockWalletActivityAdapter()
+    settings = settings or get_settings()
+    provider_key = _wallet_activity_provider_key(settings)
+    if settings.is_mock or provider_key == WALLET_ACTIVITY_PROVIDER_MOCK:
+        return MockWalletActivityAdapter()
+    if provider_key == WALLET_ACTIVITY_PROVIDER_TONAPI:
+        return TonapiWalletActivityScaffoldAdapter(settings)
+    if provider_key == WALLET_ACTIVITY_PROVIDER_TON_PROVIDER:
+        return TonProviderWalletActivityScaffoldAdapter(settings)
+    if provider_key == WALLET_ACTIVITY_PROVIDER_STONFI:
+        return StonfiWalletActivityScaffoldAdapter(settings)
+    if provider_key == WALLET_ACTIVITY_PROVIDER_BITQUERY:
+        return BitqueryWalletActivityScaffoldAdapter(settings)
+    return UnsupportedWalletActivityProviderAdapter(settings, provider_key)
+
+
+def get_wallet_activity_provider_status(settings=None) -> dict[str, Any]:
+    """Return status for the configured wallet activity ingestion adapter."""
+    settings = settings or get_settings()
+    provider_key = _wallet_activity_provider_key(settings)
+
+    if provider_key not in WALLET_ACTIVITY_PROVIDER_CHOICES:
+        return {
+            "configured": False,
+            "available": False,
+            "message": (
+                f"WALLET_ACTIVITY_PROVIDER={provider_key} is unsupported. "
+                "Use mock, tonapi, ton_provider, stonfi, or bitquery."
+            ),
+        }
+
+    if settings.is_mock:
+        if provider_key == WALLET_ACTIVITY_PROVIDER_MOCK:
+            message = (
+                "Mock mode: wallet activity ingestion uses the deterministic "
+                "mock adapter. Provider-specific scaffolds are inactive."
+            )
+        else:
+            message = (
+                f"Mock mode: WALLET_ACTIVITY_PROVIDER={provider_key} is set, "
+                "but wallet activity ingestion still uses deterministic mock "
+                "fixtures. Switch DATA_MODE=real to inspect scaffold coverage."
+            )
+        return {
+            "configured": True,
+            "available": True,
+            "message": message,
+        }
+
+    if provider_key == WALLET_ACTIVITY_PROVIDER_MOCK:
+        return {
+            "configured": True,
+            "available": True,
+            "message": (
+                "Real mode: wallet activity ingestion is intentionally pinned "
+                "to the deterministic mock adapter because "
+                "WALLET_ACTIVITY_PROVIDER=mock. No real wallet provider calls "
+                "are made."
+            ),
+        }
+
+    spec = WALLET_ACTIVITY_SCAFFOLD_SPECS[provider_key]
+    configured = _provider_scaffold_configured(provider_key, settings)
+    if not configured:
+        return {
+            "configured": False,
+            "available": False,
+            "message": (
+                f"Real mode: {spec.label} scaffold is selected, but "
+                f"{spec.configuration_label} is missing or invalid. Wallet "
+                "activity ingestion will return unavailable coverage only."
+            ),
+        }
+
+    return {
+        "configured": True,
+        "available": False,
+        "message": (
+            f"Real mode: {spec.label} scaffold is selected. Configuration is "
+            "present, but live wallet activity calls are disabled in v0.11.5; "
+            "preview/run return limited coverage metadata only."
+        ),
+    }
+
+
+def _wallet_activity_provider_key(settings: Settings) -> str:
+    return (settings.wallet_activity_provider or WALLET_ACTIVITY_PROVIDER_MOCK).lower()
+
+
+def _provider_scaffold_configured(provider_key: str, settings: Settings) -> bool:
+    if provider_key == WALLET_ACTIVITY_PROVIDER_TONAPI:
+        return TonapiAdapter(settings).is_configured()
+    if provider_key == WALLET_ACTIVITY_PROVIDER_TON_PROVIDER:
+        return TonProviderAdapter(settings).is_configured()
+    if provider_key == WALLET_ACTIVITY_PROVIDER_STONFI:
+        return StonfiAdapter(settings).is_configured()
+    if provider_key == WALLET_ACTIVITY_PROVIDER_BITQUERY:
+        return BitqueryAdapter(settings).is_configured()
+    return False
 
 
 def _provider_evidence(
@@ -366,7 +658,8 @@ def _warnings_for_request(request: WalletActivityAdapterRequest) -> list[str]:
     if request.environment_data_mode == "real":
         warnings.append(
             "DATA_MODE=real is active, but wallet activity ingestion remains "
-            "mock-normalized in v0.11.4."
+            "mock-normalized unless WALLET_ACTIVITY_PROVIDER selects a "
+            "v0.11.5 scaffold."
         )
     if "jettons" in request.surfaces:
         warnings.append(MOCK_JETTON_SURFACE_WARNING)
@@ -374,12 +667,19 @@ def _warnings_for_request(request: WalletActivityAdapterRequest) -> list[str]:
 
 
 def _warning_records(warnings: list[str]) -> list[WalletActivityWarning]:
+    return _warning_records_for_provider(warnings, MOCK_WALLET_ACTIVITY_PROVIDER)
+
+
+def _warning_records_for_provider(
+    warnings: list[str],
+    provider: str,
+) -> list[WalletActivityWarning]:
     return [
         WalletActivityWarning(
             severity="warning" if index == 1 else "info",
-            provider=MOCK_WALLET_ACTIVITY_PROVIDER,
+            provider=provider,
             message=message,
-            evidence_key=f"mock_wallet_activity_{index}",
+            evidence_key=f"{provider}_{index}",
         )
         for index, message in enumerate(warnings, start=1)
     ]

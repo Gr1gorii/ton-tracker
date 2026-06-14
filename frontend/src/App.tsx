@@ -20,7 +20,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.11.4 ADAPTERS";
+const RELEASE_LABEL = "v0.11.5 SCAFFOLDS";
 
 const navItems = [
   "DASHBOARD",
@@ -134,11 +134,21 @@ export default function App() {
         providerSnapshot.geckoterminal,
         providerSnapshot.stonfi,
         providerSnapshot.tonapi,
+        providerSnapshot.wallet_activity,
         providerSnapshot.bitquery,
         providerSnapshot.ton_provider,
       ].filter((item) => item?.available).length
     : 0;
-  const providerTotal = providerSnapshot ? 5 : 0;
+  const providerTotal = providerSnapshot
+    ? [
+        providerSnapshot.geckoterminal,
+        providerSnapshot.stonfi,
+        providerSnapshot.tonapi,
+        providerSnapshot.wallet_activity,
+        providerSnapshot.bitquery,
+        providerSnapshot.ton_provider,
+      ].filter(Boolean).length
+    : 0;
   const providerBadge = providerSnapshot
     ? {
         label: `PROVIDERS ${availableProviders}/${providerTotal}`,
@@ -920,18 +930,18 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Wallet ingestion adapter interfaces</strong>
+            <strong>Wallet ingestion provider scaffolds</strong>
             <p>
-              Wallet activity ingestion now runs through a provider adapter
-              contract while the active adapter remains deterministic mock data.
+              Provider-specific wallet activity scaffolds are visible behind
+              explicit config/status controls while mock remains the default.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
-            label="Adapter contract"
-            text="Preview and ingestion orchestration now use a wallet activity adapter interface before persistence."
+            label="Provider scaffolds"
+            text="Wallet activity can report selected TonAPI, TON provider, STON.fi, or Bitquery scaffold coverage without fetching real rows."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -961,7 +971,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.11.4 ADAPTERS is a product release label."
+            text="Backend VERSION remains the API-version field; v0.11.5 SCAFFOLDS is a product release label."
           />
         </div>
       </section>

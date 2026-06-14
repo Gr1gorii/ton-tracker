@@ -50,8 +50,10 @@ After this public baseline, `v0.11.1 SCHEMA` added wallet activity schema
 scaffolding, `v0.11.2 MOCK INGEST` proves that schema with deterministic
 mock-normalized ingestion, `v0.11.3 INGEST UI` adds the dashboard workflow, and
 `v0.11.4 ADAPTERS` adds the backend wallet activity adapter interface with the
-mock adapter as the only active provider. Real provider calls remain deferred
-behind the contract in
+mock adapter as the default active provider. `v0.11.5 SCAFFOLDS` adds
+provider-specific wallet activity scaffolds behind `WALLET_ACTIVITY_PROVIDER`
+and the public provider status row, without enabling real provider calls. Real
+provider calls remain deferred behind the contract in
 `REAL_WALLET_INGESTION_PLAN.md`:
 
 - wallet transfers;

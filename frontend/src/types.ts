@@ -114,6 +114,7 @@ export interface ProvidersStatus {
   bitquery: ProviderStatusInfo;
   stonfi?: ProviderStatusInfo;
   tonapi?: ProviderStatusInfo;
+  wallet_activity?: ProviderStatusInfo;
 }
 
 export interface DataQualityComponents {

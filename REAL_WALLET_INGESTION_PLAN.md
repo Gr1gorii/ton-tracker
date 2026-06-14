@@ -1,8 +1,9 @@
-# TON Wallet Intelligence Dashboard - v0.11.4 ADAPTERS
+# TON Wallet Intelligence Dashboard - v0.11.5 SCAFFOLDS
 
 Planning and rollout contract for real wallet activity ingestion. The current
-milestone adds the backend wallet activity adapter interface under the dashboard
-workspace; it does not implement real full-wallet analysis yet.
+milestone adds provider-specific wallet activity adapter scaffolds behind
+explicit configuration/status controls; it does not implement real full-wallet
+analysis yet.
 
 ## Objective
 
@@ -17,7 +18,7 @@ The plan must preserve the current data honesty contract:
 - backend `VERSION=0.2.1` remains the API-version field until the API contract
   changes.
 
-## Non-Goals For v0.11.4
+## Non-Goals For v0.11.5
 
 - Do not calculate real wallet PnL yet.
 - Do not connect real wallet activity to clustering yet.
@@ -67,14 +68,18 @@ provider-limited, stale, unavailable, or mock-aware.
 `v0.11.2` implements these endpoints with deterministic mock-normalized data.
 `v0.11.3` adds a dashboard workspace that uses them. `v0.11.4` routes preview
 and run orchestration through the backend wallet activity adapter interface.
-They still do not call real providers:
+`v0.11.5` adds explicit provider scaffold selection through
+`WALLET_ACTIVITY_PROVIDER`. They still do not call real providers:
 
 - `POST /api/wallets/ingest/preview`
   - validates wallet address, window, and requested surfaces;
   - returns estimated provider coverage and unavailable surfaces;
+  - returns limited/unavailable evidence for explicit provider scaffolds;
   - does not persist a run.
 - `POST /api/wallets/ingest`
   - persists a deterministic mock-normalized wallet ingestion run;
+  - persists scaffold-only warning/evidence runs when an explicit provider
+    scaffold is selected;
   - returns run id, status, provider coverage, and warnings.
 - `GET /api/wallets/ingest/{run_id}`
   - returns normalized transfers, transactions, swaps, balances, warnings, and
@@ -110,6 +115,18 @@ Every adapter response must include:
   surfaces, and normalized rows.
 - `MockWalletActivityAdapter` as the only active adapter.
 
+`v0.11.5` extends the same file with:
+
+- `WALLET_ACTIVITY_PROVIDER=mock` as the default executable adapter.
+- `TonapiWalletActivityScaffoldAdapter` for jetton-oriented future coverage.
+- `TonProviderWalletActivityScaffoldAdapter` for transfers, transactions, and
+  native balance future coverage.
+- `StonfiWalletActivityScaffoldAdapter` for DEX swap future coverage.
+- `BitqueryWalletActivityScaffoldAdapter` for provider-limited DEX swap future
+  coverage.
+- `wallet_activity` in `/api/providers/status` so the selected adapter is
+  visible before preview/run.
+
 ## UI Direction
 
 Add a dedicated wallet ingestion workspace before changing legacy analytics:
@@ -138,7 +155,8 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
 
 4. Provider adapter integration
    - Add adapter protocol and mock adapter boundary. Done in `v0.11.4`.
-   - Add provider-specific scaffolds behind feature/data-mode controls.
+   - Add provider-specific scaffolds behind feature/data-mode controls. Done in
+     `v0.11.5`.
    - Add real provider calls behind explicit feature/data-mode controls.
    - Keep partial provider coverage visible.
 
@@ -148,7 +166,7 @@ Add a dedicated wallet ingestion workspace before changing legacy analytics:
 
 ## Verification Gates
 
-Before promoting wallet ingestion adapter interfaces:
+Before promoting wallet ingestion provider scaffolds:
 
 - `npm run build` passes.
 - `.venv/bin/python -m pytest -q` passes.
@@ -156,20 +174,25 @@ Before promoting wallet ingestion adapter interfaces:
   passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_ingestion.py -q`
   passes.
+- `.venv/bin/python -m pytest tests/test_wallet_activity_provider_status.py -q`
+  passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_schema.py -q` passes.
-- UI shows `RELEASE v0.11.4 ADAPTERS`.
+- UI shows `RELEASE v0.11.5 SCAFFOLDS`.
 - `/api/wallets/ingest/preview`, `/api/wallets/ingest`, and
   `/api/wallets/ingest/{run_id}` return source-aware mock data.
-- `DATA_MODE=real` still returns honest mock-normalized warnings until real
-  provider calls are explicitly enabled.
+- `DATA_MODE=real` without `WALLET_ACTIVITY_PROVIDER` still returns honest
+  mock-normalized warnings.
+- Explicit provider scaffolds return limited/unavailable evidence and zero
+  normalized real-provider rows.
+- `/api/providers/status` includes the selected wallet activity adapter row.
 - Wallet Activity Ingestion Workspace can preview coverage, persist a mock run,
   refresh the stored run, and render activity tables.
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, and this document all
-  describe the same adapter-interface scope.
+  describe the same provider-scaffold scope.
 - No user-facing UI claims real full-wallet analysis exists yet.
 
 ## Next Branch
 
 ```bash
-git checkout -b v0.11.5-wallet-ingestion-provider-scaffolds
+git checkout -b v0.11.6-wallet-ingestion-live-provider-guards
 ```

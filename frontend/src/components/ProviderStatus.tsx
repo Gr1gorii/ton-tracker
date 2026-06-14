@@ -19,6 +19,16 @@ function dotClass(info: ProviderStatusInfo): string {
 
 function providerMode(label: string, info: ProviderStatusInfo): string {
   const message = info.message.toLowerCase();
+  if (
+    label === "Wallet activity" &&
+    info.available &&
+    message.includes("deterministic mock")
+  ) {
+    return "preview";
+  }
+  if (label === "Wallet activity" && message.includes("scaffold")) {
+    return "limited";
+  }
   if (label === "Bitquery" && message.includes("coverage")) return "limited";
   if (info.available && message.includes("mock")) return "preview";
   if (message.includes("public mode") || message.includes("rate limit")) {
@@ -49,6 +59,7 @@ function providerShortMessage(label: string, info: ProviderStatusInfo): string {
     return "Public mode may be rate limited";
   }
   if (label === "TonAPI") return "Account jetton preview provider";
+  if (label === "Wallet activity") return "Adapter selection + coverage scope";
   if (label === "Bitquery") return "Provider-limited TON coverage";
   if (label === "GeckoTerminal") return "Market data provider";
   return "Legacy/provider status";
@@ -101,6 +112,9 @@ function providerRows(
   ];
   if (providers.stonfi) rows.push(["STON.fi", providers.stonfi]);
   if (providers.tonapi) rows.push(["TonAPI", providers.tonapi]);
+  if (providers.wallet_activity) {
+    rows.push(["Wallet activity", providers.wallet_activity]);
+  }
   rows.push(["Bitquery", providers.bitquery]);
   rows.push(["TON provider", providers.ton_provider]);
   return rows;
@@ -178,7 +192,9 @@ export default function ProviderStatus({
           >
             <div>
               <span>Endpoint coverage</span>
-              <strong>{rows.length}/5 providers</strong>
+              <strong>
+                {onlineCount}/{rows.length} providers
+              </strong>
             </div>
             <div>
               <span>Runtime state</span>

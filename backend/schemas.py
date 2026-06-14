@@ -75,6 +75,7 @@ class ProvidersStatusResponse(BaseModel):
     bitquery: ProviderStatus
     stonfi: ProviderStatus
     tonapi: ProviderStatus
+    wallet_activity: ProviderStatus
 
 
 class WalletIngestionPreviewRequest(BaseModel):

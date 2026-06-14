@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from adapters.stonfi import StonfiAdapter
 from adapters.tonapi import TonapiAdapter
+from adapters.wallet_activity import get_wallet_activity_provider_status
 from config import get_settings
 from database import get_session, init_db
 from models import AnalysisRun
@@ -96,6 +97,7 @@ def get_api_providers_status(settings=None) -> dict:
     status = get_providers_status(settings)
     status["stonfi"] = StonfiAdapter(settings).status()
     status["tonapi"] = TonapiAdapter(settings).status()
+    status["wallet_activity"] = get_wallet_activity_provider_status(settings)
     return status
 
 
