@@ -179,6 +179,65 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_jetton_snapshot(
     assert body["balances"][0]["source_status"] == "live"
 
 
+def test_wallet_ingestion_guarded_tonapi_live_persists_native_balance_snapshot(
+    client,
+    monkeypatch,
+):
+    def fake_get_account_balance_preview(self, account_address):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "balance": {
+                    "wallet_address": account_address,
+                    "asset": "TON",
+                    "balance": "2500000000",
+                    "decimals": 9,
+                    "account_status": "active",
+                    "is_scam": False,
+                    "source": "tonapi",
+                },
+            },
+            source="real",
+            message="TonAPI account native TON balance fetched.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_balance_preview",
+        fake_get_account_balance_preview,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["balances", "transactions"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "partial"
+    assert body["data_mode"] == "real"
+    assert body["unavailable_surfaces"] == ["transactions"]
+    assert body["provider_evidence"][0]["provider"] == "tonapi_wallet_activity_live"
+    assert body["provider_evidence"][0]["source_status"] == "live"
+    assert body["provider_evidence"][0]["raw_count"] == 1
+    assert body["provider_evidence"][0]["normalized_count"] == 1
+    assert body["transactions"] == []
+    assert len(body["balances"]) == 1
+    assert body["balances"][0]["asset"] == "TON"
+    assert body["balances"][0]["balance"] == "2.500000000000000000"
+    assert body["balances"][0]["balance_usd"] is None
+    assert body["balances"][0]["provider"] == "tonapi"
+    assert body["balances"][0]["source_status"] == "live"
+    assert body["balances"][0]["raw"]["surface"] == "balances"
+
+
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
     client,
     monkeypatch,

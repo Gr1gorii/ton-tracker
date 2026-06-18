@@ -201,6 +201,76 @@ def test_guarded_tonapi_live_adapter_ingests_jetton_snapshots(monkeypatch):
     assert any("non-jetton surfaces" in warning.message for warning in result.warnings)
 
 
+def test_guarded_tonapi_live_adapter_ingests_native_and_jetton_balances(
+    monkeypatch,
+):
+    def fake_get_account_balance_preview(self, account_address):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "balance": {
+                    "wallet_address": account_address,
+                    "asset": "TON",
+                    "balance": "2500000000",
+                    "decimals": 9,
+                    "account_status": "active",
+                    "is_scam": False,
+                    "source": "tonapi",
+                },
+            },
+            source="real",
+            message="TonAPI account native TON balance fetched.",
+        )
+
+    def fake_get_account_jettons_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "jettons": [
+                    {
+                        "jetton_address": "EQjetton",
+                        "jetton_name": "Example Jetton",
+                        "jetton_symbol": "EJT",
+                        "balance": "123450000",
+                        "decimals": 6,
+                        "price_usd": "0.25",
+                        "wallet_contract_address": "EQjettonWallet",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_jettons": 1,
+            },
+            source="real",
+            message="TonAPI account jettons preview fetched.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_balance_preview",
+        fake_get_account_balance_preview,
+    )
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_jettons_preview",
+        fake_get_account_jettons_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["balances", "jettons", "swaps"], "real"))
+
+    assert result.status == "partial"
+    assert result.unavailable_surfaces == ["swaps"]
+    assert result.provider_evidence[0].source_status == "live"
+    assert result.provider_evidence[0].raw_count == 2
+    assert result.provider_evidence[0].normalized_count == 2
+    assert [item.asset for item in result.balances] == ["TON", "EJT"]
+    assert result.balances[0].balance == "2.500000000000000000"
+    assert result.balances[0].balance_usd is None
+    assert result.balances[0].raw["surface"] == "balances"
+    assert result.balances[1].balance == "123.450000000000000000"
+
+
 def test_guarded_tonapi_live_adapter_error_returns_no_rows(monkeypatch):
     def fake_get_account_jettons_preview(self, account_address, limit):
         return ProviderResult.failure(
@@ -224,7 +294,10 @@ def test_guarded_tonapi_live_adapter_error_returns_no_rows(monkeypatch):
     assert result.provider_evidence[0].normalized_count == 0
     assert result.balances == []
     assert result.unavailable_surfaces == ["jettons"]
-    assert any("TonAPI provider warning" in warning.message for warning in result.warnings)
+    assert any(
+        "TonAPI jetton balance warning" in warning.message
+        for warning in result.warnings
+    )
 
 
 def test_wallet_activity_scaffold_missing_config_is_unavailable():
@@ -268,6 +341,7 @@ def test_wallet_activity_provider_status_reports_guarded_tonapi_live():
     assert status["configured"] is True
     assert status["available"] is True
     assert "guarded live TonAPI" in status["message"]
+    assert "Native TON balance" in status["message"]
     assert "jetton balance snapshots" in status["message"]
 
 

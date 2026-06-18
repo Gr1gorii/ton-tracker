@@ -89,7 +89,7 @@ def test_status_real_mode_valid_base_url_without_api_key(monkeypatch):
     assert status["available"] is True
     assert "public TonAPI requests" in status["message"]
     assert "rate limits may apply" in status["message"]
-    assert "account jetton preview only" in status["message"]
+    assert "native TON balance and jetton" in status["message"]
     assert "not full wallet intelligence" in status["message"]
 
 
@@ -103,7 +103,7 @@ def test_status_real_mode_valid_base_url_with_api_key(monkeypatch):
     assert status["configured"] is True
     assert status["available"] is True
     assert "TONAPI_API_KEY is configured" in status["message"]
-    assert "account jetton preview only" in status["message"]
+    assert "native TON balance and jetton" in status["message"]
     assert "secret-key" not in status["message"]
 
 
@@ -138,6 +138,48 @@ def test_get_account_jettons_preview_mock_mode_does_not_probe_network(monkeypatc
         "total_jettons": 0,
     }
     assert "not actively queried" in (result.message or "").lower()
+
+
+def test_get_account_balance_preview_success_normalizes_response(monkeypatch):
+    captured = {}
+    payload = {
+        "balance": "2500000000",
+        "status": "active",
+        "is_scam": False,
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["method"] = request.get_method()
+        captured["timeout"] = timeout
+        captured["authorization"] = request.get_header("Authorization")
+        return _json_response(payload)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(
+        _settings("real", tonapi_api_key="test-key")
+    ).get_account_balance_preview("EQwallet")
+
+    assert result.ok is True
+    assert result.source == "real"
+    assert captured == {
+        "url": f"{DEFAULT_TONAPI_BASE_URL}/v2/accounts/EQwallet",
+        "method": "GET",
+        "timeout": 10,
+        "authorization": "Bearer test-key",
+    }
+    assert result.data["wallet_address"] == "EQwallet"
+    assert result.data["balance"] == {
+        "wallet_address": "EQwallet",
+        "asset": "TON",
+        "balance": "2500000000",
+        "decimals": 9,
+        "account_status": "active",
+        "is_scam": False,
+        "source": "tonapi",
+    }
+    assert "native TON balance" in (result.message or "")
 
 
 def test_get_account_jettons_preview_success_normalizes_response(monkeypatch):

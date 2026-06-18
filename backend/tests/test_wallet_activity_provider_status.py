@@ -64,6 +64,7 @@ def test_providers_status_real_mode_tonapi_live_guard(monkeypatch):
     assert status["configured"] is True
     assert status["available"] is True
     assert "guarded live TonAPI" in status["message"]
+    assert "Native TON balance" in status["message"]
     assert "jetton balance snapshots" in status["message"]
     assert "transfers" in status["message"]
 

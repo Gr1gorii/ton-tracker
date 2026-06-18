@@ -55,11 +55,11 @@ provider-specific wallet activity scaffolds behind `WALLET_ACTIVITY_PROVIDER`
 and the public provider status row. `v0.11.6 LIVE GUARDS` adds the first
 guarded live wallet activity path: TonAPI account jetton balance snapshots,
 enabled only with `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
-`WALLET_ACTIVITY_LIVE_ENABLED=true`. Broader real provider calls remain
+`WALLET_ACTIVITY_LIVE_ENABLED=true`. `v0.11.7 BALANCES` expands that guarded
+path to native TON balance snapshots while keeping broader real provider calls
 deferred behind the contract in `REAL_WALLET_INGESTION_PLAN.md`:
 
 - wallet transfers;
 - transaction history;
 - DEX swaps;
-- current TON balances;
 - real wallet-level PnL and clustering inputs.

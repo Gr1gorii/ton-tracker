@@ -20,7 +20,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.11.6 LIVE GUARDS";
+const RELEASE_LABEL = "v0.11.7 BALANCES";
 
 const navItems = [
   "DASHBOARD",
@@ -932,9 +932,9 @@ function EvidenceColumn({
           <div>
             <strong>Wallet ingestion live-provider guards</strong>
             <p>
-              The first guarded TonAPI live path can fetch account jetton
-              balance snapshots only when explicit real-mode flags are enabled.
-              Mock remains the default.
+              Guarded TonAPI live mode can fetch native TON balance and
+              account jetton balance snapshots when explicit real-mode flags
+              are enabled. Mock remains the default.
             </p>
           </div>
         </div>
@@ -942,7 +942,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="TonAPI live guard"
-            text="DATA_MODE=real, WALLET_ACTIVITY_PROVIDER=tonapi, and WALLET_ACTIVITY_LIVE_ENABLED=true enable live account jetton balance snapshots only."
+            text="DATA_MODE=real, WALLET_ACTIVITY_PROVIDER=tonapi, and WALLET_ACTIVITY_LIVE_ENABLED=true enable live native TON and account jetton balance snapshots only."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -967,12 +967,12 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Transfers, transactions, swaps, native TON balance, PnL, clustering, and ownership proof remain unavailable in the live guard."
+            text="Transfers, transactions, swaps, PnL, clustering, and ownership proof remain unavailable in the live guard."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.11.6 LIVE GUARDS is a product release label."
+            text="Backend VERSION remains the API-version field; v0.11.7 BALANCES is a product release label."
           />
         </div>
       </section>

@@ -107,8 +107,8 @@ class TonapiAdapter:
             "message": (
                 "Real mode: TonAPI is configured. Account jetton preview "
                 "endpoints can attempt live TonAPI requests. "
-                f"{auth_note} Scope is account jetton preview only, not full "
-                "wallet intelligence."
+                f"{auth_note} Scope is account native TON balance and jetton "
+                "previews only, not full wallet intelligence."
             ),
         }
 
@@ -185,6 +185,55 @@ class TonapiAdapter:
             payload,
             source="real",
             message="TonAPI JSON response fetched.",
+        )
+
+    # -- Account balance preview ----------------------------------------
+
+    def get_account_balance_preview(
+        self,
+        account_address: str,
+    ) -> ProviderResult:
+        """Fetch and normalize TonAPI account native TON balance."""
+        account = self._optional_string(account_address)
+        if account is None:
+            return self._provider_error("TonAPI account address is required.")
+
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {
+                    "wallet_address": account,
+                    "balance": None,
+                },
+                source="mock",
+                message="Mock mode: TonAPI is not actively queried.",
+            )
+
+        encoded_account = urllib.parse.quote(account, safe="")
+        result = self.fetch_json(f"/v2/accounts/{encoded_account}")
+        if not result.ok:
+            return result
+
+        try:
+            balance = self.normalize_account_balance_response(
+                result.data,
+                account,
+            )
+        except ValueError as exc:
+            return self._provider_error(
+                f"TonAPI response had an unexpected structure: {exc}."
+            )
+
+        return ProviderResult.success(
+            {
+                "wallet_address": account,
+                "balance": balance,
+            },
+            source="real",
+            message=(
+                "TonAPI account native TON balance fetched. This is an "
+                "account-level balance snapshot only and is not transaction "
+                "history or full wallet intelligence."
+            ),
         )
 
     # -- Jettons preview -------------------------------------------------
@@ -268,6 +317,34 @@ class TonapiAdapter:
             normalized.append(cls.normalize_jetton_balance(raw_balance,
                                                            wallet_address))
         return normalized
+
+    @classmethod
+    def normalize_account_balance_response(
+        cls,
+        payload: Any,
+        wallet_address: str,
+    ) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("response must be an object")
+
+        nested_account = payload.get("account")
+        if not isinstance(nested_account, dict):
+            nested_account = {}
+        raw_balance = payload.get("balance", nested_account.get("balance"))
+        if raw_balance is None:
+            raise ValueError("account balance is missing")
+
+        return {
+            "wallet_address": wallet_address,
+            "asset": "TON",
+            "balance": cls._optional_string(raw_balance),
+            "decimals": 9,
+            "account_status": cls._optional_string(
+                payload.get("status", nested_account.get("status"))
+            ),
+            "is_scam": payload.get("is_scam", nested_account.get("is_scam")),
+            "source": "tonapi",
+        }
 
     @classmethod
     def normalize_jetton_balance(
