@@ -52,6 +52,23 @@ def test_providers_status_real_mode_tonapi_scaffold_is_limited(monkeypatch):
     assert "live wallet activity calls are disabled" in status["message"]
 
 
+def test_providers_status_real_mode_tonapi_live_guard(monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    body = _client().get("/api/providers/status").json()
+    status = body["wallet_activity"]
+
+    assert status["configured"] is True
+    assert status["available"] is True
+    assert "guarded live TonAPI" in status["message"]
+    assert "Native TON balance" in status["message"]
+    assert "jetton balance snapshots" in status["message"]
+    assert "transfers" in status["message"]
+
+
 def test_providers_status_real_mode_bitquery_scaffold_missing_key(
     monkeypatch,
 ):

@@ -566,6 +566,7 @@ export interface WalletIngestionRunResponse {
   data_mode: "mock" | "real";
   requested_surfaces: WalletIngestionSurface[];
   provider_evidence: WalletActivityProviderEvidence[];
+  unavailable_surfaces: WalletIngestionSurface[];
   transfers: WalletTransferRecord[];
   transactions: WalletTransactionRecord[];
   swaps: WalletSwapRecord[];

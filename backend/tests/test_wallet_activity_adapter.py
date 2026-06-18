@@ -5,12 +5,18 @@ from __future__ import annotations
 from adapters.wallet_activity import (
     BitqueryWalletActivityScaffoldAdapter,
     MockWalletActivityAdapter,
+    TonapiWalletActivityLiveAdapter,
     TonapiWalletActivityScaffoldAdapter,
     WalletActivityAdapterRequest,
     build_wallet_activity_adapter,
     get_wallet_activity_provider_status,
 )
-from config import DEFAULT_STONFI_BASE_URL, DEFAULT_TONAPI_BASE_URL, Settings
+from config import (
+    DEFAULT_STONFI_BASE_URL,
+    DEFAULT_TONAPI_BASE_URL,
+    ProviderResult,
+    Settings,
+)
 
 
 def _settings(
@@ -29,6 +35,8 @@ def _settings(
         tonapi_base_url=DEFAULT_TONAPI_BASE_URL,
         tonapi_api_key="",
         wallet_activity_provider=provider,
+        wallet_activity_live_enabled=False,
+        wallet_activity_live_jetton_limit=100,
     )
     base.update(kw)
     return Settings(**base)
@@ -135,6 +143,163 @@ def test_wallet_activity_adapter_factory_routes_explicit_tonapi_scaffold():
     assert any("scaffold-only" in warning.message for warning in result.warnings)
 
 
+def test_wallet_activity_adapter_factory_routes_guarded_tonapi_live_adapter():
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    assert isinstance(adapter, TonapiWalletActivityLiveAdapter)
+
+
+def test_guarded_tonapi_live_adapter_ingests_jetton_snapshots(monkeypatch):
+    def fake_get_account_jettons_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "jettons": [
+                    {
+                        "jetton_address": "EQjetton",
+                        "jetton_name": "Example Jetton",
+                        "jetton_symbol": "EJT",
+                        "balance": "123450000",
+                        "decimals": 6,
+                        "price_usd": "0.25",
+                        "wallet_contract_address": "EQjettonWallet",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_jettons": 1,
+            },
+            source="real",
+            message="TonAPI account jettons preview fetched.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_jettons_preview",
+        fake_get_account_jettons_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["jettons", "transfers"], "real"))
+
+    assert result.status == "partial"
+    assert result.data_mode == "real"
+    assert result.unavailable_surfaces == ["transfers"]
+    assert result.provider_evidence[0].provider == "tonapi_wallet_activity_live"
+    assert result.provider_evidence[0].source_status == "live"
+    assert result.provider_evidence[0].raw_count == 1
+    assert result.provider_evidence[0].normalized_count == 1
+    assert result.balances[0].asset == "EJT"
+    assert result.balances[0].balance == "123.450000000000000000"
+    assert result.balances[0].balance_usd == "30.86250000"
+    assert result.balances[0].provider == "tonapi"
+    assert result.balances[0].source_status == "live"
+    assert result.transfers == []
+    assert any("non-jetton surfaces" in warning.message for warning in result.warnings)
+
+
+def test_guarded_tonapi_live_adapter_ingests_native_and_jetton_balances(
+    monkeypatch,
+):
+    def fake_get_account_balance_preview(self, account_address):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "balance": {
+                    "wallet_address": account_address,
+                    "asset": "TON",
+                    "balance": "2500000000",
+                    "decimals": 9,
+                    "account_status": "active",
+                    "is_scam": False,
+                    "source": "tonapi",
+                },
+            },
+            source="real",
+            message="TonAPI account native TON balance fetched.",
+        )
+
+    def fake_get_account_jettons_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "jettons": [
+                    {
+                        "jetton_address": "EQjetton",
+                        "jetton_name": "Example Jetton",
+                        "jetton_symbol": "EJT",
+                        "balance": "123450000",
+                        "decimals": 6,
+                        "price_usd": "0.25",
+                        "wallet_contract_address": "EQjettonWallet",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_jettons": 1,
+            },
+            source="real",
+            message="TonAPI account jettons preview fetched.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_balance_preview",
+        fake_get_account_balance_preview,
+    )
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_jettons_preview",
+        fake_get_account_jettons_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["balances", "jettons", "swaps"], "real"))
+
+    assert result.status == "partial"
+    assert result.unavailable_surfaces == ["swaps"]
+    assert result.provider_evidence[0].source_status == "live"
+    assert result.provider_evidence[0].raw_count == 2
+    assert result.provider_evidence[0].normalized_count == 2
+    assert [item.asset for item in result.balances] == ["TON", "EJT"]
+    assert result.balances[0].balance == "2.500000000000000000"
+    assert result.balances[0].balance_usd is None
+    assert result.balances[0].raw["surface"] == "balances"
+    assert result.balances[1].balance == "123.450000000000000000"
+
+
+def test_guarded_tonapi_live_adapter_error_returns_no_rows(monkeypatch):
+    def fake_get_account_jettons_preview(self, account_address, limit):
+        return ProviderResult.failure(
+            "provider_error",
+            "TonAPI network error: timeout.",
+            source="real",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_jettons_preview",
+        fake_get_account_jettons_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["jettons"], "real"))
+
+    assert result.status == "error"
+    assert result.provider_evidence[0].source_status == "error"
+    assert result.provider_evidence[0].normalized_count == 0
+    assert result.balances == []
+    assert result.unavailable_surfaces == ["jettons"]
+    assert any(
+        "TonAPI jetton balance warning" in warning.message
+        for warning in result.warnings
+    )
+
+
 def test_wallet_activity_scaffold_missing_config_is_unavailable():
     adapter = build_wallet_activity_adapter(
         _settings("real", "bitquery", bitquery_api_key="")
@@ -166,6 +331,18 @@ def test_wallet_activity_provider_status_reports_real_scaffold_limited():
     assert status["available"] is False
     assert "STON.fi wallet activity scaffold" in status["message"]
     assert "live wallet activity calls are disabled" in status["message"]
+
+
+def test_wallet_activity_provider_status_reports_guarded_tonapi_live():
+    status = get_wallet_activity_provider_status(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    assert status["configured"] is True
+    assert status["available"] is True
+    assert "guarded live TonAPI" in status["message"]
+    assert "Native TON balance" in status["message"]
+    assert "jetton balance snapshots" in status["message"]
 
 
 def test_wallet_activity_provider_status_rejects_unknown_provider():

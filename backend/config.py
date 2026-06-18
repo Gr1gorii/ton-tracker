@@ -64,6 +64,8 @@ class Settings:
     tonapi_base_url: str = DEFAULT_TONAPI_BASE_URL
     tonapi_api_key: str = ""
     wallet_activity_provider: str = "mock"
+    wallet_activity_live_enabled: bool = False
+    wallet_activity_live_jetton_limit: int = 100
 
     @property
     def is_mock(self) -> bool:
@@ -76,6 +78,21 @@ class Settings:
 
 def _env(name: str, default: str = "") -> str:
     return (os.environ.get(name, default) or "").strip()
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = _env(name)
+    if not value:
+        return default
+    return value.lower() in ("1", "true", "yes", "on")
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(_env(name, str(default)))
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
 
 
 def get_settings() -> Settings:
@@ -104,6 +121,13 @@ def get_settings() -> Settings:
         tonapi_api_key=_env("TONAPI_API_KEY"),
         wallet_activity_provider=_env("WALLET_ACTIVITY_PROVIDER", "mock").lower()
         or "mock",
+        wallet_activity_live_enabled=_env_bool("WALLET_ACTIVITY_LIVE_ENABLED"),
+        wallet_activity_live_jetton_limit=_env_int(
+            "WALLET_ACTIVITY_LIVE_JETTON_LIMIT",
+            default=100,
+            minimum=1,
+            maximum=500,
+        ),
     )
 
 
