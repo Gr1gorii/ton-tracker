@@ -525,6 +525,34 @@ def test_wallet_ingestion_activity_summary_is_derived_and_labeled(
     ) == Decimal("950.42")
 
 
+def test_wallet_ingestion_run_json_export_download(client, monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    monkeypatch.delenv("WALLET_ACTIVITY_PROVIDER", raising=False)
+
+    run = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["transfers", "transactions", "swaps", "balances"],
+        },
+    )
+    run_id = run.json()["run_id"]
+
+    res = client.get(f"/api/wallets/ingest/{run_id}/export.json")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("application/json")
+    disposition = res.headers["content-disposition"]
+    assert "attachment" in disposition
+    assert f"wallet_ingestion_run_{run_id}.json" in disposition
+    body = res.json()
+    assert body["run_id"] == run_id
+    assert "activity_summary" in body
+
+    missing = client.get("/api/wallets/ingest/99999/export.json")
+    assert missing.status_code == 404
+
+
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
     client,
     monkeypatch,

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from database import get_session
@@ -57,3 +60,24 @@ def read_wallet_ingestion_run(
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
     return result
+
+
+@router.get("/ingest/{run_id}/export.json")
+def export_wallet_ingestion_run(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download one persisted wallet ingestion run (rows + summary) as JSON."""
+    result = get_wallet_ingestion_run(run_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    body = json.dumps(result, ensure_ascii=False, indent=2)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_ingestion_run_{run_id}.json"
+            )
+        },
+    )
