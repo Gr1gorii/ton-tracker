@@ -20,5 +20,5 @@ frontend/.env.local
 .vscode/
 .idea/
 
-# Tooling
-.claude/settings.local.json
+# Local tool / editor settings (e.g. *.local.json overrides)
+*.local.json
