@@ -20,7 +20,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.11.8 HISTORY";
+const RELEASE_LABEL = "v0.11.9 TRANSFERS";
 
 const navItems = [
   "DASHBOARD",
@@ -933,9 +933,9 @@ function EvidenceColumn({
             <strong>Wallet ingestion live-provider guards</strong>
             <p>
               Guarded TonAPI live mode can fetch native TON balance snapshots,
-              account jetton balance snapshots, and an ordered transaction-history
-              timeline when explicit real-mode flags are enabled. Mock remains
-              the default.
+              account jetton balance snapshots, an ordered transaction-history
+              timeline, and TON/jetton transfer history when explicit real-mode
+              flags are enabled. Mock remains the default.
             </p>
           </div>
         </div>
@@ -943,7 +943,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="TonAPI live guard"
-            text="DATA_MODE=real, WALLET_ACTIVITY_PROVIDER=tonapi, and WALLET_ACTIVITY_LIVE_ENABLED=true enable live native TON balance, account jetton balance, and account transaction-history coverage only."
+            text="DATA_MODE=real, WALLET_ACTIVITY_PROVIDER=tonapi, and WALLET_ACTIVITY_LIVE_ENABLED=true enable live native TON balance, account jetton balance, account transaction-history, and TON/jetton transfer coverage only."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -968,12 +968,12 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Transfers, DEX swaps, PnL, clustering, and ownership proof remain unavailable in the live guard."
+            text="DEX swaps, PnL, clustering, and ownership proof remain unavailable in the live guard."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.11.8 HISTORY is a product release label."
+            text="Backend VERSION remains the API-version field; v0.11.9 TRANSFERS is a product release label."
           />
         </div>
       </section>

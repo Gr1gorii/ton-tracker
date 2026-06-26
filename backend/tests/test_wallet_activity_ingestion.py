@@ -310,6 +310,84 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
     assert read_body["transactions"][0]["tx_hash"] == "abc123"
 
 
+def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
+    client,
+    monkeypatch,
+):
+    def fake_get_account_events_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "transfers": [
+                    {
+                        "event_id": "evt1",
+                        "utime": 1717236000,
+                        "lt": "46000000000001",
+                        "action_type": "TonTransfer",
+                        "asset": "TON",
+                        "raw_amount": "2500000000",
+                        "decimals": 9,
+                        "direction": "out",
+                        "counterparty": "EQdest",
+                        "sender": "EQwallet",
+                        "recipient": "EQdest",
+                        "jetton_address": None,
+                        "jetton_symbol": None,
+                        "status": "ok",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_transfers": 1,
+                "total_events": 1,
+            },
+            source="real",
+            message="TonAPI account transfer history fetched from events.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_events_preview",
+        fake_get_account_events_preview,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["transfers", "swaps"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    run_id = body["run_id"]
+    assert body["status"] == "partial"
+    assert body["data_mode"] == "real"
+    assert body["unavailable_surfaces"] == ["swaps"]
+    assert body["provider_evidence"][0]["source_status"] == "live"
+    assert body["provider_evidence"][0]["raw_count"] == 1
+    assert body["provider_evidence"][0]["normalized_count"] == 1
+    assert body["balances"] == []
+    assert len(body["transfers"]) == 1
+    transfer = body["transfers"][0]
+    assert transfer["asset"] == "TON"
+    assert transfer["direction"] == "out"
+    assert transfer["amount"] == "2.500000000000000000"
+    assert transfer["counterparty"] == "EQdest"
+    assert transfer["provider"] == "tonapi"
+    assert transfer["source_status"] == "live"
+    assert transfer["raw"]["surface"] == "transfers"
+
+    read_back = client.get(f"/api/wallets/ingest/{run_id}")
+    assert read_back.status_code == 200
+    assert len(read_back.json()["transfers"]) == 1
+
+
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
     client,
     monkeypatch,
