@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -126,6 +126,11 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
             "legacy PnL or clustering yet."
         )
 
+    transfers = [_transfer_record(item) for item in run.transfers]
+    transactions = [_transaction_record(item) for item in run.transactions]
+    swaps = [_swap_record(item) for item in run.swaps]
+    balances = [_balance_record(item) for item in run.balance_snapshots]
+
     return {
         "run_id": run.id,
         "wallet_address": run.wallet_address,
@@ -135,12 +140,117 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
         "requested_surfaces": requested_surfaces,
         "provider_evidence": evidence,
         "unavailable_surfaces": unavailable_surfaces,
-        "transfers": [_transfer_record(item) for item in run.transfers],
-        "transactions": [_transaction_record(item) for item in run.transactions],
-        "swaps": [_swap_record(item) for item in run.swaps],
-        "balances": [_balance_record(item) for item in run.balance_snapshots],
+        "transfers": transfers,
+        "transactions": transactions,
+        "swaps": swaps,
+        "balances": balances,
         "warnings": [_warning_record(item) for item in run.warnings],
         "message": message,
+        "activity_summary": _activity_summary(
+            transfers, transactions, swaps, balances
+        ),
+    }
+
+
+_ZERO = Decimal(0)
+
+
+def _dec(value: Any) -> Decimal:
+    if value is None or value == "":
+        return _ZERO
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return _ZERO
+
+
+def _activity_summary(
+    transfers: list[dict[str, Any]],
+    transactions: list[dict[str, Any]],
+    swaps: list[dict[str, Any]],
+    balances: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Derived, read-only activity summary aggregated from ingested rows.
+
+    Amounts are token quantities only. No pricing, cost basis, USD valuation,
+    PnL, or clustering is inferred here.
+    """
+    transfer_assets: dict[str, dict[str, Any]] = {}
+    for item in transfers:
+        asset = item.get("asset") or "UNKNOWN"
+        entry = transfer_assets.setdefault(
+            asset,
+            {
+                "in_count": 0,
+                "out_count": 0,
+                "unknown_count": 0,
+                "in_amount": _ZERO,
+                "out_amount": _ZERO,
+            },
+        )
+        amount = _dec(item.get("amount"))
+        direction = item.get("direction")
+        if direction == "in":
+            entry["in_count"] += 1
+            entry["in_amount"] += amount
+        elif direction == "out":
+            entry["out_count"] += 1
+            entry["out_amount"] += amount
+        else:
+            entry["unknown_count"] += 1
+
+    transfers_by_asset = [
+        {
+            "asset": asset,
+            "in_count": e["in_count"],
+            "out_count": e["out_count"],
+            "unknown_count": e["unknown_count"],
+            "in_amount": str(e["in_amount"]),
+            "out_amount": str(e["out_amount"]),
+            "net_amount": str(e["in_amount"] - e["out_amount"]),
+        }
+        for asset, e in sorted(transfer_assets.items())
+    ]
+
+    swap_dex: dict[str, int] = {}
+    for item in swaps:
+        dex = item.get("dex") or "unknown"
+        swap_dex[dex] = swap_dex.get(dex, 0) + 1
+    swaps_by_dex = [
+        {"dex": dex, "count": count} for dex, count in sorted(swap_dex.items())
+    ]
+
+    total_fee = _ZERO
+    for item in transactions:
+        total_fee += _dec(item.get("fee_ton"))
+
+    balance_assets = sorted(
+        {item.get("asset") for item in balances if item.get("asset")}
+    )
+
+    return {
+        "is_pnl": False,
+        "note": (
+            "Derived activity summary from ingested rows only. Amounts are "
+            "token quantities, not USD. This is not PnL, cost basis, or "
+            "valuation."
+        ),
+        "counts": {
+            "transfers": len(transfers),
+            "transactions": len(transactions),
+            "swaps": len(swaps),
+            "balances": len(balances),
+        },
+        "transfers_by_asset": transfers_by_asset,
+        "swaps_by_dex": swaps_by_dex,
+        "transactions": {
+            "count": len(transactions),
+            "total_fee_ton": str(total_fee),
+        },
+        "balances": {
+            "count": len(balances),
+            "assets": balance_assets,
+        },
     }
 
 
