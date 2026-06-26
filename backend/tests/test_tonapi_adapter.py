@@ -460,3 +460,108 @@ def test_get_account_transactions_preview_rejects_missing_account_address():
     assert result.ok is False
     assert result.error == ERROR_PROVIDER_ERROR
     assert "account address is required" in (result.message or "").lower()
+
+
+def test_get_account_events_preview_mock_mode_does_not_probe_network(monkeypatch):
+    _forbid_network(monkeypatch)
+
+    result = TonapiAdapter(_settings("mock")).get_account_events_preview(
+        "EQwallet",
+    )
+
+    assert result.ok is True
+    assert result.source == "mock"
+    assert result.data == {
+        "wallet_address": "EQwallet",
+        "transfers": [],
+        "preview_count": 0,
+        "total_transfers": 0,
+        "total_events": 0,
+    }
+    assert "not actively queried" in (result.message or "").lower()
+
+
+def test_get_account_events_preview_normalizes_ton_and_jetton_transfers(monkeypatch):
+    captured = {}
+    payload = {
+        "events": [
+            {
+                "event_id": "evt1",
+                "timestamp": 1717236000,
+                "lt": "46000000000001",
+                "actions": [
+                    {
+                        "type": "TonTransfer",
+                        "status": "ok",
+                        "TonTransfer": {
+                            "sender": {"address": "EQwallet"},
+                            "recipient": {"address": "EQdest"},
+                            "amount": 2500000000,
+                        },
+                    },
+                    {
+                        "type": "JettonTransfer",
+                        "status": "ok",
+                        "JettonTransfer": {
+                            "sender": {"address": "EQsource"},
+                            "recipient": {"address": "EQwallet"},
+                            "amount": "123450000",
+                            "jetton": {
+                                "address": "EQjetton",
+                                "symbol": "EJT",
+                                "decimals": 6,
+                            },
+                        },
+                    },
+                    {"type": "ContractDeploy", "status": "ok"},
+                ],
+            }
+        ]
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return _json_response(payload)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(
+        _settings("real", tonapi_api_key="test-key")
+    ).get_account_events_preview("EQwallet", limit=2)
+
+    assert result.ok is True
+    assert result.source == "real"
+    assert captured["url"] == (
+        f"{DEFAULT_TONAPI_BASE_URL}/v2/accounts/EQwallet/events?limit=2"
+    )
+    assert result.data["total_events"] == 1
+    assert result.data["total_transfers"] == 2
+    transfers = result.data["transfers"]
+    assert transfers[0]["action_type"] == "TonTransfer"
+    assert transfers[0]["asset"] == "TON"
+    assert transfers[0]["direction"] == "out"
+    assert transfers[0]["counterparty"] == "EQdest"
+    assert transfers[0]["raw_amount"] == "2500000000"
+    assert transfers[0]["decimals"] == 9
+    assert transfers[1]["action_type"] == "JettonTransfer"
+    assert transfers[1]["asset"] == "EJT"
+    assert transfers[1]["direction"] == "in"
+    assert transfers[1]["counterparty"] == "EQsource"
+    assert transfers[1]["raw_amount"] == "123450000"
+    assert transfers[1]["decimals"] == 6
+    assert "transfer history" in (result.message or "").lower()
+
+
+def test_get_account_events_preview_unexpected_shape_returns_error(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return _json_response({"unexpected": []})
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_events_preview(
+        "EQwallet",
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_ERROR
+    assert "unexpected structure" in (result.message or "").lower()

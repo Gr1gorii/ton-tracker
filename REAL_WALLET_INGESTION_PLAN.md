@@ -1,9 +1,10 @@
-# TON Wallet Intelligence Dashboard - v0.11.8 HISTORY
+# TON Wallet Intelligence Dashboard - v0.11.9 TRANSFERS
 
 Planning and rollout contract for real wallet activity ingestion. The current
-milestone expands the guarded TonAPI live path to an ordered account
-transaction-history timeline, alongside the existing native TON balance and
-account jetton balance snapshots, behind explicit configuration controls.
+milestone expands the guarded TonAPI live path to TON/jetton transfer history
+derived from account events, alongside the existing native TON balance, account
+jetton balance snapshots, and transaction-history timeline, behind explicit
+configuration controls.
 
 ## Objective
 
@@ -18,17 +19,17 @@ The plan must preserve the current data honesty contract:
 - backend `VERSION=0.2.1` remains the API-version field until the API contract
   changes.
 
-## Non-Goals For v0.11.8
+## Non-Goals For v0.11.9
 
 - Do not calculate real wallet PnL yet.
-- Do not connect live balance snapshots or transaction-history rows to
+- Do not connect live balance, transaction-history, or transfer rows to
   clustering yet.
 - Do not replace legacy mock-aware buyers, exports, or interesting-wallet
   reports yet.
-- Do not infer transfers, DEX swaps, or ownership proof from balance snapshots
-  or the transaction-history timeline.
-- Do not claim the transaction-history timeline is transfer-level attribution,
-  DEX swap reconstruction, or complete wallet intelligence.
+- Do not infer DEX swaps or ownership proof from balance snapshots, the
+  transaction-history timeline, or transfer rows.
+- Do not claim transfer rows are DEX swap reconstruction or complete wallet
+  intelligence; transfer direction is best-effort from event addresses.
 - Do not wire ingestion rows into legacy PnL, clustering, or exports.
 - Do not remove TonAPI/STON.fi/Bitquery provider limitation messaging.
 
@@ -38,7 +39,7 @@ Planned wallet activity surfaces:
 
 | Surface | Purpose | Current status |
 | --- | --- | --- |
-| Wallet transfers | Incoming/outgoing TON and jetton movements | Mock-normalized in v0.11.2; live deferred |
+| Wallet transfers | Incoming/outgoing TON and jetton movements | Mock-normalized in v0.11.2; TonAPI live guarded in v0.11.9 |
 | Transaction history | Ordered account activity timeline | Mock-normalized in v0.11.2; TonAPI live guarded in v0.11.8 |
 | DEX swaps | Swap-side activity for wallet-level behavior | Mock-normalized in v0.11.2; live deferred |
 | Current TON balance | Wallet-level native TON balance | TonAPI live guarded in v0.11.7 |
@@ -51,8 +52,9 @@ Use explicit, source-aware entities rather than a single opaque JSON blob.
 `v0.11.1` scaffolds these entities in SQLAlchemy, `v0.11.2` persists
 deterministic mock-normalized rows into them, `v0.11.6` persists guarded TonAPI
 live jetton balance snapshots, `v0.11.7` adds guarded native TON balance
-snapshots into `WalletBalanceSnapshot`, and `v0.11.8` persists guarded live
-transaction-history rows into `WalletTransaction`:
+snapshots into `WalletBalanceSnapshot`, `v0.11.8` persists guarded live
+transaction-history rows into `WalletTransaction`, and `v0.11.9` persists
+guarded live TON/jetton transfer rows into `WalletTransfer`:
 
 - `WalletIngestionRun`: run id, wallet address, requested window, data mode,
   provider summary, unavailable surfaces, status, timestamps.
@@ -79,6 +81,8 @@ and run orchestration through the backend wallet activity adapter interface.
 account jetton balance snapshots. `v0.11.7` expands the same guard to native
 TON balance snapshots for requested `balances`. `v0.11.8` expands it again to an
 ordered account transaction-history timeline for requested `transactions`.
+`v0.11.9` expands it again to TON/jetton transfer history (from account events)
+for requested `transfers`.
 
 - `POST /api/wallets/ingest/preview`
   - validates wallet address, window, and requested surfaces;
@@ -96,6 +100,8 @@ ordered account transaction-history timeline for requested `transactions`.
     is enabled and `jettons` is requested;
   - persists live TonAPI ordered transaction-history rows when the v0.11.8 live
     guard is enabled and `transactions` is requested;
+  - persists live TonAPI TON/jetton transfer rows when the v0.11.9 live guard
+    is enabled and `transfers` is requested;
   - returns run id, status, provider evidence, unavailable surfaces, normalized
     rows, and warnings.
 - `GET /api/wallets/ingest/{run_id}`
@@ -124,25 +130,27 @@ Every adapter response must include:
 - freshness timestamp when available;
 - raw count and normalized count.
 
-`v0.11.8` keeps the `TonapiWalletActivityLiveAdapter` guarded by:
+`v0.11.9` keeps the `TonapiWalletActivityLiveAdapter` guarded by:
 
 - `DATA_MODE=real`;
 - `WALLET_ACTIVITY_PROVIDER=tonapi`;
 - `WALLET_ACTIVITY_LIVE_ENABLED=true`;
 - `WALLET_ACTIVITY_LIVE_JETTON_LIMIT`, clamped to `1..500`;
-- `WALLET_ACTIVITY_LIVE_TX_LIMIT`, clamped to `1..1000`.
+- `WALLET_ACTIVITY_LIVE_TX_LIMIT`, clamped to `1..1000`;
+- `WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT`, clamped to `1..1000`.
 
-Supported live surfaces in v0.11.8:
+Supported live surfaces in v0.11.9:
 
 - `balances`: one native TON balance snapshot from TonAPI account data.
 - `jettons`: account jetton balance snapshots from TonAPI account jetton data.
 - `transactions`: ordered account transaction-history rows from TonAPI
   blockchain account-transactions data (`hash`, `lt`, `utime`, `total_fees`,
   `success`).
+- `transfers`: TON/jetton transfer rows parsed from TonAPI account events
+  (`TonTransfer`/`JettonTransfer` actions) with best-effort direction.
 
-Unsupported live surfaces in v0.11.8:
+Unsupported live surfaces in v0.11.9:
 
-- `transfers`
 - `swaps`
 - PnL inputs
 - clustering inputs
@@ -159,9 +167,9 @@ Keep the dedicated wallet ingestion workspace before changing legacy analytics:
 - Data honesty cards for unavailable surfaces.
 - Activity tables separated by surface.
 - Clear message that PnL/clustering are not yet real unless explicitly wired.
-- Release-readiness copy that states v0.11.8 is live only for native TON
-  balance snapshots, account jetton balance snapshots, and account
-  transaction-history rows.
+- Release-readiness copy that states v0.11.9 is live only for native TON
+  balance snapshots, account jetton balance snapshots, account
+  transaction-history rows, and TON/jetton transfer rows.
 
 ## Rollout Phases
 
@@ -189,8 +197,10 @@ Keep the dedicated wallet ingestion workspace before changing legacy analytics:
 5. Activity history exploration
    - Add guarded transaction-history coverage (ordered account timeline). Done
      in `v0.11.8`.
-   - Add guarded transfer-level (event/action) coverage only after provider
-     rate-limit behavior, freshness, and field reliability are understood.
+   - Add guarded transfer-level coverage (event/action parsing). Done in
+     `v0.11.9`.
+   - Add guarded DEX swap reconstruction only after provider rate-limit
+     behavior, freshness, and field reliability are understood.
    - Keep balance snapshots separate from activity/history rows.
 
 6. Analytics integration
@@ -199,7 +209,7 @@ Keep the dedicated wallet ingestion workspace before changing legacy analytics:
 
 ## Verification Gates
 
-Before promoting wallet ingestion transaction-history coverage:
+Before promoting wallet ingestion transfer-history coverage:
 
 - `npm run build` passes.
 - `.venv/bin/python -m pytest -q` passes.
@@ -210,24 +220,24 @@ Before promoting wallet ingestion transaction-history coverage:
   passes.
 - `.venv/bin/python -m pytest tests/test_wallet_activity_provider_status.py -q`
   passes.
-- UI shows `RELEASE v0.11.8 HISTORY`.
+- UI shows `RELEASE v0.11.9 TRANSFERS`.
 - `/api/wallets/ingest/preview`, `/api/wallets/ingest`, and
   `/api/wallets/ingest/{run_id}` return source-aware mock data by default.
 - `DATA_MODE=real` without `WALLET_ACTIVITY_LIVE_ENABLED=true` still returns
   honest mock/scaffold warnings instead of live rows.
 - Guarded TonAPI live mode persists only native TON balance snapshots, account
-  jetton balance snapshots, and ordered transaction-history rows.
-- Unsupported surfaces (transfers, swaps) remain visible in
-  `unavailable_surfaces`.
+  jetton balance snapshots, ordered transaction-history rows, and TON/jetton
+  transfer rows.
+- Unsupported surfaces (swaps) remain visible in `unavailable_surfaces`.
 - `/api/providers/status` includes the selected wallet activity adapter row.
 - Wallet Activity Ingestion Workspace can preview coverage, persist a run,
   refresh the stored run, and render activity tables.
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`, and this document all
-  describe the same transaction-history-coverage scope.
+  describe the same transfer-history-coverage scope.
 - No user-facing UI claims real full-wallet analysis exists yet.
 
 ## Next Branch
 
 ```bash
-git checkout -b v0.11.9-wallet-ingestion-tonapi-transfers
+git checkout -b v0.12.0-wallet-ingestion-dex-swaps
 ```

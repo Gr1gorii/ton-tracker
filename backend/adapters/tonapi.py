@@ -363,6 +363,77 @@ class TonapiAdapter:
             ),
         )
 
+    # -- Transfers preview (events) -------------------------------------
+
+    def get_account_events_preview(
+        self,
+        account_address: str,
+        limit: int = 10,
+    ) -> ProviderResult:
+        """Fetch and normalize TON/jetton transfers from TonAPI account events.
+
+        Only ``TonTransfer`` and ``JettonTransfer`` actions are represented as
+        transfers. Other action types (swaps, NFT, contract calls) are not
+        transfers. Transfer direction is best-effort from the event addresses.
+        """
+        account = self._optional_string(account_address)
+        if account is None:
+            return self._provider_error("TonAPI account address is required.")
+        if limit < 1:
+            return self._provider_error(
+                "TonAPI events preview limit must be at least 1."
+            )
+
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {
+                    "wallet_address": account,
+                    "transfers": [],
+                    "preview_count": 0,
+                    "total_transfers": 0,
+                    "total_events": 0,
+                },
+                source="mock",
+                message="Mock mode: TonAPI is not actively queried.",
+            )
+
+        encoded_account = urllib.parse.quote(account, safe="")
+        result = self.fetch_json(
+            f"/v2/accounts/{encoded_account}/events",
+            query={"limit": limit},
+        )
+        if not result.ok:
+            return result
+
+        try:
+            transfers = self.normalize_account_events_response(
+                result.data,
+                account,
+            )
+        except ValueError as exc:
+            return self._provider_error(
+                f"TonAPI response had an unexpected structure: {exc}."
+            )
+
+        events = result.data.get("events") if isinstance(result.data, dict) else None
+        total_events = len(events) if isinstance(events, list) else len(transfers)
+        return ProviderResult.success(
+            {
+                "wallet_address": account,
+                "transfers": transfers,
+                "preview_count": len(transfers),
+                "total_transfers": len(transfers),
+                "total_events": total_events,
+            },
+            source="real",
+            message=(
+                "TonAPI account transfer history fetched from events. Only TON "
+                "and jetton transfer actions are represented and direction is "
+                "best-effort; this is not DEX swap reconstruction, PnL, or "
+                "ownership proof."
+            ),
+        )
+
     # -- Normalization ---------------------------------------------------
 
     @classmethod
@@ -459,6 +530,114 @@ class TonapiAdapter:
             "end_status": cls._optional_string(raw_tx.get("end_status")),
             "source": "tonapi",
         }
+
+    @classmethod
+    def normalize_account_events_response(
+        cls,
+        payload: Any,
+        wallet_address: str,
+    ) -> list[dict]:
+        if not isinstance(payload, dict):
+            raise ValueError("response must be an object")
+
+        events = payload.get("events")
+        if not isinstance(events, list):
+            raise ValueError("events must be a list")
+
+        account_norm = (wallet_address or "").strip().lower()
+        transfers: list[dict] = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_id = cls._optional_string(event.get("event_id"))
+            utime = cls._optional_int(event.get("timestamp"))
+            lt = cls._optional_string(event.get("lt"))
+            actions = event.get("actions")
+            if not isinstance(actions, list):
+                continue
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                action_type = cls._optional_string(action.get("type"))
+                if action_type not in ("TonTransfer", "JettonTransfer"):
+                    continue
+                detail = action.get(action_type)
+                if not isinstance(detail, dict):
+                    continue
+                transfers.append(
+                    cls.normalize_event_transfer(
+                        detail,
+                        action,
+                        action_type,
+                        event_id,
+                        utime,
+                        lt,
+                        account_norm,
+                    )
+                )
+        return transfers
+
+    @classmethod
+    def normalize_event_transfer(
+        cls,
+        detail: dict,
+        action: dict,
+        action_type: str,
+        event_id: str | None,
+        utime: int | None,
+        lt: str | None,
+        account_norm: str,
+    ) -> dict:
+        sender_addr = cls._account_address(detail.get("sender"))
+        recipient_addr = cls._account_address(detail.get("recipient"))
+
+        if account_norm and account_norm == (sender_addr or "").strip().lower():
+            direction = "out"
+            counterparty = recipient_addr
+        elif account_norm and account_norm == (recipient_addr or "").strip().lower():
+            direction = "in"
+            counterparty = sender_addr
+        else:
+            direction = "unknown"
+            counterparty = recipient_addr or sender_addr
+
+        if action_type == "TonTransfer":
+            asset = "TON"
+            decimals: int | None = 9
+            jetton_address = None
+            jetton_symbol = None
+        else:
+            jetton = detail.get("jetton")
+            if not isinstance(jetton, dict):
+                jetton = {}
+            jetton_symbol = cls._optional_string(jetton.get("symbol"))
+            jetton_address = cls._optional_string(jetton.get("address"))
+            asset = jetton_symbol or jetton_address or "UNKNOWN_JETTON"
+            decimals = cls._optional_int(jetton.get("decimals"))
+
+        return {
+            "event_id": event_id,
+            "utime": utime,
+            "lt": lt,
+            "action_type": action_type,
+            "asset": asset,
+            "raw_amount": cls._optional_string(detail.get("amount")),
+            "decimals": decimals,
+            "direction": direction,
+            "counterparty": counterparty,
+            "sender": sender_addr,
+            "recipient": recipient_addr,
+            "jetton_address": jetton_address,
+            "jetton_symbol": jetton_symbol,
+            "status": cls._optional_string(action.get("status")),
+            "source": "tonapi",
+        }
+
+    @classmethod
+    def _account_address(cls, value: Any) -> str | None:
+        if isinstance(value, dict):
+            return cls._optional_string(value.get("address"))
+        return cls._optional_string(value)
 
     @classmethod
     def normalize_jetton_balance(
