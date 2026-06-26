@@ -500,6 +500,58 @@ class TonapiAdapter:
             ),
         )
 
+    # -- Rates (prices) preview -----------------------------------------
+
+    def get_rates_preview(
+        self,
+        tokens: list[str],
+        currency: str = "usd",
+    ) -> ProviderResult:
+        """Fetch provider-reported USD rates for tokens from TonAPI.
+
+        ``tokens`` accepts ``"ton"`` and/or jetton master addresses. Prices are
+        provider-reported and may be stale; this is not PnL.
+        """
+        cleaned = [
+            token
+            for token in (self._optional_string(item) for item in tokens)
+            if token
+        ]
+        if not cleaned:
+            return self._provider_error(
+                "TonAPI rates require at least one token."
+            )
+
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {"rates": {}, "currency": currency, "source": "tonapi"},
+                source="mock",
+                message="Mock mode: TonAPI is not actively queried.",
+            )
+
+        result = self.fetch_json(
+            "/v2/rates",
+            query={"tokens": ",".join(cleaned), "currencies": currency},
+        )
+        if not result.ok:
+            return result
+
+        try:
+            rates = self.normalize_rates_response(result.data, currency)
+        except ValueError as exc:
+            return self._provider_error(
+                f"TonAPI response had an unexpected structure: {exc}."
+            )
+
+        return ProviderResult.success(
+            {"rates": rates, "currency": currency, "source": "tonapi"},
+            source="real",
+            message=(
+                "TonAPI rates fetched. Provider-reported prices may be stale "
+                "and are not PnL."
+            ),
+        )
+
     # -- Normalization ---------------------------------------------------
 
     @classmethod
@@ -788,6 +840,32 @@ class TonapiAdapter:
         amount = cls._optional_string(detail.get(f"amount_{side}"))
         decimals = cls._optional_int(master.get("decimals"))
         return token, amount, decimals
+
+    @classmethod
+    def normalize_rates_response(
+        cls,
+        payload: Any,
+        currency: str,
+    ) -> dict[str, str | None]:
+        if not isinstance(payload, dict):
+            raise ValueError("response must be an object")
+        rates = payload.get("rates")
+        if not isinstance(rates, dict):
+            raise ValueError("rates must be an object")
+
+        wanted = currency.upper()
+        out: dict[str, str | None] = {}
+        for token, entry in rates.items():
+            price = None
+            if isinstance(entry, dict):
+                prices = entry.get("prices")
+                if isinstance(prices, dict):
+                    for key, value in prices.items():
+                        if str(key).upper() == wanted:
+                            price = value
+                            break
+            out[token] = cls._optional_string(price)
+        return out
 
     @classmethod
     def normalize_jetton_balance(
