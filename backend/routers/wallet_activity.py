@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from database import get_session
 from schemas import WalletIngestionPreviewRequest, WalletIngestionPreviewResponse
 from schemas import WalletIngestionRunResponse
+from services import export
 from services.wallet_activity_ingestion import (
     build_wallet_ingestion_preview,
     get_wallet_ingestion_run,
@@ -78,6 +79,26 @@ def export_wallet_ingestion_run(
         headers={
             "Content-Disposition": (
                 f"attachment; filename=wallet_ingestion_run_{run_id}.json"
+            )
+        },
+    )
+
+
+@router.get("/ingest/{run_id}/export.csv")
+def export_wallet_ingestion_run_csv(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download one persisted wallet ingestion run as flattened activity CSV."""
+    result = get_wallet_ingestion_run(run_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    return Response(
+        content=export.wallet_ingestion_run_to_csv(result),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_ingestion_run_{run_id}.csv"
             )
         },
     )
