@@ -127,6 +127,65 @@ class GeckoTerminalAdapter:
             message="Real GeckoTerminal pool/token data.",
         )
 
+    def get_token_price(self, token_address: str,
+                        network: str = "ton") -> ProviderResult:
+        """Fetch a provider-reported USD token price from GeckoTerminal."""
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {"token_address": token_address, "price_usd": None},
+                source="mock",
+                message="Mock mode: GeckoTerminal is not actively queried.",
+            )
+
+        base = self.settings.geckoterminal_base_url.rstrip("/")
+        url = f"{base}/networks/{network}/tokens/{token_address}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": "ton-check/0.2",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_ERROR,
+                f"GeckoTerminal returned HTTP {exc.code} for token "
+                f"{token_address}.",
+                source="real",
+            )
+        except (urllib.error.URLError, TimeoutError) as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_ERROR,
+                f"Could not reach GeckoTerminal: {exc}.",
+                source="real",
+            )
+        except (ValueError, json.JSONDecodeError):
+            return ProviderResult.failure(
+                ERROR_PROVIDER_ERROR,
+                "GeckoTerminal returned an unparseable response.",
+                source="real",
+            )
+
+        try:
+            attrs = payload["data"]["attributes"]
+            price = attrs.get("price_usd")
+        except (KeyError, TypeError):
+            return ProviderResult.failure(
+                ERROR_PROVIDER_ERROR,
+                "GeckoTerminal token response had an unexpected structure.",
+                source="real",
+            )
+
+        price_str = str(price).strip() if price not in (None, "") else None
+        return ProviderResult.success(
+            {"token_address": token_address, "price_usd": price_str},
+            source="real",
+            message="GeckoTerminal token price fetched.",
+        )
+
     # -- Mode-aware orchestrator ----------------------------------------
 
     def get_pool_and_token(self, pool_url: str) -> ProviderResult:
