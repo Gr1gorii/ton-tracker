@@ -256,6 +256,10 @@ export function walletRunExportUrl(runId: number): string {
   return `${API_BASE}/api/wallets/ingest/${runId}/export.json`;
 }
 
+export function walletRunExportCsvUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/export.csv`;
+}
+
 async function responseError(res: Response, fallback: string): Promise<string> {
   let detail = `${fallback} (${res.status})`;
   try {

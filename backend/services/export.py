@@ -57,3 +57,94 @@ def wallets_to_csv(analysis: dict) -> str:
 def analysis_to_json(analysis: dict) -> str:
     """Serialize a full analysis result to pretty JSON text."""
     return json.dumps(analysis, ensure_ascii=False, indent=2)
+
+
+# Flattened activity columns for a stored wallet ingestion run export.
+ACTIVITY_CSV_COLUMNS = [
+    "surface",
+    "tx_hash",
+    "timestamp",
+    "asset",
+    "amount",
+    "direction",
+    "counterparty",
+    "dex",
+    "token_in",
+    "amount_in",
+    "token_out",
+    "amount_out",
+    "fee_ton",
+    "success",
+    "balance",
+    "balance_usd",
+    "provider",
+    "source_status",
+]
+
+
+def wallet_ingestion_run_to_csv(run: dict) -> str:
+    """Serialize a stored wallet ingestion run into flattened activity CSV.
+
+    One row per activity item, tagged by surface. Heterogeneous columns are
+    left blank where a surface does not provide them.
+    """
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer, fieldnames=ACTIVITY_CSV_COLUMNS, extrasaction="ignore"
+    )
+    writer.writeheader()
+
+    for item in run.get("transfers", []):
+        writer.writerow(
+            {
+                "surface": "transfer",
+                "tx_hash": item.get("tx_hash"),
+                "timestamp": item.get("timestamp"),
+                "asset": item.get("asset"),
+                "amount": item.get("amount"),
+                "direction": item.get("direction"),
+                "counterparty": item.get("counterparty"),
+                "provider": item.get("provider"),
+                "source_status": item.get("source_status"),
+            }
+        )
+    for item in run.get("transactions", []):
+        writer.writerow(
+            {
+                "surface": "transaction",
+                "tx_hash": item.get("tx_hash"),
+                "timestamp": item.get("timestamp"),
+                "fee_ton": item.get("fee_ton"),
+                "success": item.get("success"),
+                "provider": item.get("provider"),
+                "source_status": item.get("source_status"),
+            }
+        )
+    for item in run.get("swaps", []):
+        writer.writerow(
+            {
+                "surface": "swap",
+                "tx_hash": item.get("tx_hash"),
+                "timestamp": item.get("timestamp"),
+                "dex": item.get("dex"),
+                "token_in": item.get("token_in"),
+                "amount_in": item.get("amount_in"),
+                "token_out": item.get("token_out"),
+                "amount_out": item.get("amount_out"),
+                "provider": item.get("provider"),
+                "source_status": item.get("source_status"),
+            }
+        )
+    for item in run.get("balances", []):
+        writer.writerow(
+            {
+                "surface": "balance",
+                "timestamp": item.get("snapshot_at"),
+                "asset": item.get("asset"),
+                "balance": item.get("balance"),
+                "balance_usd": item.get("balance_usd"),
+                "provider": item.get("provider"),
+                "source_status": item.get("source_status"),
+            }
+        )
+    return buffer.getvalue()

@@ -553,6 +553,33 @@ def test_wallet_ingestion_run_json_export_download(client, monkeypatch):
     assert missing.status_code == 404
 
 
+def test_wallet_ingestion_run_csv_export_download(client, monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    monkeypatch.delenv("WALLET_ACTIVITY_PROVIDER", raising=False)
+
+    run = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["transfers", "transactions", "swaps", "balances"],
+        },
+    )
+    run_id = run.json()["run_id"]
+
+    res = client.get(f"/api/wallets/ingest/{run_id}/export.csv")
+    assert res.status_code == 200
+    assert res.headers["content-type"].startswith("text/csv")
+    assert f"wallet_ingestion_run_{run_id}.csv" in res.headers["content-disposition"]
+    lines = res.text.splitlines()
+    assert lines[0].split(",")[0] == "surface"
+    assert any(line.startswith("transfer,") for line in lines[1:])
+    assert any(line.startswith("swap,") for line in lines[1:])
+
+    missing = client.get("/api/wallets/ingest/99999/export.csv")
+    assert missing.status_code == 404
+
+
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
     client,
     monkeypatch,

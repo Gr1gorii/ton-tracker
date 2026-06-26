@@ -3,6 +3,7 @@ import {
   getWalletIngestionRun,
   previewWalletIngestion,
   runWalletIngestion,
+  walletRunExportCsvUrl,
   walletRunExportUrl,
 } from "../api";
 import type {
@@ -545,6 +546,15 @@ export default function WalletIngestionWorkspace({
               download
             >
               Export run (JSON)
+            </a>
+          )}
+          {runResult?.run_id != null && (
+            <a
+              className="btn btn-ghost"
+              href={walletRunExportCsvUrl(runResult.run_id)}
+              download
+            >
+              Export run (CSV)
             </a>
           )}
           <button
