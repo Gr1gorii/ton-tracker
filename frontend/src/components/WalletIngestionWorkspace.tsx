@@ -7,6 +7,7 @@ import {
 import type {
   TimeWindow,
   WalletActivityProviderEvidence,
+  WalletActivitySummary,
   WalletBalanceSnapshotRecord,
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
@@ -604,6 +605,9 @@ export default function WalletIngestionWorkspace({
           <ProviderEvidence evidence={visibleEvidence} />
           <WalletIngestionWarnings warnings={visibleWarnings} />
 
+          {runResult?.activity_summary && (
+            <ActivitySummaryCard summary={runResult.activity_summary} />
+          )}
           {runResult && <WalletActivityTables result={runResult} />}
         </div>
       )}
@@ -822,6 +826,77 @@ function WalletIngestionWarnings({ warnings }: { warnings: string[] }) {
           {warning}
         </div>
       ))}
+    </div>
+  );
+}
+
+function ActivitySummaryCard({ summary }: { summary: WalletActivitySummary }) {
+  return (
+    <div
+      className="intelligence-table-block"
+      aria-label="Derived activity summary"
+    >
+      <div className="table-toolbar">
+        <div className="table-toolbar-main">
+          <span className="section-eyebrow">Derived — not PnL</span>
+          <h2>Activity summary</h2>
+          <p>{summary.note}</p>
+        </div>
+        <div className="table-meta">
+          <span className="badge badge-mock">NOT PnL</span>
+        </div>
+      </div>
+
+      <div className="workspace-scope-strip" aria-label="Activity counts">
+        <div className="workspace-scope-item">
+          <span>Transfers</span>
+          <strong>{summary.counts.transfers}</strong>
+        </div>
+        <div className="workspace-scope-item">
+          <span>Transactions</span>
+          <strong>{summary.counts.transactions}</strong>
+        </div>
+        <div className="workspace-scope-item">
+          <span>Swaps</span>
+          <strong>{summary.counts.swaps}</strong>
+        </div>
+        <div className="workspace-scope-item">
+          <span>Balances</span>
+          <strong>{summary.counts.balances}</strong>
+        </div>
+      </div>
+
+      {summary.transfers_by_asset.length > 0 && (
+        <table className="data-table intelligence-table wallet-ingestion-table">
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>In</th>
+              <th>Out</th>
+              <th>Net (token qty)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {summary.transfers_by_asset.map((row) => (
+              <tr key={row.asset}>
+                <td>{row.asset}</td>
+                <td>{row.in_count}</td>
+                <td>{row.out_count}</td>
+                <td>{row.net_amount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {summary.swaps_by_dex.length > 0 && (
+        <p className="muted small">
+          Swaps by DEX:{" "}
+          {summary.swaps_by_dex
+            .map((entry) => `${entry.dex} (${entry.count})`)
+            .join(", ")}
+        </p>
+      )}
     </div>
   );
 }
