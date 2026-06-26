@@ -1,13 +1,14 @@
-# TON Wallet Intelligence Dashboard — v0.11.9 TRANSFERS
+# TON Wallet Intelligence Dashboard — v0.12.0 SWAPS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. The current milestone expands the guarded live
-wallet activity path to add TON/jetton transfer history (derived from account
-events) alongside the existing native TON balance, account jetton balance
-snapshots, and transaction-history timeline, all behind explicit real-mode
-flags. Deterministic mock data remains the default executable ingestion path.
+wallet activity path to add DEX swaps (parsed from account events) alongside the
+existing native TON balance, account jetton balance snapshots, transaction-history
+timeline, and TON/jetton transfers — completing the live activity surface set,
+all behind explicit real-mode flags. Deterministic mock data remains the default
+executable ingestion path.
 
-> **v0.11.9 TRANSFERS status — guarded TonAPI balances, transaction history, and transfers.**
+> **v0.12.0 SWAPS status — guarded TonAPI balances, transactions, transfers, and DEX swaps.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -20,9 +21,9 @@ flags. Deterministic mock data remains the default executable ingestion path.
 >   `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
 >   `WALLET_ACTIVITY_LIVE_ENABLED=true` enable the only live wallet activity
 >   path in this release: TonAPI native TON balance snapshots, account jetton
->   balance snapshots, an ordered account transaction-history timeline, and
->   TON/jetton transfer history. DEX swaps, PnL, and clustering remain
->   unavailable.
+>   balance snapshots, an ordered account transaction-history timeline,
+>   TON/jetton transfer history, and DEX swaps from account events. PnL and
+>   clustering remain unavailable.
 > - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
 >   remain scaffold/limited coverage paths. They do not fetch or persist live
 >   wallet activity rows.
@@ -39,7 +40,7 @@ flags. Deterministic mock data remains the default executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.11.9 TRANSFERS` product label and avoids
+> - User-facing UI copy uses the `v0.12.0 SWAPS` product label and avoids
 >   stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -47,7 +48,7 @@ flags. Deterministic mock data remains the default executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.11.9 TRANSFERS`
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.12.0 SWAPS`
 >   is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
@@ -187,7 +188,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.11.9 TRANSFERS)
+## Data modes & providers (v0.12.0 SWAPS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -208,6 +209,7 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | `WALLET_ACTIVITY_LIVE_JETTON_LIMIT` | TonAPI live jetton snapshot limit, clamped to `1..500` |
 | `WALLET_ACTIVITY_LIVE_TX_LIMIT` | TonAPI live transaction-history page size, clamped to `1..1000` |
 | `WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT` | TonAPI live transfer-history (account events) page size, clamped to `1..1000` |
+| `WALLET_ACTIVITY_LIVE_SWAP_LIMIT` | TonAPI live DEX-swap (account events) page size, clamped to `1..1000` |
 
 What is real, preview-only, mock-aware, planned, and scaffolded in this
 milestone:
@@ -221,7 +223,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns native TON balance, jetton balance snapshots, an ordered transaction-history timeline, and TON/jetton transfer history (from events); DEX swaps, PnL, and clustering remain unavailable |
+| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns native TON balance, jetton balance snapshots, an ordered transaction-history timeline, TON/jetton transfer history, and DEX swaps (all from TonAPI); PnL and clustering remain unavailable |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -238,7 +240,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.11.9 TRANSFERS` is the current user-facing
+API-version field, while `v0.12.0 SWAPS` is the current user-facing
 product release label.
 
 ### `GET /api/providers/status`
@@ -281,17 +283,18 @@ only, not all TON DeFi.
 
 ### `POST /api/wallets/ingest/preview`
 Returns provider coverage for a wallet activity ingestion request. The default
-mock path is deterministic. In v0.11.9 the explicit TonAPI live guard can call
+mock path is deterministic. In v0.12.0 the explicit TonAPI live guard can call
 TonAPI for native TON balance, account jetton balance, account
-transaction-history, and TON/jetton transfer coverage; DEX swaps remain
-unavailable.
+transaction-history, TON/jetton transfer, and DEX swap coverage; PnL and
+clustering remain unavailable.
 
 ### `POST /api/wallets/ingest`
 Persists one adapter-backed wallet activity run and returns run id, status,
 provider evidence, normalized rows, unavailable surfaces, and warnings. The
-default path persists deterministic mock-normalized rows. The v0.11.9 TonAPI
+default path persists deterministic mock-normalized rows. The v0.12.0 TonAPI
 live guard persists native TON balance snapshots, account jetton balance
-snapshots, ordered transaction-history rows, and TON/jetton transfer rows only.
+snapshots, ordered transaction-history rows, TON/jetton transfer rows, and DEX
+swap rows only.
 
 ### `GET /api/wallets/ingest/{run_id}`
 Returns one persisted wallet activity run by id, including provider evidence,
@@ -357,11 +360,10 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ## Live guard checklist
 
-The `v0.11.9` wallet ingestion transfer-history milestone is considered
-ready when:
+The `v0.12.0` wallet ingestion DEX-swaps milestone is considered ready when:
 
 - the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.11.9 TRANSFERS` on desktop and mobile
+- final browser QA confirms `RELEASE v0.12.0 SWAPS` on desktop and mobile
   without console errors or horizontal page overflow;
 - release promotion gates and commands are documented in
   `RELEASE_PROMOTION.md`;
@@ -379,8 +381,8 @@ ready when:
 - live guard tests prove `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`,
   and `WALLET_ACTIVITY_LIVE_ENABLED=true` can fetch and persist TonAPI native
   TON balance snapshots, account jetton balance snapshots, ordered
-  transaction-history rows, and TON/jetton transfer rows only; DEX swaps remain
-  unavailable;
+  transaction-history rows, TON/jetton transfer rows, and DEX swap rows only;
+  PnL and clustering remain unavailable;
 - the Wallet Activity Ingestion Workspace can preview coverage, run mock
   ingestion, refresh a stored run, and render transfers, transactions, swaps,
   balances, warnings, and provider evidence;
@@ -398,16 +400,17 @@ ready when:
   strips, loading states, and dashboard sections;
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
-  product milestone as `v0.11.9 TRANSFERS`.
+  product milestone as `v0.12.0 SWAPS`.
 
-## Roadmap beyond v0.11.9 TRANSFERS
+## Roadmap beyond v0.12.0 SWAPS
 
-- Add guarded DEX swap reconstruction (e.g. STON.fi/DeDust action parsing) only
-  when provider evidence and rate-limit behavior are reliable.
+- Wire the live activity surfaces (balances, transactions, transfers, swaps)
+  into real PnL and clustering instead of mock-aware legacy analysis, once
+  ingestion quality is measurable.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.
-- Connect real wallet activity to buyers, PnL, clustering, and exports instead
-  of mock-aware legacy analysis.
+- Connect real wallet activity to buyers, exports, and stored-run reports
+  instead of re-running mock analysis.
 - Expand Bitquery or alternate DEX coverage for TON trade history.
 - Export specific stored runs by id instead of re-running an analysis.
 - Calibrate clustering confidence with richer features and clearer uncertainty

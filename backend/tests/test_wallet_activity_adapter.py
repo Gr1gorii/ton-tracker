@@ -183,11 +183,11 @@ def test_guarded_tonapi_live_adapter_ingests_jetton_snapshots(monkeypatch):
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["jettons", "swaps"], "real"))
+    result = adapter.ingest(_request(["jettons"], "real"))
 
-    assert result.status == "partial"
+    assert result.status == "success"
     assert result.data_mode == "real"
-    assert result.unavailable_surfaces == ["swaps"]
+    assert result.unavailable_surfaces == []
     assert result.provider_evidence[0].provider == "tonapi_wallet_activity_live"
     assert result.provider_evidence[0].source_status == "live"
     assert result.provider_evidence[0].raw_count == 1
@@ -198,7 +198,10 @@ def test_guarded_tonapi_live_adapter_ingests_jetton_snapshots(monkeypatch):
     assert result.balances[0].provider == "tonapi"
     assert result.balances[0].source_status == "live"
     assert result.transfers == []
-    assert any("unsupported surfaces" in warning.message for warning in result.warnings)
+    assert any(
+        "DEX swaps from events only" in warning.message
+        for warning in result.warnings
+    )
 
 
 def test_guarded_tonapi_live_adapter_ingests_native_and_jetton_balances(
@@ -257,10 +260,10 @@ def test_guarded_tonapi_live_adapter_ingests_native_and_jetton_balances(
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["balances", "jettons", "swaps"], "real"))
+    result = adapter.ingest(_request(["balances", "jettons"], "real"))
 
-    assert result.status == "partial"
-    assert result.unavailable_surfaces == ["swaps"]
+    assert result.status == "success"
+    assert result.unavailable_surfaces == []
     assert result.provider_evidence[0].source_status == "live"
     assert result.provider_evidence[0].raw_count == 2
     assert result.provider_evidence[0].normalized_count == 2
@@ -339,11 +342,11 @@ def test_guarded_tonapi_live_adapter_ingests_transaction_history(monkeypatch):
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["transactions", "swaps"], "real"))
+    result = adapter.ingest(_request(["transactions"], "real"))
 
-    assert result.status == "partial"
+    assert result.status == "success"
     assert result.data_mode == "real"
-    assert result.unavailable_surfaces == ["swaps"]
+    assert result.unavailable_surfaces == []
     assert result.provider_evidence[0].provider == "tonapi_wallet_activity_live"
     assert result.provider_evidence[0].source_status == "live"
     assert result.provider_evidence[0].raw_count == 2
@@ -358,7 +361,8 @@ def test_guarded_tonapi_live_adapter_ingests_transaction_history(monkeypatch):
     assert result.transactions[0].raw["surface"] == "transactions"
     assert result.transactions[1].success == "failed"
     assert any(
-        "unsupported surfaces" in warning.message for warning in result.warnings
+        "account-level evidence" in warning.message
+        for warning in result.warnings
     )
 
 
@@ -448,11 +452,11 @@ def test_guarded_tonapi_live_adapter_ingests_transfer_history(monkeypatch):
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["transfers", "swaps"], "real"))
+    result = adapter.ingest(_request(["transfers"], "real"))
 
-    assert result.status == "partial"
+    assert result.status == "success"
     assert result.data_mode == "real"
-    assert result.unavailable_surfaces == ["swaps"]
+    assert result.unavailable_surfaces == []
     assert result.provider_evidence[0].provider == "tonapi_wallet_activity_live"
     assert result.provider_evidence[0].source_status == "live"
     assert result.provider_evidence[0].raw_count == 2
@@ -499,6 +503,98 @@ def test_guarded_tonapi_live_adapter_transfers_error_returns_no_rows(monkeypatch
     assert result.unavailable_surfaces == ["transfers"]
     assert any(
         "TonAPI transfer-history warning" in warning.message
+        for warning in result.warnings
+    )
+
+
+def test_guarded_tonapi_live_adapter_ingests_dex_swaps(monkeypatch):
+    def fake_get_account_swaps_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "swaps": [
+                    {
+                        "event_id": "evtswap",
+                        "utime": 1717236000,
+                        "lt": "46000000000002",
+                        "dex": "stonfi",
+                        "token_in": "TON",
+                        "raw_amount_in": "5000000000",
+                        "decimals_in": 9,
+                        "token_out": "EJT",
+                        "raw_amount_out": "123450000",
+                        "decimals_out": 6,
+                        "router": "EQrouter",
+                        "status": "ok",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_swaps": 1,
+                "total_events": 1,
+            },
+            source="real",
+            message="TonAPI account DEX swaps fetched from events.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_swaps_preview",
+        fake_get_account_swaps_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["swaps"], "real"))
+
+    assert result.status == "success"
+    assert result.data_mode == "real"
+    assert result.unavailable_surfaces == []
+    assert result.provider_evidence[0].source_status == "live"
+    assert result.provider_evidence[0].raw_count == 1
+    assert result.provider_evidence[0].normalized_count == 1
+    assert len(result.swaps) == 1
+    swap = result.swaps[0]
+    assert swap.dex == "stonfi"
+    assert swap.token_in == "TON"
+    assert swap.amount_in == "5.000000000000000000"
+    assert swap.token_out == "EJT"
+    assert swap.amount_out == "123.450000000000000000"
+    assert swap.estimated_usd is None
+    assert swap.provider == "tonapi"
+    assert swap.source_status == "live"
+    assert swap.raw["surface"] == "swaps"
+    assert any(
+        "DEX swaps are parsed from account events" in warning.message
+        for warning in result.warnings
+    )
+
+
+def test_guarded_tonapi_live_adapter_swaps_error_returns_no_rows(monkeypatch):
+    def fake_get_account_swaps_preview(self, account_address, limit):
+        return ProviderResult.failure(
+            "provider_error",
+            "TonAPI network error: timeout.",
+            source="real",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_swaps_preview",
+        fake_get_account_swaps_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["swaps"], "real"))
+
+    assert result.status == "error"
+    assert result.provider_evidence[0].source_status == "error"
+    assert result.provider_evidence[0].normalized_count == 0
+    assert result.swaps == []
+    assert result.unavailable_surfaces == ["swaps"]
+    assert any(
+        "TonAPI DEX swap warning" in warning.message
         for warning in result.warnings
     )
 

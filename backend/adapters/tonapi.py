@@ -434,6 +434,72 @@ class TonapiAdapter:
             ),
         )
 
+    # -- Swaps preview (events) -----------------------------------------
+
+    def get_account_swaps_preview(
+        self,
+        account_address: str,
+        limit: int = 10,
+    ) -> ProviderResult:
+        """Fetch and normalize DEX swaps from TonAPI account events.
+
+        Only ``JettonSwap`` actions are represented as swaps. USD valuation is
+        not computed. This is not PnL or ownership proof.
+        """
+        account = self._optional_string(account_address)
+        if account is None:
+            return self._provider_error("TonAPI account address is required.")
+        if limit < 1:
+            return self._provider_error(
+                "TonAPI swaps preview limit must be at least 1."
+            )
+
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {
+                    "wallet_address": account,
+                    "swaps": [],
+                    "preview_count": 0,
+                    "total_swaps": 0,
+                    "total_events": 0,
+                },
+                source="mock",
+                message="Mock mode: TonAPI is not actively queried.",
+            )
+
+        encoded_account = urllib.parse.quote(account, safe="")
+        result = self.fetch_json(
+            f"/v2/accounts/{encoded_account}/events",
+            query={"limit": limit},
+        )
+        if not result.ok:
+            return result
+
+        try:
+            swaps = self.normalize_account_swaps_response(result.data, account)
+        except ValueError as exc:
+            return self._provider_error(
+                f"TonAPI response had an unexpected structure: {exc}."
+            )
+
+        events = result.data.get("events") if isinstance(result.data, dict) else None
+        total_events = len(events) if isinstance(events, list) else len(swaps)
+        return ProviderResult.success(
+            {
+                "wallet_address": account,
+                "swaps": swaps,
+                "preview_count": len(swaps),
+                "total_swaps": len(swaps),
+                "total_events": total_events,
+            },
+            source="real",
+            message=(
+                "TonAPI account DEX swaps fetched from events. Only JettonSwap "
+                "actions are represented and USD valuation is not computed; "
+                "this is not PnL or ownership proof."
+            ),
+        )
+
     # -- Normalization ---------------------------------------------------
 
     @classmethod
@@ -638,6 +704,90 @@ class TonapiAdapter:
         if isinstance(value, dict):
             return cls._optional_string(value.get("address"))
         return cls._optional_string(value)
+
+    @classmethod
+    def normalize_account_swaps_response(
+        cls,
+        payload: Any,
+        wallet_address: str,
+    ) -> list[dict]:
+        if not isinstance(payload, dict):
+            raise ValueError("response must be an object")
+
+        events = payload.get("events")
+        if not isinstance(events, list):
+            raise ValueError("events must be a list")
+
+        swaps: list[dict] = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            event_id = cls._optional_string(event.get("event_id"))
+            utime = cls._optional_int(event.get("timestamp"))
+            lt = cls._optional_string(event.get("lt"))
+            actions = event.get("actions")
+            if not isinstance(actions, list):
+                continue
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                if cls._optional_string(action.get("type")) != "JettonSwap":
+                    continue
+                detail = action.get("JettonSwap")
+                if not isinstance(detail, dict):
+                    continue
+                swaps.append(
+                    cls.normalize_swap(detail, action, event_id, utime, lt)
+                )
+        return swaps
+
+    @classmethod
+    def normalize_swap(
+        cls,
+        detail: dict,
+        action: dict,
+        event_id: str | None,
+        utime: int | None,
+        lt: str | None,
+    ) -> dict:
+        token_in, amount_in, decimals_in = cls._swap_side(detail, "in")
+        token_out, amount_out, decimals_out = cls._swap_side(detail, "out")
+        return {
+            "event_id": event_id,
+            "utime": utime,
+            "lt": lt,
+            "dex": cls._optional_string(detail.get("dex")),
+            "token_in": token_in,
+            "raw_amount_in": amount_in,
+            "decimals_in": decimals_in,
+            "token_out": token_out,
+            "raw_amount_out": amount_out,
+            "decimals_out": decimals_out,
+            "router": cls._account_address(detail.get("router")),
+            "status": cls._optional_string(action.get("status")),
+            "source": "tonapi",
+        }
+
+    @classmethod
+    def _swap_side(
+        cls,
+        detail: dict,
+        side: str,
+    ) -> tuple[str | None, str | None, int | None]:
+        # TonAPI JettonSwap exposes ton_in/ton_out (nanoton) and
+        # amount_in/amount_out (raw jetton) with jetton_master_in/out.
+        ton_amount = detail.get(f"ton_{side}")
+        if ton_amount not in (None, ""):
+            return "TON", cls._optional_string(ton_amount), 9
+        master = detail.get(f"jetton_master_{side}")
+        if not isinstance(master, dict):
+            master = {}
+        token = cls._optional_string(master.get("symbol")) or cls._optional_string(
+            master.get("address")
+        )
+        amount = cls._optional_string(detail.get(f"amount_{side}"))
+        decimals = cls._optional_int(master.get("decimals"))
+        return token, amount, decimals
 
     @classmethod
     def normalize_jetton_balance(

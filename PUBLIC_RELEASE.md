@@ -57,9 +57,10 @@ guarded live wallet activity path: TonAPI account jetton balance snapshots,
 enabled only with `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
 `WALLET_ACTIVITY_LIVE_ENABLED=true`. `v0.11.7 BALANCES` expands that guarded
 path to native TON balance snapshots, `v0.11.8 HISTORY` adds an ordered
-account transaction-history timeline, and `v0.11.9 TRANSFERS` adds TON/jetton
-transfer history from account events, while keeping broader real provider calls
-deferred behind the contract in `REAL_WALLET_INGESTION_PLAN.md`:
+account transaction-history timeline, `v0.11.9 TRANSFERS` adds TON/jetton
+transfer history from account events, and `v0.12.0 SWAPS` adds DEX swaps from
+account events — completing the live activity surface set — while keeping the
+following deferred behind the contract in `REAL_WALLET_INGESTION_PLAN.md`:
 
-- DEX swaps;
-- real wallet-level PnL and clustering inputs.
+- real wallet-level PnL and clustering inputs;
+- wiring live activity into legacy buyers, exports, and reports.
