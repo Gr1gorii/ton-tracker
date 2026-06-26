@@ -213,11 +213,43 @@ def _activity_summary(
     ]
 
     swap_dex: dict[str, int] = {}
+    swap_tokens: dict[str, dict[str, Any]] = {}
     for item in swaps:
         dex = item.get("dex") or "unknown"
         swap_dex[dex] = swap_dex.get(dex, 0) + 1
+
+        token_in = item.get("token_in")
+        if token_in:
+            entry = swap_tokens.setdefault(
+                token_in,
+                {"sent_count": 0, "received_count": 0,
+                 "sent_amount": _ZERO, "received_amount": _ZERO},
+            )
+            entry["sent_count"] += 1
+            entry["sent_amount"] += _dec(item.get("amount_in"))
+
+        token_out = item.get("token_out")
+        if token_out:
+            entry = swap_tokens.setdefault(
+                token_out,
+                {"sent_count": 0, "received_count": 0,
+                 "sent_amount": _ZERO, "received_amount": _ZERO},
+            )
+            entry["received_count"] += 1
+            entry["received_amount"] += _dec(item.get("amount_out"))
+
     swaps_by_dex = [
         {"dex": dex, "count": count} for dex, count in sorted(swap_dex.items())
+    ]
+    swaps_by_token = [
+        {
+            "token": token,
+            "sent_count": e["sent_count"],
+            "received_count": e["received_count"],
+            "sent_amount": str(e["sent_amount"]),
+            "received_amount": str(e["received_amount"]),
+        }
+        for token, e in sorted(swap_tokens.items())
     ]
 
     total_fee = _ZERO
@@ -243,6 +275,7 @@ def _activity_summary(
         },
         "transfers_by_asset": transfers_by_asset,
         "swaps_by_dex": swaps_by_dex,
+        "swaps_by_token": swaps_by_token,
         "transactions": {
             "count": len(transactions),
             "total_fee_ton": str(total_fee),

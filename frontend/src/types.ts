@@ -579,6 +579,13 @@ export interface WalletActivitySummary {
   };
   transfers_by_asset: WalletActivityTransferAssetSummary[];
   swaps_by_dex: { dex: string; count: number }[];
+  swaps_by_token?: {
+    token: string;
+    sent_count: number;
+    received_count: number;
+    sent_amount: string;
+    received_amount: string;
+  }[];
   transactions: { count: number; total_fee_ton: string };
   balances: { count: number; assets: string[] };
 }
