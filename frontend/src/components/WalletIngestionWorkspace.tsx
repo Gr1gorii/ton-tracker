@@ -897,6 +897,18 @@ function ActivitySummaryCard({ summary }: { summary: WalletActivitySummary }) {
             .join(", ")}
         </p>
       )}
+
+      {summary.swaps_by_token && summary.swaps_by_token.length > 0 && (
+        <p className="muted small">
+          Swap volume (token qty):{" "}
+          {summary.swaps_by_token
+            .map(
+              (entry) =>
+                `${entry.token} sent ${entry.sent_amount} / received ${entry.received_amount}`,
+            )
+            .join("; ")}
+        </p>
+      )}
     </div>
   );
 }

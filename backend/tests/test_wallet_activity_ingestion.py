@@ -504,6 +504,18 @@ def test_wallet_ingestion_activity_summary_is_derived_and_labeled(
     assert ton["out_count"] == 1
     assert Decimal(ton["net_amount"]) == Decimal("113.5")
     assert summary["swaps_by_dex"] == [{"dex": "STON.fi", "count": 1}]
+    swap_ton = next(
+        item for item in summary["swaps_by_token"] if item["token"] == "TON"
+    )
+    assert swap_ton["sent_count"] == 1
+    assert Decimal(swap_ton["sent_amount"]) == Decimal("15")
+    swap_alpha = next(
+        item
+        for item in summary["swaps_by_token"]
+        if item["token"] == "JETTON_ALPHA"
+    )
+    assert swap_alpha["received_count"] == 1
+    assert Decimal(swap_alpha["received_amount"]) == Decimal("3180")
     assert "TON" in summary["balances"]["assets"]
 
 
