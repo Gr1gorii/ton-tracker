@@ -1,22 +1,23 @@
-# TON Wallet Intelligence Dashboard - v0.11.7 BALANCES Promotion Checklist
+# TON Wallet Intelligence Dashboard - v0.11.8 HISTORY Promotion Checklist
 
-Operational checklist for promoting the wallet activity guarded balance
-coverage milestone branch.
+Operational checklist for promoting the wallet activity guarded
+transaction-history coverage milestone branch.
 
 ## Promotion Gates
 
-- Product label shows `v0.11.7 BALANCES` in the dashboard header and release
+- Product label shows `v0.11.8 HISTORY` in the dashboard header and release
   readiness card.
 - README, `RELEASE_NOTES.md`, and this promotion checklist all reference
-  `v0.11.7 BALANCES`.
+  `v0.11.8 HISTORY`.
 - `MockWalletActivityAdapter` remains the default executable adapter.
 - `TonapiWalletActivityLiveAdapter` activates only when `DATA_MODE=real`,
   `WALLET_ACTIVITY_PROVIDER=tonapi`, and
   `WALLET_ACTIVITY_LIVE_ENABLED=true`.
 - Guarded live TonAPI wallet activity fetches and persists only native TON
-  balance and account jetton balance snapshots.
-- Transfers, transactions, swaps, PnL, clustering, and ownership proof remain
-  unavailable and visible.
+  balance snapshots, account jetton balance snapshots, and ordered
+  transaction-history rows.
+- Transfers, DEX swaps, PnL, clustering, and ownership proof remain unavailable
+  and visible.
 - TonAPI without the live guard, TON provider, STON.fi, and Bitquery remain
   scaffold/limited coverage paths for wallet activity ingestion.
 - `/api/providers/status` includes a `wallet_activity` status row and reports
@@ -72,7 +73,7 @@ npm run build
 
 ## Version Contract
 
-- `v0.11.7 BALANCES` is the product release label.
+- `v0.11.8 HISTORY` is the product release label.
 - Backend `VERSION=0.2.1` remains the backend API-version field.
 - Do not change backend `VERSION` for this promotion unless the backend API
   contract changes.
@@ -87,11 +88,16 @@ npm run build
   `WALLET_ACTIVITY_LIVE_ENABLED=true`.
 - `balances` can persist one native TON balance snapshot from TonAPI.
 - `jettons` can persist account jetton balance snapshots from TonAPI.
+- `transactions` can persist ordered account transaction-history rows from
+  TonAPI.
 - `WALLET_ACTIVITY_LIVE_JETTON_LIMIT` controls live TonAPI account jetton
   snapshots and is clamped to `1..500`.
+- `WALLET_ACTIVITY_LIVE_TX_LIMIT` controls live TonAPI transaction-history page
+  size and is clamped to `1..1000`.
 - Guarded live mode may return `data_mode=real` and `source_status=live`, but
-  it must only persist balance snapshot rows.
-- Non-balance requested surfaces must remain in `unavailable_surfaces`.
+  it must only persist balance snapshot and transaction-history rows.
+- Unsupported requested surfaces (transfers, swaps) must remain in
+  `unavailable_surfaces`.
 - Legacy buyers, PnL, clustering, and exports remain mock-aware or deferred.
 - Missing provider data must stay visible and must not be inferred.
 
@@ -101,10 +107,10 @@ Run these only after the promotion gates are accepted:
 
 ```bash
 git checkout main
-git merge --no-ff v0.11.7-wallet-ingestion-tonapi-balance-coverage -m "Merge v0.11.7 wallet ingestion TonAPI balance coverage"
-git tag v0.11.7
+git merge --no-ff v0.11.8-wallet-ingestion-tonapi-activity-history -m "Merge v0.11.8 wallet ingestion TonAPI transaction history"
+git tag v0.11.8
 git push origin main
-git push origin v0.11.7
+git push origin v0.11.8
 ```
 
 ## Rollback Notes
@@ -116,8 +122,9 @@ git push origin v0.11.7
 
 ## Next Branch
 
-If the next track begins guarded TonAPI activity-history exploration:
+If the next track begins guarded TonAPI transfer-level (event/action)
+exploration:
 
 ```bash
-git checkout -b v0.11.8-wallet-ingestion-tonapi-activity-history
+git checkout -b v0.11.9-wallet-ingestion-tonapi-transfers
 ```

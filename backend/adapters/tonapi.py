@@ -295,6 +295,74 @@ class TonapiAdapter:
             ),
         )
 
+    # -- Transactions preview -------------------------------------------
+
+    def get_account_transactions_preview(
+        self,
+        account_address: str,
+        limit: int = 10,
+        before_lt: Optional[int] = None,
+    ) -> ProviderResult:
+        """Fetch and normalize a TonAPI account transaction-history preview.
+
+        This is an ordered account-level activity timeline only. It is not DEX
+        swap reconstruction, transfer-level attribution, PnL, or ownership
+        proof.
+        """
+        account = self._optional_string(account_address)
+        if account is None:
+            return self._provider_error("TonAPI account address is required.")
+        if limit < 1:
+            return self._provider_error(
+                "TonAPI transactions preview limit must be at least 1."
+            )
+
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {
+                    "wallet_address": account,
+                    "transactions": [],
+                    "preview_count": 0,
+                    "total_transactions": 0,
+                },
+                source="mock",
+                message="Mock mode: TonAPI is not actively queried.",
+            )
+
+        encoded_account = urllib.parse.quote(account, safe="")
+        result = self.fetch_json(
+            f"/v2/blockchain/accounts/{encoded_account}/transactions",
+            query={"limit": limit, "before_lt": before_lt},
+        )
+        if not result.ok:
+            return result
+
+        try:
+            transactions = self.normalize_account_transactions_response(
+                result.data,
+                account,
+            )
+        except ValueError as exc:
+            return self._provider_error(
+                f"TonAPI response had an unexpected structure: {exc}."
+            )
+
+        preview = transactions[:limit]
+        return ProviderResult.success(
+            {
+                "wallet_address": account,
+                "transactions": preview,
+                "preview_count": len(preview),
+                "total_transactions": len(transactions),
+            },
+            source="real",
+            message=(
+                "TonAPI account transaction history fetched. This is an "
+                "ordered account-level activity timeline only and is not DEX "
+                "swap reconstruction, PnL, or ownership proof."
+            ),
+        )
+
     # -- Normalization ---------------------------------------------------
 
     @classmethod
@@ -343,6 +411,52 @@ class TonapiAdapter:
                 payload.get("status", nested_account.get("status"))
             ),
             "is_scam": payload.get("is_scam", nested_account.get("is_scam")),
+            "source": "tonapi",
+        }
+
+    @classmethod
+    def normalize_account_transactions_response(
+        cls,
+        payload: Any,
+        wallet_address: str,
+    ) -> list[dict]:
+        if not isinstance(payload, dict):
+            raise ValueError("response must be an object")
+
+        transactions = payload.get("transactions")
+        if not isinstance(transactions, list):
+            raise ValueError("transactions must be a list")
+
+        normalized = []
+        for index, raw_tx in enumerate(transactions):
+            if not isinstance(raw_tx, dict):
+                raise ValueError(f"transaction {index} must be an object")
+            normalized.append(cls.normalize_transaction(raw_tx, wallet_address))
+        return normalized
+
+    @classmethod
+    def normalize_transaction(
+        cls,
+        raw_tx: dict,
+        wallet_address: str,
+    ) -> dict:
+        tx_hash = cls._optional_string(raw_tx.get("hash"))
+        if tx_hash is None:
+            raise ValueError("transaction is missing a hash")
+
+        success = raw_tx.get("success")
+        return {
+            "wallet_address": wallet_address,
+            "tx_hash": tx_hash,
+            "logical_time": cls._optional_string(raw_tx.get("lt")),
+            "utime": cls._optional_int(raw_tx.get("utime")),
+            "total_fees": cls._optional_string(raw_tx.get("total_fees")),
+            "success": success if isinstance(success, bool) else None,
+            "transaction_type": cls._optional_string(
+                raw_tx.get("transaction_type")
+            ),
+            "orig_status": cls._optional_string(raw_tx.get("orig_status")),
+            "end_status": cls._optional_string(raw_tx.get("end_status")),
             "source": "tonapi",
         }
 

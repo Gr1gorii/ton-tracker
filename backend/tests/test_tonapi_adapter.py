@@ -356,3 +356,107 @@ def test_get_account_jettons_preview_rejects_missing_account_address():
     assert result.ok is False
     assert result.error == ERROR_PROVIDER_ERROR
     assert "account address is required" in (result.message or "").lower()
+
+
+def test_get_account_transactions_preview_mock_mode_does_not_probe_network(
+    monkeypatch,
+):
+    _forbid_network(monkeypatch)
+
+    result = TonapiAdapter(_settings("mock")).get_account_transactions_preview(
+        "EQwallet",
+    )
+
+    assert result.ok is True
+    assert result.source == "mock"
+    assert result.data == {
+        "wallet_address": "EQwallet",
+        "transactions": [],
+        "preview_count": 0,
+        "total_transactions": 0,
+    }
+    assert "not actively queried" in (result.message or "").lower()
+
+
+def test_get_account_transactions_preview_success_normalizes_response(monkeypatch):
+    captured = {}
+    payload = {
+        "transactions": [
+            {
+                "hash": "abc123",
+                "lt": 46000000000001,
+                "utime": 1717236000,
+                "total_fees": 4200000,
+                "success": True,
+                "transaction_type": "TransOrd",
+                "orig_status": "active",
+                "end_status": "active",
+            },
+            {
+                "hash": "def456",
+                "lt": 46000000000000,
+                "utime": 1717235000,
+                "total_fees": 0,
+                "success": False,
+            },
+        ]
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return _json_response(payload)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(
+        _settings("real", tonapi_api_key="test-key")
+    ).get_account_transactions_preview("EQwallet", limit=1)
+
+    assert result.ok is True
+    assert result.source == "real"
+    assert captured["url"] == (
+        f"{DEFAULT_TONAPI_BASE_URL}/v2/blockchain/accounts/EQwallet"
+        "/transactions?limit=1"
+    )
+    assert result.data["wallet_address"] == "EQwallet"
+    assert result.data["preview_count"] == 1
+    assert result.data["total_transactions"] == 2
+    tx = result.data["transactions"][0]
+    assert tx == {
+        "wallet_address": "EQwallet",
+        "tx_hash": "abc123",
+        "logical_time": "46000000000001",
+        "utime": 1717236000,
+        "total_fees": "4200000",
+        "success": True,
+        "transaction_type": "TransOrd",
+        "orig_status": "active",
+        "end_status": "active",
+        "source": "tonapi",
+    }
+    assert "transaction history" in (result.message or "").lower()
+
+
+def test_get_account_transactions_preview_unexpected_shape_returns_error(
+    monkeypatch,
+):
+    def fake_urlopen(request, timeout):
+        return _json_response({"unexpected": []})
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_preview(
+        "EQwallet",
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_ERROR
+    assert "unexpected structure" in (result.message or "").lower()
+
+
+def test_get_account_transactions_preview_rejects_missing_account_address():
+    result = TonapiAdapter(_settings("real")).get_account_transactions_preview("")
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_ERROR
+    assert "account address is required" in (result.message or "").lower()
