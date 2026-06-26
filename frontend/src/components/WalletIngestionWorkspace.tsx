@@ -3,6 +3,7 @@ import {
   getWalletIngestionRun,
   previewWalletIngestion,
   runWalletIngestion,
+  walletRunExportUrl,
 } from "../api";
 import type {
   TimeWindow,
@@ -537,6 +538,15 @@ export default function WalletIngestionWorkspace({
           >
             {loadingAction === "read" ? "Refreshing run" : "Refresh run"}
           </button>
+          {runResult?.run_id != null && (
+            <a
+              className="btn btn-ghost"
+              href={walletRunExportUrl(runResult.run_id)}
+              download
+            >
+              Export run (JSON)
+            </a>
+          )}
           <button
             className="btn btn-ghost"
             type="button"

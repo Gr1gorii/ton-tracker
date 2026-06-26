@@ -252,6 +252,10 @@ export async function getWalletIngestionRun(
   return (await res.json()) as WalletIngestionRunResponse;
 }
 
+export function walletRunExportUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/export.json`;
+}
+
 async function responseError(res: Response, fallback: string): Promise<string> {
   let detail = `${fallback} (${res.status})`;
   try {
