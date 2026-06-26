@@ -558,6 +558,31 @@ export interface WalletIngestionWarningRecord {
   evidence_key?: string | null;
 }
 
+export interface WalletActivityTransferAssetSummary {
+  asset: string;
+  in_count: number;
+  out_count: number;
+  unknown_count: number;
+  in_amount: string;
+  out_amount: string;
+  net_amount: string;
+}
+
+export interface WalletActivitySummary {
+  is_pnl: boolean;
+  note: string;
+  counts: {
+    transfers: number;
+    transactions: number;
+    swaps: number;
+    balances: number;
+  };
+  transfers_by_asset: WalletActivityTransferAssetSummary[];
+  swaps_by_dex: { dex: string; count: number }[];
+  transactions: { count: number; total_fee_ton: string };
+  balances: { count: number; assets: string[] };
+}
+
 export interface WalletIngestionRunResponse {
   run_id?: number | null;
   wallet_address: string;
@@ -573,4 +598,5 @@ export interface WalletIngestionRunResponse {
   balances: WalletBalanceSnapshotRecord[];
   warnings: WalletIngestionWarningRecord[];
   message: string;
+  activity_summary?: WalletActivitySummary;
 }
