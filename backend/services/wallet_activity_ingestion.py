@@ -260,6 +260,17 @@ def _activity_summary(
         {item.get("asset") for item in balances if item.get("asset")}
     )
 
+    total_balance_usd = _ZERO
+    priced_assets = 0
+    unpriced_assets = 0
+    for item in balances:
+        usd = item.get("balance_usd")
+        if usd is None or usd == "":
+            unpriced_assets += 1
+        else:
+            total_balance_usd += _dec(usd)
+            priced_assets += 1
+
     return {
         "is_pnl": False,
         "note": (
@@ -283,6 +294,18 @@ def _activity_summary(
         "balances": {
             "count": len(balances),
             "assets": balance_assets,
+            "portfolio": {
+                "total_balance_usd": (
+                    str(total_balance_usd) if priced_assets else None
+                ),
+                "priced_assets": priced_assets,
+                "unpriced_assets": unpriced_assets,
+                "note": (
+                    "USD totals use provider-reported prices for priced assets "
+                    "only; unpriced assets (e.g. native TON, jettons without a "
+                    "provider price) are excluded and prices may be stale."
+                ),
+            },
         },
     }
 

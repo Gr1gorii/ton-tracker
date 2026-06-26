@@ -517,6 +517,12 @@ def test_wallet_ingestion_activity_summary_is_derived_and_labeled(
     assert swap_alpha["received_count"] == 1
     assert Decimal(swap_alpha["received_amount"]) == Decimal("3180")
     assert "TON" in summary["balances"]["assets"]
+    portfolio = summary["balances"]["portfolio"]
+    assert portfolio["priced_assets"] == 3
+    assert portfolio["unpriced_assets"] == 0
+    assert Decimal(portfolio["total_balance_usd"]).quantize(
+        Decimal("0.01")
+    ) == Decimal("950.42")
 
 
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
