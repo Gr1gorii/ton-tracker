@@ -587,7 +587,16 @@ export interface WalletActivitySummary {
     received_amount: string;
   }[];
   transactions: { count: number; total_fee_ton: string };
-  balances: { count: number; assets: string[] };
+  balances: {
+    count: number;
+    assets: string[];
+    portfolio?: {
+      total_balance_usd: string | null;
+      priced_assets: number;
+      unpriced_assets: number;
+      note: string;
+    };
+  };
 }
 
 export interface WalletIngestionRunResponse {

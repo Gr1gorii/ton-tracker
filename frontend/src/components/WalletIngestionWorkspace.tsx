@@ -909,6 +909,15 @@ function ActivitySummaryCard({ summary }: { summary: WalletActivitySummary }) {
             .join("; ")}
         </p>
       )}
+
+      {summary.balances.portfolio?.total_balance_usd != null && (
+        <p className="muted small">
+          Portfolio (provider-priced): ${summary.balances.portfolio.total_balance_usd}{" "}
+          ({summary.balances.portfolio.priced_assets} priced,{" "}
+          {summary.balances.portfolio.unpriced_assets} unpriced). Provider prices
+          may be stale; unpriced assets excluded.
+        </p>
+      )}
     </div>
   );
 }
