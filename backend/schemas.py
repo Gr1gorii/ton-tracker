@@ -231,6 +231,7 @@ class WalletIngestionRunResponse(BaseModel):
     balances: list[WalletBalanceSnapshotRecord] = Field(default_factory=list)
     warnings: list[WalletIngestionWarningRecord] = Field(default_factory=list)
     message: str
+    activity_summary: dict[str, Any] = Field(default_factory=dict)
 
 
 class BitqueryTokenTradesPreviewRequest(BaseModel):

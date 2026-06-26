@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -460,6 +462,49 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
     read_back = client.get(f"/api/wallets/ingest/{run_id}")
     assert read_back.status_code == 200
     assert len(read_back.json()["swaps"]) == 1
+
+
+def test_wallet_ingestion_activity_summary_is_derived_and_labeled(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    monkeypatch.delenv("WALLET_ACTIVITY_PROVIDER", raising=False)
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": [
+                "transfers",
+                "transactions",
+                "swaps",
+                "balances",
+                "jettons",
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["activity_summary"]
+
+    assert summary["is_pnl"] is False
+    assert "not pnl" in summary["note"].lower()
+    assert summary["counts"] == {
+        "transfers": 3,
+        "transactions": 3,
+        "swaps": 1,
+        "balances": 3,
+    }
+    ton = next(
+        item for item in summary["transfers_by_asset"] if item["asset"] == "TON"
+    )
+    assert ton["in_count"] == 1
+    assert ton["out_count"] == 1
+    assert Decimal(ton["net_amount"]) == Decimal("113.5")
+    assert summary["swaps_by_dex"] == [{"dex": "STON.fi", "count": 1}]
+    assert "TON" in summary["balances"]["assets"]
 
 
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
