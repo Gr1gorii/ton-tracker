@@ -215,15 +215,15 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_native_balance_snapshot(
         json={
             "wallet_address": "EQwallet",
             "time_window": "24h",
-            "surfaces": ["balances", "transactions"],
+            "surfaces": ["balances"],
         },
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "partial"
+    assert body["status"] == "success"
     assert body["data_mode"] == "real"
-    assert body["unavailable_surfaces"] == ["transactions"]
+    assert body["unavailable_surfaces"] == []
     assert body["provider_evidence"][0]["provider"] == "tonapi_wallet_activity_live"
     assert body["provider_evidence"][0]["source_status"] == "live"
     assert body["provider_evidence"][0]["raw_count"] == 1
@@ -236,6 +236,78 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_native_balance_snapshot(
     assert body["balances"][0]["provider"] == "tonapi"
     assert body["balances"][0]["source_status"] == "live"
     assert body["balances"][0]["raw"]["surface"] == "balances"
+
+
+def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
+    client,
+    monkeypatch,
+):
+    def fake_get_account_transactions_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "transactions": [
+                    {
+                        "tx_hash": "abc123",
+                        "logical_time": "46000000000001",
+                        "utime": 1717236000,
+                        "total_fees": "4200000",
+                        "success": True,
+                        "transaction_type": "TransOrd",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_transactions": 1,
+            },
+            source="real",
+            message="TonAPI account transaction history fetched.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_transactions_preview",
+        fake_get_account_transactions_preview,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["transactions", "swaps"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    run_id = body["run_id"]
+    assert body["status"] == "partial"
+    assert body["data_mode"] == "real"
+    assert body["unavailable_surfaces"] == ["swaps"]
+    assert body["provider_evidence"][0]["provider"] == "tonapi_wallet_activity_live"
+    assert body["provider_evidence"][0]["source_status"] == "live"
+    assert body["provider_evidence"][0]["raw_count"] == 1
+    assert body["provider_evidence"][0]["normalized_count"] == 1
+    assert body["balances"] == []
+    assert len(body["transactions"]) == 1
+    tx = body["transactions"][0]
+    assert tx["tx_hash"] == "abc123"
+    assert tx["fee_ton"] == "0.004200000000000000"
+    assert tx["success"] == "success"
+    assert tx["provider"] == "tonapi"
+    assert tx["source_status"] == "live"
+    assert tx["raw"]["surface"] == "transactions"
+
+    # The persisted run round-trips through GET with the live transaction row.
+    read_back = client.get(f"/api/wallets/ingest/{run_id}")
+    assert read_back.status_code == 200
+    read_body = read_back.json()
+    assert len(read_body["transactions"]) == 1
+    assert read_body["transactions"][0]["tx_hash"] == "abc123"
 
 
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(

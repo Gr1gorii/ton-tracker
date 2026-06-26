@@ -66,6 +66,7 @@ class Settings:
     wallet_activity_provider: str = "mock"
     wallet_activity_live_enabled: bool = False
     wallet_activity_live_jetton_limit: int = 100
+    wallet_activity_live_tx_limit: int = 100
 
     @property
     def is_mock(self) -> bool:
@@ -127,6 +128,12 @@ def get_settings() -> Settings:
             default=100,
             minimum=1,
             maximum=500,
+        ),
+        wallet_activity_live_tx_limit=_env_int(
+            "WALLET_ACTIVITY_LIVE_TX_LIMIT",
+            default=100,
+            minimum=1,
+            maximum=1000,
         ),
     )
 

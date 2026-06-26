@@ -198,7 +198,7 @@ def test_guarded_tonapi_live_adapter_ingests_jetton_snapshots(monkeypatch):
     assert result.balances[0].provider == "tonapi"
     assert result.balances[0].source_status == "live"
     assert result.transfers == []
-    assert any("non-jetton surfaces" in warning.message for warning in result.warnings)
+    assert any("unsupported surfaces" in warning.message for warning in result.warnings)
 
 
 def test_guarded_tonapi_live_adapter_ingests_native_and_jetton_balances(
@@ -296,6 +296,97 @@ def test_guarded_tonapi_live_adapter_error_returns_no_rows(monkeypatch):
     assert result.unavailable_surfaces == ["jettons"]
     assert any(
         "TonAPI jetton balance warning" in warning.message
+        for warning in result.warnings
+    )
+
+
+def test_guarded_tonapi_live_adapter_ingests_transaction_history(monkeypatch):
+    def fake_get_account_transactions_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "transactions": [
+                    {
+                        "tx_hash": "abc123",
+                        "logical_time": "46000000000001",
+                        "utime": 1717236000,
+                        "total_fees": "4200000",
+                        "success": True,
+                        "transaction_type": "TransOrd",
+                        "source": "tonapi",
+                    },
+                    {
+                        "tx_hash": "def456",
+                        "logical_time": "46000000000000",
+                        "utime": 1717235000,
+                        "total_fees": "0",
+                        "success": False,
+                        "source": "tonapi",
+                    },
+                ],
+                "preview_count": 2,
+                "total_transactions": 2,
+            },
+            source="real",
+            message="TonAPI account transaction history fetched.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_transactions_preview",
+        fake_get_account_transactions_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["transactions", "swaps"], "real"))
+
+    assert result.status == "partial"
+    assert result.data_mode == "real"
+    assert result.unavailable_surfaces == ["swaps"]
+    assert result.provider_evidence[0].provider == "tonapi_wallet_activity_live"
+    assert result.provider_evidence[0].source_status == "live"
+    assert result.provider_evidence[0].raw_count == 2
+    assert result.provider_evidence[0].normalized_count == 2
+    assert result.balances == []
+    assert [tx.tx_hash for tx in result.transactions] == ["abc123", "def456"]
+    assert result.transactions[0].fee_ton == "0.004200000000000000"
+    assert result.transactions[0].success == "success"
+    assert result.transactions[0].timestamp == "2024-06-01T10:00:00+00:00"
+    assert result.transactions[0].provider == "tonapi"
+    assert result.transactions[0].source_status == "live"
+    assert result.transactions[0].raw["surface"] == "transactions"
+    assert result.transactions[1].success == "failed"
+    assert any(
+        "unsupported surfaces" in warning.message for warning in result.warnings
+    )
+
+
+def test_guarded_tonapi_live_adapter_transactions_error_returns_no_rows(monkeypatch):
+    def fake_get_account_transactions_preview(self, account_address, limit):
+        return ProviderResult.failure(
+            "provider_error",
+            "TonAPI network error: timeout.",
+            source="real",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_transactions_preview",
+        fake_get_account_transactions_preview,
+    )
+    adapter = build_wallet_activity_adapter(
+        _settings("real", "tonapi", wallet_activity_live_enabled=True)
+    )
+
+    result = adapter.ingest(_request(["transactions"], "real"))
+
+    assert result.status == "error"
+    assert result.provider_evidence[0].source_status == "error"
+    assert result.provider_evidence[0].normalized_count == 0
+    assert result.transactions == []
+    assert result.unavailable_surfaces == ["transactions"]
+    assert any(
+        "TonAPI transaction-history warning" in warning.message
         for warning in result.warnings
     )
 
