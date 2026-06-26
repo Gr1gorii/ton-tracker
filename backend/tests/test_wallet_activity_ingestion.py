@@ -156,15 +156,15 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_jetton_snapshot(
         json={
             "wallet_address": "EQwallet",
             "time_window": "24h",
-            "surfaces": ["jettons", "swaps"],
+            "surfaces": ["jettons"],
         },
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "partial"
+    assert body["status"] == "success"
     assert body["data_mode"] == "real"
-    assert body["unavailable_surfaces"] == ["swaps"]
+    assert body["unavailable_surfaces"] == []
     assert body["provider_evidence"][0]["provider"] == "tonapi_wallet_activity_live"
     assert body["provider_evidence"][0]["source_status"] == "live"
     assert body["provider_evidence"][0]["raw_count"] == 1
@@ -278,16 +278,16 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
         json={
             "wallet_address": "EQwallet",
             "time_window": "24h",
-            "surfaces": ["transactions", "swaps"],
+            "surfaces": ["transactions"],
         },
     )
 
     assert response.status_code == 200
     body = response.json()
     run_id = body["run_id"]
-    assert body["status"] == "partial"
+    assert body["status"] == "success"
     assert body["data_mode"] == "real"
-    assert body["unavailable_surfaces"] == ["swaps"]
+    assert body["unavailable_surfaces"] == []
     assert body["provider_evidence"][0]["provider"] == "tonapi_wallet_activity_live"
     assert body["provider_evidence"][0]["source_status"] == "live"
     assert body["provider_evidence"][0]["raw_count"] == 1
@@ -359,16 +359,16 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
         json={
             "wallet_address": "EQwallet",
             "time_window": "24h",
-            "surfaces": ["transfers", "swaps"],
+            "surfaces": ["transfers"],
         },
     )
 
     assert response.status_code == 200
     body = response.json()
     run_id = body["run_id"]
-    assert body["status"] == "partial"
+    assert body["status"] == "success"
     assert body["data_mode"] == "real"
-    assert body["unavailable_surfaces"] == ["swaps"]
+    assert body["unavailable_surfaces"] == []
     assert body["provider_evidence"][0]["source_status"] == "live"
     assert body["provider_evidence"][0]["raw_count"] == 1
     assert body["provider_evidence"][0]["normalized_count"] == 1
@@ -386,6 +386,80 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
     read_back = client.get(f"/api/wallets/ingest/{run_id}")
     assert read_back.status_code == 200
     assert len(read_back.json()["transfers"]) == 1
+
+
+def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
+    client,
+    monkeypatch,
+):
+    def fake_get_account_swaps_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "swaps": [
+                    {
+                        "event_id": "evtswap",
+                        "utime": 1717236000,
+                        "lt": "46000000000002",
+                        "dex": "stonfi",
+                        "token_in": "TON",
+                        "raw_amount_in": "5000000000",
+                        "decimals_in": 9,
+                        "token_out": "EJT",
+                        "raw_amount_out": "123450000",
+                        "decimals_out": 6,
+                        "router": "EQrouter",
+                        "status": "ok",
+                        "source": "tonapi",
+                    }
+                ],
+                "preview_count": 1,
+                "total_swaps": 1,
+                "total_events": 1,
+            },
+            source="real",
+            message="TonAPI account DEX swaps fetched from events.",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_swaps_preview",
+        fake_get_account_swaps_preview,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "surfaces": ["swaps"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    run_id = body["run_id"]
+    assert body["status"] == "success"
+    assert body["unavailable_surfaces"] == []
+    assert body["provider_evidence"][0]["source_status"] == "live"
+    assert body["provider_evidence"][0]["normalized_count"] == 1
+    assert len(body["swaps"]) == 1
+    swap = body["swaps"][0]
+    assert swap["dex"] == "stonfi"
+    assert swap["token_in"] == "TON"
+    assert swap["amount_in"] == "5.000000000000000000"
+    assert swap["token_out"] == "EJT"
+    assert swap["amount_out"] == "123.450000000000000000"
+    assert swap["estimated_usd"] is None
+    assert swap["source_status"] == "live"
+    assert swap["raw"]["surface"] == "swaps"
+
+    read_back = client.get(f"/api/wallets/ingest/{run_id}")
+    assert read_back.status_code == 200
+    assert len(read_back.json()["swaps"]) == 1
 
 
 def test_wallet_ingestion_persists_mock_activity_and_can_read_run(

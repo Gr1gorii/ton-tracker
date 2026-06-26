@@ -565,3 +565,88 @@ def test_get_account_events_preview_unexpected_shape_returns_error(monkeypatch):
     assert result.ok is False
     assert result.error == ERROR_PROVIDER_ERROR
     assert "unexpected structure" in (result.message or "").lower()
+
+
+def test_get_account_swaps_preview_mock_mode_does_not_probe_network(monkeypatch):
+    _forbid_network(monkeypatch)
+
+    result = TonapiAdapter(_settings("mock")).get_account_swaps_preview(
+        "EQwallet",
+    )
+
+    assert result.ok is True
+    assert result.source == "mock"
+    assert result.data == {
+        "wallet_address": "EQwallet",
+        "swaps": [],
+        "preview_count": 0,
+        "total_swaps": 0,
+        "total_events": 0,
+    }
+
+
+def test_get_account_swaps_preview_normalizes_jetton_swap(monkeypatch):
+    captured = {}
+    payload = {
+        "events": [
+            {
+                "event_id": "evtswap",
+                "timestamp": 1717236000,
+                "lt": "46000000000002",
+                "actions": [
+                    {
+                        "type": "JettonSwap",
+                        "status": "ok",
+                        "JettonSwap": {
+                            "dex": "stonfi",
+                            "ton_in": 5000000000,
+                            "amount_out": "123450000",
+                            "jetton_master_out": {
+                                "address": "EQjetton",
+                                "symbol": "EJT",
+                                "decimals": 6,
+                            },
+                            "router": {"address": "EQrouter"},
+                        },
+                    },
+                    {
+                        "type": "TonTransfer",
+                        "status": "ok",
+                        "TonTransfer": {
+                            "sender": {"address": "EQwallet"},
+                            "recipient": {"address": "EQdest"},
+                            "amount": 1,
+                        },
+                    },
+                ],
+            }
+        ]
+    }
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return _json_response(payload)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(
+        _settings("real", tonapi_api_key="test-key")
+    ).get_account_swaps_preview("EQwallet", limit=3)
+
+    assert result.ok is True
+    assert result.source == "real"
+    assert captured["url"] == (
+        f"{DEFAULT_TONAPI_BASE_URL}/v2/accounts/EQwallet/events?limit=3"
+    )
+    assert result.data["total_events"] == 1
+    assert result.data["total_swaps"] == 1
+    swap = result.data["swaps"][0]
+    assert swap["dex"] == "stonfi"
+    assert swap["token_in"] == "TON"
+    assert swap["raw_amount_in"] == "5000000000"
+    assert swap["decimals_in"] == 9
+    assert swap["token_out"] == "EJT"
+    assert swap["raw_amount_out"] == "123450000"
+    assert swap["decimals_out"] == 6
+    assert swap["router"] == "EQrouter"
+    assert "dex swaps" in (result.message or "").lower()

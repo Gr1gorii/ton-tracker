@@ -82,7 +82,7 @@ def persist_mock_wallet_ingestion(
                 "provider_evidence": _provider_evidence(result),
                 "unavailable_surfaces": result.unavailable_surfaces,
                 "message": result.message,
-                "adapter_contract": "wallet_activity_adapter_v0.11.9",
+                "adapter_contract": "wallet_activity_adapter_v0.12.0",
             }
         ),
     )
@@ -278,46 +278,53 @@ def _warning_models(
 
 
 def _transfer_record(item: WalletTransfer) -> dict[str, Any]:
+    raw = _json_loads(item.raw_json)
     return {
         "tx_hash": item.tx_hash,
         "logical_time": item.logical_time,
         "timestamp": _isoformat(item.timestamp),
         "asset": item.asset,
-        "amount": _decimal_string(item.amount),
+        "amount": _balance_value_from_raw(raw, "normalized_amount")
+        or _decimal_string(item.amount),
         "direction": item.direction,
         "counterparty": item.counterparty,
         "provider": item.provider,
         "source_status": item.source_status,
-        "raw": _json_loads(item.raw_json),
+        "raw": raw,
     }
 
 
 def _transaction_record(item: WalletTransaction) -> dict[str, Any]:
+    raw = _json_loads(item.raw_json)
     return {
         "tx_hash": item.tx_hash,
         "logical_time": item.logical_time,
         "timestamp": _isoformat(item.timestamp),
-        "fee_ton": _decimal_string(item.fee_ton),
+        "fee_ton": _balance_value_from_raw(raw, "normalized_fee_ton")
+        or _decimal_string(item.fee_ton),
         "success": item.success,
         "provider": item.provider,
         "source_status": item.source_status,
-        "raw": _json_loads(item.raw_json),
+        "raw": raw,
     }
 
 
 def _swap_record(item: WalletSwap) -> dict[str, Any]:
+    raw = _json_loads(item.raw_json)
     return {
         "tx_hash": item.tx_hash,
         "timestamp": _isoformat(item.timestamp),
         "dex": item.dex,
         "token_in": item.token_in,
-        "amount_in": _decimal_string(item.amount_in),
+        "amount_in": _balance_value_from_raw(raw, "normalized_amount_in")
+        or _decimal_string(item.amount_in),
         "token_out": item.token_out,
-        "amount_out": _decimal_string(item.amount_out),
+        "amount_out": _balance_value_from_raw(raw, "normalized_amount_out")
+        or _decimal_string(item.amount_out),
         "estimated_usd": _decimal_string(item.estimated_usd),
         "provider": item.provider,
         "source_status": item.source_status,
-        "raw": _json_loads(item.raw_json),
+        "raw": raw,
     }
 
 

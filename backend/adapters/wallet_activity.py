@@ -1,10 +1,10 @@
 """Wallet activity ingestion adapter contracts, mock provider, and live guards.
 
-v0.11.9 keeps deterministic mock data as the default executable adapter, keeps
+v0.12.0 keeps deterministic mock data as the default executable adapter, keeps
 provider-specific scaffold adapters behind explicit configuration, and runs a
 guarded TonAPI live path for native TON balance snapshots, account jetton
-balance snapshots, an ordered account transaction-history timeline, and
-TON/jetton transfer history derived from account events.
+balance snapshots, an ordered account transaction-history timeline, TON/jetton
+transfer history, and DEX swaps parsed from account events.
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ WALLET_ACTIVITY_PROVIDER_CHOICES = {
 
 MOCK_ACTIVITY_WARNINGS = [
     "Mock-normalized wallet activity ingestion uses deterministic fixtures only.",
-    "No real transfers, swaps, balances, or transaction history are fetched by the default mock adapter in v0.11.9.",
+    "No real transfers, swaps, balances, or transaction history are fetched by the default mock adapter in v0.12.0.",
     "Legacy buyers, PnL, clustering, and exports are not wired to this ingestion run yet.",
 ]
 
@@ -380,7 +380,7 @@ class MockWalletActivityAdapter:
             message=(
                 "Mock-normalized wallet activity coverage is available. "
                 "No real provider calls are performed by the default mock "
-                "adapter in v0.11.9."
+                "adapter in v0.12.0."
             ),
         )
 
@@ -464,7 +464,7 @@ class ProviderScaffoldWalletActivityAdapter:
             message=(
                 f"{self.spec.label} scaffold returned {action} metadata only. "
                 "No real wallet activity provider calls are performed in "
-                "this scaffold path in v0.11.9."
+                "this scaffold path in v0.12.0."
             ),
         )
 
@@ -481,7 +481,7 @@ class ProviderScaffoldWalletActivityAdapter:
             ),
             (
                 "Provider-specific wallet activity adapters are scaffold-only "
-                "unless an explicit v0.11.9 live guard is enabled; scaffold "
+                "unless an explicit v0.12.0 live guard is enabled; scaffold "
                 "paths expose status and coverage limits but do not fetch or "
                 "persist real provider rows."
             ),
@@ -514,15 +514,17 @@ TONAPI_LIVE_SUPPORTED_SURFACES: tuple[WalletIngestionSurface, ...] = (
     "jettons",
     "transactions",
     "transfers",
+    "swaps",
 )
 
 
 class TonapiWalletActivityLiveAdapter:
-    """Guarded live TonAPI adapter for balances, transactions, and transfers.
+    """Guarded live TonAPI adapter for the full account activity surface set.
 
-    v0.11.9 expands the guard to also fetch TON/jetton transfer history derived
-    from account events, alongside balance snapshots and the transaction-history
-    timeline. DEX swaps, PnL, and clustering remain unavailable.
+    v0.12.0 expands the guard to also fetch DEX swaps parsed from account events
+    (`JettonSwap` actions), alongside balance snapshots, the transaction-history
+    timeline, and TON/jetton transfers. All five activity surfaces can be live;
+    PnL, clustering, and ownership proof remain unavailable.
     """
 
     provider_name = "tonapi_wallet_activity_live"
@@ -566,11 +568,12 @@ class TonapiWalletActivityLiveAdapter:
         balances: list[WalletActivityBalanceSnapshot] = []
         transactions: list[WalletActivityTransaction] = []
         transfers: list[WalletActivityTransfer] = []
+        swaps: list[WalletActivitySwap] = []
 
         if not supported_requested:
             warnings.append(
                 "TonAPI live guard has no requested balance, jetton, "
-                "transaction-history, or transfer surface to fetch."
+                "transaction-history, transfer, or swap surface to fetch."
             )
             return self._live_result(
                 requested_surfaces=requested_surfaces,
@@ -581,10 +584,11 @@ class TonapiWalletActivityLiveAdapter:
                 balances=[],
                 transactions=[],
                 transfers=[],
+                swaps=[],
                 message=(
                     "Guarded TonAPI live adapter was enabled, but no native "
-                    "TON balance, jetton balance, transaction-history, or "
-                    "transfer surface was requested."
+                    "TON balance, jetton balance, transaction-history, "
+                    "transfer, or swap surface was requested."
                 ),
             )
 
@@ -738,13 +742,50 @@ class TonapiWalletActivityLiveAdapter:
                 if mode == "ingest":
                     transfers.extend(_tonapi_live_transfers(transfer_rows))
 
+        if "swaps" in requested_surfaces:
+            result = self.tonapi.get_account_swaps_preview(
+                request.wallet_address,
+                limit=self.settings.wallet_activity_live_swap_limit,
+            )
+            if not result.ok:
+                message = (
+                    result.message or "TonAPI live DEX swap request failed."
+                )
+                warnings.append(f"TonAPI DEX swap warning: {message}")
+                unavailable_surfaces.append("swaps")
+                failed_supported_surfaces.append("swaps")
+            else:
+                data = result.data if isinstance(result.data, dict) else {}
+                swap_rows = (
+                    data.get("swaps")
+                    if isinstance(data.get("swaps"), list)
+                    else []
+                )
+                total_swaps = _safe_int(data.get("total_swaps"), len(swap_rows))
+                total_events = _safe_int(data.get("total_events"), 0)
+                raw_count += total_swaps
+                successful_supported_surfaces.append("swaps")
+                warnings.append(
+                    "TonAPI DEX swaps are parsed from account events "
+                    "(JettonSwap actions) and exclude USD valuation. They are "
+                    "not PnL, ownership proof, or full DEX trade history."
+                )
+                if total_events and total_swaps == 0:
+                    warnings.append(
+                        "TonAPI returned events but no JettonSwap actions for "
+                        "this guarded fetch. This is not evidence of no "
+                        "activity."
+                    )
+                if mode == "ingest":
+                    swaps.extend(_tonapi_live_swaps(swap_rows))
+
         unavailable_surfaces = list(dict.fromkeys(unavailable_surfaces))
         if failed_supported_surfaces and not successful_supported_surfaces:
             status: WalletIngestionStatus = "error"
             source_status: WalletSourceStatus = "error"
             message = (
                 "Guarded TonAPI live adapter could not fetch the requested "
-                "balance, transaction-history, or transfer data. No live "
+                "balance, transaction-history, transfer, or swap data. No live "
                 "wallet activity rows were persisted."
             )
         else:
@@ -753,8 +794,8 @@ class TonapiWalletActivityLiveAdapter:
             message = (
                 "Guarded TonAPI live activity fetched. Scope is native TON "
                 "balance, account jetton balances, account transaction "
-                "history, and TON/jetton transfer history only; DEX swaps, "
-                "PnL, and clustering remain unavailable."
+                "history, TON/jetton transfer history, and DEX swaps from "
+                "events only; PnL and clustering remain unavailable."
             )
 
         return self._live_result(
@@ -766,6 +807,7 @@ class TonapiWalletActivityLiveAdapter:
             balances=balances,
             transactions=transactions,
             transfers=transfers,
+            swaps=swaps,
             message=message,
             source_status=source_status,
         )
@@ -781,10 +823,12 @@ class TonapiWalletActivityLiveAdapter:
         message: str,
         transactions: list[WalletActivityTransaction] | None = None,
         transfers: list[WalletActivityTransfer] | None = None,
+        swaps: list[WalletActivitySwap] | None = None,
         source_status: WalletSourceStatus = "live",
     ) -> WalletActivityAdapterResult:
         transactions = transactions or []
         transfers = transfers or []
+        swaps = swaps or []
         return WalletActivityAdapterResult(
             status=status,
             data_mode="real",
@@ -798,7 +842,10 @@ class TonapiWalletActivityLiveAdapter:
                     freshness=_now_utc_iso(),
                     raw_count=raw_count,
                     normalized_count=(
-                        len(balances) + len(transactions) + len(transfers)
+                        len(balances)
+                        + len(transactions)
+                        + len(transfers)
+                        + len(swaps)
                     ),
                 )
             ],
@@ -808,6 +855,7 @@ class TonapiWalletActivityLiveAdapter:
             balances=balances,
             transactions=transactions,
             transfers=transfers,
+            swaps=swaps,
         )
 
 
@@ -932,8 +980,8 @@ def get_wallet_activity_provider_status(settings=None) -> dict[str, Any]:
             "message": (
                 "Real mode: guarded live TonAPI wallet activity is enabled. "
                 "Native TON balance, account jetton balance snapshots, account "
-                "transaction history, and TON/jetton transfers can be fetched; "
-                "DEX swaps, PnL, and clustering remain unavailable."
+                "transaction history, TON/jetton transfers, and DEX swaps from "
+                "events can be fetched; PnL and clustering remain unavailable."
             ),
         }
 
@@ -943,7 +991,7 @@ def get_wallet_activity_provider_status(settings=None) -> dict[str, Any]:
         "message": (
             f"Real mode: {spec.label} scaffold is selected. Configuration is "
             "present, but live wallet activity calls are disabled in this "
-            "v0.11.9 scaffold path; "
+            "v0.12.0 scaffold path; "
             "preview/run return limited coverage metadata only."
         ),
     }
@@ -972,12 +1020,12 @@ def _tonapi_live_warnings(
         (
             "Guarded live TonAPI wallet activity is enabled for native TON "
             "balance, account jetton balance snapshots, account transaction "
-            "history, and TON/jetton transfers only."
+            "history, TON/jetton transfers, and DEX swaps from events only."
         ),
         (
             "Live TonAPI data is account-level evidence. Transfer direction is "
-            "best-effort from event addresses, and it is not DEX swap "
-            "reconstruction, PnL, clustering input, or ownership proof."
+            "best-effort from event addresses, swaps exclude USD valuation, and "
+            "it is not PnL, clustering input, or ownership proof."
         ),
     ]
     if unavailable_surfaces:
@@ -1072,6 +1120,54 @@ def _tonapi_live_transfer(item: dict[str, Any]) -> WalletActivityTransfer:
             "counterparty": _optional_string(item.get("counterparty")),
             "jetton_address": _optional_string(item.get("jetton_address")),
             "jetton_symbol": _optional_string(item.get("jetton_symbol")),
+            "status": _optional_string(item.get("status")),
+            "source": item.get("source"),
+        },
+    )
+
+
+def _tonapi_live_swaps(rows: list[Any]) -> list[WalletActivitySwap]:
+    return [
+        _tonapi_live_swap(item)
+        for item in rows
+        if isinstance(item, dict)
+    ]
+
+
+def _tonapi_live_swap(item: dict[str, Any]) -> WalletActivitySwap:
+    amount_in = _scaled_balance_string(
+        item.get("raw_amount_in"), item.get("decimals_in")
+    )
+    amount_out = _scaled_balance_string(
+        item.get("raw_amount_out"), item.get("decimals_out")
+    )
+    return WalletActivitySwap(
+        tx_hash=_optional_string(item.get("event_id")),
+        timestamp=_utime_to_iso(item.get("utime")),
+        dex=_optional_string(item.get("dex")),
+        token_in=_optional_string(item.get("token_in")),
+        amount_in=amount_in,
+        token_out=_optional_string(item.get("token_out")),
+        amount_out=amount_out,
+        estimated_usd=None,
+        provider="tonapi",
+        source_status="live",
+        raw={
+            "provider": "tonapi",
+            "surface": "swaps",
+            "event_id": _optional_string(item.get("event_id")),
+            "lt": _optional_string(item.get("lt")),
+            "utime": item.get("utime"),
+            "dex": _optional_string(item.get("dex")),
+            "token_in": _optional_string(item.get("token_in")),
+            "raw_amount_in": _optional_string(item.get("raw_amount_in")),
+            "normalized_amount_in": amount_in,
+            "decimals_in": item.get("decimals_in"),
+            "token_out": _optional_string(item.get("token_out")),
+            "raw_amount_out": _optional_string(item.get("raw_amount_out")),
+            "normalized_amount_out": amount_out,
+            "decimals_out": item.get("decimals_out"),
+            "router": _optional_string(item.get("router")),
             "status": _optional_string(item.get("status")),
             "source": item.get("source"),
         },
@@ -1228,7 +1324,7 @@ def _warnings_for_request(request: WalletActivityAdapterRequest) -> list[str]:
         warnings.append(
             "DATA_MODE=real is active, but wallet activity ingestion remains "
             "mock-normalized unless WALLET_ACTIVITY_PROVIDER selects a "
-            "v0.11.9 scaffold or explicit live guard."
+            "v0.12.0 scaffold or explicit live guard."
         )
     if "jettons" in request.surfaces:
         warnings.append(MOCK_JETTON_SURFACE_WARNING)

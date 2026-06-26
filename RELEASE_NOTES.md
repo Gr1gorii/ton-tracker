@@ -1,9 +1,9 @@
-# TON Wallet Intelligence Dashboard - v0.11.9 TRANSFERS
+# TON Wallet Intelligence Dashboard - v0.12.0 SWAPS
 
-Wallet activity guarded transfer-history coverage handoff for the current
-wallet intelligence workspace. This milestone adds TON/jetton transfer history
-(derived from account events) to the existing guarded balance snapshots and
-transaction-history timeline.
+Wallet activity guarded DEX-swap coverage handoff for the current wallet
+intelligence workspace. This milestone adds DEX swaps (parsed from account
+events) to the existing guarded balance snapshots, transaction-history timeline,
+and TON/jetton transfers — completing the live activity surface set.
 
 ## Release Scope
 
@@ -18,20 +18,21 @@ transaction-history timeline.
 - The guarded TonAPI live path now fetches native TON balance snapshots for
   requested `balances`, account jetton balance snapshots for requested
   `jettons`, an ordered account transaction-history timeline for requested
-  `transactions`, and TON/jetton transfer history for requested `transfers`.
-- DEX swaps, PnL, clustering, and ownership proof remain unavailable in this
-  live path.
+  `transactions`, TON/jetton transfer history for requested `transfers`, and
+  DEX swaps from events for requested `swaps`.
+- PnL, clustering, and ownership proof remain unavailable in this live path,
+  and swaps exclude USD valuation.
 - TonAPI without the live guard, TON provider, STON.fi, and Bitquery remain
   scaffold/limited coverage paths for wallet activity ingestion.
 - `/api/providers/status` reports guarded TonAPI live scope as native TON
-  balance, account jetton balance snapshots, account transaction history, and
-  TON/jetton transfers.
+  balance, account jetton balance snapshots, account transaction history,
+  TON/jetton transfers, and DEX swaps.
 - Version contract remains: backend `VERSION=0.2.1` is the API-version field;
-  `v0.11.9 TRANSFERS` is the product release label.
+  `v0.12.0 SWAPS` is the product release label.
 
 ## Current Data Contract
 
-- Product label: `v0.11.9 TRANSFERS`.
+- Product label: `v0.12.0 SWAPS`.
 - Backend API `VERSION` remains `0.2.1`.
 - `DATA_MODE=mock` remains the default.
 - `WALLET_ACTIVITY_PROVIDER=mock` remains the default wallet ingestion adapter.
@@ -46,10 +47,12 @@ transaction-history timeline.
   size and is clamped to `1..1000`.
 - `WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT` controls the TonAPI transfer-history
   (account events) page size and is clamped to `1..1000`.
+- `WALLET_ACTIVITY_LIVE_SWAP_LIMIT` controls the TonAPI DEX-swap (account
+  events) page size and is clamped to `1..1000`.
 - Guarded live responses use `data_mode=real`, provider
-  `tonapi_wallet_activity_live`, and source-aware balance, transaction, and
-  transfer rows only for requested `balances`, `jettons`, `transactions`, and
-  `transfers`.
+  `tonapi_wallet_activity_live`, and source-aware balance, transaction,
+  transfer, and swap rows only for requested `balances`, `jettons`,
+  `transactions`, `transfers`, and `swaps`.
 - If one supported TonAPI surface fails and another succeeds, the run remains
   partial and the failed surface is listed in `unavailable_surfaces`.
 - Unsupported requested surfaces remain listed in `unavailable_surfaces`.
@@ -69,14 +72,14 @@ Use this checklist before promoting the balance coverage branch:
 - `.venv/bin/python -m pytest tests/test_wallet_activity_provider_status.py -q`
   from `backend/`.
 - Browser QA on desktop and mobile widths.
-- Confirm UI shows `RELEASE v0.11.9 TRANSFERS`.
+- Confirm UI shows `RELEASE v0.12.0 SWAPS`.
 - Confirm Provider Status includes Wallet activity and shows dynamic provider
   counts.
 - Confirm default wallet ingestion still previews, runs, refreshes, and renders
   mock-normalized activity tables.
 - Confirm guarded TonAPI live mode can persist native TON balance snapshots,
-  account jetton balance snapshots, transaction-history rows, and TON/jetton
-  transfer rows in tests.
+  account jetton balance snapshots, transaction-history rows, TON/jetton
+  transfer rows, and DEX swap rows in tests.
 - Confirm no user-facing UI copy shows stale current product labels such as
   `v0.11.6 LIVE GUARDS`, `v0.11.5 SCAFFOLDS`, `v0.11.4 ADAPTERS`,
   `v0.11.3 INGEST UI`, `v0.11.2 MOCK INGEST`, `v0.11.1 SCHEMA`,
@@ -88,13 +91,13 @@ Use this checklist before promoting the balance coverage branch:
 ## Known Limitations
 
 - Full real wallet activity analysis is not implemented yet.
-- Guarded TonAPI live mode does not fetch DEX swaps, PnL inputs, clustering
-  inputs, or ownership proof.
+- Guarded TonAPI live mode does not compute PnL inputs, clustering inputs, or
+  ownership proof.
 - Live transfer rows are derived from account events (TON/jetton transfer
-  actions only) with best-effort direction; they are not DEX swap
-  reconstruction.
-- Mock ingestion runs and live balance/transaction/transfer rows are not wired
-  into legacy PnL, clustering, or exports.
+  actions only) with best-effort direction; live swap rows are parsed from
+  `JettonSwap` actions and exclude USD valuation.
+- Mock ingestion runs and live balance/transaction/transfer/swap rows are not
+  wired into legacy PnL, clustering, or exports.
 - TonAPI wallet intelligence preview remains jettons-only.
 - STON.fi remains a pool/swap-scope provider, not complete TON DeFi coverage.
 - Bitquery TON trade coverage remains schema/provider limited.
@@ -102,9 +105,10 @@ Use this checklist before promoting the balance coverage branch:
 
 ## Recommended Next Step
 
-Promote this transfer-history branch after the checklist is accepted. The next
-logical track is guarded DEX swap reconstruction exploration:
+Promote this DEX-swaps branch after the checklist is accepted. With all five
+activity surfaces live, the next logical track is wiring real activity into PnL
+and clustering:
 
 ```bash
-git checkout -b v0.12.0-wallet-ingestion-dex-swaps
+git checkout -b v0.12.1-wallet-activity-pnl
 ```
