@@ -203,9 +203,28 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_native_balance_snapshot(
             message="TonAPI account native TON balance fetched.",
         )
 
+    def fake_price_assets(specs, settings):
+        return {
+            "prices": [
+                {
+                    "asset": spec["asset"],
+                    "token": spec["token"],
+                    "price_usd": "1.50" if spec["token"] == "ton" else None,
+                    "priced_by": "tonapi" if spec["token"] == "ton" else None,
+                }
+                for spec in specs
+            ],
+            "unpriced": [],
+            "warnings": [],
+            "currency": "usd",
+        }
+
     monkeypatch.setattr(
         "adapters.tonapi.TonapiAdapter.get_account_balance_preview",
         fake_get_account_balance_preview,
+    )
+    monkeypatch.setattr(
+        "services.wallet_activity_ingestion.price_assets", fake_price_assets
     )
     monkeypatch.setenv("DATA_MODE", "real")
     monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
@@ -234,10 +253,15 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_native_balance_snapshot(
     assert len(body["balances"]) == 1
     assert body["balances"][0]["asset"] == "TON"
     assert body["balances"][0]["balance"] == "2.500000000000000000"
-    assert body["balances"][0]["balance_usd"] is None
+    assert body["balances"][0]["balance_usd"] == "3.75000000"
     assert body["balances"][0]["provider"] == "tonapi"
     assert body["balances"][0]["source_status"] == "live"
     assert body["balances"][0]["raw"]["surface"] == "balances"
+    portfolio = body["activity_summary"]["balances"]["portfolio"]
+    assert portfolio["priced_assets"] == 1
+    assert Decimal(portfolio["total_balance_usd"]).quantize(
+        Decimal("0.01")
+    ) == Decimal("3.75")
 
 
 def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
@@ -523,6 +547,73 @@ def test_wallet_ingestion_activity_summary_is_derived_and_labeled(
     assert Decimal(portfolio["total_balance_usd"]).quantize(
         Decimal("0.01")
     ) == Decimal("950.42")
+
+
+def test_price_balances_fills_usd_in_real_mode(monkeypatch):
+    from adapters.wallet_activity import WalletActivityBalanceSnapshot
+    from config import get_settings
+    from services import wallet_activity_ingestion as svc
+
+    def fake_price_assets(specs, settings):
+        prices = []
+        for spec in specs:
+            if spec["token"] == "ton":
+                prices.append({"asset": spec["asset"], "token": spec["token"],
+                               "price_usd": "1.50", "priced_by": "tonapi"})
+            elif spec["token"] == "EQjetton":
+                prices.append({"asset": spec["asset"], "token": spec["token"],
+                               "price_usd": "0.25", "priced_by": "geckoterminal"})
+            else:
+                prices.append({"asset": spec["asset"], "token": spec["token"],
+                               "price_usd": None, "priced_by": None})
+        return {"prices": prices, "unpriced": [], "warnings": [], "currency": "usd"}
+
+    monkeypatch.setattr(svc, "price_assets", fake_price_assets)
+    monkeypatch.setenv("DATA_MODE", "real")
+    settings = get_settings()
+
+    balances = [
+        WalletActivityBalanceSnapshot(
+            asset="TON", balance="2.000000000000000000", balance_usd=None,
+            provider="tonapi", source_status="live", snapshot_at=None,
+            raw={"surface": "balances", "normalized_balance_usd": None},
+        ),
+        WalletActivityBalanceSnapshot(
+            asset="EJT", balance="100.000000000000000000", balance_usd=None,
+            provider="tonapi", source_status="live", snapshot_at=None,
+            raw={"surface": "jettons", "jetton_address": "EQjetton",
+                 "normalized_balance_usd": None},
+        ),
+    ]
+
+    out = svc._price_balances(balances, settings)
+    assert out[0].balance_usd == "3.00000000"
+    assert out[0].raw["normalized_balance_usd"] == "3.00000000"
+    assert out[0].raw["priced_by"] == "tonapi"
+    assert out[1].balance_usd == "25.00000000"
+    assert out[1].raw["priced_by"] == "geckoterminal"
+
+
+def test_price_balances_skips_in_mock_mode(monkeypatch):
+    from adapters.wallet_activity import WalletActivityBalanceSnapshot
+    from config import get_settings
+    from services import wallet_activity_ingestion as svc
+
+    def boom(specs, settings):  # must not be called in mock mode
+        raise AssertionError("price_assets must not run in mock mode")
+
+    monkeypatch.setattr(svc, "price_assets", boom)
+    monkeypatch.setenv("DATA_MODE", "mock")
+    settings = get_settings()
+
+    balances = [
+        WalletActivityBalanceSnapshot(
+            asset="TON", balance="2.0", balance_usd=None, provider="mock",
+            source_status="mock", snapshot_at=None, raw={},
+        )
+    ]
+    out = svc._price_balances(balances, settings)
+    assert out[0].balance_usd is None
 
 
 def test_wallet_ingestion_run_json_export_download(client, monkeypatch):
