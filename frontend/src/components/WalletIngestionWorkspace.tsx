@@ -306,7 +306,7 @@ export default function WalletIngestionWorkspace({
     onAccountAddressChange(request.payload.wallet_address);
     onPreviewRunStateChange?.({
       status: "running",
-      message: "Persisting deterministic mock wallet activity ingestion run.",
+      message: "Persisting wallet activity ingestion run.",
       accountAddress: request.payload.wallet_address,
       limit: formatSurfaces(request.payload.surfaces),
     });
@@ -318,7 +318,7 @@ export default function WalletIngestionWorkspace({
       setResultSnapshot(snapshotForPayload(request.payload));
       onPreviewRunStateChange?.({
         status: "success",
-        message: `Mock ingestion run #${data.run_id ?? "-"} stored ${activityCount(data)} normalized rows.`,
+        message: `${data.data_mode === "real" ? "Live" : "Mock"} ingestion run #${data.run_id ?? "-"} stored ${activityCount(data)} normalized rows.`,
         accountAddress: request.payload.wallet_address,
         limit: formatSurfaces(request.payload.surfaces),
       });
@@ -380,16 +380,24 @@ export default function WalletIngestionWorkspace({
     <section className="section wallet-ingestion-panel wallet-intelligence-console">
       <div className="wallet-intelligence-head">
         <div>
-          <span className="section-eyebrow">Mock-normalized ingestion</span>
+          <span className="section-eyebrow">
+            {runResult?.data_mode === "real"
+              ? "Guarded live ingestion"
+              : "Mock-normalized ingestion"}
+          </span>
           <h2>Wallet Activity Ingestion Workspace</h2>
           <p>
-            Preview coverage, persist one mock-normalized wallet activity run,
-            and inspect normalized rows before any real provider wiring.
+            Preview coverage, persist one wallet activity run, and inspect
+            normalized, source-labeled rows.
           </p>
         </div>
         <div className="wallet-intelligence-badges">
           <span className="badge badge-provider">WORKSPACE</span>
-          <span className="badge badge-mock">MOCK SOURCE</span>
+          <span
+            className={`badge ${runResult?.data_mode === "real" ? "badge-real" : "badge-mock"}`}
+          >
+            {runResult?.data_mode === "real" ? "LIVE SOURCE" : "MOCK SOURCE"}
+          </span>
           {runResult && <span className="badge badge-real">RUN #{runResult.run_id}</span>}
         </div>
       </div>
@@ -401,9 +409,9 @@ export default function WalletIngestionWorkspace({
 
       <div className="tonapi-wallet-note wallet-ingestion-note">
         <div>
-          The ingestion workspace uses deterministic fixtures from the backend.
-          Rows are persisted and source-labeled, but they are not real on-chain
-          wallet activity and do not feed PnL or clustering yet.
+          {runResult?.data_mode === "real"
+            ? "This run used the guarded live TonAPI path. Rows are real on-chain account data, persisted and source-labeled; they do not feed PnL or clustering yet."
+            : "The ingestion workspace uses deterministic fixtures from the backend. Rows are persisted and source-labeled, but they are not real on-chain wallet activity and do not feed PnL or clustering yet."}
         </div>
       </div>
 

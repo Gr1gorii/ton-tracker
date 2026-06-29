@@ -8,8 +8,9 @@ persistence, and public response conversion.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -25,6 +26,7 @@ from adapters.wallet_activity import (
     build_wallet_activity_adapter,
 )
 from config import get_settings
+from services.pricing import price_assets
 from models import (
     WalletBalanceSnapshot,
     WalletIngestionRun,
@@ -87,10 +89,11 @@ def persist_mock_wallet_ingestion(
         ),
     )
 
+    priced_balances = _price_balances(result.balances, settings)
     run.transfers.extend(_transfer_models(result.transfers))
     run.transactions.extend(_transaction_models(result.transactions))
     run.swaps.extend(_swap_models(result.swaps))
-    run.balance_snapshots.extend(_balance_snapshot_models(result.balances))
+    run.balance_snapshots.extend(_balance_snapshot_models(priced_balances))
     run.warnings.extend(_warning_models(result.warnings))
 
     session.add(run)
@@ -153,6 +156,7 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
 
 
 _ZERO = Decimal(0)
+_USD_QUANT = Decimal("0.00000001")
 
 
 def _dec(value: Any) -> Decimal:
@@ -162,6 +166,46 @@ def _dec(value: Any) -> Decimal:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return _ZERO
+
+
+def _price_balances(
+    balances: list[WalletActivityBalanceSnapshot],
+    settings,
+) -> list[WalletActivityBalanceSnapshot]:
+    """Fill missing ``balance_usd`` via the two-source pricing service.
+
+    Real mode only. Uses provider-reported USD prices (TonAPI rates, then
+    GeckoTerminal). Never overwrites a value the provider already set; assets
+    neither source priced are left unpriced (no inferred value).
+    """
+    if not balances or not getattr(settings, "is_real", False):
+        return balances
+    if all(b.balance_usd is not None for b in balances):
+        return balances
+
+    specs = []
+    for b in balances:
+        raw = b.raw if isinstance(b.raw, dict) else {}
+        token = "ton" if b.asset == "TON" else raw.get("jetton_address")
+        specs.append({"asset": b.asset, "token": token})
+
+    prices = price_assets(specs, settings).get("prices", [])
+
+    enriched: list[WalletActivityBalanceSnapshot] = []
+    for snapshot, price in zip(balances, prices):
+        price_usd = price.get("price_usd") if isinstance(price, dict) else None
+        if snapshot.balance_usd is None and price_usd and snapshot.balance:
+            usd = (_dec(snapshot.balance) * _dec(price_usd)).quantize(
+                _USD_QUANT, rounding=ROUND_HALF_UP
+            )
+            usd_str = format(usd, "f")
+            raw = dict(snapshot.raw) if isinstance(snapshot.raw, dict) else {}
+            raw["normalized_balance_usd"] = usd_str
+            raw["priced_by"] = price.get("priced_by")
+            enriched.append(replace(snapshot, balance_usd=usd_str, raw=raw))
+        else:
+            enriched.append(snapshot)
+    return enriched
 
 
 def _activity_summary(
