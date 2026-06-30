@@ -955,23 +955,45 @@ function ActivitySummaryCard({ summary }: { summary: WalletActivitySummary }) {
   );
 }
 
+function pairScoreKey(a: number, b: number): string {
+  return a < b ? `${a}-${b}` : `${b}-${a}`;
+}
+
 function WalletClusterCompareCard({ runId }: { runId: number }) {
-  const [otherRunId, setOtherRunId] = useState("");
+  const [otherRunIds, setOtherRunIds] = useState("");
   const [comparing, setComparing] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
   const [compareResult, setCompareResult] =
     useState<WalletClusterCompareResponse | null>(null);
 
   const handleCompare = async () => {
-    const parsed = Number(otherRunId);
-    if (!Number.isInteger(parsed) || parsed <= 0) {
-      setCompareError("Enter a valid run id to compare against.");
+    const tokens = otherRunIds
+      .split(/[\s,]+/)
+      .map((token) => token.trim())
+      .filter((token) => token !== "");
+    const invalid = tokens.filter((token) => {
+      const value = Number(token);
+      return !Number.isInteger(value) || value <= 0;
+    });
+    if (invalid.length > 0) {
+      setCompareError(`Not valid run ids: ${invalid.join(", ")}`);
+      return;
+    }
+    // Combine with the current run, dedupe, drop a self-reference.
+    const others = tokens.map((token) => Number(token));
+    const runIds = Array.from(new Set([runId, ...others]));
+    if (runIds.length < 2) {
+      setCompareError("Enter at least one other run id to compare against.");
+      return;
+    }
+    if (runIds.length > 25) {
+      setCompareError("At most 25 runs can be compared at once.");
       return;
     }
     setComparing(true);
     setCompareError(null);
     try {
-      const data = await compareWalletRuns([runId, parsed]);
+      const data = await compareWalletRuns(runIds);
       setCompareResult(data);
     } catch (err) {
       setCompareResult(null);
@@ -981,16 +1003,26 @@ function WalletClusterCompareCard({ runId }: { runId: number }) {
     }
   };
 
+  const scoreByPair = new Map<string, number>();
+  if (compareResult) {
+    for (const pair of compareResult.pairs) {
+      scoreByPair.set(
+        pairScoreKey(pair.wallet_a_run_id, pair.wallet_b_run_id),
+        pair.score,
+      );
+    }
+  }
+
   return (
     <div className="intelligence-table-block" aria-label="Wallet pair comparison">
       <div className="table-toolbar">
         <div className="table-toolbar-main">
           <span className="section-eyebrow">Probabilistic signal — not proof</span>
-          <h2>Compare with another run</h2>
+          <h2>Compare with other runs</h2>
           <p>
-            Behavioral similarity between this run (#{runId}) and another stored
-            wallet ingestion run, derived only from on-chain swap and balance
-            rows. Never proof of common ownership.
+            Behavioral similarity between this run (#{runId}) and up to 24 other
+            stored wallet ingestion runs, derived only from on-chain swap and
+            balance rows. Never proof of common ownership.
           </p>
         </div>
         <div className="table-meta">
@@ -1000,25 +1032,24 @@ function WalletClusterCompareCard({ runId }: { runId: number }) {
 
       <div className="wallet-ingestion-form wallet-query-card">
         <div className="field">
-          <label className="field-label" htmlFor="wallet-cluster-other-run">
-            Other run id
+          <label className="field-label" htmlFor="wallet-cluster-other-runs">
+            Other run ids
           </label>
           <input
-            id="wallet-cluster-other-run"
+            id="wallet-cluster-other-runs"
             className="text-input"
-            type="number"
-            min={1}
-            value={otherRunId}
+            type="text"
+            value={otherRunIds}
             disabled={comparing}
-            placeholder="e.g. 12"
-            onChange={(event) => setOtherRunId(event.target.value)}
+            placeholder="e.g. 12, 15, 20"
+            onChange={(event) => setOtherRunIds(event.target.value)}
           />
         </div>
         <button
           className="btn btn-primary"
           type="button"
           onClick={handleCompare}
-          disabled={comparing || otherRunId.trim() === ""}
+          disabled={comparing || otherRunIds.trim() === ""}
         >
           {comparing ? "Comparing" : "Compare"}
         </button>
@@ -1029,6 +1060,40 @@ function WalletClusterCompareCard({ runId }: { runId: number }) {
       {compareResult && (
         <>
           <p className="muted small">{compareResult.note}</p>
+
+          {compareResult.wallets.length > 2 && (
+            <table className="data-table intelligence-table wallet-ingestion-table">
+              <thead>
+                <tr>
+                  <th>Score matrix</th>
+                  {compareResult.wallets.map((wallet) => (
+                    <th key={`col-${wallet.run_id}`}>#{wallet.run_id}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {compareResult.wallets.map((rowWallet) => (
+                  <tr key={`row-${rowWallet.run_id}`}>
+                    <td>#{rowWallet.run_id}</td>
+                    {compareResult.wallets.map((colWallet) => {
+                      if (rowWallet.run_id === colWallet.run_id) {
+                        return <td key={`cell-${rowWallet.run_id}-${colWallet.run_id}`}>—</td>;
+                      }
+                      const score = scoreByPair.get(
+                        pairScoreKey(rowWallet.run_id, colWallet.run_id),
+                      );
+                      return (
+                        <td key={`cell-${rowWallet.run_id}-${colWallet.run_id}`}>
+                          {score != null ? score.toFixed(2) : "-"}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
           <table className="data-table intelligence-table wallet-ingestion-table">
             <thead>
               <tr>
