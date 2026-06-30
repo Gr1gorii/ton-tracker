@@ -279,10 +279,15 @@ class WalletClusterCompareResponse(BaseModel):
 class WalletEvidenceSignalRecord(BaseModel):
     code: str
     title: str
-    strength: Literal["weak", "moderate", "strong"]
+    confidence: Literal["low", "medium", "high"]
     observation: str
     evidence: dict[str, Any] = Field(default_factory=dict)
     note: str
+
+
+class WalletEvidenceInsufficientRecord(BaseModel):
+    code: str
+    reason: str
 
 
 class WalletRunSignalsResponse(BaseModel):
@@ -291,6 +296,9 @@ class WalletRunSignalsResponse(BaseModel):
     is_risk_score: bool = False
     evaluated: list[str] = Field(default_factory=list)
     signals: list[WalletEvidenceSignalRecord] = Field(default_factory=list)
+    insufficient_evidence: list[WalletEvidenceInsufficientRecord] = Field(
+        default_factory=list
+    )
     note: str
 
 

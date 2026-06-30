@@ -37,21 +37,25 @@ def client():
         app.dependency_overrides.clear()
 
 
-def _signal_codes(result: dict) -> set[str]:
-    return {signal["code"] for signal in result["signals"]}
+def _codes(items: list[dict]) -> set[str]:
+    return {item["code"] for item in items}
+
+
+def _signal(result: dict, code: str) -> dict:
+    return next(s for s in result["signals"] if s["code"] == code)
 
 
 # --- Pure-function rule tests -------------------------------------------------
 
 
-def test_clean_run_produces_no_signals():
+def test_clean_run_produces_no_signals_and_no_insufficiency():
     run = {
         "run_id": 1,
         "wallet_address": "EQclean",
         "transfers": [
-            {"counterparty": "EQa"},
-            {"counterparty": "EQb"},
-            {"counterparty": "EQc"},
+            {"direction": "out", "counterparty": "EQa"},
+            {"direction": "out", "counterparty": "EQb"},
+            {"direction": "out", "counterparty": "EQc"},
         ],
         "transactions": [
             {"success": "success"},
@@ -63,17 +67,17 @@ def test_clean_run_produces_no_signals():
     result = derive_run_signals(run)
     assert result["is_risk_score"] is False
     assert result["signals"] == []
+    assert result["insufficient_evidence"] == []
     assert set(result["evaluated"]) == {
-        "transfer_counterparty_concentration",
+        "single_counterparty_dominance",
+        "high_outflow_concentration",
         "failed_transaction_ratio",
         "many_distinct_jettons",
     }
 
 
-def test_counterparty_concentration_fires_with_evidence():
+def test_single_counterparty_dominance_low_confidence_small_sample():
     run = {
-        "run_id": 2,
-        "wallet_address": "EQconc",
         "transfers": [
             {"counterparty": "EQhub"},
             {"counterparty": "EQhub"},
@@ -81,80 +85,105 @@ def test_counterparty_concentration_fires_with_evidence():
             {"counterparty": "EQother"},
         ],
     }
-    result = derive_run_signals(run)
-    signals = {s["code"]: s for s in result["signals"]}
-    assert "transfer_counterparty_concentration" in signals
-    signal = signals["transfer_counterparty_concentration"]
-    assert signal["strength"] == "moderate"  # 3/4 = 0.75 -> moderate
+    signal = _signal(derive_run_signals(run), "single_counterparty_dominance")
+    # 3/4 = 0.75 pattern, but only 4 rows -> low confidence (volume-driven).
+    assert signal["confidence"] == "low"
     assert signal["evidence"]["counterparty"] == "EQhub"
-    assert signal["evidence"]["transfer_count"] == 3
     assert signal["evidence"]["total_with_counterparty"] == 4
-    assert "not proof of risk" in signal["note"]
+    assert "pseudonymous" in signal["note"]
+    assert "not proof" in signal["note"]
 
 
-def test_counterparty_concentration_strength_scales():
+def test_single_counterparty_dominance_high_confidence_large_sample():
     run = {
         "transfers": [{"counterparty": "EQhub"} for _ in range(9)]
         + [{"counterparty": "EQother"}],
     }
-    signal = next(
-        s
-        for s in derive_run_signals(run)["signals"]
-        if s["code"] == "transfer_counterparty_concentration"
-    )
-    # 9/10 = 0.9 -> strong
-    assert signal["strength"] == "strong"
+    signal = _signal(derive_run_signals(run), "single_counterparty_dominance")
+    assert signal["confidence"] == "high"  # 10 rows
 
 
-def test_counterparty_concentration_ignored_below_threshold():
+def test_single_counterparty_insufficient_when_too_few():
+    run = {"transfers": [{"counterparty": "EQa"}, {"counterparty": "EQb"}]}
+    result = derive_run_signals(run)
+    assert "single_counterparty_dominance" not in _codes(result["signals"])
+    assert "single_counterparty_dominance" in _codes(result["insufficient_evidence"])
+
+
+def test_high_outflow_concentration_fires():
     run = {
         "transfers": [
-            {"counterparty": "EQa"},
-            {"counterparty": "EQb"},
-            {"counterparty": "EQc"},
+            {"direction": "out", "counterparty": "EQsink"},
+            {"direction": "out", "counterparty": "EQsink"},
+            {"direction": "out", "counterparty": "EQsink"},
+            {"direction": "out", "counterparty": "EQx"},
         ],
     }
-    assert "transfer_counterparty_concentration" not in _signal_codes(
-        derive_run_signals(run)
-    )
+    signal = _signal(derive_run_signals(run), "high_outflow_concentration")
+    assert signal["evidence"]["counterparty"] == "EQsink"
+    assert signal["evidence"]["total_outgoing"] == 4
+    assert signal["confidence"] == "low"
 
 
-def test_failed_transaction_ratio_fires():
+def test_high_outflow_insufficient_when_direction_data_weak():
     run = {
-        "transactions": [
-            {"success": "failed"},
-            {"success": "failed"},
-            {"success": "success"},
-            {"success": "success"},
+        "transfers": [
+            {"direction": "unknown", "counterparty": "EQa"},
+            {"direction": "out", "counterparty": "EQb"},
         ],
     }
-    signal = next(
-        s
-        for s in derive_run_signals(run)["signals"]
-        if s["code"] == "failed_transaction_ratio"
+    result = derive_run_signals(run)
+    insufficient = {i["code"]: i for i in result["insufficient_evidence"]}
+    assert "high_outflow_concentration" in insufficient
+    assert "outgoing" in insufficient["high_outflow_concentration"]["reason"]
+
+
+def test_failed_transaction_ratio_fires_and_insufficient_path():
+    fired = derive_run_signals(
+        {
+            "transactions": [
+                {"success": "failed"},
+                {"success": "failed"},
+                {"success": "success"},
+                {"success": "success"},
+            ],
+        }
     )
+    signal = _signal(fired, "failed_transaction_ratio")
     assert signal["evidence"] == {"failed": 2, "total": 4, "share": 0.5}
-    assert signal["strength"] == "weak"  # 0.5 -> not > 0.6
+    assert signal["confidence"] == "low"  # 4 transactions
+
+    weak = derive_run_signals({"transactions": [{"success": "failed"}]})
+    assert "failed_transaction_ratio" in _codes(weak["insufficient_evidence"])
 
 
-def test_many_distinct_jettons_fires():
-    balances = [{"asset": "TON"}] + [
-        {"asset": f"JET{i}"} for i in range(12)
-    ]
-    run = {"balances": balances}
-    signal = next(
-        s
-        for s in derive_run_signals(run)["signals"]
-        if s["code"] == "many_distinct_jettons"
+def test_many_distinct_jettons_fires_and_insufficient_without_balances():
+    fired = derive_run_signals(
+        {"balances": [{"asset": "TON"}] + [{"asset": f"JET{i}"} for i in range(12)]}
     )
+    signal = _signal(fired, "many_distinct_jettons")
     assert signal["evidence"]["distinct_jetton_count"] == 12
-    assert signal["strength"] == "weak"
+    assert signal["confidence"] == "low"
+
+    none_ingested = derive_run_signals({"transfers": [], "transactions": []})
+    assert "many_distinct_jettons" in _codes(none_ingested["insufficient_evidence"])
+
+
+def test_empty_run_is_all_insufficient_no_signals():
+    result = derive_run_signals({"run_id": 9, "wallet_address": "EQempty"})
+    assert result["signals"] == []
+    assert _codes(result["insufficient_evidence"]) == {
+        "single_counterparty_dominance",
+        "high_outflow_concentration",
+        "failed_transaction_ratio",
+        "many_distinct_jettons",
+    }
 
 
 # --- Endpoint integration tests ----------------------------------------------
 
 
-def test_signals_endpoint_on_clean_mock_run(client, monkeypatch):
+def test_signals_endpoint_on_mock_run(client, monkeypatch):
     monkeypatch.setenv("DATA_MODE", "mock")
     monkeypatch.delenv("WALLET_ACTIVITY_PROVIDER", raising=False)
     run = client.post(
@@ -173,10 +202,12 @@ def test_signals_endpoint_on_clean_mock_run(client, monkeypatch):
     assert body["run_id"] == run["run_id"]
     assert body["wallet_address"] == "EQwallet"
     assert body["is_risk_score"] is False
-    assert len(body["evaluated"]) == 3
+    assert len(body["evaluated"]) == 4
     # The deterministic mock wallet is clean: distinct counterparties, no
-    # failed transactions, only two jettons.
+    # failed transactions, only two jettons. It has a single outgoing transfer,
+    # so outflow concentration is reported as insufficient evidence.
     assert body["signals"] == []
+    assert "high_outflow_concentration" in _codes(body["insufficient_evidence"])
     assert "not a risk score" in body["note"]
 
 
