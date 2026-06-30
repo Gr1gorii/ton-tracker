@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 from database import get_session
 from schemas import WalletClusterCompareRequest, WalletClusterCompareResponse
 from schemas import WalletIngestionPreviewRequest, WalletIngestionPreviewResponse
-from schemas import WalletIngestionRunResponse
+from schemas import WalletIngestionRunResponse, WalletRunSignalsResponse
 from services import export
 from services.wallet_activity_clustering import compare_wallet_activity
+from services.wallet_activity_signals import derive_run_signals
 from services.wallet_activity_ingestion import (
     build_wallet_ingestion_preview,
     get_wallet_ingestion_run,
@@ -63,6 +64,24 @@ def read_wallet_ingestion_run(
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
     return result
+
+
+@router.get(
+    "/ingest/{run_id}/signals",
+    response_model=WalletRunSignalsResponse,
+)
+def read_wallet_ingestion_run_signals(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Return rule-based evidence signals for one persisted run.
+
+    Heuristic, explainable observations only -- not a risk score or a verdict.
+    """
+    result = get_wallet_ingestion_run(run_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    return derive_run_signals(result)
 
 
 @router.get("/ingest/{run_id}/export.json")

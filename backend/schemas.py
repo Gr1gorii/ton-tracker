@@ -276,6 +276,24 @@ class WalletClusterCompareResponse(BaseModel):
     note: str
 
 
+class WalletEvidenceSignalRecord(BaseModel):
+    code: str
+    title: str
+    strength: Literal["weak", "moderate", "strong"]
+    observation: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    note: str
+
+
+class WalletRunSignalsResponse(BaseModel):
+    run_id: int | None = None
+    wallet_address: str
+    is_risk_score: bool = False
+    evaluated: list[str] = Field(default_factory=list)
+    signals: list[WalletEvidenceSignalRecord] = Field(default_factory=list)
+    note: str
+
+
 class BitqueryTokenTradesPreviewRequest(BaseModel):
     token_address: str = Field(
         ...,
