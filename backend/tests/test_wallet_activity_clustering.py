@@ -217,3 +217,54 @@ def test_cluster_comparison_json_export_requires_two_runs(client, monkeypatch):
     )
 
     assert response.status_code == 400
+
+
+def test_cluster_comparison_csv_export_download(client, monkeypatch):
+    run_a = _ingest_mock_wallet(client, monkeypatch, "EQalice")
+    run_b = _ingest_mock_wallet(client, monkeypatch, "EQbob")
+
+    response = client.get(
+        "/api/wallets/cluster/compare/export.csv",
+        params={"run_ids": [run_a["run_id"], run_b["run_id"]]},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    disposition = response.headers["content-disposition"]
+    assert "attachment" in disposition
+    assert (
+        f"wallet_cluster_comparison_{run_a['run_id']}_{run_b['run_id']}.csv"
+        in disposition
+    )
+
+    lines = response.text.strip().splitlines()
+    assert lines[0] == (
+        "wallet_a_run_id,wallet_a_address,wallet_b_run_id,"
+        "wallet_b_address,score,band,shared_tokens"
+    )
+    # Two identical mock wallets -> one pair row scoring 100.
+    assert len(lines) == 2
+    assert lines[1].startswith(f"{run_a['run_id']},EQalice,{run_b['run_id']},EQbob,100.0")
+    assert "JETTON_ALPHA|JETTON_BETA" in lines[1]
+
+
+def test_cluster_comparison_csv_export_unknown_run_returns_404(client, monkeypatch):
+    run_a = _ingest_mock_wallet(client, monkeypatch, "EQalice")
+
+    response = client.get(
+        "/api/wallets/cluster/compare/export.csv",
+        params={"run_ids": [run_a["run_id"], 999999]},
+    )
+
+    assert response.status_code == 404
+
+
+def test_cluster_comparison_csv_export_requires_two_runs(client, monkeypatch):
+    run_a = _ingest_mock_wallet(client, monkeypatch, "EQalice")
+
+    response = client.get(
+        "/api/wallets/cluster/compare/export.csv",
+        params={"run_ids": [run_a["run_id"]]},
+    )
+
+    assert response.status_code == 400

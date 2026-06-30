@@ -137,6 +137,35 @@ def export_wallet_cluster_comparison(
     )
 
 
+@router.get("/cluster/compare/export.csv")
+def export_wallet_cluster_comparison_csv(
+    run_ids: list[int] = Query(..., description="Run ids to compare and export."),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download a wallet cluster comparison as flattened pair CSV.
+
+    One row per wallet pair; a probabilistic behavioral-similarity signal
+    only, not proof of ownership.
+    """
+    try:
+        result = compare_wallet_activity(run_ids, session)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    suffix = "_".join(str(run_id) for run_id in dict.fromkeys(run_ids))
+    return Response(
+        content=export.wallet_cluster_comparison_to_csv(result),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_cluster_comparison_{suffix}.csv"
+            )
+        },
+    )
+
+
 @router.get("/ingest/{run_id}/export.csv")
 def export_wallet_ingestion_run_csv(
     run_id: int = Path(..., ge=1),

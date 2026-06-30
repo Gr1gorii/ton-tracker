@@ -148,3 +148,34 @@ def wallet_ingestion_run_to_csv(run: dict) -> str:
             }
         )
     return buffer.getvalue()
+
+
+# One row per compared wallet pair, mirroring the UI pair-detail table.
+CLUSTER_COMPARISON_CSV_COLUMNS = [
+    "wallet_a_run_id",
+    "wallet_a_address",
+    "wallet_b_run_id",
+    "wallet_b_address",
+    "score",
+    "band",
+    "shared_tokens",
+]
+
+
+def wallet_cluster_comparison_to_csv(comparison: dict) -> str:
+    """Serialize a wallet cluster comparison into flattened pair CSV text.
+
+    One row per wallet pair. This is a probabilistic similarity signal only,
+    not proof of common ownership.
+    """
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer, fieldnames=CLUSTER_COMPARISON_CSV_COLUMNS, extrasaction="ignore"
+    )
+    writer.writeheader()
+    for pair in comparison.get("pairs", []):
+        row = dict(pair)
+        # Flatten the list-valued cell for CSV.
+        row["shared_tokens"] = "|".join(pair.get("shared_tokens", []))
+        writer.writerow(row)
+    return buffer.getvalue()

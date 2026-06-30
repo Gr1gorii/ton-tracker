@@ -4,6 +4,7 @@ import {
   getWalletIngestionRun,
   previewWalletIngestion,
   runWalletIngestion,
+  walletClusterCompareCsvExportUrl,
   walletClusterCompareExportUrl,
   walletRunExportCsvUrl,
   walletRunExportUrl,
@@ -1069,6 +1070,15 @@ function WalletClusterCompareCard({ runId }: { runId: number }) {
               download
             >
               Export comparison (JSON)
+            </a>
+            <a
+              className="btn btn-ghost"
+              href={walletClusterCompareCsvExportUrl(
+                compareResult.wallets.map((wallet) => wallet.run_id),
+              )}
+              download
+            >
+              Export comparison (CSV)
             </a>
           </div>
           <p className="muted small">{compareResult.note}</p>

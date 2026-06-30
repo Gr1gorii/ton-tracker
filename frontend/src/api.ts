@@ -266,6 +266,11 @@ export function walletClusterCompareExportUrl(runIds: number[]): string {
   return `${API_BASE}/api/wallets/cluster/compare/export.json?${params}`;
 }
 
+export function walletClusterCompareCsvExportUrl(runIds: number[]): string {
+  const params = runIds.map((id) => `run_ids=${id}`).join("&");
+  return `${API_BASE}/api/wallets/cluster/compare/export.csv?${params}`;
+}
+
 export async function compareWalletRuns(
   runIds: number[],
 ): Promise<WalletClusterCompareResponse> {
