@@ -170,3 +170,50 @@ def test_compare_caps_at_twenty_five_run_ids(client):
     )
 
     assert response.status_code == 422
+
+
+def test_cluster_comparison_json_export_download(client, monkeypatch):
+    run_a = _ingest_mock_wallet(client, monkeypatch, "EQalice")
+    run_b = _ingest_mock_wallet(client, monkeypatch, "EQbob")
+
+    response = client.get(
+        "/api/wallets/cluster/compare/export.json",
+        params={"run_ids": [run_a["run_id"], run_b["run_id"]]},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    disposition = response.headers["content-disposition"]
+    assert "attachment" in disposition
+    assert (
+        f"wallet_cluster_comparison_{run_a['run_id']}_{run_b['run_id']}.json"
+        in disposition
+    )
+
+    body = response.json()
+    assert body["is_cluster_proof"] is False
+    assert len(body["wallets"]) == 2
+    assert len(body["pairs"]) == 1
+    assert "not proof of common ownership" in body["note"]
+
+
+def test_cluster_comparison_json_export_unknown_run_returns_404(client, monkeypatch):
+    run_a = _ingest_mock_wallet(client, monkeypatch, "EQalice")
+
+    response = client.get(
+        "/api/wallets/cluster/compare/export.json",
+        params={"run_ids": [run_a["run_id"], 999999]},
+    )
+
+    assert response.status_code == 404
+
+
+def test_cluster_comparison_json_export_requires_two_runs(client, monkeypatch):
+    run_a = _ingest_mock_wallet(client, monkeypatch, "EQalice")
+
+    response = client.get(
+        "/api/wallets/cluster/compare/export.json",
+        params={"run_ids": [run_a["run_id"]]},
+    )
+
+    assert response.status_code == 400

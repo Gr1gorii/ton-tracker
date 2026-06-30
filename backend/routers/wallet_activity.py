@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -105,6 +105,36 @@ def compare_wallet_ingestion_runs(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/cluster/compare/export.json")
+def export_wallet_cluster_comparison(
+    run_ids: list[int] = Query(..., description="Run ids to compare and export."),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download a wallet cluster comparison (pairs, signals, note) as JSON.
+
+    The comparison is computed on the fly from the given run ids; it is a
+    probabilistic behavioral-similarity signal only, not proof of ownership.
+    """
+    try:
+        result = compare_wallet_activity(run_ids, session)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    body = json.dumps(result, ensure_ascii=False, indent=2)
+    suffix = "_".join(str(run_id) for run_id in dict.fromkeys(run_ids))
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_cluster_comparison_{suffix}.json"
+            )
+        },
+    )
 
 
 @router.get("/ingest/{run_id}/export.csv")

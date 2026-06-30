@@ -4,6 +4,7 @@ import {
   getWalletIngestionRun,
   previewWalletIngestion,
   runWalletIngestion,
+  walletClusterCompareExportUrl,
   walletRunExportCsvUrl,
   walletRunExportUrl,
 } from "../api";
@@ -1059,6 +1060,17 @@ function WalletClusterCompareCard({ runId }: { runId: number }) {
 
       {compareResult && (
         <>
+          <div className="tonapi-wallet-result-head">
+            <a
+              className="btn btn-ghost"
+              href={walletClusterCompareExportUrl(
+                compareResult.wallets.map((wallet) => wallet.run_id),
+              )}
+              download
+            >
+              Export comparison (JSON)
+            </a>
+          </div>
           <p className="muted small">{compareResult.note}</p>
 
           {compareResult.wallets.length > 2 && (
