@@ -11,6 +11,7 @@ import type {
   StonfiPoolsPreviewResponse,
   TonapiAccountJettonsPreviewResponse,
   TonapiWalletIntelligencePreviewResponse,
+  WalletClusterCompareResponse,
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
@@ -258,6 +259,22 @@ export function walletRunExportUrl(runId: number): string {
 
 export function walletRunExportCsvUrl(runId: number): string {
   return `${API_BASE}/api/wallets/ingest/${runId}/export.csv`;
+}
+
+export async function compareWalletRuns(
+  runIds: number[],
+): Promise<WalletClusterCompareResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/cluster/compare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ run_ids: runIds }),
+  });
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Wallet cluster compare failed"));
+  }
+
+  return (await res.json()) as WalletClusterCompareResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {

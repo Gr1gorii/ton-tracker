@@ -616,3 +616,36 @@ export interface WalletIngestionRunResponse {
   message: string;
   activity_summary?: WalletActivitySummary;
 }
+
+export interface WalletSignalsRecord {
+  run_id: number;
+  wallet_address: string;
+  data_mode: "mock" | "real";
+  ton_balance: string;
+  portfolio_value_usd?: string | null;
+  distinct_tokens_touched: string[];
+  buy_swap_count: number;
+  sell_swap_count: number;
+  avg_ton_per_buy_swap?: string | null;
+  first_buy_at?: string | null;
+  warnings: string[];
+}
+
+export interface WalletClusterPairRecord {
+  wallet_a_run_id: number;
+  wallet_b_run_id: number;
+  wallet_a_address: string;
+  wallet_b_address: string;
+  score: number;
+  band: string;
+  shared_tokens: string[];
+  note: string;
+}
+
+export interface WalletClusterCompareResponse {
+  wallets: WalletSignalsRecord[];
+  comparison_window_seconds: number;
+  pairs: WalletClusterPairRecord[];
+  is_cluster_proof: boolean;
+  note: string;
+}

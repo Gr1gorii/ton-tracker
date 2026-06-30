@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  compareWalletRuns,
   getWalletIngestionRun,
   previewWalletIngestion,
   runWalletIngestion,
@@ -11,6 +12,7 @@ import type {
   WalletActivityProviderEvidence,
   WalletActivitySummary,
   WalletBalanceSnapshotRecord,
+  WalletClusterCompareResponse,
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
@@ -74,12 +76,12 @@ const CAN_SHOW = [
   "Swaps",
   "Balances",
   "Provider evidence",
+  "Wallet-pair similarity (probabilistic, not proof)",
 ];
 
 const CANNOT_SHOW = [
   "Real provider fetch",
   "Real wallet PnL",
-  "Clustering input",
   "Ownership proof",
 ];
 
@@ -637,6 +639,9 @@ export default function WalletIngestionWorkspace({
             <ActivitySummaryCard summary={runResult.activity_summary} />
           )}
           {runResult && <WalletActivityTables result={runResult} />}
+          {runResult?.run_id != null && (
+            <WalletClusterCompareCard runId={runResult.run_id} />
+          )}
         </div>
       )}
     </section>
@@ -945,6 +950,127 @@ function ActivitySummaryCard({ summary }: { summary: WalletActivitySummary }) {
           {summary.balances.portfolio.unpriced_assets} unpriced). Provider prices
           may be stale; unpriced assets excluded.
         </p>
+      )}
+    </div>
+  );
+}
+
+function WalletClusterCompareCard({ runId }: { runId: number }) {
+  const [otherRunId, setOtherRunId] = useState("");
+  const [comparing, setComparing] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  const [compareResult, setCompareResult] =
+    useState<WalletClusterCompareResponse | null>(null);
+
+  const handleCompare = async () => {
+    const parsed = Number(otherRunId);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      setCompareError("Enter a valid run id to compare against.");
+      return;
+    }
+    setComparing(true);
+    setCompareError(null);
+    try {
+      const data = await compareWalletRuns([runId, parsed]);
+      setCompareResult(data);
+    } catch (err) {
+      setCompareResult(null);
+      setCompareError(err instanceof Error ? err.message : "Comparison failed.");
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  return (
+    <div className="intelligence-table-block" aria-label="Wallet pair comparison">
+      <div className="table-toolbar">
+        <div className="table-toolbar-main">
+          <span className="section-eyebrow">Probabilistic signal — not proof</span>
+          <h2>Compare with another run</h2>
+          <p>
+            Behavioral similarity between this run (#{runId}) and another stored
+            wallet ingestion run, derived only from on-chain swap and balance
+            rows. Never proof of common ownership.
+          </p>
+        </div>
+        <div className="table-meta">
+          <span className="badge badge-mock">NOT OWNERSHIP PROOF</span>
+        </div>
+      </div>
+
+      <div className="wallet-ingestion-form wallet-query-card">
+        <div className="field">
+          <label className="field-label" htmlFor="wallet-cluster-other-run">
+            Other run id
+          </label>
+          <input
+            id="wallet-cluster-other-run"
+            className="text-input"
+            type="number"
+            min={1}
+            value={otherRunId}
+            disabled={comparing}
+            placeholder="e.g. 12"
+            onChange={(event) => setOtherRunId(event.target.value)}
+          />
+        </div>
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={handleCompare}
+          disabled={comparing || otherRunId.trim() === ""}
+        >
+          {comparing ? "Comparing" : "Compare"}
+        </button>
+      </div>
+
+      {compareError && <WalletIngestionError message={compareError} />}
+
+      {compareResult && (
+        <>
+          <p className="muted small">{compareResult.note}</p>
+          <table className="data-table intelligence-table wallet-ingestion-table">
+            <thead>
+              <tr>
+                <th>Wallet A</th>
+                <th>Wallet B</th>
+                <th>Score</th>
+                <th>Band</th>
+                <th>Shared tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compareResult.pairs.map((pair) => (
+                <tr key={`${pair.wallet_a_run_id}-${pair.wallet_b_run_id}`}>
+                  <td>
+                    #{pair.wallet_a_run_id} {pair.wallet_a_address}
+                  </td>
+                  <td>
+                    #{pair.wallet_b_run_id} {pair.wallet_b_address}
+                  </td>
+                  <td>{pair.score.toFixed(2)}</td>
+                  <td>{pair.band}</td>
+                  <td>{pair.shared_tokens.join(", ") || "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {compareResult.pairs.map((pair) => (
+            <p
+              className="muted small"
+              key={`note-${pair.wallet_a_run_id}-${pair.wallet_b_run_id}`}
+            >
+              {pair.note}
+            </p>
+          ))}
+          {compareResult.wallets.some((w) => w.warnings.length > 0) && (
+            <p className="muted small">
+              {compareResult.wallets
+                .flatMap((w) => w.warnings.map((msg) => `#${w.run_id}: ${msg}`))
+                .join(" ")}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
