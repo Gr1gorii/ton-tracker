@@ -9,9 +9,11 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from database import get_session
+from schemas import WalletClusterCompareRequest, WalletClusterCompareResponse
 from schemas import WalletIngestionPreviewRequest, WalletIngestionPreviewResponse
 from schemas import WalletIngestionRunResponse
 from services import export
+from services.wallet_activity_clustering import compare_wallet_activity
 from services.wallet_activity_ingestion import (
     build_wallet_ingestion_preview,
     get_wallet_ingestion_run,
@@ -82,6 +84,27 @@ def export_wallet_ingestion_run(
             )
         },
     )
+
+
+@router.post(
+    "/cluster/compare",
+    response_model=WalletClusterCompareResponse,
+)
+def compare_wallet_ingestion_runs(
+    payload: WalletClusterCompareRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Compare 2-25 persisted wallet ingestion runs pairwise.
+
+    Returns a probabilistic behavioral-similarity signal only -- not proof
+    of common ownership.
+    """
+    try:
+        return compare_wallet_activity(payload.run_ids, session)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/ingest/{run_id}/export.csv")

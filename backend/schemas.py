@@ -234,6 +234,48 @@ class WalletIngestionRunResponse(BaseModel):
     activity_summary: dict[str, Any] = Field(default_factory=dict)
 
 
+class WalletClusterCompareRequest(BaseModel):
+    run_ids: list[int] = Field(
+        ...,
+        min_length=2,
+        max_length=25,
+        description="Persisted wallet ingestion run ids to compare pairwise.",
+    )
+
+
+class WalletSignalsRecord(BaseModel):
+    run_id: int
+    wallet_address: str
+    data_mode: Literal["mock", "real"]
+    ton_balance: str
+    portfolio_value_usd: str | None = None
+    distinct_tokens_touched: list[str] = Field(default_factory=list)
+    buy_swap_count: int
+    sell_swap_count: int
+    avg_ton_per_buy_swap: str | None = None
+    first_buy_at: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class WalletClusterPairRecord(BaseModel):
+    wallet_a_run_id: int
+    wallet_b_run_id: int
+    wallet_a_address: str
+    wallet_b_address: str
+    score: float
+    band: str
+    shared_tokens: list[str] = Field(default_factory=list)
+    note: str
+
+
+class WalletClusterCompareResponse(BaseModel):
+    wallets: list[WalletSignalsRecord]
+    comparison_window_seconds: float
+    pairs: list[WalletClusterPairRecord]
+    is_cluster_proof: bool = False
+    note: str
+
+
 class BitqueryTokenTradesPreviewRequest(BaseModel):
     token_address: str = Field(
         ...,
