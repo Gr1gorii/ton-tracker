@@ -54,14 +54,16 @@ def test_clean_run_produces_no_signals_and_no_insufficiency():
         "run_id": 1,
         "wallet_address": "EQclean",
         "transfers": [
-            {"direction": "out", "counterparty": "EQa"},
-            {"direction": "out", "counterparty": "EQb"},
-            {"direction": "out", "counterparty": "EQc"},
+            {"direction": "out", "counterparty": "EQa", "asset": "TON", "amount": "1.1"},
+            {"direction": "out", "counterparty": "EQb", "asset": "TON", "amount": "2.2"},
+            {"direction": "out", "counterparty": "EQc", "asset": "TON", "amount": "3.3"},
         ],
         "transactions": [
-            {"success": "success"},
-            {"success": "success"},
-            {"success": "success"},
+            {"success": "success", "timestamp": "2026-07-01T00:00:00Z"},
+            {"success": "success", "timestamp": "2026-07-01T06:00:00Z"},
+            {"success": "success", "timestamp": "2026-07-01T12:00:00Z"},
+            {"success": "success", "timestamp": "2026-07-01T18:00:00Z"},
+            {"success": "success", "timestamp": "2026-07-02T00:00:00Z"},
         ],
         "balances": [{"asset": "TON"}, {"asset": "JET1"}],
     }
@@ -74,6 +76,8 @@ def test_clean_run_produces_no_signals_and_no_insufficiency():
         "high_outflow_concentration",
         "failed_transaction_ratio",
         "many_distinct_jettons",
+        "repeated_identical_transfer_amounts",
+        "burst_transaction_activity",
     }
 
 
@@ -170,6 +174,85 @@ def test_many_distinct_jettons_fires_and_insufficient_without_balances():
     assert "many_distinct_jettons" in _codes(none_ingested["insufficient_evidence"])
 
 
+def test_repeated_identical_transfer_amounts_fires():
+    run = {
+        "transfers": [
+            {"asset": "JETX", "amount": "777.000000000000000000"},
+            {"asset": "JETX", "amount": "777.000000000000000000"},
+            {"asset": "JETX", "amount": "777.000000000000000000"},
+            {"asset": "JETX", "amount": "777.000000000000000000"},
+            {"asset": "TON", "amount": "1.500000000000000000"},
+        ],
+    }
+    signal = _signal(
+        derive_run_signals(run), "repeated_identical_transfer_amounts"
+    )
+    assert signal["evidence"]["asset"] == "JETX"
+    assert signal["evidence"]["repeated_count"] == 4
+    assert signal["evidence"]["total_with_amount"] == 5
+    assert signal["confidence"] == "medium"  # 5 rows
+    assert "not by itself" in signal["note"]
+
+
+def test_repeated_identical_amounts_needs_majority_and_min_count():
+    # Three distinct amounts -> highest repetition is 1 -> no signal.
+    spread = derive_run_signals(
+        {
+            "transfers": [
+                {"asset": "TON", "amount": "1"},
+                {"asset": "TON", "amount": "2"},
+                {"asset": "TON", "amount": "3"},
+            ],
+        }
+    )
+    assert "repeated_identical_transfer_amounts" not in _codes(spread["signals"])
+
+    # Too few transfers carrying an amount -> insufficient evidence.
+    weak = derive_run_signals({"transfers": [{"asset": "TON", "amount": "1"}]})
+    assert "repeated_identical_transfer_amounts" in _codes(
+        weak["insufficient_evidence"]
+    )
+
+
+def test_burst_transaction_activity_fires():
+    run = {
+        "transactions": [
+            {"timestamp": f"2026-07-01T10:00:{second:02d}Z"} for second in range(10)
+        ]
+        + [{"timestamp": "2026-07-02T10:00:00Z"}],
+    }
+    signal = _signal(derive_run_signals(run), "burst_transaction_activity")
+    assert signal["evidence"]["burst_transaction_count"] == 10
+    assert signal["evidence"]["total_with_timestamp"] == 11
+    assert signal["evidence"]["window_seconds"] == 600
+    assert signal["confidence"] == "medium"  # 11 rows
+    assert "not by itself" in signal["note"]
+
+
+def test_burst_transaction_activity_quiet_and_insufficient_paths():
+    # Ten transactions spread over ten hours -> no burst signal.
+    spread = derive_run_signals(
+        {
+            "transactions": [
+                {"timestamp": f"2026-07-01T{hour:02d}:00:00Z"} for hour in range(10)
+            ],
+        }
+    )
+    assert "burst_transaction_activity" not in _codes(spread["signals"])
+
+    # Unparseable or missing timestamps -> insufficient evidence.
+    weak = derive_run_signals(
+        {
+            "transactions": [
+                {"timestamp": "not-a-date"},
+                {"timestamp": None},
+                {},
+            ],
+        }
+    )
+    assert "burst_transaction_activity" in _codes(weak["insufficient_evidence"])
+
+
 def test_empty_run_is_all_insufficient_no_signals():
     result = derive_run_signals({"run_id": 9, "wallet_address": "EQempty"})
     assert result["signals"] == []
@@ -178,6 +261,8 @@ def test_empty_run_is_all_insufficient_no_signals():
         "high_outflow_concentration",
         "failed_transaction_ratio",
         "many_distinct_jettons",
+        "repeated_identical_transfer_amounts",
+        "burst_transaction_activity",
     }
 
 
@@ -203,7 +288,7 @@ def test_signals_endpoint_on_mock_run(client, monkeypatch):
     assert body["run_id"] == run["run_id"]
     assert body["wallet_address"] == "EQwallet"
     assert body["is_risk_score"] is False
-    assert len(body["evaluated"]) == 4
+    assert len(body["evaluated"]) == 6
     # The deterministic mock wallet is clean: distinct counterparties, no
     # failed transactions, only two jettons. It has a single outgoing transfer,
     # so outflow concentration is reported as insufficient evidence.

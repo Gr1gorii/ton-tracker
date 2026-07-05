@@ -17,6 +17,7 @@ and calls :func:`derive_run_signals`.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 LAYER_NOTE = (
@@ -213,12 +214,132 @@ def _rule_many_distinct_jettons(run: dict) -> dict | None:
     )
 
 
+def _rule_repeated_identical_transfer_amounts(run: dict) -> dict | None:
+    """Many transfers repeat one exact asset+amount value."""
+    rows = [
+        (transfer.get("asset"), transfer.get("amount"))
+        for transfer in run.get("transfers") or []
+        if transfer.get("amount")
+    ]
+    total = len(rows)
+    if total < 3:
+        return _insufficient(
+            "repeated_identical_transfer_amounts",
+            f"Only {total} transfer(s) with an amount; insufficient evidence "
+            "to assess repeated identical amounts.",
+        )
+
+    counts: dict[tuple, int] = {}
+    for row in rows:
+        counts[row] = counts.get(row, 0) + 1
+
+    (top_asset, top_amount), top_count = max(counts.items(), key=lambda kv: kv[1])
+    share = top_count / total
+    if top_count < 3 or share <= 0.5:
+        return None
+
+    pct = round(share * 100, 1)
+    return _signal(
+        "repeated_identical_transfer_amounts",
+        title="Repeated identical transfer amounts",
+        confidence=_confidence_from_sample(total, low_max=4, medium_max=9),
+        observation=(
+            f"{top_count} of {total} transfers with an amount repeat the "
+            f"exact same value ({top_amount} {top_asset or 'unknown asset'}, "
+            f"{pct}%)."
+        ),
+        evidence={
+            "asset": top_asset,
+            "amount": top_amount,
+            "repeated_count": top_count,
+            "total_with_amount": total,
+            "share": round(share, 4),
+        },
+        note=(
+            "Many transfers repeat one exact amount. This is a heuristic "
+            "indicator that often reflects batch payouts, airdrop "
+            "distributions, or automated transfers; it is not by itself "
+            "evidence of malicious activity."
+        ),
+    )
+
+
+_BURST_WINDOW_SECONDS = 600
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _rule_burst_transaction_activity(run: dict) -> dict | None:
+    """A large share of transactions fall inside one short burst window."""
+    timestamps = sorted(
+        parsed
+        for tx in run.get("transactions") or []
+        if (parsed := _parse_timestamp(tx.get("timestamp"))) is not None
+    )
+    total = len(timestamps)
+    if total < 5:
+        return _insufficient(
+            "burst_transaction_activity",
+            f"Only {total} transaction(s) with a parseable timestamp; "
+            "insufficient evidence to assess burst activity.",
+        )
+
+    # Largest transaction count inside any sliding window of the burst size.
+    best = 1
+    start = 0
+    for end in range(total):
+        while (
+            timestamps[end] - timestamps[start]
+        ).total_seconds() > _BURST_WINDOW_SECONDS:
+            start += 1
+        best = max(best, end - start + 1)
+
+    share = best / total
+    if best < 10 or share <= 0.5:
+        return None
+
+    pct = round(share * 100, 1)
+    return _signal(
+        "burst_transaction_activity",
+        title="Burst transaction activity",
+        confidence=_confidence_from_sample(total, low_max=9, medium_max=29),
+        observation=(
+            f"{best} of {total} transactions with a timestamp fall inside one "
+            f"{_BURST_WINDOW_SECONDS // 60}-minute window ({pct}%)."
+        ),
+        evidence={
+            "burst_transaction_count": best,
+            "window_seconds": _BURST_WINDOW_SECONDS,
+            "total_with_timestamp": total,
+            "share": round(share, 4),
+        },
+        note=(
+            "A large share of the run's transactions occur within one short "
+            "burst window. This is a heuristic indicator that often reflects "
+            "batch operations, consolidation, or automated service activity; "
+            "it is not by itself evidence of malicious activity."
+        ),
+    )
+
+
 # Ordered so output is deterministic and the evaluated list is stable.
 _RULES: list[Callable[[dict], dict | None]] = [
     _rule_single_counterparty_dominance,
     _rule_high_outflow_concentration,
     _rule_failed_transaction_ratio,
     _rule_many_distinct_jettons,
+    _rule_repeated_identical_transfer_amounts,
+    _rule_burst_transaction_activity,
 ]
 
 _RULE_CODES = [
@@ -226,6 +347,8 @@ _RULE_CODES = [
     "high_outflow_concentration",
     "failed_transaction_ratio",
     "many_distinct_jettons",
+    "repeated_identical_transfer_amounts",
+    "burst_transaction_activity",
 ]
 
 
