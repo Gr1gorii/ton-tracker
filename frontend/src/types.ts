@@ -664,6 +664,46 @@ export interface WalletEvidenceInsufficientRecord {
   reason: string;
 }
 
+export interface WalletPnlRequirementRecord {
+  code: string;
+  available: boolean;
+  reason?: string | null;
+}
+
+export interface WalletPnlTokenFlowRecord {
+  token: string;
+  buy_swap_count: number;
+  sell_swap_count: number;
+  token_bought_qty: string;
+  token_sold_qty: string;
+  ton_spent: string;
+  ton_received: string;
+  net_ton_flow: string;
+}
+
+export interface WalletRunPnlPreviewResponse {
+  run_id?: number | null;
+  wallet_address: string;
+  pnl_mode:
+    | "imported_pnl"
+    | "estimated_onchain_pnl"
+    | "real_pnl_locked"
+    | "insufficient_data";
+  confidence: "high" | "medium" | "low" | "unavailable";
+  is_real_pnl: boolean;
+  real_pnl_locked: boolean;
+  token_flows: WalletPnlTokenFlowRecord[];
+  total_ton_spent: string;
+  total_ton_received: string;
+  net_ton_flow: string;
+  swaps_used: number;
+  swaps_excluded: number;
+  requirements: WalletPnlRequirementRecord[];
+  missing_evidence: string[];
+  warnings: string[];
+  note: string;
+}
+
 export interface WalletRunSignalsResponse {
   run_id?: number | null;
   wallet_address: string;

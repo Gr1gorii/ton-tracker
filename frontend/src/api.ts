@@ -15,6 +15,7 @@ import type {
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
+  WalletRunPnlPreviewResponse,
   WalletRunSignalsResponse,
 } from "./types";
 
@@ -264,6 +265,18 @@ export async function getWalletRunSignals(
   }
 
   return (await res.json()) as WalletRunSignalsResponse;
+}
+
+export async function getWalletRunPnlPreview(
+  runId: number,
+): Promise<WalletRunPnlPreviewResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}/pnl-preview`);
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Wallet PnL preview read failed"));
+  }
+
+  return (await res.json()) as WalletRunPnlPreviewResponse;
 }
 
 export function walletRunSignalsExportUrl(runId: number): string {

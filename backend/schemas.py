@@ -302,6 +302,47 @@ class WalletRunSignalsResponse(BaseModel):
     note: str
 
 
+class WalletPnlRequirementRecord(BaseModel):
+    code: str
+    available: bool
+    reason: str | None = None
+
+
+class WalletPnlTokenFlowRecord(BaseModel):
+    token: str
+    buy_swap_count: int
+    sell_swap_count: int
+    token_bought_qty: str
+    token_sold_qty: str
+    ton_spent: str
+    ton_received: str
+    net_ton_flow: str
+
+
+class WalletRunPnlPreviewResponse(BaseModel):
+    run_id: int | None = None
+    wallet_address: str
+    pnl_mode: Literal[
+        "imported_pnl",
+        "estimated_onchain_pnl",
+        "real_pnl_locked",
+        "insufficient_data",
+    ]
+    confidence: Literal["high", "medium", "low", "unavailable"]
+    is_real_pnl: bool = False
+    real_pnl_locked: bool = True
+    token_flows: list[WalletPnlTokenFlowRecord] = Field(default_factory=list)
+    total_ton_spent: str
+    total_ton_received: str
+    net_ton_flow: str
+    swaps_used: int
+    swaps_excluded: int
+    requirements: list[WalletPnlRequirementRecord] = Field(default_factory=list)
+    missing_evidence: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    note: str
+
+
 class BitqueryTokenTradesPreviewRequest(BaseModel):
     token_address: str = Field(
         ...,
@@ -415,6 +456,9 @@ class ImportTradesAnalysisResponse(BaseModel):
     has_more_wallets: bool
     source: Literal["imported_csv", "imported_json"]
     analysis_note: str
+    pnl_mode: Literal["imported_pnl"] = "imported_pnl"
+    pnl_confidence: Literal["high", "medium", "low", "unavailable"] = "medium"
+    pnl_note: str = ""
 
 
 class DataQualityComponents(BaseModel):

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   compareWalletRuns,
   getWalletIngestionRun,
+  getWalletRunPnlPreview,
   getWalletRunSignals,
   previewWalletIngestion,
   runWalletIngestion,
@@ -24,6 +25,7 @@ import type {
   WalletIngestionRunResponse,
   WalletIngestionSurface,
   WalletIngestionWarningRecord,
+  WalletRunPnlPreviewResponse,
   WalletRunSignalsResponse,
   WalletSourceStatus,
   WalletSwapRecord,
@@ -650,6 +652,9 @@ export default function WalletIngestionWorkspace({
             <WalletEvidenceSignalsCard runId={runResult.run_id} />
           )}
           {runResult?.run_id != null && (
+            <WalletPnlPreviewCard runId={runResult.run_id} />
+          )}
+          {runResult?.run_id != null && (
             <WalletClusterCompareCard runId={runResult.run_id} />
           )}
         </div>
@@ -970,7 +975,7 @@ function pairScoreKey(a: number, b: number): string {
 }
 
 function confidenceBadgeClass(
-  confidence: WalletEvidenceSignalRecord["confidence"],
+  confidence: WalletEvidenceSignalRecord["confidence"] | "unavailable",
 ): string {
   switch (confidence) {
     case "high":
@@ -1121,6 +1126,156 @@ function WalletEvidenceSignalsCard({ runId }: { runId: number }) {
             </p>
           )}
           <p className="muted small">{signalsResult.note}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+const PNL_MODE_LABELS: Record<WalletRunPnlPreviewResponse["pnl_mode"], string> = {
+  imported_pnl: "IMPORTED PNL",
+  estimated_onchain_pnl: "ESTIMATED ON-CHAIN",
+  real_pnl_locked: "REAL PNL LOCKED",
+  insufficient_data: "INSUFFICIENT DATA",
+};
+
+function WalletPnlPreviewCard({ runId }: { runId: number }) {
+  const [loading, setLoading] = useState(true);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [pnlResult, setPnlResult] =
+    useState<WalletRunPnlPreviewResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setPreviewError(null);
+    setPnlResult(null);
+    getWalletRunPnlPreview(runId)
+      .then((data) => {
+        if (!cancelled) {
+          setPnlResult(data);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPreviewError(
+            err instanceof Error
+              ? err.message
+              : "Wallet PnL preview read failed.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  return (
+    <div className="intelligence-table-block" aria-label="Wallet PnL preview">
+      <div className="table-toolbar">
+        <div className="table-toolbar-main">
+          <span className="section-eyebrow">Estimated preview — not Real PnL</span>
+          <h2>PnL preview</h2>
+          <p>
+            TON-denominated realized swap flows estimated only from the stored
+            swap rows of run #{runId}. Fees, non-TON swap legs, transfers, and
+            unrealized valuation are excluded. Real PnL stays locked until
+            every evidence requirement below is available.
+          </p>
+        </div>
+        <div className="table-meta">
+          <span className="badge badge-mock">REAL PNL LOCKED</span>
+        </div>
+      </div>
+
+      {loading && <p className="muted small">Deriving PnL preview…</p>}
+      {previewError && <WalletIngestionError message={previewError} />}
+
+      {pnlResult && (
+        <>
+          <div className="tonapi-wallet-result-head">
+            <span className="badge badge-provider">
+              MODE {PNL_MODE_LABELS[pnlResult.pnl_mode]}
+            </span>
+            <span
+              className={`badge ${confidenceBadgeClass(pnlResult.confidence)}`}
+            >
+              CONFIDENCE {pnlResult.confidence.toUpperCase()}
+            </span>
+          </div>
+
+          {pnlResult.token_flows.length > 0 ? (
+            <table className="data-table intelligence-table wallet-ingestion-table">
+              <thead>
+                <tr>
+                  <th>Token</th>
+                  <th>Buys</th>
+                  <th>Sells</th>
+                  <th>TON spent</th>
+                  <th>TON received</th>
+                  <th>Net TON flow</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pnlResult.token_flows.map((flow) => (
+                  <tr key={flow.token}>
+                    <td>{flow.token}</td>
+                    <td>{flow.buy_swap_count}</td>
+                    <td>{flow.sell_swap_count}</td>
+                    <td>{flow.ton_spent}</td>
+                    <td>{flow.ton_received}</td>
+                    <td>{flow.net_ton_flow}</td>
+                  </tr>
+                ))}
+                <tr>
+                  <td>Total</td>
+                  <td colSpan={2} />
+                  <td>{pnlResult.total_ton_spent}</td>
+                  <td>{pnlResult.total_ton_received}</td>
+                  <td>{pnlResult.net_ton_flow}</td>
+                </tr>
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted small">
+              No TON-denominated swap flows could be estimated from the stored
+              rows of this run.
+            </p>
+          )}
+
+          <p className="muted small">
+            Swap rows used: {pnlResult.swaps_used}; excluded:{" "}
+            {pnlResult.swaps_excluded}.
+          </p>
+
+          <div className="table-toolbar-main">
+            <span className="section-eyebrow">Real PnL evidence requirements</span>
+          </div>
+          {pnlResult.requirements.map((requirement) => (
+            <p className="muted small" key={requirement.code}>
+              <span
+                className={`badge ${
+                  requirement.available ? "badge-group" : "badge-warning"
+                }`}
+              >
+                {requirement.available ? "AVAILABLE" : "MISSING"}
+              </span>{" "}
+              {requirement.code}
+              {requirement.reason ? ` — ${requirement.reason}` : ""}
+            </p>
+          ))}
+
+          {pnlResult.warnings.map((warning) => (
+            <p className="muted small" key={warning}>
+              {warning}
+            </p>
+          ))}
+          <p className="muted small">{pnlResult.note}</p>
         </>
       )}
     </div>

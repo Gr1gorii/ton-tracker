@@ -83,6 +83,16 @@ def analyze_imported_trades(
         "has_more_wallets": len(wallets) > preview_limit,
         "source": source,
         "analysis_note": ANALYSIS_NOTE,
+        "pnl_mode": "imported_pnl",
+        "pnl_confidence": (
+            "high"
+            if summary["invalid_rows"] == 0 and summary["duplicate_rows"] == 0
+            else "medium"
+        ),
+        "pnl_note": (
+            "Imported-trade PnL relies entirely on user-supplied rows; it is "
+            "not verified against on-chain data and is not Real PnL."
+        ),
     }
 
 
