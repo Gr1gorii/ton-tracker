@@ -9,6 +9,8 @@ import {
   walletClusterCompareExportUrl,
   walletRunExportCsvUrl,
   walletRunExportUrl,
+  walletRunSignalsCsvExportUrl,
+  walletRunSignalsExportUrl,
 } from "../api";
 import type {
   TimeWindow,
@@ -1052,6 +1054,22 @@ function WalletEvidenceSignalsCard({ runId }: { runId: number }) {
 
       {signalsResult && (
         <>
+          <div className="tonapi-wallet-result-head">
+            <a
+              className="btn btn-ghost"
+              href={walletRunSignalsExportUrl(runId)}
+              download
+            >
+              Export signals (JSON)
+            </a>
+            <a
+              className="btn btn-ghost"
+              href={walletRunSignalsCsvExportUrl(runId)}
+              download
+            >
+              Export signals (CSV)
+            </a>
+          </div>
           {signalsResult.signals.length > 0 ? (
             <table className="data-table intelligence-table wallet-ingestion-table">
               <thead>

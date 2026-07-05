@@ -266,6 +266,14 @@ export async function getWalletRunSignals(
   return (await res.json()) as WalletRunSignalsResponse;
 }
 
+export function walletRunSignalsExportUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/signals/export.json`;
+}
+
+export function walletRunSignalsCsvExportUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/signals/export.csv`;
+}
+
 export function walletRunExportUrl(runId: number): string {
   return `${API_BASE}/api/wallets/ingest/${runId}/export.json`;
 }

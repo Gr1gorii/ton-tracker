@@ -179,3 +179,47 @@ def wallet_cluster_comparison_to_csv(comparison: dict) -> str:
         row["shared_tokens"] = "|".join(pair.get("shared_tokens", []))
         writer.writerow(row)
     return buffer.getvalue()
+
+
+# One row per evidence record: derived signals first, then rules that lacked
+# sufficient evidence, tagged by record_type. Blank cells mean the column does
+# not apply to that record type.
+RUN_SIGNALS_CSV_COLUMNS = [
+    "record_type",
+    "code",
+    "title",
+    "confidence",
+    "observation",
+    "evidence",
+    "reason",
+]
+
+
+def wallet_run_signals_to_csv(result: dict) -> str:
+    """Serialize run evidence signals into flattened CSV text.
+
+    One row per signal or insufficient-evidence record. Signals are heuristic
+    indicators only -- not a risk score or a verdict.
+    """
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer, fieldnames=RUN_SIGNALS_CSV_COLUMNS, extrasaction="ignore"
+    )
+    writer.writeheader()
+    for signal in result.get("signals", []):
+        row = dict(signal)
+        row["record_type"] = "signal"
+        # Flatten the evidence mapping for CSV.
+        row["evidence"] = "|".join(
+            f"{key}={value}" for key, value in signal.get("evidence", {}).items()
+        )
+        writer.writerow(row)
+    for item in result.get("insufficient_evidence", []):
+        writer.writerow(
+            {
+                "record_type": "insufficient_evidence",
+                "code": item.get("code"),
+                "reason": item.get("reason"),
+            }
+        )
+    return buffer.getvalue()

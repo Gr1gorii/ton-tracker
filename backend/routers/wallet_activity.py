@@ -84,6 +84,54 @@ def read_wallet_ingestion_run_signals(
     return derive_run_signals(result)
 
 
+@router.get("/ingest/{run_id}/signals/export.json")
+def export_wallet_ingestion_run_signals(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download rule-based evidence signals for one persisted run as JSON.
+
+    Heuristic, explainable observations only -- not a risk score or a verdict.
+    """
+    result = get_wallet_ingestion_run(run_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    body = json.dumps(derive_run_signals(result), ensure_ascii=False, indent=2)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_run_signals_{run_id}.json"
+            )
+        },
+    )
+
+
+@router.get("/ingest/{run_id}/signals/export.csv")
+def export_wallet_ingestion_run_signals_csv(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download rule-based evidence signals for one persisted run as CSV.
+
+    One row per signal or insufficient-evidence record; heuristic indicators
+    only -- not a risk score or a verdict.
+    """
+    result = get_wallet_ingestion_run(run_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    return Response(
+        content=export.wallet_run_signals_to_csv(derive_run_signals(result)),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_run_signals_{run_id}.csv"
+            )
+        },
+    )
+
+
 @router.get("/ingest/{run_id}/export.json")
 def export_wallet_ingestion_run(
     run_id: int = Path(..., ge=1),

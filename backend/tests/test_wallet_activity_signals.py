@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from database import Base, get_session
 from main import app
+from services.export import wallet_run_signals_to_csv
 from services.wallet_activity_signals import derive_run_signals
 
 
@@ -213,4 +214,96 @@ def test_signals_endpoint_on_mock_run(client, monkeypatch):
 
 def test_signals_endpoint_missing_run_returns_404(client):
     response = client.get("/api/wallets/ingest/999999/signals")
+    assert response.status_code == 404
+
+
+def _ingest_mock_run(client, monkeypatch) -> dict:
+    monkeypatch.setenv("DATA_MODE", "mock")
+    monkeypatch.delenv("WALLET_ACTIVITY_PROVIDER", raising=False)
+    return client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "7d",
+            "surfaces": ["transfers", "transactions", "swaps", "balances", "jettons"],
+        },
+    ).json()
+
+
+def test_signals_json_export_download(client, monkeypatch):
+    run = _ingest_mock_run(client, monkeypatch)
+
+    response = client.get(f"/api/wallets/ingest/{run['run_id']}/signals/export.json")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    disposition = response.headers["content-disposition"]
+    assert "attachment" in disposition
+    assert f"wallet_run_signals_{run['run_id']}.json" in disposition
+
+    body = response.json()
+    assert body["run_id"] == run["run_id"]
+    assert body["is_risk_score"] is False
+    assert "high_outflow_concentration" in _codes(body["insufficient_evidence"])
+    assert "not a risk score" in body["note"]
+
+
+def test_signals_csv_export_download(client, monkeypatch):
+    run = _ingest_mock_run(client, monkeypatch)
+
+    response = client.get(f"/api/wallets/ingest/{run['run_id']}/signals/export.csv")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    disposition = response.headers["content-disposition"]
+    assert "attachment" in disposition
+    assert f"wallet_run_signals_{run['run_id']}.csv" in disposition
+
+    lines = response.text.strip().splitlines()
+    assert lines[0] == (
+        "record_type,code,title,confidence,observation,evidence,reason"
+    )
+    # The deterministic mock wallet derives no signals; insufficient-evidence
+    # records must still be visible in the export.
+    data_rows = lines[1:]
+    assert any(row.startswith("insufficient_evidence,") for row in data_rows)
+    assert not any(row.startswith("signal,") for row in data_rows)
+
+
+def test_wallet_run_signals_to_csv_flattens_signal_rows():
+    csv_text = wallet_run_signals_to_csv(
+        {
+            "signals": [
+                {
+                    "code": "many_distinct_jettons",
+                    "title": "Many distinct jettons held",
+                    "confidence": "high",
+                    "observation": "The wallet holds 100 distinct non-TON jettons.",
+                    "evidence": {"distinct_jetton_count": 100},
+                    "note": "Heuristic indicator only.",
+                }
+            ],
+            "insufficient_evidence": [
+                {"code": "failed_transaction_ratio", "reason": "No transactions."}
+            ],
+        }
+    )
+
+    lines = csv_text.strip().splitlines()
+    assert lines[0] == (
+        "record_type,code,title,confidence,observation,evidence,reason"
+    )
+    assert lines[1].startswith("signal,many_distinct_jettons,")
+    assert "distinct_jetton_count=100" in lines[1]
+    assert lines[2].startswith("insufficient_evidence,failed_transaction_ratio,")
+    assert lines[2].endswith("No transactions.")
+
+
+def test_signals_json_export_missing_run_returns_404(client):
+    response = client.get("/api/wallets/ingest/999999/signals/export.json")
+    assert response.status_code == 404
+
+
+def test_signals_csv_export_missing_run_returns_404(client):
+    response = client.get("/api/wallets/ingest/999999/signals/export.csv")
     assert response.status_code == 404
