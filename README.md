@@ -1,14 +1,16 @@
-# TON Wallet Intelligence Dashboard — v0.12.0 SWAPS
+# TON Wallet Intelligence Dashboard — v0.13.4 SIGNALS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. The current milestone expands the guarded live
-wallet activity path to add DEX swaps (parsed from account events) alongside the
-existing native TON balance, account jetton balance snapshots, transaction-history
-timeline, and TON/jetton transfers — completing the live activity surface set,
-all behind explicit real-mode flags. Deterministic mock data remains the default
-executable ingestion path.
+mock-aware wallet analytics. On top of the guarded live wallet activity path
+(native TON balance, account jetton balance snapshots, transaction-history
+timeline, TON/jetton transfers, and DEX swaps behind explicit real-mode flags),
+the v0.13.x milestone adds run-scoped intelligence: probabilistic multi-wallet
+cluster comparison with JSON/CSV export, and a rule-based evidence signal layer
+with confidence levels, insufficient-evidence records, a workspace UI card, and
+JSON/CSV export. Deterministic mock data remains the default executable
+ingestion path.
 
-> **v0.12.0 SWAPS status — guarded TonAPI balances, transactions, transfers, and DEX swaps.**
+> **v0.13.4 SIGNALS status — run-scoped cluster comparison and evidence signals on top of guarded TonAPI activity ingestion.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -22,8 +24,15 @@ executable ingestion path.
 >   `WALLET_ACTIVITY_LIVE_ENABLED=true` enable the only live wallet activity
 >   path in this release: TonAPI native TON balance snapshots, account jetton
 >   balance snapshots, an ordered account transaction-history timeline,
->   TON/jetton transfer history, and DEX swaps from account events. PnL and
->   clustering remain unavailable.
+>   TON/jetton transfer history, and DEX swaps from account events. PnL
+>   remains unavailable.
+> - Persisted ingestion runs can be compared pairwise (2-25 runs) as a
+>   probabilistic behavioral-similarity signal with JSON/CSV export — never
+>   proof of common ownership.
+> - Each persisted run exposes rule-based evidence signals with confidence
+>   levels and explicit insufficient-evidence records, rendered in a workspace
+>   card and exportable as JSON/CSV. Signals are heuristic observations, not a
+>   risk score.
 > - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
 >   remain scaffold/limited coverage paths. They do not fetch or persist live
 >   wallet activity rows.
@@ -40,7 +49,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.12.0 SWAPS` product label and avoids
+> - User-facing UI copy uses the `v0.13.4 SIGNALS` product label and avoids
 >   stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -48,7 +57,7 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.12.0 SWAPS`
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.13.4 SIGNALS`
 >   is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
@@ -99,6 +108,10 @@ backend/
                          Jettons-only wallet intelligence preview builder
     wallet_activity_ingestion.py
                          Adapter-backed wallet activity ingestion persistence
+    wallet_activity_clustering.py
+                         Pairwise run comparison (probabilistic similarity)
+    wallet_activity_signals.py
+                         Rule-based evidence signals with confidence levels
   adapters/
     geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
     wallet_activity.py Wallet activity contract + mock/scaffold adapters
@@ -106,7 +119,8 @@ backend/
     stonfi.py          STON.fi pools preview adapter
     bitquery.py        DEX trades — mock/provider-limited Bitquery
     ton_provider.py    Legacy TON provider status/scaffold
-  tests/               pytest suite (parser, config, data_quality, PnL, clustering)
+  tests/               pytest suite (parser, config, data_quality, PnL,
+                       clustering, wallet activity, evidence signals)
 
 frontend/
   package.json
@@ -188,7 +202,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.12.0 SWAPS)
+## Data modes & providers (v0.13.4 SIGNALS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -223,7 +237,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns native TON balance, jetton balance snapshots, an ordered transaction-history timeline, TON/jetton transfer history, and DEX swaps (all from TonAPI); PnL and clustering remain unavailable |
+| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns native TON balance, jetton balance snapshots, an ordered transaction-history timeline, TON/jetton transfer history, and DEX swaps (all from TonAPI); PnL remains unavailable; cluster comparison and evidence signals run separately over persisted runs |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -240,7 +254,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.12.0 SWAPS` is the current user-facing
+API-version field, while `v0.13.4 SIGNALS` is the current user-facing
 product release label.
 
 ### `GET /api/providers/status`
@@ -283,15 +297,15 @@ only, not all TON DeFi.
 
 ### `POST /api/wallets/ingest/preview`
 Returns provider coverage for a wallet activity ingestion request. The default
-mock path is deterministic. In v0.12.0 the explicit TonAPI live guard can call
-TonAPI for native TON balance, account jetton balance, account
-transaction-history, TON/jetton transfer, and DEX swap coverage; PnL and
-clustering remain unavailable.
+mock path is deterministic. Since v0.12.0 the explicit TonAPI live guard can
+call TonAPI for native TON balance, account jetton balance, account
+transaction-history, TON/jetton transfer, and DEX swap coverage; PnL remains
+unavailable.
 
 ### `POST /api/wallets/ingest`
 Persists one adapter-backed wallet activity run and returns run id, status,
 provider evidence, normalized rows, unavailable surfaces, and warnings. The
-default path persists deterministic mock-normalized rows. The v0.12.0 TonAPI
+default path persists deterministic mock-normalized rows. The TonAPI
 live guard persists native TON balance snapshots, account jetton balance
 snapshots, ordered transaction-history rows, TON/jetton transfer rows, and DEX
 swap rows only.
@@ -299,6 +313,28 @@ swap rows only.
 ### `GET /api/wallets/ingest/{run_id}`
 Returns one persisted wallet activity run by id, including provider evidence,
 unavailable surfaces, normalized rows, and warnings.
+
+### `GET /api/wallets/ingest/{run_id}/export.json` and `.../export.csv`
+Download one persisted run as JSON, or as flattened one-row-per-activity CSV.
+
+### `GET /api/wallets/ingest/{run_id}/signals`
+Returns rule-based evidence signals for one persisted run: signal codes,
+confidence levels, observations, per-signal evidence, and explicit
+insufficient-evidence records. Heuristic observations only — not a risk score
+or a verdict.
+
+### `GET /api/wallets/ingest/{run_id}/signals/export.json` and `.../export.csv`
+Download the evidence signals for one persisted run as JSON, or as flattened
+CSV with one row per signal or insufficient-evidence record.
+
+### `POST /api/wallets/cluster/compare`
+Compares 2-25 persisted runs pairwise and returns a probabilistic
+behavioral-similarity signal (scores, bands, shared tokens) — never proof of
+common ownership.
+
+### `GET /api/wallets/cluster/compare/export.json` and `.../export.csv`
+Download a cluster comparison for the given `run_ids` as JSON or flattened
+pair CSV.
 
 ### `POST /api/bitquery/token-trades/preview`
 Returns a Bitquery token-trades preview when provider coverage is available.
@@ -360,7 +396,7 @@ holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
 
 ## Live guard checklist
 
-The `v0.12.0` wallet ingestion DEX-swaps milestone is considered ready when:
+The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 
 - the frontend builds with `npm run build`;
 - final browser QA confirms `RELEASE v0.12.0 SWAPS` on desktop and mobile
@@ -399,19 +435,21 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone is considered ready when:
 - accessibility pass remains intact for navigation, segmented controls, status
   strips, loading states, and dashboard sections;
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
-  `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identify the
-  product milestone as `v0.12.0 SWAPS`.
+  `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
+  product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
+  tracks the current release (`v0.13.4 SIGNALS`).
 
-## Roadmap beyond v0.12.0 SWAPS
+## Roadmap beyond v0.13.4 SIGNALS
 
+- Add a historical price source to unlock honest cost-basis PnL for real
+  wallet activity (current pricing is spot-only, so real PnL stays blocked).
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
-  into real PnL and clustering instead of mock-aware legacy analysis, once
-  ingestion quality is measurable.
+  into real PnL instead of mock-aware legacy analysis, once historical prices
+  exist and ingestion quality is measurable.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.
-- Connect real wallet activity to buyers, exports, and stored-run reports
-  instead of re-running mock analysis.
+- Connect real wallet activity to buyers and stored-run reports instead of
+  re-running mock analysis.
 - Expand Bitquery or alternate DEX coverage for TON trade history.
-- Export specific stored runs by id instead of re-running an analysis.
-- Calibrate clustering confidence with richer features and clearer uncertainty
-  bands.
+- Broaden the evidence-signal rule set and calibrate cluster-comparison
+  confidence with richer features and clearer uncertainty bands.

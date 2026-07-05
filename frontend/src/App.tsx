@@ -20,7 +20,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.12.0 SWAPS";
+const RELEASE_LABEL = "v0.13.4 SIGNALS";
 
 const navItems = [
   "DASHBOARD",
@@ -964,17 +964,22 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Legacy analytics"
-            text="Buyers, PnL, clusters, and exports are not wired to ingestion runs yet."
+            text="Buyers and PnL are not wired to ingestion runs yet; run exports, probabilistic cluster comparison, and evidence signals operate on stored runs only."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="PnL, clustering, and ownership proof remain unavailable in the live guard; swaps exclude USD valuation."
+            text="PnL and ownership proof remain unavailable; cluster comparison stays probabilistic; swaps exclude USD valuation."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Evidence signals"
+            text="Stored runs expose rule-based signals with confidence levels and explicit insufficient-evidence records — heuristic observations, not a risk score."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Version contract"
-            text="Backend VERSION remains the API-version field; v0.12.0 SWAPS is a product release label."
+            text={`Backend VERSION remains the API-version field; ${RELEASE_LABEL} is a product release label.`}
           />
         </div>
       </section>
