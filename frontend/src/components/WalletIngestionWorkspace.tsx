@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   compareWalletRuns,
   getWalletIngestionRun,
+  getWalletRunSignals,
   previewWalletIngestion,
   runWalletIngestion,
   walletClusterCompareCsvExportUrl,
@@ -15,11 +16,13 @@ import type {
   WalletActivitySummary,
   WalletBalanceSnapshotRecord,
   WalletClusterCompareResponse,
+  WalletEvidenceSignalRecord,
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
   WalletIngestionSurface,
   WalletIngestionWarningRecord,
+  WalletRunSignalsResponse,
   WalletSourceStatus,
   WalletSwapRecord,
   WalletTransactionRecord,
@@ -642,6 +645,9 @@ export default function WalletIngestionWorkspace({
           )}
           {runResult && <WalletActivityTables result={runResult} />}
           {runResult?.run_id != null && (
+            <WalletEvidenceSignalsCard runId={runResult.run_id} />
+          )}
+          {runResult?.run_id != null && (
             <WalletClusterCompareCard runId={runResult.run_id} />
           )}
         </div>
@@ -959,6 +965,148 @@ function ActivitySummaryCard({ summary }: { summary: WalletActivitySummary }) {
 
 function pairScoreKey(a: number, b: number): string {
   return a < b ? `${a}-${b}` : `${b}-${a}`;
+}
+
+function confidenceBadgeClass(
+  confidence: WalletEvidenceSignalRecord["confidence"],
+): string {
+  switch (confidence) {
+    case "high":
+      return "badge-group";
+    case "medium":
+      return "badge-warning";
+    default:
+      return "badge-provider";
+  }
+}
+
+function formatSignalEvidence(evidence: Record<string, unknown>): string {
+  const entries = Object.entries(evidence);
+  if (entries.length === 0) {
+    return "-";
+  }
+  return entries
+    .map(([key, value]) => {
+      const rendered =
+        typeof value === "object" && value !== null
+          ? JSON.stringify(value)
+          : String(value);
+      return `${key}=${rendered}`;
+    })
+    .join(", ");
+}
+
+function WalletEvidenceSignalsCard({ runId }: { runId: number }) {
+  const [loading, setLoading] = useState(true);
+  const [signalsError, setSignalsError] = useState<string | null>(null);
+  const [signalsResult, setSignalsResult] =
+    useState<WalletRunSignalsResponse | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setSignalsError(null);
+    setSignalsResult(null);
+    getWalletRunSignals(runId)
+      .then((data) => {
+        if (!cancelled) {
+          setSignalsResult(data);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setSignalsError(
+            err instanceof Error ? err.message : "Wallet signals read failed.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId]);
+
+  return (
+    <div className="intelligence-table-block" aria-label="Wallet evidence signals">
+      <div className="table-toolbar">
+        <div className="table-toolbar-main">
+          <span className="section-eyebrow">Heuristic observations — not a verdict</span>
+          <h2>Evidence signals</h2>
+          <p>
+            Rule-based observations derived only from the stored rows of run
+            #{runId}. Each signal explains the evidence behind it; absence of a
+            signal is not clearance.
+          </p>
+        </div>
+        <div className="table-meta">
+          <span className="badge badge-mock">NOT A RISK SCORE</span>
+        </div>
+      </div>
+
+      {loading && <p className="muted small">Deriving evidence signals…</p>}
+      {signalsError && <WalletIngestionError message={signalsError} />}
+
+      {signalsResult && (
+        <>
+          {signalsResult.signals.length > 0 ? (
+            <table className="data-table intelligence-table wallet-ingestion-table">
+              <thead>
+                <tr>
+                  <th>Signal</th>
+                  <th>Confidence</th>
+                  <th>Observation</th>
+                  <th>Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {signalsResult.signals.map((signal) => (
+                  <tr key={signal.code}>
+                    <td>{signal.title}</td>
+                    <td>
+                      <span
+                        className={`badge ${confidenceBadgeClass(signal.confidence)}`}
+                      >
+                        {signal.confidence.toUpperCase()}
+                      </span>
+                    </td>
+                    <td>{signal.observation}</td>
+                    <td>{formatSignalEvidence(signal.evidence)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted small">
+              No evidence signals were derived from the stored rows of this run.
+            </p>
+          )}
+          {signalsResult.signals.map((signal) => (
+            <p className="muted small" key={`note-${signal.code}`}>
+              {signal.note}
+            </p>
+          ))}
+          {signalsResult.insufficient_evidence.length > 0 && (
+            <p className="muted small">
+              Insufficient evidence:{" "}
+              {signalsResult.insufficient_evidence
+                .map((item) => `${item.code} — ${item.reason}`)
+                .join("; ")}
+            </p>
+          )}
+          {signalsResult.evaluated.length > 0 && (
+            <p className="muted small">
+              Evaluated rules: {signalsResult.evaluated.join(", ")}
+            </p>
+          )}
+          <p className="muted small">{signalsResult.note}</p>
+        </>
+      )}
+    </div>
+  );
 }
 
 function WalletClusterCompareCard({ runId }: { runId: number }) {

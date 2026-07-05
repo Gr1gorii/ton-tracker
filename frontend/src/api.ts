@@ -15,6 +15,7 @@ import type {
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
+  WalletRunSignalsResponse,
 } from "./types";
 
 // API base URL. Override with VITE_API_BASE at build/dev time.
@@ -251,6 +252,18 @@ export async function getWalletIngestionRun(
   }
 
   return (await res.json()) as WalletIngestionRunResponse;
+}
+
+export async function getWalletRunSignals(
+  runId: number,
+): Promise<WalletRunSignalsResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}/signals`);
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Wallet signals read failed"));
+  }
+
+  return (await res.json()) as WalletRunSignalsResponse;
 }
 
 export function walletRunExportUrl(runId: number): string {

@@ -649,3 +649,27 @@ export interface WalletClusterCompareResponse {
   is_cluster_proof: boolean;
   note: string;
 }
+
+export interface WalletEvidenceSignalRecord {
+  code: string;
+  title: string;
+  confidence: "low" | "medium" | "high";
+  observation: string;
+  evidence: Record<string, unknown>;
+  note: string;
+}
+
+export interface WalletEvidenceInsufficientRecord {
+  code: string;
+  reason: string;
+}
+
+export interface WalletRunSignalsResponse {
+  run_id?: number | null;
+  wallet_address: string;
+  is_risk_score: boolean;
+  evaluated: string[];
+  signals: WalletEvidenceSignalRecord[];
+  insufficient_evidence: WalletEvidenceInsufficientRecord[];
+  note: string;
+}
