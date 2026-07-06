@@ -14,6 +14,7 @@ does not provide full wallet intelligence by itself.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any, Optional
 import urllib.error
 import urllib.parse
@@ -552,7 +553,86 @@ class TonapiAdapter:
             ),
         )
 
+    def get_rates_chart_preview(
+        self,
+        token: str,
+        currency: str = "usd",
+        start_date: int | None = None,
+        end_date: int | None = None,
+    ) -> ProviderResult:
+        """Fetch provider-reported historical rate points from TonAPI.
+
+        ``token`` accepts ``"ton"`` or a jetton master address. Points are
+        provider-reported chart samples for preview only; they are not wired
+        into cost-basis or PnL math.
+        """
+        cleaned = self._optional_string(token)
+        if not cleaned:
+            return self._provider_error("TonAPI rates chart requires a token.")
+
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {"token": cleaned, "currency": currency, "points": []},
+                source="mock",
+                message="Mock mode: TonAPI is not actively queried.",
+            )
+
+        query: dict[str, Any] = {"token": cleaned, "currency": currency}
+        if start_date is not None:
+            query["start_date"] = start_date
+        if end_date is not None:
+            query["end_date"] = end_date
+
+        result = self.fetch_json("/v2/rates/chart", query=query)
+        if not result.ok:
+            return result
+
+        try:
+            points = self.normalize_rates_chart_response(result.data)
+        except ValueError as exc:
+            return self._provider_error(
+                f"TonAPI response had an unexpected structure: {exc}."
+            )
+
+        return ProviderResult.success(
+            {"token": cleaned, "currency": currency, "points": points},
+            source="real",
+            message=(
+                "TonAPI historical rate points fetched. Provider-reported "
+                "chart samples only; not wired into cost-basis or PnL math."
+            ),
+        )
+
     # -- Normalization ---------------------------------------------------
+
+    @classmethod
+    def normalize_rates_chart_response(cls, payload: Any) -> list[dict]:
+        if not isinstance(payload, dict):
+            raise ValueError("response must be an object")
+        points = payload.get("points")
+        if not isinstance(points, list):
+            raise ValueError("points must be a list")
+
+        normalized = []
+        for index, point in enumerate(points):
+            if not isinstance(point, (list, tuple)) or len(point) != 2:
+                raise ValueError(
+                    f"point {index} must be a [timestamp, price] pair"
+                )
+            timestamp, price = point
+            if isinstance(timestamp, bool) or not isinstance(
+                timestamp, (int, float)
+            ):
+                raise ValueError(f"point {index} timestamp must be a number")
+            if isinstance(price, bool) or not isinstance(price, (int, float)):
+                raise ValueError(f"point {index} price must be a number")
+            iso = (
+                datetime.fromtimestamp(int(timestamp), tz=timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+            normalized.append({"timestamp": iso, "price_usd": str(price)})
+        return normalized
 
     @classmethod
     def normalize_account_jettons_response(

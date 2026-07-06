@@ -302,6 +302,26 @@ class WalletRunSignalsResponse(BaseModel):
     note: str
 
 
+class HistoricalPricePointRecord(BaseModel):
+    timestamp: str
+    price_usd: str
+
+
+class HistoricalPricesPreviewResponse(BaseModel):
+    token: str
+    currency: Literal["usd"]
+    requested_start: str
+    requested_end: str
+    data_mode: Literal["mock", "real"]
+    source_status: Literal["mock", "real", "unavailable"]
+    points: list[HistoricalPricePointRecord] = Field(default_factory=list)
+    point_count: int
+    is_cost_basis_source: bool = False
+    warnings: list[str] = Field(default_factory=list)
+    message: str
+    note: str
+
+
 class WalletPnlRequirementRecord(BaseModel):
     code: str
     available: bool

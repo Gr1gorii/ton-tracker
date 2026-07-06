@@ -70,8 +70,8 @@ def build_real_pnl_requirements(run: dict) -> list[dict[str, Any]]:
             "code": "historical_prices",
             "available": False,
             "reason": (
-                "No historical price source is configured; only spot prices "
-                "exist."
+                "Historical prices are preview-only and not wired into "
+                "cost-basis math."
             ),
         },
         {
