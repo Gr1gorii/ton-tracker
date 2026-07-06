@@ -701,6 +701,23 @@ export interface WalletPnlTokenFlowRecord {
   net_ton_flow: string;
 }
 
+export interface WalletPnlUsdFlowRecord {
+  token: string;
+  usd_spent: string;
+  usd_received: string;
+  net_usd_flow: string;
+  matched_swap_count: number;
+}
+
+export interface WalletPnlHistoricalPricingRecord {
+  source_status: "mock" | "real" | "unavailable";
+  points_fetched: number;
+  swaps_matched: number;
+  swaps_unmatched: number;
+  tolerance_seconds: number;
+  note: string;
+}
+
 export interface WalletRunPnlPreviewResponse {
   run_id?: number | null;
   wallet_address: string;
@@ -718,6 +735,11 @@ export interface WalletRunPnlPreviewResponse {
   net_ton_flow: string;
   swaps_used: number;
   swaps_excluded: number;
+  usd_flows: WalletPnlUsdFlowRecord[];
+  total_usd_spent?: string | null;
+  total_usd_received?: string | null;
+  net_usd_flow?: string | null;
+  historical_pricing?: WalletPnlHistoricalPricingRecord | null;
   requirements: WalletPnlRequirementRecord[];
   missing_evidence: string[];
   warnings: string[];

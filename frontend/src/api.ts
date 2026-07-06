@@ -289,8 +289,12 @@ export async function previewHistoricalPrices(
 
 export async function getWalletRunPnlPreview(
   runId: number,
+  includeHistorical = false,
 ): Promise<WalletRunPnlPreviewResponse> {
-  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}/pnl-preview`);
+  const suffix = includeHistorical ? "?include_historical=true" : "";
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/pnl-preview${suffix}`,
+  );
 
   if (!res.ok) {
     throw new Error(await responseError(res, "Wallet PnL preview read failed"));

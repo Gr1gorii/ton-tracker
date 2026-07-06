@@ -1143,6 +1143,7 @@ const PNL_MODE_LABELS: Record<WalletRunPnlPreviewResponse["pnl_mode"], string> =
 
 function WalletPnlPreviewCard({ runId }: { runId: number }) {
   const [loading, setLoading] = useState(true);
+  const [includeHistorical, setIncludeHistorical] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [pnlResult, setPnlResult] =
     useState<WalletRunPnlPreviewResponse | null>(null);
@@ -1152,7 +1153,7 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
     setLoading(true);
     setPreviewError(null);
     setPnlResult(null);
-    getWalletRunPnlPreview(runId)
+    getWalletRunPnlPreview(runId, includeHistorical)
       .then((data) => {
         if (!cancelled) {
           setPnlResult(data);
@@ -1175,7 +1176,7 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, includeHistorical]);
 
   return (
     <div className="intelligence-table-block" aria-label="Wallet PnL preview">
@@ -1223,6 +1224,16 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
             >
               Export preview (CSV)
             </a>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => setIncludeHistorical((value) => !value)}
+              disabled={loading}
+            >
+              {includeHistorical
+                ? "Hide USD valuation"
+                : "Add USD valuation (historical)"}
+            </button>
           </div>
 
           {pnlResult.token_flows.length > 0 ? (
@@ -1268,6 +1279,57 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
             Swap rows used: {pnlResult.swaps_used}; excluded:{" "}
             {pnlResult.swaps_excluded}.
           </p>
+
+          {pnlResult.usd_flows.length > 0 && (
+            <>
+              <div className="table-toolbar-main">
+                <span className="section-eyebrow">
+                  USD-valued swap legs — historical prices, not cost basis
+                </span>
+              </div>
+              <table className="data-table intelligence-table wallet-ingestion-table">
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Matched swaps</th>
+                    <th>USD spent</th>
+                    <th>USD received</th>
+                    <th>Net USD flow</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pnlResult.usd_flows.map((flow) => (
+                    <tr key={`usd-${flow.token}`}>
+                      <td>{flow.token}</td>
+                      <td>{flow.matched_swap_count}</td>
+                      <td>{flow.usd_spent}</td>
+                      <td>{flow.usd_received}</td>
+                      <td>{flow.net_usd_flow}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td>Total</td>
+                    <td />
+                    <td>{pnlResult.total_usd_spent ?? "-"}</td>
+                    <td>{pnlResult.total_usd_received ?? "-"}</td>
+                    <td>{pnlResult.net_usd_flow ?? "-"}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          )}
+          {pnlResult.historical_pricing && (
+            <p className="muted small">
+              Historical pricing: source{" "}
+              {pnlResult.historical_pricing.source_status.toUpperCase()};{" "}
+              {pnlResult.historical_pricing.points_fetched} points;{" "}
+              {pnlResult.historical_pricing.swaps_matched} matched /{" "}
+              {pnlResult.historical_pricing.swaps_unmatched} unmatched swap
+              leg(s); tolerance{" "}
+              {pnlResult.historical_pricing.tolerance_seconds / 3600}h.{" "}
+              {pnlResult.historical_pricing.note}
+            </p>
+          )}
 
           <div className="table-toolbar-main">
             <span className="section-eyebrow">Real PnL evidence requirements</span>
