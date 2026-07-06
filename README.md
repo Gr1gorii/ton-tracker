@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.15.2 HISTORICAL PRICES
+# TON Wallet Intelligence Dashboard — v0.16.2 USD VALUATION
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -8,12 +8,12 @@ run-scoped intelligence covers probabilistic multi-wallet cluster comparison,
 a rule-based evidence signal layer, and an estimated PnL preview
 (TON-denominated realized swap flows with Real PnL locked behind explicit
 evidence requirements) — each with hedged language and JSON/CSV export where
-applicable. A historical price preview (provider-reported TonAPI rate points,
-explicitly not a cost-basis source yet) starts the track toward unlocking
-Real PnL. Deterministic mock data remains the default executable ingestion
-path.
+applicable. A historical price preview (provider-reported TonAPI rate points) powers an
+optional USD valuation of TON-side swap legs in the PnL preview; cost basis
+and fee handling still keep Real PnL locked. Deterministic mock data remains
+the default executable ingestion path.
 
-> **v0.15.2 HISTORICAL PRICES status — provider-reported historical rate preview (not cost basis), on top of PnL preview, cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
+> **v0.16.2 USD VALUATION status — optional historical USD valuation of swap legs in the PnL preview, on top of historical price preview, cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -48,6 +48,12 @@ path.
 >   mock default and no hidden fallback on provider failure. The preview is
 >   explicitly not a cost-basis source (`is_cost_basis_source: false`), so
 >   Real PnL stays locked.
+> - The PnL preview accepts `include_historical=true` to value TON-side swap
+>   legs in USD at the nearest historical TON/USD point (6h tolerance). The
+>   `historical_prices` requirement becomes available only when every leg
+>   matches a point; unmatched legs and provider failures stay visible with
+>   no hidden fallback. Cost basis and fee handling remain missing, so Real
+>   PnL stays locked.
 > - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
 >   remain scaffold/limited coverage paths. They do not fetch or persist live
 >   wallet activity rows.
@@ -64,7 +70,7 @@ path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.15.2 HISTORICAL PRICES` product label
+> - User-facing UI copy uses the `v0.16.2 USD VALUATION` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -72,8 +78,8 @@ path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.15.2 HISTORICAL
->   PRICES` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.16.2 USD
+>   VALUATION` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -129,6 +135,7 @@ backend/
     wallet_activity_signals.py
                          Rule-based evidence signals with confidence levels
     pnl_preview.py       Estimated PnL preview (Real PnL stays locked)
+    pnl_usd_valuation.py USD valuation of swap legs via historical prices
     historical_pricing.py
                          Historical rate point preview (not a cost-basis source)
   adapters/
@@ -221,7 +228,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.15.2 HISTORICAL PRICES)
+## Data modes & providers (v0.16.2 USD VALUATION)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -273,7 +280,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.15.2 HISTORICAL PRICES` is the current
+API-version field, while `v0.16.2 USD VALUATION` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -354,6 +361,14 @@ reasons, and warnings. Estimate only — never Real PnL; Real PnL stays locked
 until transaction history, swap evidence, historical prices, cost basis, and
 fee handling are all available. Imported-trade analysis responses are tagged
 `pnl_mode: imported_pnl` with their own confidence and note.
+
+With `include_historical=true` the response additionally values TON-side
+swap legs in USD at the nearest historical TON/USD point (6h tolerance):
+`usd_flows`, USD totals, and a `historical_pricing` evidence block
+(source status, points fetched, matched/unmatched legs). The
+`historical_prices` requirement becomes available only at full match
+coverage; unmatched legs stay visible and no fallback data is substituted.
+The default (parameter omitted) response is unchanged and stays offline.
 
 ### `GET /api/prices/historical/preview`
 Returns provider-reported historical rate points for one `token` (`"ton"` or
@@ -473,13 +488,14 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.15.2 HISTORICAL PRICES`).
+  tracks the current release (`v0.16.2 USD VALUATION`).
 
-## Roadmap beyond v0.15.2 HISTORICAL PRICES
+## Roadmap beyond v0.16.2 USD VALUATION
 
-- Wire the historical price preview into cost-basis math so the
-  `historical_prices` Real-PnL requirement can honestly become available
-  (points exist as preview-only today; Real PnL stays locked).
+- Incorporate recorded transaction fees (`fee_ton`) into the PnL preview so
+  the `fee_handling` Real-PnL requirement can honestly become available.
+- Extend cost-basis coverage beyond the run window (acquisition history) so
+  the `cost_basis` requirement can become available and Real PnL can unlock.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
   into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.
