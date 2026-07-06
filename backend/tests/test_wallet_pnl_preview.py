@@ -156,6 +156,57 @@ def test_partial_token_quantity_warning():
     assert any("token quantities are partial" in w for w in result["warnings"])
 
 
+def test_fee_handling_flips_when_all_used_swaps_have_fees():
+    run = {
+        "transactions": [
+            {"tx_hash": "t1", "fee_ton": "0.05", "success": "success"},
+            {"tx_hash": "t2", "fee_ton": "0.07", "success": "success"},
+        ],
+        "swaps": [
+            {"tx_hash": "t1", "token_in": "TON", "amount_in": "10",
+             "token_out": "JETA", "amount_out": "100"},
+            {"tx_hash": "t2", "token_in": "JETA", "amount_in": "30",
+             "token_out": "TON", "amount_out": "6"},
+        ],
+    }
+    result = derive_run_pnl_preview(run)
+
+    flow = result["token_flows"][0]
+    assert flow["fee_ton"] == "0.12"
+    assert flow["net_ton_flow"] == "-4"
+    assert flow["net_ton_flow_after_fees"] == "-4.12"
+    assert result["total_fees_ton"] == "0.12"
+    assert result["net_ton_flow_after_fees"] == "-4.12"
+
+    fee_req = _requirement(result, "fee_handling")
+    assert fee_req["available"] is True
+    assert fee_req["reason"] is None
+    # Real PnL still locked by historical prices and cost basis.
+    assert result["real_pnl_locked"] is True
+    assert len(result["missing_evidence"]) == 2
+
+
+def test_partial_fee_coverage_keeps_requirement_missing():
+    run = {
+        "transactions": [
+            {"tx_hash": "t1", "fee_ton": "0.05", "success": "success"},
+        ],
+        "swaps": [
+            {"tx_hash": "t1", "token_in": "TON", "amount_in": "10",
+             "token_out": "JETA", "amount_out": "100"},
+            {"tx_hash": "t-unknown", "token_in": "TON", "amount_in": "5",
+             "token_out": "JETA", "amount_out": "50"},
+        ],
+    }
+    result = derive_run_pnl_preview(run)
+
+    fee_req = _requirement(result, "fee_handling")
+    assert fee_req["available"] is False
+    assert "Only 1 of 2" in fee_req["reason"]
+    assert any("after-fee figures are partial" in w for w in result["warnings"])
+    assert result["token_flows"][0]["fee_ton"] == "0.05"
+
+
 def test_wallet_pnl_preview_to_csv_flattens_flows_and_requirements():
     csv_text = wallet_pnl_preview_to_csv(
         derive_run_pnl_preview(
@@ -176,8 +227,8 @@ def test_wallet_pnl_preview_to_csv_flattens_flows_and_requirements():
     lines = csv_text.strip().splitlines()
     assert lines[0] == (
         "record_type,token,buy_swap_count,sell_swap_count,token_bought_qty,"
-        "token_sold_qty,ton_spent,ton_received,net_ton_flow,code,available,"
-        "reason"
+        "token_sold_qty,ton_spent,ton_received,net_ton_flow,fee_ton,"
+        "net_ton_flow_after_fees,code,available,reason"
     )
     assert lines[1].startswith("token_flow,JETA,1,0,100,0,10,0,-10,")
     requirement_rows = [

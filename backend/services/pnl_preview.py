@@ -21,9 +21,10 @@ from typing import Any
 PNL_PREVIEW_NOTE = (
     "Estimated PnL preview only -- not Real PnL. Figures are TON-denominated "
     "realized swap flows computed from this run's ingested swap rows. They "
-    "exclude transaction fees, non-TON swap legs, transfers, historical "
-    "prices, and unrealized valuation. Real PnL stays locked until every "
-    "evidence requirement is available."
+    "exclude non-TON swap legs, transfers, historical prices, and unrealized "
+    "valuation; recorded transaction fees are netted separately in the "
+    "after-fee figures. Real PnL stays locked until every evidence "
+    "requirement is available."
 )
 
 ZERO = Decimal("0")
@@ -93,6 +94,18 @@ def build_real_pnl_requirements(run: dict) -> list[dict[str, Any]]:
     ]
 
 
+def _set_requirement_entry(
+    requirements: list[dict[str, Any]],
+    code: str,
+    available: bool,
+    reason: str | None,
+) -> None:
+    for requirement in requirements:
+        if requirement["code"] == code:
+            requirement["available"] = available
+            requirement["reason"] = reason
+
+
 def _empty_flow(token: str) -> dict[str, Any]:
     return {
         "token": token,
@@ -102,6 +115,7 @@ def _empty_flow(token: str) -> dict[str, Any]:
         "token_sold_qty": ZERO,
         "ton_spent": ZERO,
         "ton_received": ZERO,
+        "fee_ton": ZERO,
     }
 
 
@@ -109,18 +123,21 @@ def derive_run_pnl_preview(run: dict) -> dict[str, Any]:
     """Return an estimated PnL preview derived from one run response."""
     swaps = run.get("swaps") or []
     requirements = build_real_pnl_requirements(run)
-    missing_evidence = [
-        f"{req['code']}: {req['reason']}"
-        for req in requirements
-        if not req["available"]
-    ]
-    real_pnl_locked = any(not req["available"] for req in requirements)
     warnings: list[str] = []
+
+    # Recorded fees, keyed by transaction hash, for fee handling.
+    fee_by_tx_hash: dict[str, Decimal] = {}
+    for transaction in run.get("transactions") or []:
+        tx_hash = transaction.get("tx_hash")
+        fee = _decimal(transaction.get("fee_ton"))
+        if tx_hash and fee is not None:
+            fee_by_tx_hash[tx_hash] = fee
 
     flows: dict[str, dict[str, Any]] = {}
     swaps_used = 0
     swaps_excluded = 0
     partial_quantity_rows = 0
+    fees_matched = 0
     for swap in swaps:
         token_in = (swap.get("token_in") or "").upper()
         token_out = (swap.get("token_out") or "").upper()
@@ -147,6 +164,41 @@ def derive_run_pnl_preview(run: dict) -> dict[str, Any]:
             swaps_used += 1
         else:
             swaps_excluded += 1
+            continue
+
+        fee = fee_by_tx_hash.get(swap.get("tx_hash") or "")
+        if fee is not None:
+            flow["fee_ton"] += fee
+            fees_matched += 1
+
+    if swaps_used == 0:
+        _set_requirement_entry(
+            requirements,
+            "fee_handling",
+            False,
+            "No usable swap rows exist to attach recorded fees to.",
+        )
+    elif fees_matched == swaps_used:
+        _set_requirement_entry(requirements, "fee_handling", True, None)
+    else:
+        _set_requirement_entry(
+            requirements,
+            "fee_handling",
+            False,
+            f"Only {fees_matched} of {swaps_used} used swap rows have a "
+            "recorded transaction fee.",
+        )
+        warnings.append(
+            f"{swaps_used - fees_matched} used swap row(s) have no recorded "
+            "transaction fee; after-fee figures are partial."
+        )
+
+    missing_evidence = [
+        f"{req['code']}: {req['reason']}"
+        for req in requirements
+        if not req["available"]
+    ]
+    real_pnl_locked = any(not req["available"] for req in requirements)
 
     if swaps_excluded:
         warnings.append(
@@ -183,10 +235,13 @@ def derive_run_pnl_preview(run: dict) -> dict[str, Any]:
     token_flows = []
     total_ton_spent = ZERO
     total_ton_received = ZERO
+    total_fees_ton = ZERO
     for token in sorted(flows):
         flow = flows[token]
         total_ton_spent += flow["ton_spent"]
         total_ton_received += flow["ton_received"]
+        total_fees_ton += flow["fee_ton"]
+        net_flow = flow["ton_received"] - flow["ton_spent"]
         token_flows.append(
             {
                 "token": flow["token"],
@@ -196,10 +251,13 @@ def derive_run_pnl_preview(run: dict) -> dict[str, Any]:
                 "token_sold_qty": _money(flow["token_sold_qty"]),
                 "ton_spent": _money(flow["ton_spent"]),
                 "ton_received": _money(flow["ton_received"]),
-                "net_ton_flow": _money(flow["ton_received"] - flow["ton_spent"]),
+                "net_ton_flow": _money(net_flow),
+                "fee_ton": _money(flow["fee_ton"]),
+                "net_ton_flow_after_fees": _money(net_flow - flow["fee_ton"]),
             }
         )
 
+    net_total = total_ton_received - total_ton_spent
     return {
         "run_id": run.get("run_id"),
         "wallet_address": run.get("wallet_address"),
@@ -210,7 +268,9 @@ def derive_run_pnl_preview(run: dict) -> dict[str, Any]:
         "token_flows": token_flows,
         "total_ton_spent": _money(total_ton_spent),
         "total_ton_received": _money(total_ton_received),
-        "net_ton_flow": _money(total_ton_received - total_ton_spent),
+        "net_ton_flow": _money(net_total),
+        "total_fees_ton": _money(total_fees_ton),
+        "net_ton_flow_after_fees": _money(net_total - total_fees_ton),
         "swaps_used": swaps_used,
         "swaps_excluded": swaps_excluded,
         "requirements": requirements,

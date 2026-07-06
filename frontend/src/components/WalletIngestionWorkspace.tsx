@@ -1246,6 +1246,8 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                   <th>TON spent</th>
                   <th>TON received</th>
                   <th>Net TON flow</th>
+                  <th>Fees (TON)</th>
+                  <th>Net after fees</th>
                 </tr>
               </thead>
               <tbody>
@@ -1257,6 +1259,8 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                     <td>{flow.ton_spent}</td>
                     <td>{flow.ton_received}</td>
                     <td>{flow.net_ton_flow}</td>
+                    <td>{flow.fee_ton}</td>
+                    <td>{flow.net_ton_flow_after_fees}</td>
                   </tr>
                 ))}
                 <tr>
@@ -1265,6 +1269,8 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                   <td>{pnlResult.total_ton_spent}</td>
                   <td>{pnlResult.total_ton_received}</td>
                   <td>{pnlResult.net_ton_flow}</td>
+                  <td>{pnlResult.total_fees_ton}</td>
+                  <td>{pnlResult.net_ton_flow_after_fees}</td>
                 </tr>
               </tbody>
             </table>

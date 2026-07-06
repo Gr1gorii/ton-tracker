@@ -208,6 +208,8 @@ PNL_PREVIEW_CSV_COLUMNS = [
     "ton_spent",
     "ton_received",
     "net_ton_flow",
+    "fee_ton",
+    "net_ton_flow_after_fees",
     "code",
     "available",
     "reason",

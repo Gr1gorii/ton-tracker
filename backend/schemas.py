@@ -337,6 +337,8 @@ class WalletPnlTokenFlowRecord(BaseModel):
     ton_spent: str
     ton_received: str
     net_ton_flow: str
+    fee_ton: str
+    net_ton_flow_after_fees: str
 
 
 class WalletPnlUsdFlowRecord(BaseModel):
@@ -372,6 +374,8 @@ class WalletRunPnlPreviewResponse(BaseModel):
     total_ton_spent: str
     total_ton_received: str
     net_ton_flow: str
+    total_fees_ton: str
+    net_ton_flow_after_fees: str
     swaps_used: int
     swaps_excluded: int
     usd_flows: list[WalletPnlUsdFlowRecord] = Field(default_factory=list)

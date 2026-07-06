@@ -23,8 +23,8 @@ MATCH_TOLERANCE_SECONDS = 21600  # 6 hours
 HISTORICAL_VALUATION_NOTE = (
     "USD figures value only the TON leg of matched swaps at the nearest "
     "historical TON/USD point (6h tolerance). They are in-window realized "
-    "flows, not cost-basis PnL: cost basis and fee handling remain "
-    "unavailable, so Real PnL stays locked."
+    "flows, not cost-basis PnL: fees are accounted in TON terms only and "
+    "cost basis remains unavailable, so Real PnL stays locked."
 )
 
 ZERO = Decimal("0")

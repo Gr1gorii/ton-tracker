@@ -699,6 +699,8 @@ export interface WalletPnlTokenFlowRecord {
   ton_spent: string;
   ton_received: string;
   net_ton_flow: string;
+  fee_ton: string;
+  net_ton_flow_after_fees: string;
 }
 
 export interface WalletPnlUsdFlowRecord {
@@ -733,6 +735,8 @@ export interface WalletRunPnlPreviewResponse {
   total_ton_spent: string;
   total_ton_received: string;
   net_ton_flow: string;
+  total_fees_ton: string;
+  net_ton_flow_after_fees: string;
   swaps_used: number;
   swaps_excluded: number;
   usd_flows: WalletPnlUsdFlowRecord[];
