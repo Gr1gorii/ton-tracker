@@ -339,6 +339,23 @@ class WalletPnlTokenFlowRecord(BaseModel):
     net_ton_flow: str
 
 
+class WalletPnlUsdFlowRecord(BaseModel):
+    token: str
+    usd_spent: str
+    usd_received: str
+    net_usd_flow: str
+    matched_swap_count: int
+
+
+class WalletPnlHistoricalPricingRecord(BaseModel):
+    source_status: Literal["mock", "real", "unavailable"]
+    points_fetched: int
+    swaps_matched: int
+    swaps_unmatched: int
+    tolerance_seconds: int
+    note: str
+
+
 class WalletRunPnlPreviewResponse(BaseModel):
     run_id: int | None = None
     wallet_address: str
@@ -357,6 +374,11 @@ class WalletRunPnlPreviewResponse(BaseModel):
     net_ton_flow: str
     swaps_used: int
     swaps_excluded: int
+    usd_flows: list[WalletPnlUsdFlowRecord] = Field(default_factory=list)
+    total_usd_spent: str | None = None
+    total_usd_received: str | None = None
+    net_usd_flow: str | None = None
+    historical_pricing: WalletPnlHistoricalPricingRecord | None = None
     requirements: list[WalletPnlRequirementRecord] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

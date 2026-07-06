@@ -15,6 +15,7 @@ from schemas import WalletIngestionRunResponse, WalletRunSignalsResponse
 from schemas import WalletRunPnlPreviewResponse
 from services import export
 from services.pnl_preview import derive_run_pnl_preview
+from services.pnl_usd_valuation import derive_run_pnl_preview_with_historical
 from services.wallet_activity_clustering import compare_wallet_activity
 from services.wallet_activity_signals import derive_run_signals
 from services.wallet_activity_ingestion import (
@@ -92,17 +93,28 @@ def read_wallet_ingestion_run_signals(
 )
 def read_wallet_ingestion_run_pnl_preview(
     run_id: int = Path(..., ge=1),
+    include_historical: bool = Query(
+        False,
+        description=(
+            "Also value TON-side swap legs in USD at the nearest historical "
+            "TON/USD point. In-window flows only, never cost-basis PnL."
+        ),
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
     """Return an estimated PnL preview for one persisted run.
 
     Estimate only -- never Real PnL. Real PnL stays locked until transaction
     history, swap evidence, historical prices, cost basis, and fee handling
-    are all available; missing evidence is reported explicitly.
+    are all available; missing evidence is reported explicitly. With
+    ``include_historical=true`` the response also values TON-side swap legs
+    in USD using historical price points.
     """
     result = get_wallet_ingestion_run(run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    if include_historical:
+        return derive_run_pnl_preview_with_historical(result)
     return derive_run_pnl_preview(result)
 
 
