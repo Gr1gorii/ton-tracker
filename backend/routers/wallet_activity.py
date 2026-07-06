@@ -106,6 +106,55 @@ def read_wallet_ingestion_run_pnl_preview(
     return derive_run_pnl_preview(result)
 
 
+@router.get("/ingest/{run_id}/pnl-preview/export.json")
+def export_wallet_ingestion_run_pnl_preview(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download the estimated PnL preview for one persisted run as JSON.
+
+    Estimate only -- never Real PnL; the locked-requirement checklist and
+    missing-evidence reasons are included in the payload.
+    """
+    result = get_wallet_ingestion_run(run_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    body = json.dumps(derive_run_pnl_preview(result), ensure_ascii=False, indent=2)
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_pnl_preview_{run_id}.json"
+            )
+        },
+    )
+
+
+@router.get("/ingest/{run_id}/pnl-preview/export.csv")
+def export_wallet_ingestion_run_pnl_preview_csv(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Download the estimated PnL preview for one persisted run as CSV.
+
+    One row per estimated token flow or Real-PnL requirement record;
+    estimate only -- never Real PnL.
+    """
+    result = get_wallet_ingestion_run(run_id, session)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    return Response(
+        content=export.wallet_pnl_preview_to_csv(derive_run_pnl_preview(result)),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=wallet_pnl_preview_{run_id}.csv"
+            )
+        },
+    )
+
+
 @router.get("/ingest/{run_id}/signals/export.json")
 def export_wallet_ingestion_run_signals(
     run_id: int = Path(..., ge=1),

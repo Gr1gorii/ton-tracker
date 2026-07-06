@@ -279,6 +279,14 @@ export async function getWalletRunPnlPreview(
   return (await res.json()) as WalletRunPnlPreviewResponse;
 }
 
+export function walletRunPnlPreviewExportUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/pnl-preview/export.json`;
+}
+
+export function walletRunPnlPreviewCsvExportUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/pnl-preview/export.csv`;
+}
+
 export function walletRunSignalsExportUrl(runId: number): string {
   return `${API_BASE}/api/wallets/ingest/${runId}/signals/export.json`;
 }

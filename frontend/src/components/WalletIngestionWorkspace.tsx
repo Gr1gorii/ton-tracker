@@ -10,6 +10,8 @@ import {
   walletClusterCompareExportUrl,
   walletRunExportCsvUrl,
   walletRunExportUrl,
+  walletRunPnlPreviewCsvExportUrl,
+  walletRunPnlPreviewExportUrl,
   walletRunSignalsCsvExportUrl,
   walletRunSignalsExportUrl,
 } from "../api";
@@ -1207,6 +1209,20 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
             >
               CONFIDENCE {pnlResult.confidence.toUpperCase()}
             </span>
+            <a
+              className="btn btn-ghost"
+              href={walletRunPnlPreviewExportUrl(runId)}
+              download
+            >
+              Export preview (JSON)
+            </a>
+            <a
+              className="btn btn-ghost"
+              href={walletRunPnlPreviewCsvExportUrl(runId)}
+              download
+            >
+              Export preview (CSV)
+            </a>
           </div>
 
           {pnlResult.token_flows.length > 0 ? (

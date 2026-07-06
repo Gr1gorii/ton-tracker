@@ -195,6 +195,52 @@ RUN_SIGNALS_CSV_COLUMNS = [
 ]
 
 
+# One row per record: estimated token flows first, then the Real-PnL evidence
+# requirement checklist, tagged by record_type. Blank cells mean the column
+# does not apply to that record type.
+PNL_PREVIEW_CSV_COLUMNS = [
+    "record_type",
+    "token",
+    "buy_swap_count",
+    "sell_swap_count",
+    "token_bought_qty",
+    "token_sold_qty",
+    "ton_spent",
+    "ton_received",
+    "net_ton_flow",
+    "code",
+    "available",
+    "reason",
+]
+
+
+def wallet_pnl_preview_to_csv(result: dict) -> str:
+    """Serialize an estimated PnL preview into flattened CSV text.
+
+    One row per estimated token flow or Real-PnL requirement record. The
+    figures are an estimate only -- never Real PnL.
+    """
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer, fieldnames=PNL_PREVIEW_CSV_COLUMNS, extrasaction="ignore"
+    )
+    writer.writeheader()
+    for flow in result.get("token_flows", []):
+        row = dict(flow)
+        row["record_type"] = "token_flow"
+        writer.writerow(row)
+    for requirement in result.get("requirements", []):
+        writer.writerow(
+            {
+                "record_type": "requirement",
+                "code": requirement.get("code"),
+                "available": requirement.get("available"),
+                "reason": requirement.get("reason") or "",
+            }
+        )
+    return buffer.getvalue()
+
+
 def wallet_run_signals_to_csv(result: dict) -> str:
     """Serialize run evidence signals into flattened CSV text.
 
