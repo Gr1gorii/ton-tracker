@@ -1,16 +1,17 @@
-# TON Wallet Intelligence Dashboard — v0.13.4 SIGNALS
+# TON Wallet Intelligence Dashboard — v0.14.1 PNL PREVIEW
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
 (native TON balance, account jetton balance snapshots, transaction-history
 timeline, TON/jetton transfers, and DEX swaps behind explicit real-mode flags),
-the v0.13.x milestone adds run-scoped intelligence: probabilistic multi-wallet
-cluster comparison with JSON/CSV export, and a rule-based evidence signal layer
-with confidence levels, insufficient-evidence records, a workspace UI card, and
-JSON/CSV export. Deterministic mock data remains the default executable
-ingestion path.
+run-scoped intelligence covers probabilistic multi-wallet cluster comparison,
+a rule-based evidence signal layer, and an estimated PnL preview
+(TON-denominated realized swap flows with Real PnL locked behind explicit
+evidence requirements) — each with hedged language and JSON/CSV export where
+applicable. Deterministic mock data remains the default executable ingestion
+path.
 
-> **v0.13.4 SIGNALS status — run-scoped cluster comparison and evidence signals on top of guarded TonAPI activity ingestion.**
+> **v0.14.1 PNL PREVIEW status — estimated PnL preview with locked Real PnL, on top of cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -33,6 +34,13 @@ ingestion path.
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
 >   risk score.
+> - Each persisted run exposes an estimated PnL preview (`pnl_mode`:
+>   `imported_pnl` / `estimated_onchain_pnl` / `real_pnl_locked` /
+>   `insufficient_data`, confidence `high`/`medium`/`low`/`unavailable`):
+>   TON-denominated realized swap flows only, never labeled Real PnL. Real
+>   PnL stays locked until transaction history, swap evidence, historical
+>   prices, cost basis, and fee handling are all available; missing evidence
+>   is listed explicitly.
 > - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
 >   remain scaffold/limited coverage paths. They do not fetch or persist live
 >   wallet activity rows.
@@ -49,16 +57,16 @@ ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.13.4 SIGNALS` product label and avoids
->   stale product version references.
+> - User-facing UI copy uses the `v0.14.1 PNL PREVIEW` product label and
+>   avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
 >   `REAL_WALLET_INGESTION_PLAN.md`.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.13.4 SIGNALS`
->   is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.14.1 PNL
+>   PREVIEW` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -112,6 +120,7 @@ backend/
                          Pairwise run comparison (probabilistic similarity)
     wallet_activity_signals.py
                          Rule-based evidence signals with confidence levels
+    pnl_preview.py       Estimated PnL preview (Real PnL stays locked)
   adapters/
     geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
     wallet_activity.py Wallet activity contract + mock/scaffold adapters
@@ -202,7 +211,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.13.4 SIGNALS)
+## Data modes & providers (v0.14.1 PNL PREVIEW)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -254,7 +263,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.13.4 SIGNALS` is the current user-facing
+API-version field, while `v0.14.1 PNL PREVIEW` is the current user-facing
 product release label.
 
 ### `GET /api/providers/status`
@@ -326,6 +335,15 @@ or a verdict.
 ### `GET /api/wallets/ingest/{run_id}/signals/export.json` and `.../export.csv`
 Download the evidence signals for one persisted run as JSON, or as flattened
 CSV with one row per signal or insufficient-evidence record.
+
+### `GET /api/wallets/ingest/{run_id}/pnl-preview`
+Returns an estimated PnL preview for one persisted run: `pnl_mode`,
+confidence, TON-denominated realized swap flows per token, swap rows
+used/excluded, the Real-PnL evidence requirement checklist, missing-evidence
+reasons, and warnings. Estimate only — never Real PnL; Real PnL stays locked
+until transaction history, swap evidence, historical prices, cost basis, and
+fee handling are all available. Imported-trade analysis responses are tagged
+`pnl_mode: imported_pnl` with their own confidence and note.
 
 ### `POST /api/wallets/cluster/compare`
 Compares 2-25 persisted runs pairwise and returns a probabilistic
@@ -437,14 +455,15 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.13.4 SIGNALS`).
+  tracks the current release (`v0.14.1 PNL PREVIEW`).
 
-## Roadmap beyond v0.13.4 SIGNALS
+## Roadmap beyond v0.14.1 PNL PREVIEW
 
-- Add a historical price source to unlock honest cost-basis PnL for real
-  wallet activity (current pricing is spot-only, so real PnL stays blocked).
+- Add a historical price source to unlock honest cost-basis Real PnL (current
+  pricing is spot-only, so Real PnL stays locked; the estimated preview covers
+  TON-denominated realized swap flows only).
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
-  into real PnL instead of mock-aware legacy analysis, once historical prices
+  into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.
 - Keep backend `VERSION` as an API-version field until the backend API contract
   changes.

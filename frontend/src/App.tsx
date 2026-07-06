@@ -20,7 +20,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.13.4 SIGNALS";
+const RELEASE_LABEL = "v0.14.1 PNL PREVIEW";
 
 const navItems = [
   "DASHBOARD",
@@ -970,6 +970,11 @@ function EvidenceColumn({
             tone="scoped"
             label="Data contract"
             text="PnL and ownership proof remain unavailable; cluster comparison stays probabilistic; swaps exclude USD valuation."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="PnL preview"
+            text="Stored runs expose a TON-denominated estimated PnL preview; Real PnL stays locked behind explicit evidence requirements and is never claimed."
           />
           <ReleaseReadinessItem
             tone="ready"
