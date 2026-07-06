@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.14.1 PNL PREVIEW";
+const RELEASE_LABEL = "v0.15.2 HISTORICAL PRICES";
 
 const navItems = [
   "DASHBOARD",
@@ -980,6 +980,11 @@ function EvidenceColumn({
             tone="scoped"
             label="Data contract"
             text="PnL and ownership proof remain unavailable; cluster comparison stays probabilistic; swaps exclude USD valuation."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Historical prices"
+            text="Provider-reported historical rate points are preview-only; they are not wired into cost-basis math, so Real PnL stays locked."
           />
           <ReleaseReadinessItem
             tone="ready"
