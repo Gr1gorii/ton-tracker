@@ -10,6 +10,7 @@ import WalletGroups from "./components/WalletGroups";
 import CommonHoldings from "./components/CommonHoldings";
 import InterestingWallets from "./components/InterestingWallets";
 import ExportButtons from "./components/ExportButtons";
+import HistoricalPricesPreviewPanel from "./components/HistoricalPricesPreviewPanel";
 import ImportPreviewPanel from "./components/ImportPreviewPanel";
 import BitqueryTokenTradesPanel from "./components/BitqueryTokenTradesPanel";
 import StonfiPoolsPreviewPanel from "./components/StonfiPoolsPreviewPanel";
@@ -637,6 +638,15 @@ export default function App() {
                   </main>
                 )}
               </div>
+            </DashboardSection>
+
+            <DashboardSection
+              id="historical-prices"
+              eyebrow="Preview only — not cost basis"
+              title="Historical prices"
+              description="Provider-reported historical rate points for one token. Preview and export scope only: points are not wired into cost-basis or PnL math, so Real PnL stays locked."
+            >
+              <HistoricalPricesPreviewPanel />
             </DashboardSection>
 
             <DashboardSection

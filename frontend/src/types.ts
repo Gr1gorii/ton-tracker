@@ -664,6 +664,26 @@ export interface WalletEvidenceInsufficientRecord {
   reason: string;
 }
 
+export interface HistoricalPricePointRecord {
+  timestamp: string;
+  price_usd: string;
+}
+
+export interface HistoricalPricesPreviewResponse {
+  token: string;
+  currency: "usd";
+  requested_start: string;
+  requested_end: string;
+  data_mode: "mock" | "real";
+  source_status: "mock" | "real" | "unavailable";
+  points: HistoricalPricePointRecord[];
+  point_count: number;
+  is_cost_basis_source: boolean;
+  warnings: string[];
+  message: string;
+  note: string;
+}
+
 export interface WalletPnlRequirementRecord {
   code: string;
   available: boolean;

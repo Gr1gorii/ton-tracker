@@ -5,6 +5,7 @@ import type {
   BitqueryPreviewResponse,
   BitqueryTokenTradesRequest,
   ImportedTradesAnalysisResponse,
+  HistoricalPricesPreviewResponse,
   ImportPreviewRequest,
   ImportPreviewResponse,
   ProvidersStatus,
@@ -265,6 +266,25 @@ export async function getWalletRunSignals(
   }
 
   return (await res.json()) as WalletRunSignalsResponse;
+}
+
+export async function previewHistoricalPrices(
+  token: string,
+  start: string,
+  end: string,
+): Promise<HistoricalPricesPreviewResponse> {
+  const params = new URLSearchParams({ token, start, end });
+  const res = await fetch(
+    `${API_BASE}/api/prices/historical/preview?${params.toString()}`,
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Historical prices preview failed"),
+    );
+  }
+
+  return (await res.json()) as HistoricalPricesPreviewResponse;
 }
 
 export async function getWalletRunPnlPreview(
