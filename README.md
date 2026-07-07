@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.17.1 FEE HANDLING
+# TON Wallet Intelligence Dashboard — v0.18.2 COST BASIS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -9,12 +9,14 @@ a rule-based evidence signal layer, and an estimated PnL preview
 (TON-denominated realized swap flows with Real PnL locked behind explicit
 evidence requirements) — each with hedged language and JSON/CSV export where
 applicable. A historical price preview (provider-reported TonAPI rate points) powers an
-optional USD valuation of TON-side swap legs in the PnL preview, and recorded
-transaction fees are netted into after-fee figures; cost basis alone still
-keeps Real PnL locked. Deterministic mock data remains the default executable
-ingestion path.
+optional USD valuation of TON-side swap legs, recorded transaction fees are
+netted into after-fee figures, and an in-window average-cost pass computes
+realized PnL per token. Real PnL unlocks per run only when all five evidence
+requirements are met, covers in-window realized swaps only, and partial
+calculations are never labeled Real PnL. Deterministic mock data remains the
+default executable ingestion path.
 
-> **v0.17.1 FEE HANDLING status — recorded transaction fees netted in the PnL preview, on top of USD valuation, historical price preview, cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
+> **v0.18.2 COST BASIS status — in-window cost-basis realized PnL with per-run Real PnL unlock, on top of fee handling, USD valuation, historical price preview, cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -58,7 +60,16 @@ ingestion path.
 >   transaction hash and netted into per-token and total after-fee figures.
 >   The `fee_handling` requirement becomes available only when every used
 >   swap row has a recorded fee; partial coverage stays visible as a warning.
->   Cost basis remains missing, so Real PnL stays locked.
+> - With historical valuation enabled, an in-window average-cost pass
+>   computes realized PnL per token (fees valued in USD at the matched
+>   points). The `cost_basis` requirement becomes available only when every
+>   leg carries a positive token quantity and every sell is fully covered by
+>   earlier in-window buys; oversold tokens stay visible as unavailable with
+>   the exact reason.
+> - When all five evidence requirements are met for a run, the PnL preview
+>   switches to `pnl_mode: real_pnl` (in-window realized only; unrealized
+>   holdings and activity outside the window are excluded). Otherwise Real
+>   PnL stays locked and partial calculations are never labeled Real PnL.
 > - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
 >   remain scaffold/limited coverage paths. They do not fetch or persist live
 >   wallet activity rows.
@@ -75,7 +86,7 @@ ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.17.1 FEE HANDLING` product label
+> - User-facing UI copy uses the `v0.18.2 COST BASIS` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -83,8 +94,8 @@ ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.17.1 FEE
->   HANDLING` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.18.2 COST
+>   BASIS` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -233,7 +244,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.17.1 FEE HANDLING)
+## Data modes & providers (v0.18.2 COST BASIS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -285,7 +296,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.17.1 FEE HANDLING` is the current
+API-version field, while `v0.18.2 COST BASIS` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -379,6 +390,13 @@ swap legs in USD at the nearest historical TON/USD point (6h tolerance):
 `historical_prices` requirement becomes available only at full match
 coverage; unmatched legs stay visible and no fallback data is substituted.
 The default (parameter omitted) response is unchanged and stays offline.
+
+The same enriched response carries `realized_pnl`: per-token in-window
+average-cost results (proceeds, cost basis, realized PnL, remaining
+quantity, or an explicit unavailable status with the reason) plus
+`total_realized_pnl_usd`. When every evidence requirement is available the
+response switches to `pnl_mode: real_pnl` with `is_real_pnl: true` —
+in-window realized only; otherwise Real PnL stays locked.
 
 ### `GET /api/prices/historical/preview`
 Returns provider-reported historical rate points for one `token` (`"ton"` or
@@ -498,13 +516,15 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.17.1 FEE HANDLING`).
+  tracks the current release (`v0.18.2 COST BASIS`).
 
-## Roadmap beyond v0.17.1 FEE HANDLING
+## Roadmap beyond v0.18.2 COST BASIS
 
-- Extend cost-basis coverage beyond the run window (acquisition history) so
-  the `cost_basis` requirement — the last missing Real-PnL evidence — can
-  become available and Real PnL can unlock.
+- Extend acquisition history beyond a single run window (multi-run or
+  full-history ingestion) so cost basis can also cover sells of holdings
+  acquired before the window.
+- Add optional unrealized valuation of remaining in-window holdings with
+  explicit spot-price labeling, separate from realized figures.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
   into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.

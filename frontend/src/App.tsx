@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.17.1 FEE HANDLING";
+const RELEASE_LABEL = "v0.18.2 COST BASIS";
 
 const navItems = [
   "DASHBOARD",
@@ -979,17 +979,17 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Real PnL and ownership proof remain unavailable; cluster comparison stays probabilistic; USD swap valuation is optional, historical-point based, and not cost basis."
+            text="Ownership proof remains unavailable; cluster comparison stays probabilistic; unlocked Real PnL covers in-window realized swaps only and excludes unrealized valuation."
           />
           <ReleaseReadinessItem
             tone="ready"
             label="Historical prices"
-            text="Provider-reported rate points power an optional USD valuation of TON-side swap legs; cost basis and fee handling still keep Real PnL locked."
+            text="Provider-reported rate points power the optional USD valuation and in-window cost basis of the PnL preview; provider failures stay visible with no hidden fallback."
           />
           <ReleaseReadinessItem
             tone="ready"
             label="PnL preview"
-            text="Stored runs expose a TON-denominated estimated PnL preview with after-fee figures from recorded transaction fees; Real PnL stays locked behind explicit evidence requirements and is never claimed."
+            text="Stored runs expose a TON-denominated estimated PnL preview with after-fee figures and optional in-window cost-basis realized PnL; Real PnL unlocks per run only when all five evidence requirements are met, and partial calculations are never labeled Real PnL."
           />
           <ReleaseReadinessItem
             tone="ready"
