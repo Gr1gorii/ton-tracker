@@ -22,9 +22,15 @@ MATCH_TOLERANCE_SECONDS = 21600  # 6 hours
 
 HISTORICAL_VALUATION_NOTE = (
     "USD figures value only the TON leg of matched swaps at the nearest "
-    "historical TON/USD point (6h tolerance). They are in-window realized "
-    "flows, not cost-basis PnL: fees are accounted in TON terms only and "
-    "cost basis remains unavailable, so Real PnL stays locked."
+    "historical TON/USD point (6h tolerance). Whether they amount to Real "
+    "PnL is decided solely by the evidence requirement checklist."
+)
+
+REAL_PNL_NOTE = (
+    "Real PnL (in-window realized): every evidence requirement is met for "
+    "this run's window. Figures cover realized swap PnL in USD, with "
+    "recorded fees valued at the matched historical points. Unrealized "
+    "holdings and any activity outside the ingested window are not included."
 )
 
 ZERO = Decimal("0")
@@ -112,6 +118,103 @@ def _evidence(
     }
 
 
+def _compute_in_window_cost_basis(
+    legs: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], bool, str | None, Decimal | None]:
+    """Average-cost realized PnL per token, strictly within the run window.
+
+    A token is computable only when every leg carries a positive token
+    quantity and every sell is fully covered by earlier in-window buys;
+    anything else is reported as unavailable with the exact reason.
+    """
+    by_token: dict[str, list[dict[str, Any]]] = {}
+    for leg in legs:
+        by_token.setdefault(leg["token"], []).append(leg)
+
+    records: list[dict[str, Any]] = []
+    total_realized = ZERO
+    computed_count = 0
+    for token in sorted(by_token):
+        token_legs = sorted(by_token[token], key=lambda leg: leg["timestamp"])
+        qty_held = ZERO
+        cost_total = ZERO
+        proceeds_total = ZERO
+        basis_total = ZERO
+        realized = ZERO
+        sell_count = 0
+        failure: str | None = None
+        for leg in token_legs:
+            token_qty = leg["token_qty"]
+            if token_qty is None or token_qty <= ZERO:
+                failure = (
+                    f"A {leg['side']} leg lacks a positive token quantity; "
+                    "in-window cost basis cannot be computed."
+                )
+                break
+            fee_usd = (leg["fee_ton"] or ZERO) * leg["price_usd"]
+            usd_value = leg["ton_amount"] * leg["price_usd"]
+            if leg["side"] == "buy":
+                qty_held += token_qty
+                cost_total += usd_value + fee_usd
+            else:
+                sell_count += 1
+                if token_qty > qty_held:
+                    failure = (
+                        "Sold quantity exceeds in-window acquisitions; the "
+                        "cost basis of the sold tokens lies outside this "
+                        "run's window."
+                    )
+                    break
+                average_cost = cost_total / qty_held
+                basis = average_cost * token_qty
+                proceeds = usd_value - fee_usd
+                realized += proceeds - basis
+                proceeds_total += proceeds
+                basis_total += basis
+                qty_held -= token_qty
+                cost_total -= basis
+
+        if failure:
+            records.append(
+                {
+                    "token": token,
+                    "status": "unavailable",
+                    "reason": failure,
+                    "sell_leg_count": sell_count,
+                }
+            )
+        else:
+            computed_count += 1
+            total_realized += realized
+            records.append(
+                {
+                    "token": token,
+                    "status": "computed",
+                    "reason": None,
+                    "sell_leg_count": sell_count,
+                    "proceeds_usd": _money(proceeds_total),
+                    "cost_basis_usd": _money(basis_total),
+                    "realized_pnl_usd": _money(realized),
+                    "remaining_qty": _money(qty_held),
+                    "remaining_cost_usd": _money(cost_total),
+                }
+            )
+
+    unavailable_count = len(records) - computed_count
+    available = computed_count > 0 and unavailable_count == 0
+    reason = (
+        None
+        if available
+        else (
+            f"In-window cost basis is unavailable for {unavailable_count} of "
+            f"{len(records)} token(s); per-token reasons are listed in "
+            "realized_pnl."
+        )
+    )
+    total = _money(total_realized) if computed_count > 0 else None
+    return records, available, reason, total
+
+
 def derive_run_pnl_preview_with_historical(
     run: dict,
     settings=None,
@@ -120,18 +223,45 @@ def derive_run_pnl_preview_with_historical(
     settings = settings or get_settings()
     preview = derive_run_pnl_preview(run)
 
+    # Recorded fees, keyed by transaction hash (mirrors the base preview).
+    fee_by_tx_hash: dict[str, Decimal] = {}
+    for transaction in run.get("transactions") or []:
+        tx_hash = transaction.get("tx_hash")
+        fee = _decimal(transaction.get("fee_ton"))
+        if tx_hash and fee is not None:
+            fee_by_tx_hash[tx_hash] = fee
+
     # The same TON-side legs the TON-denominated estimate uses.
-    legs: list[tuple[str, str, Decimal, datetime | None]] = []
+    legs: list[dict[str, Any]] = []
     for swap in run.get("swaps") or []:
         token_in = (swap.get("token_in") or "").upper()
         token_out = (swap.get("token_out") or "").upper()
         amount_in = _decimal(swap.get("amount_in"))
         amount_out = _decimal(swap.get("amount_out"))
         timestamp = _parse_ts(swap.get("timestamp"))
+        fee_ton = fee_by_tx_hash.get(swap.get("tx_hash") or "")
         if token_in == "TON" and token_out and token_out != "TON" and amount_in:
-            legs.append((swap["token_out"], "buy", amount_in, timestamp))
+            legs.append(
+                {
+                    "token": swap["token_out"],
+                    "side": "buy",
+                    "ton_amount": amount_in,
+                    "token_qty": amount_out,
+                    "timestamp": timestamp,
+                    "fee_ton": fee_ton,
+                }
+            )
         elif token_out == "TON" and token_in and token_in != "TON" and amount_out:
-            legs.append((swap["token_in"], "sell", amount_out, timestamp))
+            legs.append(
+                {
+                    "token": swap["token_in"],
+                    "side": "sell",
+                    "ton_amount": amount_out,
+                    "token_qty": amount_in,
+                    "timestamp": timestamp,
+                    "fee_ton": fee_ton,
+                }
+            )
 
     if not legs:
         preview["historical_pricing"] = _evidence(
@@ -140,7 +270,7 @@ def derive_run_pnl_preview_with_historical(
         )
         return preview
 
-    timestamps = [ts for (_, _, _, ts) in legs if ts is not None]
+    timestamps = [leg["timestamp"] for leg in legs if leg["timestamp"] is not None]
     if not timestamps:
         preview["historical_pricing"] = _evidence(
             "unavailable", 0, 0, len(legs),
@@ -183,12 +313,15 @@ def derive_run_pnl_preview_with_historical(
     flows: dict[str, dict[str, Any]] = {}
     matched = 0
     unmatched = 0
-    for token, side, ton_amount, timestamp in legs:
+    for leg in legs:
+        timestamp = leg["timestamp"]
         price = _nearest_price(points, timestamp) if timestamp else None
+        leg["price_usd"] = price
         if price is None:
             unmatched += 1
             continue
         matched += 1
+        token = leg["token"]
         flow = flows.setdefault(
             token,
             {
@@ -199,8 +332,8 @@ def derive_run_pnl_preview_with_historical(
             },
         )
         flow["matched_swap_count"] += 1
-        usd_value = ton_amount * price
-        if side == "buy":
+        usd_value = leg["ton_amount"] * price
+        if leg["side"] == "buy":
             flow["usd_spent"] += usd_value
         else:
             flow["usd_received"] += usd_value
@@ -240,13 +373,27 @@ def derive_run_pnl_preview_with_historical(
     )
     _set_requirement(preview, "historical_prices", available, reason)
     if available:
+        records, cost_basis_available, cost_basis_reason, total_realized = (
+            _compute_in_window_cost_basis(legs)
+        )
+        _set_requirement(
+            preview, "cost_basis", cost_basis_available, cost_basis_reason
+        )
+        preview["realized_pnl"] = records
+        preview["total_realized_pnl_usd"] = total_realized
+    else:
         _set_requirement(
             preview,
             "cost_basis",
             False,
-            "Cost basis requires acquisition history beyond this run's "
-            "window; only in-window USD-valued flows are computed.",
+            "Cost basis needs a matched historical price for every swap leg.",
         )
+
+    if not preview["real_pnl_locked"]:
+        preview["pnl_mode"] = "real_pnl"
+        preview["is_real_pnl"] = True
+        preview["confidence"] = "high"
+        preview["note"] = REAL_PNL_NOTE
 
     preview["usd_flows"] = usd_flows
     preview["total_usd_spent"] = _money(total_usd_spent)

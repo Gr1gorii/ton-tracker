@@ -1139,6 +1139,7 @@ const PNL_MODE_LABELS: Record<WalletRunPnlPreviewResponse["pnl_mode"], string> =
   estimated_onchain_pnl: "ESTIMATED ON-CHAIN",
   real_pnl_locked: "REAL PNL LOCKED",
   insufficient_data: "INSUFFICIENT DATA",
+  real_pnl: "REAL PNL (IN-WINDOW)",
 };
 
 function WalletPnlPreviewCard({ runId }: { runId: number }) {

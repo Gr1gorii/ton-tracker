@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -90,12 +92,13 @@ def test_usd_valuation_matches_mock_points_and_flips_requirement(monkeypatch):
     prices_req = _requirement(result, "historical_prices")
     assert prices_req["available"] is True
     assert prices_req["reason"] is None
-    # Cost basis and fee handling still block Real PnL.
-    assert _requirement(result, "cost_basis")["available"] is False
+    # The in-window sell (30 of 100 bought) is covered, so cost basis is
+    # available here; missing fees still block Real PnL.
+    assert _requirement(result, "cost_basis")["available"] is True
     assert _requirement(result, "fee_handling")["available"] is False
     assert result["real_pnl_locked"] is True
     assert result["is_real_pnl"] is False
-    assert len(result["missing_evidence"]) == 2
+    assert len(result["missing_evidence"]) == 1
 
 
 def test_partial_match_keeps_requirement_missing(monkeypatch):
@@ -154,6 +157,75 @@ def test_no_ton_side_legs_keeps_preview_untouched(monkeypatch):
     assert result["historical_pricing"]["source_status"] == "unavailable"
     assert "No TON-side swap legs" in result["historical_pricing"]["note"]
     assert _requirement(result, "historical_prices")["available"] is False
+
+
+def test_full_evidence_unlocks_real_pnl(monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    run = {
+        "transactions": [
+            {"tx_hash": "t1", "fee_ton": "0.1", "success": "success"},
+            {"tx_hash": "t2", "fee_ton": "0.2", "success": "success"},
+        ],
+        "swaps": [
+            {"tx_hash": "t1", "token_in": "TON", "amount_in": "10",
+             "token_out": "JETA", "amount_out": "100",
+             "timestamp": "2026-06-01T10:00:00Z"},
+            {"tx_hash": "t2", "token_in": "JETA", "amount_in": "40",
+             "token_out": "TON", "amount_out": "6",
+             "timestamp": "2026-06-02T10:00:00Z"},
+        ],
+    }
+    result = derive_run_pnl_preview_with_historical(run)
+
+    assert all(req["available"] for req in result["requirements"])
+    assert result["missing_evidence"] == []
+    assert result["real_pnl_locked"] is False
+    assert result["pnl_mode"] == "real_pnl"
+    assert result["is_real_pnl"] is True
+    assert result["confidence"] == "high"
+    assert "Real PnL" in result["note"]
+
+    record = result["realized_pnl"][0]
+    assert record["status"] == "computed"
+    assert record["sell_leg_count"] == 1
+    # Buy: 10 TON @ 2.51 + fee 0.1 TON @ 2.51 = 25.351 USD for 100 JETA.
+    # Sell 40: basis 40 * 0.25351 = 10.1404; proceeds 6 TON @ 2.52 minus
+    # fee 0.2 TON @ 2.52 = 14.616.
+    assert Decimal(record["proceeds_usd"]) == Decimal("14.616")
+    assert Decimal(record["cost_basis_usd"]) == Decimal("10.1404")
+    assert Decimal(record["realized_pnl_usd"]) == Decimal("4.4756")
+    assert Decimal(record["remaining_qty"]) == Decimal("60")
+    assert Decimal(result["total_realized_pnl_usd"]) == Decimal("4.4756")
+
+
+def test_oversold_token_keeps_cost_basis_missing(monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    run = {
+        "transactions": [
+            {"tx_hash": "t1", "fee_ton": "0.1", "success": "success"},
+            {"tx_hash": "t2", "fee_ton": "0.2", "success": "success"},
+        ],
+        "swaps": [
+            {"tx_hash": "t1", "token_in": "TON", "amount_in": "10",
+             "token_out": "JETA", "amount_out": "10",
+             "timestamp": "2026-06-01T10:00:00Z"},
+            {"tx_hash": "t2", "token_in": "JETA", "amount_in": "50",
+             "token_out": "TON", "amount_out": "6",
+             "timestamp": "2026-06-02T10:00:00Z"},
+        ],
+    }
+    result = derive_run_pnl_preview_with_historical(run)
+
+    cost_req = _requirement(result, "cost_basis")
+    assert cost_req["available"] is False
+    assert "1 of 1" in cost_req["reason"]
+    record = result["realized_pnl"][0]
+    assert record["status"] == "unavailable"
+    assert "exceeds in-window acquisitions" in record["reason"]
+    assert result["total_realized_pnl_usd"] is None
+    assert result["pnl_mode"] == "estimated_onchain_pnl"
+    assert result["real_pnl_locked"] is True
+    assert result["is_real_pnl"] is False
 
 
 # --- Endpoint integration tests ----------------------------------------------

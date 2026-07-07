@@ -349,6 +349,18 @@ class WalletPnlUsdFlowRecord(BaseModel):
     matched_swap_count: int
 
 
+class WalletPnlRealizedRecord(BaseModel):
+    token: str
+    status: Literal["computed", "unavailable"]
+    reason: str | None = None
+    sell_leg_count: int
+    proceeds_usd: str | None = None
+    cost_basis_usd: str | None = None
+    realized_pnl_usd: str | None = None
+    remaining_qty: str | None = None
+    remaining_cost_usd: str | None = None
+
+
 class WalletPnlHistoricalPricingRecord(BaseModel):
     source_status: Literal["mock", "real", "unavailable"]
     points_fetched: int
@@ -366,6 +378,7 @@ class WalletRunPnlPreviewResponse(BaseModel):
         "estimated_onchain_pnl",
         "real_pnl_locked",
         "insufficient_data",
+        "real_pnl",
     ]
     confidence: Literal["high", "medium", "low", "unavailable"]
     is_real_pnl: bool = False
@@ -383,6 +396,8 @@ class WalletRunPnlPreviewResponse(BaseModel):
     total_usd_received: str | None = None
     net_usd_flow: str | None = None
     historical_pricing: WalletPnlHistoricalPricingRecord | None = None
+    realized_pnl: list[WalletPnlRealizedRecord] = Field(default_factory=list)
+    total_realized_pnl_usd: str | None = None
     requirements: list[WalletPnlRequirementRecord] = Field(default_factory=list)
     missing_evidence: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)

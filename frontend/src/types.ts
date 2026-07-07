@@ -711,6 +711,18 @@ export interface WalletPnlUsdFlowRecord {
   matched_swap_count: number;
 }
 
+export interface WalletPnlRealizedRecord {
+  token: string;
+  status: "computed" | "unavailable";
+  reason?: string | null;
+  sell_leg_count: number;
+  proceeds_usd?: string | null;
+  cost_basis_usd?: string | null;
+  realized_pnl_usd?: string | null;
+  remaining_qty?: string | null;
+  remaining_cost_usd?: string | null;
+}
+
 export interface WalletPnlHistoricalPricingRecord {
   source_status: "mock" | "real" | "unavailable";
   points_fetched: number;
@@ -727,7 +739,8 @@ export interface WalletRunPnlPreviewResponse {
     | "imported_pnl"
     | "estimated_onchain_pnl"
     | "real_pnl_locked"
-    | "insufficient_data";
+    | "insufficient_data"
+    | "real_pnl";
   confidence: "high" | "medium" | "low" | "unavailable";
   is_real_pnl: boolean;
   real_pnl_locked: boolean;
@@ -744,6 +757,8 @@ export interface WalletRunPnlPreviewResponse {
   total_usd_received?: string | null;
   net_usd_flow?: string | null;
   historical_pricing?: WalletPnlHistoricalPricingRecord | null;
+  realized_pnl?: WalletPnlRealizedRecord[];
+  total_realized_pnl_usd?: string | null;
   requirements: WalletPnlRequirementRecord[];
   missing_evidence: string[];
   warnings: string[];
