@@ -195,9 +195,10 @@ RUN_SIGNALS_CSV_COLUMNS = [
 ]
 
 
-# One row per record: estimated token flows first, then the Real-PnL evidence
-# requirement checklist, tagged by record_type. Blank cells mean the column
-# does not apply to that record type.
+# One row per record: estimated token flows, optional USD-valued flows and
+# in-window realized results (historical enrichment), then the Real-PnL
+# evidence requirement checklist, tagged by record_type. Blank cells mean the
+# column does not apply to that record type.
 PNL_PREVIEW_CSV_COLUMNS = [
     "record_type",
     "token",
@@ -210,6 +211,16 @@ PNL_PREVIEW_CSV_COLUMNS = [
     "net_ton_flow",
     "fee_ton",
     "net_ton_flow_after_fees",
+    "matched_swap_count",
+    "usd_spent",
+    "usd_received",
+    "net_usd_flow",
+    "status",
+    "sell_leg_count",
+    "proceeds_usd",
+    "cost_basis_usd",
+    "realized_pnl_usd",
+    "remaining_qty",
     "code",
     "available",
     "reason",
@@ -219,8 +230,9 @@ PNL_PREVIEW_CSV_COLUMNS = [
 def wallet_pnl_preview_to_csv(result: dict) -> str:
     """Serialize an estimated PnL preview into flattened CSV text.
 
-    One row per estimated token flow or Real-PnL requirement record. The
-    figures are an estimate only -- never Real PnL.
+    One row per token flow, USD-valued flow, realized cost-basis result, or
+    Real-PnL requirement record. Whether the figures amount to Real PnL is
+    decided solely by the requirement rows.
     """
     buffer = io.StringIO()
     writer = csv.DictWriter(
@@ -230,6 +242,15 @@ def wallet_pnl_preview_to_csv(result: dict) -> str:
     for flow in result.get("token_flows", []):
         row = dict(flow)
         row["record_type"] = "token_flow"
+        writer.writerow(row)
+    for flow in result.get("usd_flows", []):
+        row = dict(flow)
+        row["record_type"] = "usd_flow"
+        writer.writerow(row)
+    for record in result.get("realized_pnl", []):
+        row = dict(record)
+        row["record_type"] = "realized"
+        row["reason"] = record.get("reason") or ""
         writer.writerow(row)
     for requirement in result.get("requirements", []):
         writer.writerow(

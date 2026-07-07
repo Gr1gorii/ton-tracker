@@ -1221,14 +1221,14 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
             </span>
             <a
               className="btn btn-ghost"
-              href={walletRunPnlPreviewExportUrl(runId)}
+              href={walletRunPnlPreviewExportUrl(runId, includeHistorical)}
               download
             >
               Export preview (JSON)
             </a>
             <a
               className="btn btn-ghost"
-              href={walletRunPnlPreviewCsvExportUrl(runId)}
+              href={walletRunPnlPreviewCsvExportUrl(runId, includeHistorical)}
               download
             >
               Export preview (CSV)

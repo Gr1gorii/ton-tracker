@@ -121,17 +121,30 @@ def read_wallet_ingestion_run_pnl_preview(
 @router.get("/ingest/{run_id}/pnl-preview/export.json")
 def export_wallet_ingestion_run_pnl_preview(
     run_id: int = Path(..., ge=1),
+    include_historical: bool = Query(
+        False,
+        description=(
+            "Include USD-valued swap legs and in-window realized cost-basis "
+            "results computed from historical price points."
+        ),
+    ),
     session: Session = Depends(get_session),
 ) -> Response:
-    """Download the estimated PnL preview for one persisted run as JSON.
+    """Download the PnL preview for one persisted run as JSON.
 
-    Estimate only -- never Real PnL; the locked-requirement checklist and
-    missing-evidence reasons are included in the payload.
+    The locked-requirement checklist and missing-evidence reasons are always
+    included; whether the payload amounts to Real PnL is decided solely by
+    that checklist.
     """
     result = get_wallet_ingestion_run(run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
-    body = json.dumps(derive_run_pnl_preview(result), ensure_ascii=False, indent=2)
+    preview = (
+        derive_run_pnl_preview_with_historical(result)
+        if include_historical
+        else derive_run_pnl_preview(result)
+    )
+    body = json.dumps(preview, ensure_ascii=False, indent=2)
     return Response(
         content=body,
         media_type="application/json",
@@ -146,18 +159,31 @@ def export_wallet_ingestion_run_pnl_preview(
 @router.get("/ingest/{run_id}/pnl-preview/export.csv")
 def export_wallet_ingestion_run_pnl_preview_csv(
     run_id: int = Path(..., ge=1),
+    include_historical: bool = Query(
+        False,
+        description=(
+            "Include USD-valued swap legs and in-window realized cost-basis "
+            "results computed from historical price points."
+        ),
+    ),
     session: Session = Depends(get_session),
 ) -> Response:
-    """Download the estimated PnL preview for one persisted run as CSV.
+    """Download the PnL preview for one persisted run as CSV.
 
-    One row per estimated token flow or Real-PnL requirement record;
-    estimate only -- never Real PnL.
+    One row per token flow, optional USD flow or realized cost-basis record,
+    and Real-PnL requirement record; whether the figures amount to Real PnL
+    is decided solely by the requirement rows.
     """
     result = get_wallet_ingestion_run(run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    preview = (
+        derive_run_pnl_preview_with_historical(result)
+        if include_historical
+        else derive_run_pnl_preview(result)
+    )
     return Response(
-        content=export.wallet_pnl_preview_to_csv(derive_run_pnl_preview(result)),
+        content=export.wallet_pnl_preview_to_csv(preview),
         media_type="text/csv",
         headers={
             "Content-Disposition": (

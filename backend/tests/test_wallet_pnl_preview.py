@@ -228,7 +228,9 @@ def test_wallet_pnl_preview_to_csv_flattens_flows_and_requirements():
     assert lines[0] == (
         "record_type,token,buy_swap_count,sell_swap_count,token_bought_qty,"
         "token_sold_qty,ton_spent,ton_received,net_ton_flow,fee_ton,"
-        "net_ton_flow_after_fees,code,available,reason"
+        "net_ton_flow_after_fees,matched_swap_count,usd_spent,usd_received,"
+        "net_usd_flow,status,sell_leg_count,proceeds_usd,cost_basis_usd,"
+        "realized_pnl_usd,remaining_qty,code,available,reason"
     )
     assert lines[1].startswith("token_flow,JETA,1,0,100,0,10,0,-10,")
     requirement_rows = [
@@ -326,6 +328,56 @@ def test_pnl_preview_csv_export_download(client, monkeypatch):
     # The mock run has one TON->jetton swap and the full requirement list.
     assert any(row.startswith("token_flow,") for row in data_rows)
     assert sum(1 for row in data_rows if row.startswith("requirement,")) == 5
+
+
+def test_pnl_preview_csv_export_with_historical_adds_usd_and_realized_rows(
+    client, monkeypatch
+):
+    run = _ingest_mock_run(client, monkeypatch)
+
+    response = client.get(
+        f"/api/wallets/ingest/{run['run_id']}/pnl-preview/export.csv",
+        params={"include_historical": "true"},
+    )
+
+    assert response.status_code == 200
+    data_rows = response.text.strip().splitlines()[1:]
+    assert any(row.startswith("token_flow,") for row in data_rows)
+    assert any(row.startswith("usd_flow,JETTON_ALPHA,") for row in data_rows)
+    assert any(row.startswith("realized,JETTON_ALPHA,") for row in data_rows)
+    assert sum(1 for row in data_rows if row.startswith("requirement,")) == 5
+
+
+def test_pnl_preview_csv_export_default_stays_offline(client, monkeypatch):
+    run = _ingest_mock_run(client, monkeypatch)
+
+    response = client.get(
+        f"/api/wallets/ingest/{run['run_id']}/pnl-preview/export.csv"
+    )
+
+    assert response.status_code == 200
+    data_rows = response.text.strip().splitlines()[1:]
+    assert not any(row.startswith("usd_flow,") for row in data_rows)
+    assert not any(row.startswith("realized,") for row in data_rows)
+
+
+def test_pnl_preview_json_export_with_historical_includes_realized(
+    client, monkeypatch
+):
+    run = _ingest_mock_run(client, monkeypatch)
+
+    response = client.get(
+        f"/api/wallets/ingest/{run['run_id']}/pnl-preview/export.json",
+        params={"include_historical": "true"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["historical_pricing"]["source_status"] == "mock"
+    assert body["realized_pnl"][0]["token"] == "JETTON_ALPHA"
+    assert body["realized_pnl"][0]["status"] == "computed"
+    # The mock swap has no recorded fee, so Real PnL stays locked.
+    assert body["real_pnl_locked"] is True
 
 
 def test_pnl_preview_json_export_missing_run_returns_404(client):
