@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.16.2 USD VALUATION";
+const RELEASE_LABEL = "v0.17.1 FEE HANDLING";
 
 const navItems = [
   "DASHBOARD",
@@ -989,7 +989,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="PnL preview"
-            text="Stored runs expose a TON-denominated estimated PnL preview; Real PnL stays locked behind explicit evidence requirements and is never claimed."
+            text="Stored runs expose a TON-denominated estimated PnL preview with after-fee figures from recorded transaction fees; Real PnL stays locked behind explicit evidence requirements and is never claimed."
           />
           <ReleaseReadinessItem
             tone="ready"
