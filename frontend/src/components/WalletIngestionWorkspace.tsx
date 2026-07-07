@@ -1183,17 +1183,25 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
     <div className="intelligence-table-block" aria-label="Wallet PnL preview">
       <div className="table-toolbar">
         <div className="table-toolbar-main">
-          <span className="section-eyebrow">Estimated preview — not Real PnL</span>
+          <span className="section-eyebrow">
+            {pnlResult && !pnlResult.real_pnl_locked
+              ? "In-window realized Real PnL — evidence-complete"
+              : "Estimated preview — not Real PnL"}
+          </span>
           <h2>PnL preview</h2>
           <p>
             TON-denominated realized swap flows estimated only from the stored
-            swap rows of run #{runId}. Fees, non-TON swap legs, transfers, and
-            unrealized valuation are excluded. Real PnL stays locked until
+            swap rows of run #{runId}. Non-TON swap legs, transfers, and
+            unrealized valuation are excluded. Real PnL unlocks only when
             every evidence requirement below is available.
           </p>
         </div>
         <div className="table-meta">
-          <span className="badge badge-mock">REAL PNL LOCKED</span>
+          {pnlResult && !pnlResult.real_pnl_locked ? (
+            <span className="badge badge-real">REAL PNL (IN-WINDOW)</span>
+          ) : (
+            <span className="badge badge-mock">REAL PNL LOCKED</span>
+          )}
         </div>
       </div>
 
@@ -1323,6 +1331,69 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                   </tr>
                 </tbody>
               </table>
+            </>
+          )}
+          {pnlResult.realized_pnl && pnlResult.realized_pnl.length > 0 && (
+            <>
+              <div className="table-toolbar-main">
+                <span className="section-eyebrow">
+                  Realized PnL — in-window cost basis (USD)
+                </span>
+              </div>
+              <table className="data-table intelligence-table wallet-ingestion-table">
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Status</th>
+                    <th>Sells</th>
+                    <th>Proceeds</th>
+                    <th>Cost basis</th>
+                    <th>Realized PnL</th>
+                    <th>Remaining qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pnlResult.realized_pnl.map((record) => (
+                    <tr key={`realized-${record.token}`}>
+                      <td>{record.token}</td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            record.status === "computed"
+                              ? "badge-group"
+                              : "badge-warning"
+                          }`}
+                        >
+                          {record.status.toUpperCase()}
+                        </span>
+                      </td>
+                      <td>{record.sell_leg_count}</td>
+                      <td>{record.proceeds_usd ?? "-"}</td>
+                      <td>{record.cost_basis_usd ?? "-"}</td>
+                      <td>{record.realized_pnl_usd ?? "-"}</td>
+                      <td>{record.remaining_qty ?? "-"}</td>
+                    </tr>
+                  ))}
+                  {pnlResult.total_realized_pnl_usd != null && (
+                    <tr>
+                      <td>Total</td>
+                      <td colSpan={4} />
+                      <td>{pnlResult.total_realized_pnl_usd}</td>
+                      <td />
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              {pnlResult.realized_pnl
+                .filter((record) => record.reason)
+                .map((record) => (
+                  <p
+                    className="muted small"
+                    key={`realized-reason-${record.token}`}
+                  >
+                    {record.token}: {record.reason}
+                  </p>
+                ))}
             </>
           )}
           {pnlResult.historical_pricing && (
