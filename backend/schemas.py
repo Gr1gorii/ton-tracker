@@ -188,8 +188,10 @@ class WalletSwapRecord(BaseModel):
     timestamp: str | None = None
     dex: str | None = None
     token_in: str | None = None
+    token_in_address: str | None = None
     amount_in: str | None = None
     token_out: str | None = None
+    token_out_address: str | None = None
     amount_out: str | None = None
     estimated_usd: str | None = None
     provider: str

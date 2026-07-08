@@ -156,7 +156,13 @@ MOCK_SWAPS = [
         "token_out": "JETTON_ALPHA",
         "amount_out": "3180.000000000000000000",
         "estimated_usd": "94.25000000",
-        "raw": {"fixture": "swap", "surface": "swaps", "index": 1},
+        "raw": {
+            "fixture": "swap",
+            "surface": "swaps",
+            "index": 1,
+            "token_in_address": None,
+            "token_out_address": "EQjettonAlphaMasterMock",
+        },
     },
 ]
 
@@ -1160,10 +1166,12 @@ def _tonapi_live_swap(item: dict[str, Any]) -> WalletActivitySwap:
             "utime": item.get("utime"),
             "dex": _optional_string(item.get("dex")),
             "token_in": _optional_string(item.get("token_in")),
+            "token_in_address": _optional_string(item.get("token_in_address")),
             "raw_amount_in": _optional_string(item.get("raw_amount_in")),
             "normalized_amount_in": amount_in,
             "decimals_in": item.get("decimals_in"),
             "token_out": _optional_string(item.get("token_out")),
+            "token_out_address": _optional_string(item.get("token_out_address")),
             "raw_amount_out": _optional_string(item.get("raw_amount_out")),
             "normalized_amount_out": amount_out,
             "decimals_out": item.get("decimals_out"),

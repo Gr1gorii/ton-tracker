@@ -429,9 +429,11 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
                         "lt": "46000000000002",
                         "dex": "stonfi",
                         "token_in": "TON",
+                        "token_in_address": None,
                         "raw_amount_in": "5000000000",
                         "decimals_in": 9,
                         "token_out": "EJT",
+                        "token_out_address": "EQjetton",
                         "raw_amount_out": "123450000",
                         "decimals_out": 6,
                         "router": "EQrouter",
@@ -476,8 +478,10 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
     swap = body["swaps"][0]
     assert swap["dex"] == "stonfi"
     assert swap["token_in"] == "TON"
+    assert swap["token_in_address"] is None
     assert swap["amount_in"] == "5.000000000000000000"
     assert swap["token_out"] == "EJT"
+    assert swap["token_out_address"] == "EQjetton"
     assert swap["amount_out"] == "123.450000000000000000"
     assert swap["estimated_usd"] is None
     assert swap["source_status"] == "live"
@@ -485,7 +489,10 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
 
     read_back = client.get(f"/api/wallets/ingest/{run_id}")
     assert read_back.status_code == 200
-    assert len(read_back.json()["swaps"]) == 1
+    read_swap = read_back.json()["swaps"][0]
+    # Jetton master addresses survive persistence via the stored raw payload.
+    assert read_swap["token_out_address"] == "EQjetton"
+    assert read_swap["token_in_address"] is None
 
 
 def test_wallet_ingestion_activity_summary_is_derived_and_labeled(
@@ -706,6 +713,7 @@ def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
     assert len(body["warnings"]) == 4
     assert body["transfers"][0]["amount"] == "125.500000000000000000"
     assert body["swaps"][0]["dex"] == "STON.fi"
+    assert body["swaps"][0]["token_out_address"] == "EQjettonAlphaMasterMock"
     assert body["balances"][1]["asset"] == "JETTON_ALPHA"
 
     read_response = client.get(f"/api/wallets/ingest/{body['run_id']}")

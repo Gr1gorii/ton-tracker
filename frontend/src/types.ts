@@ -532,8 +532,10 @@ export interface WalletSwapRecord {
   timestamp?: string | null;
   dex?: string | null;
   token_in?: string | null;
+  token_in_address?: string | null;
   amount_in?: string | null;
   token_out?: string | null;
+  token_out_address?: string | null;
   amount_out?: string | null;
   estimated_usd?: string | null;
   provider: string;

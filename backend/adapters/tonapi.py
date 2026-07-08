@@ -882,17 +882,23 @@ class TonapiAdapter:
         utime: int | None,
         lt: str | None,
     ) -> dict:
-        token_in, amount_in, decimals_in = cls._swap_side(detail, "in")
-        token_out, amount_out, decimals_out = cls._swap_side(detail, "out")
+        token_in, amount_in, decimals_in, address_in = cls._swap_side(
+            detail, "in"
+        )
+        token_out, amount_out, decimals_out, address_out = cls._swap_side(
+            detail, "out"
+        )
         return {
             "event_id": event_id,
             "utime": utime,
             "lt": lt,
             "dex": cls._optional_string(detail.get("dex")),
             "token_in": token_in,
+            "token_in_address": address_in,
             "raw_amount_in": amount_in,
             "decimals_in": decimals_in,
             "token_out": token_out,
+            "token_out_address": address_out,
             "raw_amount_out": amount_out,
             "decimals_out": decimals_out,
             "router": cls._account_address(detail.get("router")),
@@ -905,21 +911,21 @@ class TonapiAdapter:
         cls,
         detail: dict,
         side: str,
-    ) -> tuple[str | None, str | None, int | None]:
+    ) -> tuple[str | None, str | None, int | None, str | None]:
         # TonAPI JettonSwap exposes ton_in/ton_out (nanoton) and
         # amount_in/amount_out (raw jetton) with jetton_master_in/out.
+        # Native TON has no jetton master address.
         ton_amount = detail.get(f"ton_{side}")
         if ton_amount not in (None, ""):
-            return "TON", cls._optional_string(ton_amount), 9
+            return "TON", cls._optional_string(ton_amount), 9, None
         master = detail.get(f"jetton_master_{side}")
         if not isinstance(master, dict):
             master = {}
-        token = cls._optional_string(master.get("symbol")) or cls._optional_string(
-            master.get("address")
-        )
+        address = cls._optional_string(master.get("address"))
+        token = cls._optional_string(master.get("symbol")) or address
         amount = cls._optional_string(detail.get(f"amount_{side}"))
         decimals = cls._optional_int(master.get("decimals"))
-        return token, amount, decimals
+        return token, amount, decimals, address
 
     @classmethod
     def normalize_rates_response(

@@ -521,14 +521,17 @@ def _transaction_record(item: WalletTransaction) -> dict[str, Any]:
 
 def _swap_record(item: WalletSwap) -> dict[str, Any]:
     raw = _json_loads(item.raw_json)
+    raw_dict = raw if isinstance(raw, dict) else {}
     return {
         "tx_hash": item.tx_hash,
         "timestamp": _isoformat(item.timestamp),
         "dex": item.dex,
         "token_in": item.token_in,
+        "token_in_address": raw_dict.get("token_in_address"),
         "amount_in": _balance_value_from_raw(raw, "normalized_amount_in")
         or _decimal_string(item.amount_in),
         "token_out": item.token_out,
+        "token_out_address": raw_dict.get("token_out_address"),
         "amount_out": _balance_value_from_raw(raw, "normalized_amount_out")
         or _decimal_string(item.amount_out),
         "estimated_usd": _decimal_string(item.estimated_usd),

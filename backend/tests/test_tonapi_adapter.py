@@ -643,9 +643,11 @@ def test_get_account_swaps_preview_normalizes_jetton_swap(monkeypatch):
     swap = result.data["swaps"][0]
     assert swap["dex"] == "stonfi"
     assert swap["token_in"] == "TON"
+    assert swap["token_in_address"] is None  # native TON has no master
     assert swap["raw_amount_in"] == "5000000000"
     assert swap["decimals_in"] == 9
     assert swap["token_out"] == "EJT"
+    assert swap["token_out_address"] == "EQjetton"
     assert swap["raw_amount_out"] == "123450000"
     assert swap["decimals_out"] == 6
     assert swap["router"] == "EQrouter"
