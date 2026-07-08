@@ -15,6 +15,7 @@ from schemas import WalletIngestionRunResponse, WalletRunSignalsResponse
 from schemas import WalletRunPnlPreviewResponse
 from services import export
 from services.pnl_preview import derive_run_pnl_preview
+from services.pnl_unrealized import derive_run_pnl_preview_with_unrealized
 from services.pnl_usd_valuation import derive_run_pnl_preview_with_historical
 from services.wallet_activity_clustering import compare_wallet_activity
 from services.wallet_activity_signals import derive_run_signals
@@ -100,19 +101,29 @@ def read_wallet_ingestion_run_pnl_preview(
             "TON/USD point. In-window flows only, never cost-basis PnL."
         ),
     ),
+    include_unrealized: bool = Query(
+        False,
+        description=(
+            "Also value remaining in-window holdings at current spot prices "
+            "(implies include_historical). Informational only; never part "
+            "of realized figures or the Real-PnL checklist."
+        ),
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
     """Return an estimated PnL preview for one persisted run.
 
-    Estimate only -- never Real PnL. Real PnL stays locked until transaction
-    history, swap evidence, historical prices, cost basis, and fee handling
-    are all available; missing evidence is reported explicitly. With
+    Estimate only -- never Real PnL unless every evidence requirement is
+    met; missing evidence is reported explicitly. With
     ``include_historical=true`` the response also values TON-side swap legs
-    in USD using historical price points.
+    in USD using historical price points; ``include_unrealized=true``
+    additionally values remaining in-window holdings at spot prices.
     """
     result = get_wallet_ingestion_run(run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
+    if include_unrealized:
+        return derive_run_pnl_preview_with_unrealized(result)
     if include_historical:
         return derive_run_pnl_preview_with_historical(result)
     return derive_run_pnl_preview(result)
