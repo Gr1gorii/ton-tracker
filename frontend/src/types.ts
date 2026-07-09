@@ -725,6 +725,18 @@ export interface WalletPnlRealizedRecord {
   remaining_cost_usd?: string | null;
 }
 
+export interface WalletPnlUnrealizedRecord {
+  token: string;
+  status: "computed" | "unavailable";
+  reason?: string | null;
+  remaining_qty?: string | null;
+  remaining_cost_usd?: string | null;
+  spot_price_usd?: string | null;
+  priced_by?: string | null;
+  market_value_usd?: string | null;
+  unrealized_pnl_usd?: string | null;
+}
+
 export interface WalletPnlHistoricalPricingRecord {
   source_status: "mock" | "real" | "unavailable";
   points_fetched: number;
@@ -761,6 +773,9 @@ export interface WalletRunPnlPreviewResponse {
   historical_pricing?: WalletPnlHistoricalPricingRecord | null;
   realized_pnl?: WalletPnlRealizedRecord[];
   total_realized_pnl_usd?: string | null;
+  unrealized: WalletPnlUnrealizedRecord[];
+  total_unrealized_pnl_usd?: string | null;
+  unrealized_note?: string | null;
   requirements: WalletPnlRequirementRecord[];
   missing_evidence: string[];
   warnings: string[];
