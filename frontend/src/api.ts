@@ -290,8 +290,13 @@ export async function previewHistoricalPrices(
 export async function getWalletRunPnlPreview(
   runId: number,
   includeHistorical = false,
+  includeUnrealized = false,
 ): Promise<WalletRunPnlPreviewResponse> {
-  const suffix = includeHistorical ? "?include_historical=true" : "";
+  const params = new URLSearchParams();
+  if (includeHistorical) params.set("include_historical", "true");
+  if (includeUnrealized) params.set("include_unrealized", "true");
+  const query = params.toString();
+  const suffix = query ? `?${query}` : "";
   const res = await fetch(
     `${API_BASE}/api/wallets/ingest/${runId}/pnl-preview${suffix}`,
   );

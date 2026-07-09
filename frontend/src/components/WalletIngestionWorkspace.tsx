@@ -1145,19 +1145,35 @@ const PNL_MODE_LABELS: Record<WalletRunPnlPreviewResponse["pnl_mode"], string> =
 function WalletPnlPreviewCard({ runId }: { runId: number }) {
   const [loading, setLoading] = useState(true);
   const [includeHistorical, setIncludeHistorical] = useState(false);
+  const [includeUnrealized, setIncludeUnrealized] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [pnlResult, setPnlResult] =
     useState<WalletRunPnlPreviewResponse | null>(null);
+  const [pnlResultScope, setPnlResultScope] = useState<{
+    runId: number;
+    includeHistorical: boolean;
+    includeUnrealized: boolean;
+  } | null>(null);
+  const loadedPnlRunId = useRef(runId);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setPreviewError(null);
-    setPnlResult(null);
-    getWalletRunPnlPreview(runId, includeHistorical)
+    if (loadedPnlRunId.current !== runId) {
+      loadedPnlRunId.current = runId;
+      setPnlResult(null);
+      setPnlResultScope(null);
+    }
+    getWalletRunPnlPreview(runId, includeHistorical, includeUnrealized)
       .then((data) => {
         if (!cancelled) {
           setPnlResult(data);
+          setPnlResultScope({
+            runId,
+            includeHistorical,
+            includeUnrealized,
+          });
         }
       })
       .catch((err) => {
@@ -1177,7 +1193,27 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
     return () => {
       cancelled = true;
     };
-  }, [runId, includeHistorical]);
+  }, [runId, includeHistorical, includeUnrealized]);
+
+  function toggleHistorical() {
+    if (includeHistorical) {
+      setIncludeHistorical(false);
+      setIncludeUnrealized(false);
+      return;
+    }
+    setIncludeHistorical(true);
+  }
+
+  function toggleUnrealized() {
+    const nextValue = !includeUnrealized;
+    setIncludeUnrealized(nextValue);
+    if (nextValue) setIncludeHistorical(true);
+  }
+
+  const canRenderUnrealized =
+    includeUnrealized &&
+    pnlResultScope?.runId === runId &&
+    pnlResultScope.includeUnrealized;
 
   return (
     <div className="intelligence-table-block" aria-label="Wallet PnL preview">
@@ -1192,8 +1228,10 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
           <p>
             TON-denominated realized swap flows estimated only from the stored
             swap rows of run #{runId}. Non-TON swap legs, transfers, and
-            unrealized valuation are excluded. Real PnL unlocks only when
-            every evidence requirement below is available.
+            activity outside this run are excluded. Spot-based unrealized
+            valuation is optional, informational, and kept separate from
+            realized figures. Real PnL unlocks only when every evidence
+            requirement below is available.
           </p>
         </div>
         <div className="table-meta">
@@ -1205,8 +1243,19 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
         </div>
       </div>
 
-      {loading && <p className="muted small">Deriving PnL preview…</p>}
+      {loading && (
+        <p className="muted small">
+          {pnlResult
+            ? "Refreshing PnL preview; the last successful result remains visible."
+            : "Deriving PnL preview…"}
+        </p>
+      )}
       {previewError && <WalletIngestionError message={previewError} />}
+      {previewError && pnlResult && (
+        <p className="muted small">
+          Requested enrichment failed; showing the last successful preview.
+        </p>
+      )}
 
       {pnlResult && (
         <>
@@ -1236,53 +1285,73 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
             <button
               className="btn btn-ghost"
               type="button"
-              onClick={() => setIncludeHistorical((value) => !value)}
+              aria-pressed={includeHistorical}
+              onClick={toggleHistorical}
               disabled={loading}
             >
               {includeHistorical
                 ? "Hide USD valuation"
                 : "Add USD valuation (historical)"}
             </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              aria-pressed={includeUnrealized}
+              onClick={toggleUnrealized}
+              disabled={loading}
+            >
+              {includeUnrealized
+                ? "Hide unrealized valuation"
+                : "Add unrealized valuation (spot)"}
+            </button>
           </div>
+          {includeUnrealized && (
+            <p className="muted small">
+              JSON/CSV exports include historical and realized enrichment;
+              the current spot snapshot is view-only.
+            </p>
+          )}
 
           {pnlResult.token_flows.length > 0 ? (
-            <table className="data-table intelligence-table wallet-ingestion-table">
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>Buys</th>
-                  <th>Sells</th>
-                  <th>TON spent</th>
-                  <th>TON received</th>
-                  <th>Net TON flow</th>
-                  <th>Fees (TON)</th>
-                  <th>Net after fees</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pnlResult.token_flows.map((flow) => (
-                  <tr key={flow.token}>
-                    <td>{flow.token}</td>
-                    <td>{flow.buy_swap_count}</td>
-                    <td>{flow.sell_swap_count}</td>
-                    <td>{flow.ton_spent}</td>
-                    <td>{flow.ton_received}</td>
-                    <td>{flow.net_ton_flow}</td>
-                    <td>{flow.fee_ton}</td>
-                    <td>{flow.net_ton_flow_after_fees}</td>
+            <div className="table-wrap">
+              <table className="data-table intelligence-table wallet-ingestion-table">
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Buys</th>
+                    <th>Sells</th>
+                    <th>TON spent</th>
+                    <th>TON received</th>
+                    <th>Net TON flow</th>
+                    <th>Fees (TON)</th>
+                    <th>Net after fees</th>
                   </tr>
-                ))}
-                <tr>
-                  <td>Total</td>
-                  <td colSpan={2} />
-                  <td>{pnlResult.total_ton_spent}</td>
-                  <td>{pnlResult.total_ton_received}</td>
-                  <td>{pnlResult.net_ton_flow}</td>
-                  <td>{pnlResult.total_fees_ton}</td>
-                  <td>{pnlResult.net_ton_flow_after_fees}</td>
-                </tr>
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {pnlResult.token_flows.map((flow) => (
+                    <tr key={flow.token}>
+                      <td>{flow.token}</td>
+                      <td>{flow.buy_swap_count}</td>
+                      <td>{flow.sell_swap_count}</td>
+                      <td>{flow.ton_spent}</td>
+                      <td>{flow.ton_received}</td>
+                      <td>{flow.net_ton_flow}</td>
+                      <td>{flow.fee_ton}</td>
+                      <td>{flow.net_ton_flow_after_fees}</td>
+                    </tr>
+                  ))}
+                  <tr>
+                    <td>Total</td>
+                    <td colSpan={2} />
+                    <td>{pnlResult.total_ton_spent}</td>
+                    <td>{pnlResult.total_ton_received}</td>
+                    <td>{pnlResult.net_ton_flow}</td>
+                    <td>{pnlResult.total_fees_ton}</td>
+                    <td>{pnlResult.net_ton_flow_after_fees}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           ) : (
             <p className="muted small">
               No TON-denominated swap flows could be estimated from the stored
@@ -1302,35 +1371,37 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                   USD-valued swap legs — historical prices, not cost basis
                 </span>
               </div>
-              <table className="data-table intelligence-table wallet-ingestion-table">
-                <thead>
-                  <tr>
-                    <th>Token</th>
-                    <th>Matched swaps</th>
-                    <th>USD spent</th>
-                    <th>USD received</th>
-                    <th>Net USD flow</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pnlResult.usd_flows.map((flow) => (
-                    <tr key={`usd-${flow.token}`}>
-                      <td>{flow.token}</td>
-                      <td>{flow.matched_swap_count}</td>
-                      <td>{flow.usd_spent}</td>
-                      <td>{flow.usd_received}</td>
-                      <td>{flow.net_usd_flow}</td>
+              <div className="table-wrap">
+                <table className="data-table intelligence-table wallet-ingestion-table">
+                  <thead>
+                    <tr>
+                      <th>Token</th>
+                      <th>Matched swaps</th>
+                      <th>USD spent</th>
+                      <th>USD received</th>
+                      <th>Net USD flow</th>
                     </tr>
-                  ))}
-                  <tr>
-                    <td>Total</td>
-                    <td />
-                    <td>{pnlResult.total_usd_spent ?? "-"}</td>
-                    <td>{pnlResult.total_usd_received ?? "-"}</td>
-                    <td>{pnlResult.net_usd_flow ?? "-"}</td>
-                  </tr>
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {pnlResult.usd_flows.map((flow) => (
+                      <tr key={`usd-${flow.token}`}>
+                        <td>{flow.token}</td>
+                        <td>{flow.matched_swap_count}</td>
+                        <td>{flow.usd_spent}</td>
+                        <td>{flow.usd_received}</td>
+                        <td>{flow.net_usd_flow}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td>Total</td>
+                      <td />
+                      <td>{pnlResult.total_usd_spent ?? "-"}</td>
+                      <td>{pnlResult.total_usd_received ?? "-"}</td>
+                      <td>{pnlResult.net_usd_flow ?? "-"}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
           {pnlResult.realized_pnl && pnlResult.realized_pnl.length > 0 && (
@@ -1340,50 +1411,52 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                   Realized PnL — in-window cost basis (USD)
                 </span>
               </div>
-              <table className="data-table intelligence-table wallet-ingestion-table">
-                <thead>
-                  <tr>
-                    <th>Token</th>
-                    <th>Status</th>
-                    <th>Sells</th>
-                    <th>Proceeds</th>
-                    <th>Cost basis</th>
-                    <th>Realized PnL</th>
-                    <th>Remaining qty</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pnlResult.realized_pnl.map((record) => (
-                    <tr key={`realized-${record.token}`}>
-                      <td>{record.token}</td>
-                      <td>
-                        <span
-                          className={`badge ${
-                            record.status === "computed"
-                              ? "badge-group"
-                              : "badge-warning"
-                          }`}
-                        >
-                          {record.status.toUpperCase()}
-                        </span>
-                      </td>
-                      <td>{record.sell_leg_count}</td>
-                      <td>{record.proceeds_usd ?? "-"}</td>
-                      <td>{record.cost_basis_usd ?? "-"}</td>
-                      <td>{record.realized_pnl_usd ?? "-"}</td>
-                      <td>{record.remaining_qty ?? "-"}</td>
-                    </tr>
-                  ))}
-                  {pnlResult.total_realized_pnl_usd != null && (
+              <div className="table-wrap">
+                <table className="data-table intelligence-table wallet-ingestion-table">
+                  <thead>
                     <tr>
-                      <td>Total</td>
-                      <td colSpan={4} />
-                      <td>{pnlResult.total_realized_pnl_usd}</td>
-                      <td />
+                      <th>Token</th>
+                      <th>Status</th>
+                      <th>Sells</th>
+                      <th>Proceeds</th>
+                      <th>Cost basis</th>
+                      <th>Realized PnL</th>
+                      <th>Remaining qty</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {pnlResult.realized_pnl.map((record) => (
+                      <tr key={`realized-${record.token}`}>
+                        <td>{record.token}</td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              record.status === "computed"
+                                ? "badge-group"
+                                : "badge-warning"
+                            }`}
+                          >
+                            {record.status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td>{record.sell_leg_count}</td>
+                        <td>{record.proceeds_usd ?? "-"}</td>
+                        <td>{record.cost_basis_usd ?? "-"}</td>
+                        <td>{record.realized_pnl_usd ?? "-"}</td>
+                        <td>{record.remaining_qty ?? "-"}</td>
+                      </tr>
+                    ))}
+                    {pnlResult.total_realized_pnl_usd != null && (
+                      <tr>
+                        <td>Total</td>
+                        <td colSpan={4} />
+                        <td>{pnlResult.total_realized_pnl_usd}</td>
+                        <td />
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
               {pnlResult.realized_pnl
                 .filter((record) => record.reason)
                 .map((record) => (
@@ -1395,6 +1468,122 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                   </p>
                 ))}
             </>
+          )}
+          {canRenderUnrealized && pnlResult.unrealized.length > 0 && (
+            <>
+              <div className="table-toolbar">
+                <div className="table-toolbar-main">
+                  <span className="section-eyebrow">
+                    Unrealized PnL — current spot snapshot (USD)
+                  </span>
+                  <p>
+                    Remaining in-window holdings only. Spot prices may be
+                    stale and do not change realized PnL or its evidence
+                    checklist.
+                  </p>
+                </div>
+                <div className="table-meta">
+                  <span className="badge badge-warning">
+                    INFORMATIONAL ONLY
+                  </span>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table className="data-table intelligence-table wallet-ingestion-table">
+                  <thead>
+                    <tr>
+                      <th>Token</th>
+                      <th>Status</th>
+                      <th>Remaining qty</th>
+                      <th>Remaining cost</th>
+                      <th>Spot price</th>
+                      <th>Spot source</th>
+                      <th>Market value</th>
+                      <th>Unrealized PnL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pnlResult.unrealized.map((record) => (
+                      <tr key={`unrealized-${record.token}`}>
+                        <td>{record.token}</td>
+                        <td>
+                          <span
+                            className={`badge ${
+                              record.status === "computed"
+                                ? "badge-group"
+                                : "badge-warning"
+                            }`}
+                          >
+                            {record.status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td title={record.remaining_qty ?? undefined}>
+                          {formatPnlNumber(record.remaining_qty)}
+                        </td>
+                        <td title={record.remaining_cost_usd ?? undefined}>
+                          {formatPnlUsd(record.remaining_cost_usd)}
+                        </td>
+                        <td title={record.spot_price_usd ?? undefined}>
+                          {formatPnlUsd(record.spot_price_usd, 8)}
+                        </td>
+                        <td>{record.priced_by?.toUpperCase() ?? "-"}</td>
+                        <td title={record.market_value_usd ?? undefined}>
+                          {formatPnlUsd(record.market_value_usd)}
+                        </td>
+                        <td
+                          className={pnlValueClass(record.unrealized_pnl_usd)}
+                          title={record.unrealized_pnl_usd ?? undefined}
+                        >
+                          {formatPnlUsd(record.unrealized_pnl_usd)}
+                        </td>
+                      </tr>
+                    ))}
+                    {pnlResult.total_unrealized_pnl_usd != null && (
+                      <tr>
+                        <td>Priced subtotal</td>
+                        <td colSpan={6} />
+                        <td
+                          className={pnlValueClass(
+                            pnlResult.total_unrealized_pnl_usd,
+                          )}
+                          title={pnlResult.total_unrealized_pnl_usd}
+                        >
+                          {formatPnlUsd(pnlResult.total_unrealized_pnl_usd)}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {pnlResult.unrealized
+                .filter((record) => record.reason)
+                .map((record) => (
+                  <p
+                    className="muted small"
+                    key={`unrealized-reason-${record.token}`}
+                  >
+                    {record.token}: {record.reason}
+                  </p>
+                ))}
+              {pnlResult.unrealized_note && (
+                <p className="muted small">{pnlResult.unrealized_note}</p>
+              )}
+              <p className="muted small">
+                Spot coverage: {pnlResult.unrealized.filter(
+                  (record) => record.status === "computed",
+                ).length}
+                /{pnlResult.unrealized.length} holding(s) priced. Unavailable
+                holdings are excluded from the priced subtotal.
+              </p>
+            </>
+          )}
+          {canRenderUnrealized && pnlResult.unrealized.length === 0 && (
+            <p className="muted small">
+              No spot-valued positions were returned. This can mean there is
+              no remaining in-window inventory or that prerequisite pricing
+              or cost-basis evidence is unavailable; review the evidence
+              requirements and warnings below.
+            </p>
           )}
           {pnlResult.historical_pricing && (
             <p className="muted small">
@@ -1436,6 +1625,34 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
       )}
     </div>
   );
+}
+
+function pnlValueClass(value: string | null | undefined): string {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed === 0) return "pnl-zero";
+  return parsed > 0 ? "pnl-pos" : "pnl-neg";
+}
+
+function formatPnlNumber(
+  value: string | null | undefined,
+  maximumFractionDigits = 6,
+  minimumFractionDigits = 0,
+): string {
+  if (value == null) return "-";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return value;
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits,
+    maximumFractionDigits,
+  }).format(parsed);
+}
+
+function formatPnlUsd(
+  value: string | null | undefined,
+  maximumFractionDigits = 2,
+): string {
+  if (value == null) return "-";
+  return `$${formatPnlNumber(value, maximumFractionDigits, 2)}`;
 }
 
 function WalletClusterCompareCard({ runId }: { runId: number }) {
