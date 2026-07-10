@@ -761,6 +761,218 @@ export interface WalletClusterCompareResponse {
   note: string;
 }
 
+export interface WalletHistoryReadinessRequest {
+  target_run_id: number;
+  run_ids: number[];
+}
+
+export interface WalletHistoryRunScopeRecord {
+  run_id: number;
+  is_target: boolean;
+  wallet_address: string;
+  wallet_identity: WalletIdentityRecord;
+  time_window: string;
+  status: WalletIngestionStatus;
+  created_at?: string | null;
+  requested_start?: string | null;
+  requested_end?: string | null;
+  requested_bounds_verified: false;
+  observed_activity_start?: string | null;
+  observed_activity_end?: string | null;
+  transfer_count: number;
+  transaction_count: number;
+  swap_count: number;
+  timestamped_activity_count: number;
+  untimestamped_activity_count: number;
+  outside_requested_bounds_count: number;
+  requested_surfaces: WalletIngestionSurface[];
+  unavailable_surfaces: WalletIngestionSurface[];
+}
+
+export interface WalletHistoryIdentityGroupRecord {
+  identity: string;
+  identity_type:
+    | "account_transaction"
+    | "transaction_hash"
+    | "provider_event_action_observation"
+    | "event_action"
+    | "event_reference"
+    | "swap_fingerprint";
+  identity_strength: "exact" | "provider_scoped" | "weak";
+  run_ids: number[];
+  observation_count: number;
+  distinct_payload_count: number;
+  has_conflict: boolean;
+}
+
+export interface WalletHistoryCoverageRecord {
+  activity_observations: number;
+  timestamped_activity_observations: number;
+  transaction_observations: number;
+  transaction_observations_with_hash: number;
+  transaction_observations_with_exact_identity: number;
+  transaction_observations_with_weak_identity: number;
+  transaction_observations_with_unavailable_identity: number;
+  transaction_observations_with_invalid_identity_contract: number;
+  transaction_identity_coverage_state: "not_observed" | "complete" | "incomplete";
+  overlapping_transaction_identity_groups: number;
+  conflicting_transaction_identity_groups: number;
+  event_action_observations: number;
+  event_action_observations_with_provider_scoped_identity: number;
+  event_action_observations_with_unavailable_identity: number;
+  event_action_observations_with_invalid_identity_contract: number;
+  event_action_identity_coverage_state: "not_observed" | "complete" | "incomplete";
+  overlapping_provider_scoped_event_action_identity_groups: number;
+  conflicting_provider_scoped_event_action_identity_groups: number;
+  swap_observations: number;
+  swap_observations_with_exact_identity: number;
+  swap_observations_with_provider_scoped_identity: number;
+  swap_observations_with_weak_identity: number;
+  overlapping_exact_swap_identity_groups: number;
+  overlapping_provider_scoped_swap_identity_groups: number;
+  overlapping_weak_swap_identity_groups: number;
+  conflicting_swap_identity_groups: number;
+  non_ton_swap_legs: number;
+  addressed_non_ton_swap_legs: number;
+  asset_address_coverage_state: "not_observed" | "complete" | "incomplete";
+  fee_link_candidate_swaps: number;
+  same_run_fee_hash_match_candidates: number;
+  fee_hash_match_coverage_state: "not_observed" | "complete" | "incomplete";
+  fee_linkage_contract_verified: false;
+}
+
+export interface WalletHistoryIntervalRecord {
+  start: string;
+  end: string;
+  duration_microseconds: string;
+}
+
+export interface WalletHistoryAcceptedIntervalRecord
+  extends WalletHistoryIntervalRecord {
+  run_id: number;
+}
+
+export interface WalletHistoryOverlapIntervalRecord
+  extends WalletHistoryIntervalRecord {
+  run_ids: number[];
+  coverage_depth: number;
+}
+
+export interface WalletHistoryGapIntervalRecord
+  extends WalletHistoryIntervalRecord {
+  left_run_ids: number[];
+  right_run_ids: number[];
+}
+
+export interface WalletHistoryIntervalRunEvidenceRecord {
+  run_id: number;
+  source_state?: string | null;
+  candidate_states: string[];
+  classification: "included" | "excluded" | "not_requested";
+  reason?: string | null;
+  source_reason_codes: string[];
+  recorded_interval_start?: string | null;
+  recorded_interval_end?: string | null;
+  interval_start?: string | null;
+  interval_end?: string | null;
+  duration_microseconds?: string | null;
+  included_in_union: boolean;
+}
+
+export interface WalletHistoryIntervalCoverageLayerRecord {
+  stream_key: "transactions" | "account_events";
+  coverage_kind:
+    | "low_level_transaction_stream"
+    | "provider_display_event_stream";
+  eligible_state: "complete" | "provider_stream_complete";
+  provider_semantics:
+    | "bounded_low_level_transaction_query"
+    | "display_only_actions";
+  state:
+    | "no_validated_intervals"
+    | "contiguous_selected_span"
+    | "gapped_selected_span";
+  selected_run_count: number;
+  requested_run_count: number;
+  included_run_count: number;
+  included_run_ids: number[];
+  excluded_run_ids: number[];
+  not_requested_run_ids: number[];
+  selected_run_coverage_state: "none" | "partial" | "complete";
+  run_evidence: WalletHistoryIntervalRunEvidenceRecord[];
+  accepted_intervals: WalletHistoryAcceptedIntervalRecord[];
+  selected_span?: WalletHistoryIntervalRecord | null;
+  union_intervals: WalletHistoryIntervalRecord[];
+  overlap_intervals: WalletHistoryOverlapIntervalRecord[];
+  gap_intervals: WalletHistoryGapIntervalRecord[];
+  span_duration_microseconds: string;
+  covered_duration_microseconds: string;
+  gap_duration_microseconds: string;
+  overlapped_duration_microseconds: string;
+  max_coverage_depth: number;
+  is_contiguous_within_selected_span: boolean;
+  outside_selected_span_coverage: "unknown";
+  establishes_full_history: false;
+  is_authoritative_activity_coverage: false;
+}
+
+export interface WalletHistoryBoundedIntervalCoverageRecord {
+  contract_version: "wallet_multi_run_interval_coverage_v1";
+  selected_run_ids: number[];
+  interval_semantics: "[start,end)";
+  coverage_scope: "selected_validated_run_intervals_only";
+  gap_scope: "inside_validated_selected_span_only";
+  cross_stream_union_applied: false;
+  low_level_transactions: WalletHistoryIntervalCoverageLayerRecord;
+  provider_display_events: WalletHistoryIntervalCoverageLayerRecord;
+  full_pre_run_history_established: false;
+  complete_wallet_history_established: false;
+  is_global_history_coverage: false;
+  is_authoritative_activity_coverage: false;
+  activity_rows_merged: false;
+  deduplication_applied: false;
+  is_cost_basis: false;
+  eligible_for_cost_basis: false;
+  used_by_pnl: false;
+  note: string;
+}
+
+export interface WalletHistoryBlockerRecord {
+  code: string;
+  reason: string;
+  run_ids: number[];
+  evidence: Record<string, unknown>;
+}
+
+export interface WalletHistoryReadinessResponse {
+  analysis_version: "wallet_history_readiness_v0.22.7";
+  target_run_id: number;
+  run_ids: number[];
+  wallet_address: string;
+  wallet_identity: WalletIdentityRecord;
+  data_mode: "mock" | "real";
+  requested_bounds_verified: false;
+  observed_activity_start?: string | null;
+  observed_activity_end?: string | null;
+  runs: WalletHistoryRunScopeRecord[];
+  transaction_identity_groups: WalletHistoryIdentityGroupRecord[];
+  swap_identity_groups: WalletHistoryIdentityGroupRecord[];
+  event_action_identity_groups: WalletHistoryIdentityGroupRecord[];
+  transaction_identity_groups_total: number;
+  swap_identity_groups_total: number;
+  event_action_identity_groups_total: number;
+  evidence_groups_truncated: boolean;
+  coverage: WalletHistoryCoverageRecord;
+  bounded_interval_coverage: WalletHistoryBoundedIntervalCoverageRecord;
+  blockers: WalletHistoryBlockerRecord[];
+  history_complete: false;
+  deduplication_applied: false;
+  is_cost_basis: false;
+  eligible_for_cost_basis: false;
+  used_by_pnl: false;
+  note: string;
+}
+
 export interface WalletEvidenceSignalRecord {
   code: string;
   title: string;

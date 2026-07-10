@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -24,6 +24,7 @@ from models import (
     WalletTransaction,
     WalletTransfer,
 )
+from schemas import WalletHistoryReadinessResponse
 from services.wallet_history_readiness import assess_wallet_history_readiness
 from services.ton_event_action_identity import (
     TON_EVENT_ACTION_IDENTITY_VERSION,
@@ -293,7 +294,7 @@ def _run(
     transfers: list[dict[str, Any]] | None = None,
     custom_start: str | None = None,
     custom_end: str | None = None,
-    created_at: str = "2026-06-02T00:00:00Z",
+    created_at: str = "2026-06-02T00:00:02Z",
     requested_surfaces: list[str] | None = None,
     unavailable_surfaces: list[str] | None = None,
     incomplete_surfaces: list[str] | None = None,
@@ -339,7 +340,13 @@ def _transaction_acquisition_stream(
         "scope_kind": "bounded_interval",
         "requested_start": "2026-06-01T00:00:00Z",
         "requested_end": "2026-06-02T00:00:00Z",
-        "query_filters": {"limit": 100},
+        "query_filters": {
+            "endpoint": "account_transactions",
+            "cursor": "before_lt",
+            "limit": 100,
+            "interval": "[resolved_start,resolved_end)",
+            "bounds_available": True,
+        },
         "sort_order": "logical_time_desc",
         "page_size": 100,
         "page_cap": 10,
@@ -480,6 +487,58 @@ def _event_acquisition_stream(
         "error_message": None,
         "pages": pages,
     }
+
+
+def _retime_transaction_stream(start: str, end: str) -> dict[str, Any]:
+    stream = copy.deepcopy(_transaction_acquisition_stream())
+    start_at = _parse_datetime(start)
+    end_at = _parse_datetime(end)
+    assert start_at is not None and end_at is not None
+    before_start = (start_at - timedelta(minutes=1)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    started_at = end_at.isoformat().replace("+00:00", "Z")
+    finished_at = (end_at + timedelta(seconds=1)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    stream["requested_start"] = start
+    stream["requested_end"] = end
+    stream["started_at"] = started_at
+    stream["finished_at"] = finished_at
+    stream["pages"][0]["min_timestamp"] = before_start
+    stream["pages"][0]["max_timestamp"] = before_start
+    stream["pages"][0]["fetched_at"] = started_at
+    return stream
+
+
+def _retime_event_stream(start: str, end: str) -> dict[str, Any]:
+    stream = copy.deepcopy(_event_acquisition_stream())
+    start_at = _parse_datetime(start)
+    end_at = _parse_datetime(end)
+    assert start_at is not None and end_at is not None
+    before_start = (start_at - timedelta(minutes=1)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    started_at = end_at.isoformat().replace("+00:00", "Z")
+    finished_at = (end_at + timedelta(seconds=1)).isoformat().replace(
+        "+00:00", "Z"
+    )
+    stream["requested_start"] = start
+    stream["requested_end"] = end
+    stream["query_filters"]["start_date"] = int(start_at.timestamp())
+    stream["query_filters"]["end_date"] = int(end_at.timestamp())
+    stream["started_at"] = started_at
+    stream["finished_at"] = finished_at
+    stream["pages"][0]["min_timestamp"] = before_start
+    stream["pages"][0]["max_timestamp"] = before_start
+    stream["pages"][0]["fetched_at"] = started_at
+    return stream
+
+
+def _created_after(end: str) -> str:
+    end_at = _parse_datetime(end)
+    assert end_at is not None
+    return (end_at + timedelta(seconds=2)).isoformat().replace("+00:00", "Z")
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -924,7 +983,7 @@ def test_provider_scoped_event_action_identity_covers_transfers_and_swaps():
 
     result = assess_wallet_history_readiness(runs, target_run_id=2)
 
-    assert result["analysis_version"] == "wallet_history_readiness_v0.22.6"
+    assert result["analysis_version"] == "wallet_history_readiness_v0.22.7"
     assert result["event_action_identity_groups_total"] == 2
     assert all(
         group["identity_type"] == "provider_event_action_observation"
@@ -1409,6 +1468,98 @@ def test_complete_transaction_stream_evidence_is_reported_but_not_global_history
 
 
 @pytest.mark.parametrize(
+    "invalid_surfaces",
+    [
+        {"transactions": True, "transfers": True, "swaps": True},
+        7,
+        "transactions",
+        ["transactions", "transactions"],
+        ["transactions", "unknown"],
+    ],
+)
+def test_malformed_requested_surfaces_fail_closed_without_endpoint_crash(
+    invalid_surfaces,
+):
+    runs = [
+        _run(
+            run_id,
+            status="partial",
+            requested_surfaces=["transactions", "transfers", "swaps"],
+            incomplete_surfaces=["transfers", "swaps"],
+            acquisition_streams=[
+                _transaction_acquisition_stream(),
+                _event_acquisition_stream(),
+            ],
+        )
+        for run_id in (1, 2)
+    ]
+    for run in runs:
+        run["requested_surfaces"] = copy.deepcopy(invalid_surfaces)
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+    WalletHistoryReadinessResponse.model_validate(result)
+    bounded = result["bounded_interval_coverage"]
+
+    for layer_name in ("low_level_transactions", "provider_display_events"):
+        layer = bounded[layer_name]
+        assert layer["state"] == "no_validated_intervals"
+        assert layer["included_run_ids"] == []
+        assert layer["excluded_run_ids"] == [1, 2]
+        assert all(
+            record["source_reason_codes"] == ["requested_surfaces_invalid"]
+            for record in layer["run_evidence"]
+        )
+    assert result["history_complete"] is False
+    assert result["used_by_pnl"] is False
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("unavailable_surfaces", ["bogus"]),
+        ("unavailable_surfaces", ["transfers", "transfers"]),
+        ("unavailable_surfaces", {"transfers": True}),
+        ("incomplete_surfaces", ["transfers", "swaps", "bogus"]),
+        ("incomplete_surfaces", ["transfers", "transfers"]),
+        ("incomplete_surfaces", 7),
+    ],
+)
+def test_malformed_surface_status_lists_reject_both_interval_layers(
+    field,
+    invalid_value,
+):
+    runs = [
+        _run(
+            run_id,
+            status="partial",
+            requested_surfaces=["transactions", "transfers", "swaps"],
+            incomplete_surfaces=["transfers", "swaps"],
+            acquisition_streams=[
+                _transaction_acquisition_stream(),
+                _event_acquisition_stream(),
+            ],
+        )
+        for run_id in (1, 2)
+    ]
+    for run in runs:
+        run[field] = copy.deepcopy(invalid_value)
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+    WalletHistoryReadinessResponse.model_validate(result)
+
+    for layer_name in ("low_level_transactions", "provider_display_events"):
+        layer = result["bounded_interval_coverage"][layer_name]
+        assert layer["included_run_ids"] == []
+        assert layer["excluded_run_ids"] == [1, 2]
+        assert all(
+            "run_scope_invalid" in record["source_reason_codes"]
+            for record in layer["run_evidence"]
+        )
+    assert result["history_complete"] is False
+    assert result["used_by_pnl"] is False
+
+
+@pytest.mark.parametrize(
     "stream",
     [
         _transaction_acquisition_stream(
@@ -1459,6 +1610,19 @@ def test_transaction_pagination_validation_fails_closed_on_tampered_scope():
     invalid_page_size_stream["page_size"] = "100"
     wrong_window_stream = copy.deepcopy(_transaction_acquisition_stream())
     wrong_window_stream["requested_start"] = "2026-06-01T01:00:00Z"
+    wrong_query_stream = copy.deepcopy(_transaction_acquisition_stream())
+    wrong_query_stream["query_filters"]["unexpected"] = True
+    page_error_metadata_stream = copy.deepcopy(
+        _transaction_acquisition_stream()
+    )
+    page_error_metadata_stream["pages"][0]["error_message"] = "stale error"
+    impossible_count_stream = copy.deepcopy(_transaction_acquisition_stream())
+    impossible_count_stream["normalized_count"] = 1
+    impossible_count_stream["duplicate_count"] = 1
+    impossible_count_stream["pages"][0]["normalized_count"] = 1
+    impossible_count_stream["pages"][0]["duplicate_count"] = 1
+    invalid_capture_stream = copy.deepcopy(_transaction_acquisition_stream())
+    invalid_capture_stream["started_at"] = "2026-06-01T23:59:59Z"
 
     tampered_runs = [
         _run(2, data_mode="mock", acquisition_streams=[_transaction_acquisition_stream()]),
@@ -1471,6 +1635,15 @@ def test_transaction_pagination_validation_fails_closed_on_tampered_scope():
         _run(2, acquisition_streams=[oversized_stream]),
         _run(2, acquisition_streams=[invalid_page_size_stream]),
         _run(2, acquisition_streams=[wrong_window_stream]),
+        _run(2, acquisition_streams=[wrong_query_stream]),
+        _run(2, acquisition_streams=[page_error_metadata_stream]),
+        _run(2, acquisition_streams=[impossible_count_stream]),
+        _run(2, acquisition_streams=[invalid_capture_stream]),
+        _run(
+            2,
+            custom_start="2026-06-01T00:00:00Z",
+            acquisition_streams=[_transaction_acquisition_stream()],
+        ),
         _run(
             2,
             transactions=[outside_transaction],
@@ -1602,6 +1775,11 @@ def test_complete_event_stream_is_observed_without_promoting_display_actions():
         "cursor_chain",
         "time_order",
         "query_bounds",
+        "query_extra",
+        "page_error_metadata",
+        "combined_count",
+        "capture_order",
+        "fetch_order",
         "termination",
     ],
 )
@@ -1628,6 +1806,18 @@ def test_event_pagination_validation_fails_closed_on_tampering(tamper):
         stream["pages"][0]["min_timestamp"] = "2026-06-01T13:00:00Z"
     elif tamper == "query_bounds":
         stream["query_filters"]["start_date"] += 1
+    elif tamper == "query_extra":
+        stream["query_filters"]["unexpected"] = True
+    elif tamper == "page_error_metadata":
+        stream["pages"][0]["error_message"] = "stale error"
+    elif tamper == "combined_count":
+        stream["duplicate_count"] = 1
+        stream["pages"][0]["duplicate_count"] = 1
+    elif tamper == "capture_order":
+        stream["started_at"] = "2026-06-01T23:59:59Z"
+    elif tamper == "fetch_order":
+        stream["pages"][0]["fetched_at"] = "2026-06-02T00:00:01Z"
+        stream["pages"][1]["fetched_at"] = "2026-06-02T00:00:00Z"
     elif tamper == "termination":
         stream["termination_reason"] = "requested_start_crossed"
 
@@ -1662,6 +1852,79 @@ def test_event_pagination_validation_fails_closed_on_tampering(tamper):
         "provider_stream_complete",
         "incomplete",
     ]
+    if tamper == "aggregate_count":
+        assert "page_evidence_invalid" in evidence[1]["reason_codes"]
+
+
+def test_transaction_page_fetch_times_must_follow_page_order():
+    stream = copy.deepcopy(_transaction_acquisition_stream())
+    stream["termination_reason"] = "provider_terminal"
+    stream["terminal_cursor"] = None
+    stream["page_count"] = 2
+    stream["pages_succeeded"] = 2
+    stream["pages"].append(
+        {
+            "page_index": 2,
+            "request_cursor": "46000000000000",
+            "response_cursor": None,
+            "requested_limit": 100,
+            "raw_count": 0,
+            "normalized_count": 0,
+            "duplicate_count": 0,
+            "min_logical_time": None,
+            "max_logical_time": None,
+            "min_timestamp": None,
+            "max_timestamp": None,
+            "response_digest": "ef" * 32,
+            "attempt_count": 1,
+            "error_code": None,
+            "error_message": None,
+            "fetched_at": "2026-06-02T00:00:01Z",
+        }
+    )
+    baseline = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                requested_surfaces=["transactions"],
+                acquisition_streams=[_transaction_acquisition_stream()],
+            ),
+            _run(
+                2,
+                requested_surfaces=["transactions"],
+                acquisition_streams=[stream],
+            ),
+        ],
+        target_run_id=2,
+    )
+    baseline_layer = baseline["bounded_interval_coverage"][
+        "low_level_transactions"
+    ]
+    assert baseline_layer["included_run_ids"] == [1, 2]
+
+    stream["pages"][0]["fetched_at"] = "2026-06-02T00:00:01Z"
+    stream["pages"][1]["fetched_at"] = "2026-06-02T00:00:00Z"
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                requested_surfaces=["transactions"],
+                acquisition_streams=[_transaction_acquisition_stream()],
+            ),
+            _run(
+                2,
+                requested_surfaces=["transactions"],
+                acquisition_streams=[stream],
+            ),
+        ],
+        target_run_id=2,
+    )
+    layer = result["bounded_interval_coverage"]["low_level_transactions"]
+    target_evidence = next(
+        item for item in layer["run_evidence"] if item["run_id"] == 2
+    )
+    assert target_evidence["classification"] == "excluded"
+    assert "capture_times_invalid" in target_evidence["source_reason_codes"]
 
 
 def test_event_stream_requires_display_actions_to_remain_incomplete_at_run_level():
@@ -1733,6 +1996,148 @@ def test_missing_event_stream_is_blocking_only_when_event_surfaces_were_requeste
     )
 
 
+def test_bounded_transaction_intervals_form_contiguous_selected_span_only():
+    first_start = "2026-06-01T00:00:00Z"
+    shared_boundary = "2026-06-02T00:00:00Z"
+    second_end = "2026-06-03T00:00:00Z"
+    runs = [
+        _run(
+            1,
+            time_window="custom",
+            custom_start=first_start,
+            custom_end=shared_boundary,
+            created_at=_created_after(shared_boundary),
+            requested_surfaces=["transactions"],
+            acquisition_streams=[
+                _retime_transaction_stream(first_start, shared_boundary)
+            ],
+        ),
+        _run(
+            2,
+            time_window="custom",
+            custom_start=shared_boundary,
+            custom_end=second_end,
+            created_at=_created_after(second_end),
+            requested_surfaces=["transactions"],
+            acquisition_streams=[
+                _retime_transaction_stream(shared_boundary, second_end)
+            ],
+        ),
+    ]
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+    bounded = result["bounded_interval_coverage"]
+    transactions = bounded["low_level_transactions"]
+
+    assert result["analysis_version"] == "wallet_history_readiness_v0.22.7"
+    assert bounded["contract_version"] == "wallet_multi_run_interval_coverage_v1"
+    assert bounded["cross_stream_union_applied"] is False
+    assert transactions["state"] == "contiguous_selected_span"
+    assert transactions["selected_run_coverage_state"] == "complete"
+    assert transactions["included_run_ids"] == [1, 2]
+    assert transactions["gap_intervals"] == []
+    assert transactions["overlap_intervals"] == []
+    assert transactions["covered_duration_microseconds"] == str(
+        2 * 86_400_000_000
+    )
+    assert bounded["provider_display_events"]["state"] == (
+        "no_validated_intervals"
+    )
+    assert bounded["full_pre_run_history_established"] is False
+    assert bounded["complete_wallet_history_established"] is False
+    assert bounded["deduplication_applied"] is False
+    assert bounded["eligible_for_cost_basis"] is False
+    assert bounded["used_by_pnl"] is False
+    assert "bounded_transaction_interval_gaps" not in _blocker_codes(result)
+    assert "bounded_transaction_interval_overlaps" not in _blocker_codes(result)
+    assert result["history_complete"] is False
+
+
+def test_provider_display_intervals_never_bridge_transaction_gap():
+    bounds = [
+        ("2026-06-01T00:00:00Z", "2026-06-02T00:00:00Z"),
+        ("2026-06-02T00:00:00Z", "2026-06-03T00:00:00Z"),
+        ("2026-06-03T00:00:00Z", "2026-06-04T00:00:00Z"),
+    ]
+    runs: list[dict[str, Any]] = []
+    for run_id, (start, end) in enumerate(bounds, start=1):
+        transaction_requested = run_id != 2
+        requested_surfaces = ["transfers"]
+        streams = [_retime_event_stream(start, end)]
+        if transaction_requested:
+            requested_surfaces.insert(0, "transactions")
+            streams.insert(0, _retime_transaction_stream(start, end))
+        runs.append(
+            _run(
+                run_id,
+                time_window="custom",
+                status="partial",
+                custom_start=start,
+                custom_end=end,
+                created_at=_created_after(end),
+                requested_surfaces=requested_surfaces,
+                incomplete_surfaces=["transfers"],
+                acquisition_streams=streams,
+            )
+        )
+
+    result = assess_wallet_history_readiness(runs, target_run_id=3)
+    bounded = result["bounded_interval_coverage"]
+    transactions = bounded["low_level_transactions"]
+    events = bounded["provider_display_events"]
+
+    assert transactions["state"] == "gapped_selected_span"
+    assert transactions["selected_run_coverage_state"] == "partial"
+    assert transactions["included_run_ids"] == [1, 3]
+    assert transactions["not_requested_run_ids"] == [2]
+    assert transactions["gap_intervals"] == [
+        {
+            "start": bounds[0][1],
+            "end": bounds[2][0],
+            "duration_microseconds": "86400000000",
+            "left_run_ids": [1],
+            "right_run_ids": [3],
+        }
+    ]
+    assert events["state"] == "contiguous_selected_span"
+    assert events["included_run_ids"] == [1, 2, 3]
+    assert events["gap_intervals"] == []
+    assert bounded["cross_stream_union_applied"] is False
+    blocker_codes = _blocker_codes(result)
+    assert "bounded_transaction_interval_gaps" in blocker_codes
+    assert "provider_display_interval_gaps" not in blocker_codes
+    assert result["history_complete"] is False
+    assert result["deduplication_applied"] is False
+
+
+def test_transaction_interval_overlap_is_diagnostic_and_never_deduplicates():
+    start = "2026-06-01T00:00:00Z"
+    end = "2026-06-02T00:00:00Z"
+    runs = [
+        _run(
+            run_id,
+            time_window="custom",
+            custom_start=start,
+            custom_end=end,
+            created_at=_created_after(end),
+            requested_surfaces=["transactions"],
+            acquisition_streams=[_retime_transaction_stream(start, end)],
+        )
+        for run_id in (1, 2)
+    ]
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+    transactions = result["bounded_interval_coverage"][
+        "low_level_transactions"
+    ]
+
+    assert transactions["max_coverage_depth"] == 2
+    assert transactions["overlap_intervals"][0]["run_ids"] == [1, 2]
+    assert "bounded_transaction_interval_overlaps" in _blocker_codes(result)
+    assert result["deduplication_applied"] is False
+    assert result["used_by_pnl"] is False
+
+
 def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
     client, session_factory = db_client
     transaction = _transaction("shared", fee_ton="0.01")
@@ -1769,7 +2174,7 @@ def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["analysis_version"] == "wallet_history_readiness_v0.22.6"
+    assert body["analysis_version"] == "wallet_history_readiness_v0.22.7"
     assert body["run_ids"] == [first_id, target_id]
     assert body["target_run_id"] == target_id
     assert next(scope for scope in body["runs"] if scope["is_target"])[
@@ -1777,6 +2182,21 @@ def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
     ] == target_id
     assert body["transaction_identity_groups_total"] == 1
     assert body["transaction_identity_groups"][0]["has_conflict"] is False
+    bounded = body["bounded_interval_coverage"]
+    assert bounded["contract_version"] == "wallet_multi_run_interval_coverage_v1"
+    assert bounded["selected_run_ids"] == [first_id, target_id]
+    assert bounded["low_level_transactions"]["state"] == (
+        "no_validated_intervals"
+    )
+    assert bounded["provider_display_events"]["state"] == (
+        "no_validated_intervals"
+    )
+    assert bounded["cross_stream_union_applied"] is False
+    assert bounded["complete_wallet_history_established"] is False
+    assert bounded["activity_rows_merged"] is False
+    assert bounded["deduplication_applied"] is False
+    assert bounded["eligible_for_cost_basis"] is False
+    assert bounded["used_by_pnl"] is False
     assert body["history_complete"] is False
     assert body["deduplication_applied"] is False
     assert body["is_cost_basis"] is False
@@ -1835,6 +2255,12 @@ def test_endpoint_groups_bounce_variants_by_scoped_wallet_identity(
         {"target_run_id": 1, "run_ids": [1, 0]},
         {"target_run_id": 3, "run_ids": [1, 2]},
         {"target_run_id": 0, "run_ids": [1, 2]},
+        {"target_run_id": True, "run_ids": [True, 2]},
+        {"target_run_id": 1.0, "run_ids": [1.0, 2]},
+        {"target_run_id": "1", "run_ids": ["1", 2]},
+        {"target_run_id": 1, "run_ids": [1, False]},
+        {"target_run_id": 1, "run_ids": [1, 2.0]},
+        {"target_run_id": 1, "run_ids": [1, "2"]},
         {"run_ids": [1, 2]},
         {"target_run_id": 1},
     ],

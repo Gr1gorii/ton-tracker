@@ -1,16 +1,19 @@
-# TON Wallet Intelligence Dashboard — v0.22.6 ACTION IDENTITY
+# TON Wallet Intelligence Dashboard — v0.22.7 INTERVAL COVERAGE
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
-retain their bounded evidence contracts. v0.22.6 adds an exact provider-scoped
-event/action observation coordinate for derived transfer and swap rows without
-promoting mutable event actions to authoritative or complete wallet history.
+retain their bounded evidence contracts, and v0.22.6 provider event/action
+observation identity remains unchanged. v0.22.7 adds deterministic interval
+coverage across 2-50 explicitly selected runs without promoting a selected
+span, provider display events, or derived actions to complete wallet history.
 
 ## Objective
 
-Make acquisition quality inspectable before multi-run history, cost basis, or
-PnL can consume it. Provider failures, cursor anomalies, caps, and legacy gaps
-must remain visible; no missing data is inferred.
+Make acquisition quality and bounded continuity inspectable before multi-run
+history, cost basis, or PnL can consume it. Provider failures, cursor anomalies,
+caps, excluded runs, not-requested streams, overlaps, internal gaps, and legacy
+evidence limits must remain visible; no missing interval or activity is
+inferred.
 
 ## Frozen interval contract
 
@@ -166,7 +169,84 @@ Runtime ingestion enforces one shared transfer/swap identity namespace in
 addition to the per-table unique indexes. Reinterpreting the same event/action
 coordinate as another surface is a conflict, not a new observation.
 
-## Surface status in v0.22.6
+## Multi-run interval coverage
+
+`wallet_multi_run_interval_coverage_v1` is a pure diagnostic contract over an
+explicit selected set of 2-50 distinct run ids. The history-readiness request
+still names one selected run as `target_run_id`; the target does not silently
+expand the selected set or grant stronger coverage semantics.
+
+This release adds no persistence fields or database migration. Alembic head
+remains `20260710_0005`; interval coverage is recomputed read-only from the
+strictly revalidated acquisition evidence already stored for each run.
+
+### Evidence admission
+
+Recorded interval fields are never trusted by themselves. Before interval math,
+history readiness strictly revalidates the complete persisted evidence chain
+for every selected run and stream:
+
+- the low-level layer accepts only one coherent bounded `transactions` stream
+  whose pages recompute to validated state `complete`;
+- the provider-display layer accepts only one coherent bounded
+  `account_events` stream whose pages recompute to validated state
+  `provider_stream_complete`;
+- provider, stream key, contract, scope, query filters, sort order, frozen
+  bounds, page indexes, cursors, counts, hashes, completion reason, and error
+  state must remain internally coherent with the selected run;
+- missing or ambiguous evidence, invalid intervals, preview-only, incomplete,
+  error, or legacy-unavailable states are classified as `excluded` with an
+  explicit reason;
+- a stream that the run did not request is classified separately as
+  `not_requested` and is never counted in the union.
+
+No interval is fabricated from run timestamps, observed row timestamps, window
+labels, another stream, or neighboring runs.
+
+### Never-mixed layers
+
+The response contains two independent layers:
+
+| Layer | Eligible revalidated state | Meaning |
+| --- | --- | --- |
+| `low_level_transactions` | `complete` | Bounded low-level TonAPI transaction-query coverage for accepted selected runs |
+| `provider_display_events` | `provider_stream_complete` | Bounded TonAPI account-event display coverage only |
+
+`cross_stream_union_applied` is always false. A transaction interval cannot
+fill an event-layer gap, an event interval cannot fill a transaction-layer gap,
+and cross-layer overlap has no coverage meaning. TonAPI high-level event actions
+remain mutable display interpretations, so even a contiguous provider-event
+span is not authoritative transfer, swap, or activity history.
+
+### Half-open sweep and exact durations
+
+Each accepted interval uses UTC half-open semantics `[start, end)`. The
+deterministic boundary sweep divides the selected eligible span into exact
+cells, then reports:
+
+- accepted per-run intervals and their normalized union;
+- adjacent intervals as one contiguous union when one `end` equals the next
+  `start`;
+- overlap segments with exact contributing run ids, coverage depth, total
+  overlapped duration, and maximum depth;
+- internal gap segments with the eligible run ids immediately to the left and
+  right;
+- span, covered, gap, and overlap durations as canonical decimal strings of
+  integer microseconds.
+
+Integer timedelta decomposition plus decimal-string transport avoids
+floating-point, browser safe-integer, and whole-second rounding, including at
+one-microsecond boundaries. Overlapping intervals count
+once in covered union duration. Gaps are measured only between the earliest
+eligible start and latest eligible end. Time before that start and at or after
+that end remains `outside_selected_span_coverage: unknown`.
+
+The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
+`gapped_selected_span`. Per-run records and summary lists keep `included`,
+`excluded`, and `not_requested` classifications visible even when the included
+intervals are contiguous.
+
+## Surface status in v0.22.7
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -175,6 +255,7 @@ coordinate as another surface is a conflict, not a new observation.
 | Swaps | Same shared chain, `JettonSwap` interpretation, and shared observation-identity namespace | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
 | Jettons | Account jetton balance snapshot | Point-in-time snapshot, not history |
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
+| Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
 
 TonAPI documents high-level event actions as presentation-oriented structures
 that can change. Transfer and swap event actions therefore remain provider
@@ -220,10 +301,13 @@ or a PnL/deduplication key. The public flags state those limits explicitly.
   visible through `incomplete_surfaces`.
 - `GET /api/wallets/ingest/{run_id}` reads the persisted evidence back without
   inferring legacy pages or missing action indexes.
-- `POST /api/wallets/history/readiness` reports per-run bounded transaction and
-  provider-event acquisition plus event-action observation identity coverage,
-  groups, and conflicts under `wallet_history_readiness_v0.22.6`, but remains
-  diagnostic.
+- `POST /api/wallets/history/readiness` accepts one explicit target within 2-50
+  distinct selected run ids. Under `wallet_history_readiness_v0.22.7`, it
+  reports per-run acquisition validation, identity coverage/groups/conflicts,
+  and the two independent `wallet_multi_run_interval_coverage_v1` layers.
+- The wallet workspace exposes this endpoint through a selected-run card: the
+  current run is the target and the user supplies the remaining selected ids.
+  Transaction and provider-display continuity remain visibly separate.
 
 One failing transaction page after earlier successful pages preserves the
 accepted rows and evidence while marking the stream incomplete. A failure before
@@ -237,8 +321,10 @@ surfaces do not convert an incomplete transaction stream into complete history.
   provider-scoped observation coordinate.
 - No jetton or native-balance history completion from snapshots.
 - No authoritative logic built from TonAPI high-level event actions.
-- No cross-run merge, interval stitching, or deduplication.
-- No proof of all wallet history before the selected interval.
+- No activity-row merge, semantic stitching, or cross-run deduplication. The
+  bounded interval union is diagnostic math only.
+- No proof of time before the earliest eligible selected interval, time after
+  the latest eligible end, or complete wallet history.
 - No acquisition cost basis from pagination evidence alone.
 - No PnL, realized/unrealized, fee-linkage, clustering, or ownership-proof
   change.
@@ -266,9 +352,16 @@ surfaces do not convert an incomplete transaction stream into complete history.
   same/cross-table conflicts, and keep v0.22.5 rows unavailable.
 - Readiness tests cover provider-scoped identity coverage, groups, changed-
   payload conflicts, and unchanged false global history/cost/PnL flags.
+- Interval tests cover 2-50 distinct selected run ids, strict transaction/event
+  evidence revalidation, independent layers, included/excluded/not-requested
+  classification, adjacency, nested and multi-run overlaps, internal gaps, and
+  exact one-microsecond boundaries.
+- Schema and endpoint tests keep `cross_stream_union_applied`, global-history,
+  authoritative-coverage, activity-merge, deduplication, cost-basis, and PnL
+  flags false.
 - Full backend tests and frontend build pass.
 
-## Roadmap beyond v0.22.6
+## Roadmap beyond v0.22.7
 
 1. Acquire authoritative low-level transfer/trade evidence or reconstruct it
    from validated traces without treating provider display actions as immutable
@@ -276,7 +369,8 @@ surfaces do not convert an incomplete transaction stream into complete history.
 2. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
    coordinate as a substitute.
-3. Prove interval continuity and gaps across selected runs, then implement
-   explicit cross-run deduplication.
+3. Use the bounded continuity diagnostics as evidence for a separately designed
+   activity-row merge and explicit cross-run deduplication contract; never
+   infer those operations from interval adjacency alone.
 4. Only after those gates, evaluate multi-run acquisition cost basis and PnL
    integration.

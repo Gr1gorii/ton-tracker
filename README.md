@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.6 ACTION IDENTITY
+# TON Wallet Intelligence Dashboard — v0.22.7 INTERVAL COVERAGE
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.6 ACTION IDENTITY status — guarded real/live TonAPI transfer and swap rows now preserve a strict provider-scoped event/action observation coordinate: network, canonical run account, canonical event id, canonical event LT, and the original zero-based action index before filtering. The coordinate is not blockchain proof, ownership proof, or authoritative semantic activity identity, and it is not used for deduplication, cost basis, or PnL. The bounded low-level transaction and shared account-event cursor contracts from v0.22.5 remain unchanged; derived surfaces stay explicitly incomplete even when the provider page chain terminates.**
+> **v0.22.7 INTERVAL COVERAGE status — multi-run history readiness now strictly revalidates persisted transaction and account-event page evidence for 2-50 explicitly selected runs, then computes two independent half-open interval layers under `wallet_multi_run_interval_coverage_v1`. Exact integer-microsecond sweep results expose adjacency, overlaps, internal gaps, included/excluded/not-requested runs, and unknown time outside each earliest/latest eligible span. Microsecond totals are serialized as canonical decimal strings so browsers cannot round 64-bit values. The transaction and provider-display layers are never combined; TonAPI events remain display-only and non-authoritative. No activity merge, deduplication, global history, cost basis, or PnL claim is introduced.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -42,13 +42,12 @@ executable ingestion path.
 > - Multi-run history readiness accepts an explicit target run and 2-50
 >   distinct run ids for the same network-scoped canonical run-wallet identity
 >   and data mode. When canonical identity is unavailable, only an exact
->   submitted-address match is accepted as a legacy diagnostic fallback. It
->   groups transactions as exact only when a coherent persisted v0.22.3 tuple
->   is present; legacy raw transaction hashes remain weak evidence. Under
->   `wallet_history_readiness_v0.22.6`, coherent TonAPI event/action coordinates
->   are grouped separately as provider-scoped observations with explicit
->   coverage and conflicts. They remain non-authoritative and cannot establish
->   semantic transfer/swap equivalence. The report also exposes observed
+>   submitted-address match is accepted as a legacy diagnostic fallback. Under
+>   `wallet_history_readiness_v0.22.7`, identity groups remain diagnostic and
+>   `bounded_interval_coverage` separately measures only strictly revalidated
+>   low-level transaction intervals and TonAPI provider-display event intervals.
+>   Each selected run is `included`, `excluded`, or `not_requested` per layer;
+>   no evidence crosses between layers. The report also exposes observed
 >   timestamp bounds, asset-address and fee hash-match coverage, and blockers.
 >   Every report remains diagnostic (`is_cost_basis: false`,
 >   `eligible_for_cost_basis: false`, `used_by_pnl: false`) and is never passed
@@ -83,6 +82,9 @@ executable ingestion path.
 >   Revision 0005 adds retry-safe provider event/action observation fields and
 >   indexes to transfers and swaps. v0.22.5 rows lack the original action index,
 >   so they remain explicitly unavailable instead of receiving a guessed key.
+>   v0.22.7 adds no database migration; Alembic head remains
+>   `20260710_0005`. Interval coverage is recomputed read-only from validated
+>   persisted acquisition evidence.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -150,7 +152,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.6 ACTION IDENTITY` product label
+> - User-facing UI copy uses the `v0.22.7 INTERVAL COVERAGE` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -158,8 +160,8 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.6 ACTION
->   IDENTITY` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.7 INTERVAL
+>   COVERAGE` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -237,6 +239,8 @@ backend/
                          Adapter-backed wallet activity ingestion persistence
     wallet_activity_clustering.py
                          Pairwise run comparison (probabilistic similarity)
+    wallet_interval_coverage.py
+                         Exact selected-run half-open interval sweep
     wallet_history_readiness.py
                          Read-only multi-run overlap and coverage diagnostics
     wallet_activity_signals.py
@@ -355,7 +359,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.6 ACTION IDENTITY)
+## Data modes & providers (v0.22.7 INTERVAL COVERAGE)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -417,7 +421,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.6 ACTION IDENTITY` is the current
+API-version field, while `v0.22.7 INTERVAL COVERAGE` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -626,26 +630,54 @@ different submitted bounceable/non-bounceable representations can be grouped
 when their persisted canonical identity and TON network match. If any run lacks
 complete canonical identity, all runs must use the exact same submitted
 `wallet_address`; that fallback stays visible as a legacy diagnostic blocker.
-The response preserves each submitted address, exposes wallet identity at the
-target and per-run scope, and reports observed bounds, transaction identity
-coverage, overlaps, conflicts, asset-address and fee hash-match coverage, and
-blockers under `analysis_version: wallet_history_readiness_v0.22.6`. An exact
-transaction group requires a coherent persisted network + canonical account +
-LT + 32-byte-hash tuple and matching real/live TonAPI provenance. A legacy raw
-transaction hash is classified only as weak evidence. Coherent transfer and
-swap event/action coordinates are grouped as `provider_scoped` observations,
-with explicit coverage and changed-payload/conflicting-coordinate blockers.
-They are not exact semantic swap or transfer identity. The diagnostic reports
-validated per-run bounded transaction pagination and separately validates the
-persisted `account_events` provider chain. Even `provider_stream_complete`
-describes only TonAPI display acquisition; derived transfers/swaps, jettons,
-balances, interval continuity across runs, and wallet history before the
-selected runs remain unverified.
-Diagnostic only: the endpoint does not apply cross-run deduplication, merge
-activity, prove complete wallet history, establish cost basis, or change any
-PnL result; `history_complete`,
-`deduplication_applied`, `is_cost_basis`, `eligible_for_cost_basis`, and
-`used_by_pnl` remain `false`.
+The target must be one of the 2-50 distinct positive `run_ids`; it selects the
+report focus but does not receive stronger coverage eligibility. The wallet
+workspace exposes the same flow in a selected-run card: the current run is the
+explicit target and the user supplies the remaining selected ids.
+
+Under `analysis_version: wallet_history_readiness_v0.22.7`, the response keeps
+the existing identity coverage, groups, conflicts, asset-address coverage, fee
+hash-match candidates, per-run bounds, and blockers. It also exposes
+`bounded_interval_coverage` under
+`wallet_multi_run_interval_coverage_v1`.
+
+Interval admission is fail-closed. Recorded bounds alone are insufficient:
+history readiness first revalidates every selected run's complete persisted
+stream and page evidence, including provider, stream contract and scope, query
+filters, sort order, frozen bounds, page sequence, cursors, counts, response
+digests, completion reason, error state, and run scope. The
+`low_level_transactions` layer accepts only a coherent bounded `transactions`
+stream in validated `complete` state. The `provider_display_events` layer
+accepts only a coherent bounded `account_events` stream in validated
+`provider_stream_complete` state. Each selected run is reported per layer as
+`included`, `excluded`, or `not_requested`; missing, ambiguous, malformed,
+preview-only, incomplete, error, and legacy evidence is never repaired or
+inferred into coverage.
+
+The two layers are never mixed: `cross_stream_union_applied` is `false`. A
+transaction interval cannot fill an event-layer gap, and provider events cannot
+fill a transaction-layer gap. TonAPI account events and their actions remain
+mutable, display-only provider interpretations; even contiguous provider-event
+coverage is not authoritative transfer, swap, semantic activity, or complete
+wallet history.
+
+Within each layer, accepted UTC intervals use exact half-open `[start, end)`
+semantics. A deterministic boundary sweep reports accepted intervals, their
+union, adjacent continuity, overlap segments and depth, and internal gaps with
+the eligible run ids on each side. Span, covered, gap, and overlap durations use
+integer microseconds, serialized as canonical decimal strings so even values
+beyond the browser safe-integer range remain exact. A one-microsecond gap is
+never rounded away. Gaps are
+measured only between the earliest eligible start and latest eligible end;
+coverage before that start and at or after that end is always `unknown`.
+
+Diagnostic only: interval adjacency or union does not merge activity rows,
+apply cross-run deduplication, prove complete pre-run/global wallet history,
+establish cost basis, or change any PnL result. `history_complete`,
+`full_pre_run_history_established`, `complete_wallet_history_established`,
+`is_global_history_coverage`, `is_authoritative_activity_coverage`,
+`activity_rows_merged`, `deduplication_applied`, `is_cost_basis`,
+`eligible_for_cost_basis`, and `used_by_pnl` remain `false`.
 
 ### `GET /api/prices/historical/preview`
 Returns provider-reported historical rate points for one `token` (`"ton"` or
@@ -767,9 +799,9 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.6 ACTION IDENTITY`).
+  tracks the current release (`v0.22.7 INTERVAL COVERAGE`).
 
-## Roadmap beyond v0.22.6 ACTION IDENTITY
+## Roadmap beyond v0.22.7 INTERVAL COVERAGE
 
 - Add authoritative low-level transfer/trade acquisition or trace-backed
   reconstruction before treating derived transfer or swap actions as complete.
@@ -778,11 +810,12 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - Define appropriate temporal evidence contracts for jetton-balance and native-
   balance snapshots without mislabeling point-in-time state as history.
 - Add authoritative semantic transfer/trade reconstruction plus jetton-asset
-  and counterparty identity contracts, then explicit cross-run interval
-  continuity and deduplication. The provider observation coordinate is not a
-  substitute for semantic identity.
-  One bounded low-level transaction stream cannot make multi-run data complete
-  wallet history or a cost-basis source.
+  and counterparty identity contracts, then a separately designed activity-row
+  merge and cross-run deduplication contract. The provider observation
+  coordinate and interval adjacency are not substitutes for semantic identity.
+  A contiguous selected interval span cannot make multi-run data complete
+  wallet history or a cost-basis source; time outside the eligible span remains
+  unknown.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
   into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.

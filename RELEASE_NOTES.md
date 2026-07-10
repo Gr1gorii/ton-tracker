@@ -1,111 +1,112 @@
-# TON Wallet Intelligence Dashboard — v0.22.6 ACTION IDENTITY
+# TON Wallet Intelligence Dashboard — v0.22.7 INTERVAL COVERAGE
 
-This release adds a strict provider-scoped observation identity for transfer
-and swap rows derived from TonAPI account-event actions. The identity preserves
-the exact event/action coordinate returned by the provider; it does not promote
-mutable high-level actions to authoritative activity, blockchain proof, or
-ownership proof.
+This release adds deterministic multi-run interval coverage diagnostics to the
+existing wallet history-readiness response. It measures only revalidated,
+bounded acquisition evidence from the selected runs and never promotes a
+selected span to complete or global wallet history.
 
 ## Release scope
 
-- Every guarded real/live TonAPI transfer or swap action is evaluated against
-  `tonapi_event_action_obs_v1` before its identity is persisted.
-- The coordinate contains provider, TON network, canonical run account,
-  canonical event id, canonical event LT, and the original zero-based action
-  index from the complete provider action array.
-- Filtering unsupported action types never renumbers supported actions.
-- Transfer and swap surfaces share one identity namespace, so the same provider
-  coordinate cannot be accepted twice or retyped into a second activity row.
-- Mock, malformed, incoherent, and legacy rows remain explicitly
-  `unavailable`.
-- Bounded transaction and shared account-event pagination from v0.22.5 remain
-  unchanged.
+- `analysis_version: wallet_history_readiness_v0.22.7` now exposes
+  `bounded_interval_coverage` under contract
+  `wallet_multi_run_interval_coverage_v1`.
+- The request still requires one explicit target run and 2-50 distinct run ids
+  for the same wallet identity and data mode.
+- Every selected run is classified independently in each coverage layer as
+  `included`, `excluded`, or `not_requested`, with its recorded evidence state
+  and rejection reason preserved.
+- Accepted intervals use exact half-open UTC semantics: `[start, end)`.
+- Durations are calculated with integer microseconds and serialized as
+  canonical decimal strings. No floating-point, browser safe-integer, or
+  whole-second rounding can hide a one-microsecond gap.
+- A deterministic boundary sweep reports accepted intervals, their union,
+  adjacency, overlap segments and depth, and internal gap segments.
+- Time before the earliest eligible start and at or after the latest eligible
+  end remains `unknown`.
 
-## Provider observation identity contract
+## Strict evidence revalidation
 
-The persisted key is derived from:
+Coverage is not derived from stored start/end fields alone. History readiness
+first revalidates every selected run's persisted stream and page evidence:
 
-```text
-tonapi_event_action_obs_v1
-| tonapi
-| network
-| canonical_account
-| canonical_event_id
-| canonical_event_lt
-| original_action_index
-```
+- low-level transaction coverage accepts only one coherent bounded
+  `transactions` stream in validated `complete` state;
+- provider-display coverage accepts only one coherent bounded `account_events`
+  stream in validated `provider_stream_complete` state;
+- stream contract, provider, scope, query filters, sort order, page sequence,
+  cursors, counts, digests, bounds, completion reason, errors, and run scope must
+  satisfy the existing fail-closed page-evidence validators;
+- missing, ambiguous, malformed, incomplete, preview-only, legacy, or otherwise
+  ineligible evidence is excluded rather than repaired or inferred;
+- a surface that was not requested is reported separately as `not_requested`
+  and is never silently counted as an excluded or covered interval.
 
-The event id is canonical lowercase 32-byte hex, event LT is a positive uint64,
-and the action index is a strict non-negative integer captured before surface
-filtering. Network, run wallet, provider provenance, event fields, and action
-type must remain coherent with the raw provider observation.
+## Two separate coverage layers
 
-`action_type` and activity surface are audit fields, not key fields. This is
-intentional: changing the interpretation of one provider coordinate must expose
-a conflict instead of creating a new identity.
+The contract contains two layers that are never combined:
 
-The identity is provider-scoped observation evidence only:
+1. `low_level_transactions` measures validated low-level transaction-query
+   intervals.
+2. `provider_display_events` measures validated TonAPI account-event display
+   intervals.
 
-- `is_provider_observation_identity` can be true for a coherent live row;
-- `is_blockchain_proof_verified` is false;
-- `is_authoritative_activity_identity` is false;
-- `is_ownership_proof` is false;
-- `eligible_for_cost_basis` is false;
-- `deduplication_applied` is false;
-- `used_by_pnl` is false.
+`cross_stream_union_applied` is always false. A gap in one layer cannot be
+filled by evidence from the other layer, and overlap between the layers has no
+coverage meaning. TonAPI event actions remain mutable, display-only provider
+interpretations; even contiguous `provider_display_events` coverage is not
+authoritative transfer, swap, or activity history.
 
-It therefore does not establish semantic transfer or swap equivalence across
-provider revisions, verified chain execution, ownership, acquisition cost
-basis, or PnL.
+## Interval semantics
 
-## Migration and legacy behavior
+For each layer, the response exposes:
 
-Alembic revision `20260710_0005` adds the event-action observation fields and
-indexes to both `wallet_transfers` and `wallet_swaps`. It enforces per-table
-identity uniqueness and validates the shared transfer/swap namespace before
-creating indexes.
+- accepted per-run intervals and the normalized union;
+- a selected span from the earliest eligible start to the latest eligible end;
+- exact covered, gap, overlap, and span durations as canonical decimal
+  microsecond strings;
+- overlap segments with contributing run ids and coverage depth;
+- internal gap segments with the eligible run ids on each side;
+- included, excluded, and not-requested run ids plus per-run evidence reasons;
+- `contiguous_selected_span`, `gapped_selected_span`, or
+  `no_validated_intervals` state.
 
-Rows written by v0.22.5 do not contain the original action index. The migration
-does not infer that index from row order, payload shape, timestamp, or action
-type, so those rows remain `event_action_identity_status: unavailable`.
-Migration retry accepts only an exact, safe schema state; downgrade remains
-unsupported.
+Touching half-open intervals are adjacent and form one contiguous union.
+Overlapping intervals contribute coverage only once to the union, while their
+overlap duration and maximum depth remain visible. Gaps are reported only
+inside the earliest-to-latest eligible span; the contract makes no statement
+about time outside it.
 
-## History readiness v0.22.6
+## UI
 
-`analysis_version: wallet_history_readiness_v0.22.6` validates provider action
-identities independently of low-level transaction identity. It reports
-event-action identity coverage, provider-scoped groups, and conflicts across
-the selected runs. A repeated identity with changed semantic payload is a
-conflict, not a second valid observation.
+The wallet workspace includes a selected-run history-readiness card. The
+current run is the explicit target, and the user supplies the remaining run ids
+for a total of 2-50 distinct selected runs. The card keeps transaction and
+provider-display interval summaries separate and shows included, excluded,
+not-requested, overlap, and internal-gap evidence without a full-history claim.
 
-Provider-scoped groups do not prove global activity continuity or authorize
-cross-run deduplication. `history_complete`, `deduplication_applied`,
-`is_cost_basis`, `eligible_for_cost_basis`, and `used_by_pnl` remain false.
+## Migration and compatibility
 
-## TonAPI response hardening
+v0.22.7 adds no database migration. Alembic head remains
+`20260710_0005`. The v0.22.6 provider event/action observation identity
+contract `tonapi_event_action_obs_v1`, transaction identity, and persisted
+acquisition evidence remain unchanged.
 
-- A response body larger than 16 MiB is rejected as protocol evidence.
-- Parsed JSON is limited to depth 64 and 200,000 nodes.
-- JSON numeric tokens are limited to 128 characters; non-standard and
-  non-finite numeric values are rejected.
-- Validation uses a bounded iterative walk, so deeply nested input does not
-  escape as an uncaught recursion failure.
-- Malformed JSON, invalid UTF-8, non-byte bodies, excessive structure, and
-  parser resource failures are reported as provider protocol errors; transport
-  failures retain provider/network error classification.
-- Existing keyed-request HTTPS and non-forwarded redirect authorization rules
-  remain enforced.
+Legacy or malformed stream evidence is not synthesized into interval coverage.
+It is represented through explicit per-layer exclusion or not-requested state.
 
 ## Explicitly unchanged
 
-- No authoritative transfer, swap-action, jetton-asset, or counterparty
-  identity is introduced.
-- No cross-run merge, interval stitching, semantic deduplication, or complete
-  pre-run acquisition history is established.
-- Existing realized/unrealized calculations and Real-PnL gates are unchanged.
-- Backend `VERSION=0.2.1` remains the API-version field; `v0.22.6 ACTION
-  IDENTITY` is the product label.
+- No transaction or event rows are merged across runs.
+- No cross-run or semantic deduplication is applied.
+- No complete pre-run, global, or full wallet history is established.
+- No acquisition cost basis or PnL input is created.
+- Provider-display event actions remain non-authoritative.
+- `full_pre_run_history_established`, `complete_wallet_history_established`,
+  `is_global_history_coverage`, `is_authoritative_activity_coverage`,
+  `activity_rows_merged`, `deduplication_applied`, `is_cost_basis`,
+  `eligible_for_cost_basis`, and `used_by_pnl` remain false.
+- Backend `VERSION=0.2.1` remains the API-version field; `v0.22.7 INTERVAL
+  COVERAGE` is the product label.
 
 ## Verification
 
@@ -117,8 +118,9 @@ cd ../frontend
 npm run build
 ```
 
-Guarded live verification must confirm that original action indexes survive
-normalization, persistence, readback, and export; transfer and swap observations
-share one identity namespace; malformed or conflicting coordinates fail closed;
-legacy rows remain unavailable; readiness remains diagnostic; and no credential
-appears in logs, warnings, persisted evidence, errors, or exports.
+Verification must cover strict stream/page revalidation, 2-50 distinct selected
+run ids, exact one-microsecond boundaries, adjacency, nested and multi-run
+overlap, internal gaps, excluded and not-requested runs, independent layer
+results, unknown outside-span coverage, and unchanged false merge/history/
+cost/PnL flags. No credential may appear in logs, warnings, persisted evidence,
+errors, exports, or UI copy.

@@ -8,7 +8,7 @@ for OpenAPI via a permissive model.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -36,6 +36,7 @@ WalletSourceStatus = Literal[
     "unavailable",
     "error",
 ]
+PositiveStrictRunId = Annotated[int, Field(strict=True, ge=1)]
 
 
 class AnalyzeRequest(BaseModel):
@@ -395,12 +396,11 @@ class WalletClusterCompareResponse(BaseModel):
 
 
 class WalletHistoryReadinessRequest(BaseModel):
-    target_run_id: int = Field(
+    target_run_id: PositiveStrictRunId = Field(
         ...,
-        ge=1,
         description="Persisted run used as the explicit diagnostic target.",
     )
-    run_ids: list[int] = Field(
+    run_ids: list[PositiveStrictRunId] = Field(
         ...,
         min_length=2,
         max_length=50,
@@ -409,13 +409,6 @@ class WalletHistoryReadinessRequest(BaseModel):
             "inspect for history-readiness evidence."
         ),
     )
-
-    @field_validator("run_ids")
-    @classmethod
-    def _run_ids_must_be_positive(cls, value: list[int]) -> list[int]:
-        if any(run_id < 1 for run_id in value):
-            raise ValueError("Every run_id must be a positive integer.")
-        return value
 
     @model_validator(mode="after")
     def _target_must_be_in_scope(self):
@@ -506,6 +499,105 @@ class WalletHistoryCoverageRecord(BaseModel):
     fee_linkage_contract_verified: Literal[False] = False
 
 
+class WalletHistoryIntervalRecord(BaseModel):
+    start: str
+    end: str
+    duration_microseconds: str = Field(pattern=r"^[1-9][0-9]*$")
+
+
+class WalletHistoryAcceptedIntervalRecord(WalletHistoryIntervalRecord):
+    run_id: int = Field(ge=1)
+
+
+class WalletHistoryOverlapIntervalRecord(WalletHistoryIntervalRecord):
+    run_ids: list[int]
+    coverage_depth: int = Field(ge=2)
+
+
+class WalletHistoryGapIntervalRecord(WalletHistoryIntervalRecord):
+    left_run_ids: list[int]
+    right_run_ids: list[int]
+
+
+class WalletHistoryIntervalRunEvidenceRecord(BaseModel):
+    run_id: int = Field(ge=1)
+    source_state: str | None = None
+    candidate_states: list[str] = Field(default_factory=list)
+    classification: Literal["included", "excluded", "not_requested"]
+    reason: str | None = None
+    source_reason_codes: list[str] = Field(default_factory=list)
+    recorded_interval_start: str | None = None
+    recorded_interval_end: str | None = None
+    interval_start: str | None = None
+    interval_end: str | None = None
+    duration_microseconds: str | None = Field(
+        default=None,
+        pattern=r"^[1-9][0-9]*$",
+    )
+    included_in_union: bool
+
+
+class WalletHistoryIntervalCoverageLayerRecord(BaseModel):
+    stream_key: Literal["transactions", "account_events"]
+    coverage_kind: Literal[
+        "low_level_transaction_stream",
+        "provider_display_event_stream",
+    ]
+    eligible_state: Literal["complete", "provider_stream_complete"]
+    provider_semantics: Literal[
+        "bounded_low_level_transaction_query",
+        "display_only_actions",
+    ]
+    state: Literal[
+        "no_validated_intervals",
+        "contiguous_selected_span",
+        "gapped_selected_span",
+    ]
+    selected_run_count: int = Field(ge=2, le=50)
+    requested_run_count: int = Field(ge=0, le=50)
+    included_run_count: int = Field(ge=0, le=50)
+    included_run_ids: list[int]
+    excluded_run_ids: list[int]
+    not_requested_run_ids: list[int]
+    selected_run_coverage_state: Literal["none", "partial", "complete"]
+    run_evidence: list[WalletHistoryIntervalRunEvidenceRecord]
+    accepted_intervals: list[WalletHistoryAcceptedIntervalRecord]
+    selected_span: WalletHistoryIntervalRecord | None = None
+    union_intervals: list[WalletHistoryIntervalRecord]
+    overlap_intervals: list[WalletHistoryOverlapIntervalRecord]
+    gap_intervals: list[WalletHistoryGapIntervalRecord]
+    span_duration_microseconds: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    covered_duration_microseconds: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    gap_duration_microseconds: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    overlapped_duration_microseconds: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    max_coverage_depth: int = Field(ge=0, le=50)
+    is_contiguous_within_selected_span: bool
+    outside_selected_span_coverage: Literal["unknown"]
+    establishes_full_history: Literal[False] = False
+    is_authoritative_activity_coverage: Literal[False] = False
+
+
+class WalletHistoryBoundedIntervalCoverageRecord(BaseModel):
+    contract_version: Literal["wallet_multi_run_interval_coverage_v1"]
+    selected_run_ids: list[int]
+    interval_semantics: Literal["[start,end)"]
+    coverage_scope: Literal["selected_validated_run_intervals_only"]
+    gap_scope: Literal["inside_validated_selected_span_only"]
+    cross_stream_union_applied: Literal[False] = False
+    low_level_transactions: WalletHistoryIntervalCoverageLayerRecord
+    provider_display_events: WalletHistoryIntervalCoverageLayerRecord
+    full_pre_run_history_established: Literal[False] = False
+    complete_wallet_history_established: Literal[False] = False
+    is_global_history_coverage: Literal[False] = False
+    is_authoritative_activity_coverage: Literal[False] = False
+    activity_rows_merged: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    is_cost_basis: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    note: str
+
+
 class WalletHistoryBlockerRecord(BaseModel):
     code: str
     reason: str
@@ -514,7 +606,7 @@ class WalletHistoryBlockerRecord(BaseModel):
 
 
 class WalletHistoryReadinessResponse(BaseModel):
-    analysis_version: Literal["wallet_history_readiness_v0.22.6"]
+    analysis_version: Literal["wallet_history_readiness_v0.22.7"]
     target_run_id: int
     run_ids: list[int]
     wallet_address: str
@@ -538,6 +630,7 @@ class WalletHistoryReadinessResponse(BaseModel):
     event_action_identity_groups_total: int = Field(ge=0)
     evidence_groups_truncated: bool
     coverage: WalletHistoryCoverageRecord
+    bounded_interval_coverage: WalletHistoryBoundedIntervalCoverageRecord
     blockers: list[WalletHistoryBlockerRecord] = Field(default_factory=list)
     history_complete: Literal[False] = False
     deduplication_applied: Literal[False] = False

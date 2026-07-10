@@ -13,6 +13,8 @@ import type {
   TonapiAccountJettonsPreviewResponse,
   TonapiWalletIntelligencePreviewResponse,
   WalletClusterCompareResponse,
+  WalletHistoryReadinessRequest,
+  WalletHistoryReadinessResponse,
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
@@ -382,6 +384,24 @@ export async function compareWalletRuns(
   }
 
   return (await res.json()) as WalletClusterCompareResponse;
+}
+
+export async function inspectWalletHistoryReadiness(
+  req: WalletHistoryReadinessRequest,
+): Promise<WalletHistoryReadinessResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/history/readiness`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Wallet interval coverage inspection failed"),
+    );
+  }
+
+  return (await res.json()) as WalletHistoryReadinessResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {

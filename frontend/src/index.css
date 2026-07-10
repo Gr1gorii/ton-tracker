@@ -4970,3 +4970,375 @@ input {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Multi-run bounded interval coverage v0.22.7 ---------------------- */
+.interval-coverage-card {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid rgba(33, 74, 49, 0.78);
+  border-radius: 9px;
+  background:
+    linear-gradient(135deg, rgba(45, 212, 191, 0.045), transparent 48%),
+    rgba(2, 6, 4, 0.4);
+}
+
+.interval-coverage-toolbar {
+  align-items: flex-start;
+}
+
+.interval-coverage-safety,
+.interval-layer-footnote {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid rgba(230, 180, 80, 0.34);
+  border-radius: 7px;
+  background: rgba(230, 180, 80, 0.065);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.interval-coverage-safety strong,
+.interval-layer-footnote strong {
+  color: #f2cc73;
+}
+
+.interval-coverage-form {
+  grid-template-columns: minmax(260px, 1fr) max-content;
+  margin-top: 0;
+}
+
+.interval-coverage-form .btn {
+  min-height: 40px;
+}
+
+.interval-coverage-help {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.interval-coverage-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.interval-contract-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.interval-contract-strip > div,
+.interval-layer-metrics > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(33, 74, 49, 0.54);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.interval-contract-strip span,
+.interval-layer-metrics span {
+  display: block;
+  color: var(--primary-green);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.65px;
+  text-transform: uppercase;
+}
+
+.interval-contract-strip strong,
+.interval-layer-metrics strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.interval-layer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(33, 74, 49, 0.7);
+  border-radius: 8px;
+  background: rgba(2, 6, 4, 0.48);
+}
+
+.interval-layer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.interval-layer-head > div:first-child {
+  min-width: 0;
+}
+
+.interval-layer-head h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.interval-layer-head p {
+  max-width: 780px;
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.interval-layer-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.interval-layer-metrics small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.interval-table-section {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.interval-table-section h4,
+.interval-subhead h4 {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.interval-table-wrap {
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
+}
+
+.interval-table {
+  min-width: 860px;
+  table-layout: auto;
+}
+
+.interval-table caption {
+  padding: 8px 10px;
+  background: rgba(8, 17, 11, 0.84);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.interval-table th,
+.interval-table td {
+  height: auto;
+  padding: 9px 10px;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.interval-table tbody th {
+  border-top: 1px solid var(--border-soft);
+  color: var(--text);
+  font-size: 11px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.interval-table td,
+.interval-table time {
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.interval-table .source-badge {
+  white-space: nowrap;
+}
+
+.interval-target-badge {
+  margin-left: 6px;
+}
+
+.interval-bounds {
+  display: block;
+  min-width: 210px;
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+}
+
+.interval-timeline-table {
+  min-width: 720px;
+}
+
+.interval-gap-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(33, 74, 49, 0.62);
+  border-radius: 7px;
+  background: rgba(2, 6, 4, 0.34);
+}
+
+.interval-gap-section-warning {
+  border-color: rgba(230, 180, 80, 0.38);
+  background: rgba(230, 180, 80, 0.055);
+}
+
+.interval-subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.interval-empty-message {
+  margin: 0;
+  padding: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.interval-detail-block {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid rgba(33, 74, 49, 0.62);
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(2, 6, 4, 0.34);
+}
+
+.interval-detail-block summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.interval-detail-block summary:hover {
+  background: rgba(0, 230, 118, 0.045);
+}
+
+.interval-detail-block summary > span:first-child {
+  margin-right: auto;
+}
+
+.interval-detail-block summary > span:last-child {
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+}
+
+.interval-blocker-details {
+  border-color: rgba(230, 180, 80, 0.34);
+}
+
+.interval-blocker-list {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 10px;
+  border-top: 1px solid rgba(33, 74, 49, 0.5);
+  list-style: none;
+}
+
+.interval-blocker-list li {
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid rgba(230, 180, 80, 0.24);
+  border-radius: 6px;
+  background: rgba(230, 180, 80, 0.045);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.interval-blocker-list strong {
+  color: #f2cc73;
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.interval-blocker-list small {
+  color: var(--muted);
+}
+
+.interval-layer-footnote {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.interval-coverage-note {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .interval-contract-strip,
+  .interval-layer-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .interval-layer-head {
+    flex-direction: column;
+  }
+
+  .interval-layer-head .table-meta {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .interval-coverage-card,
+  .interval-layer {
+    padding: 10px;
+  }
+
+  .interval-coverage-safety,
+  .interval-layer-footnote {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .interval-coverage-form,
+  .interval-contract-strip,
+  .interval-layer-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .interval-coverage-form .btn {
+    width: 100%;
+  }
+
+  .interval-table {
+    min-width: 760px;
+  }
+}
