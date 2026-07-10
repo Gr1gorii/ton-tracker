@@ -2180,6 +2180,10 @@ class TonapiAdapter:
         if jetton_address is None:
             raise ValueError("jetton balance is missing jetton address")
 
+        wallet_contract = raw_balance.get("wallet_address")
+        if isinstance(wallet_contract, dict):
+            wallet_contract = wallet_contract.get("address")
+
         return {
             "wallet_address": wallet_address,
             "jetton_address": jetton_address,
@@ -2189,9 +2193,7 @@ class TonapiAdapter:
             "decimals": cls._optional_int(jetton.get("decimals")),
             "image": cls._optional_string(jetton.get("image")),
             "price_usd": cls._optional_string(raw_balance.get("price")),
-            "wallet_contract_address": cls._optional_string(
-                raw_balance.get("wallet_address")
-            ),
+            "wallet_contract_address": cls._optional_string(wallet_contract),
             "source": "tonapi",
         }
 

@@ -1424,6 +1424,342 @@ class WalletNativeActivityPnlReadinessResponse(BaseModel):
         return self
 
 
+MultiAssetPnlRequirementCode = Literal[
+    "deduplicated_native_activity",
+    "verified_jetton_payload_semantics",
+    "provider_scoped_jetton_asset_evidence",
+    "exact_transaction_fee_evidence",
+    "complete_wallet_history",
+    "authoritative_trade_semantics",
+    "historical_trade_prices",
+    "transaction_fee_allocation",
+    "acquisition_lots_and_cost_basis",
+]
+
+
+class WalletMultiAssetPnlRequirementRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: MultiAssetPnlRequirementCode
+    available: bool
+    reason: str | None = Field(default=None, max_length=300)
+
+
+class WalletJettonPayloadOccurrenceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: PositiveStrictRunId
+    capture_id: PositiveStrictRunId
+    verification_id: PositiveStrictRunId
+
+
+class WalletJettonAssetFeeEvidenceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ordinal: Annotated[int, Field(strict=True, ge=0, le=9999)]
+    payload_observation_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+    occurrence_count: Annotated[int, Field(strict=True, ge=1, le=10000)]
+    source_run_ids: list[PositiveStrictRunId] = Field(min_length=1, max_length=50)
+    occurrences: list[WalletJettonPayloadOccurrenceRecord] = Field(
+        min_length=1, max_length=10000
+    )
+    operation: JettonPayloadOperation
+    standard_status: Literal["active", "suggested"]
+    transaction_hash: CanonicalTraceTransactionHash
+    message_hash: CanonicalTraceTransactionHash
+    query_id: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    amount_base_units: str | None = Field(
+        default=None, pattern=r"^(?:0|[1-9][0-9]*)$"
+    )
+    contract_account_role: Literal[
+        "destination_jetton_wallet_observed",
+        "source_jetton_wallet_observed",
+        "destination_jetton_master_observed",
+        "unresolved_contract_role",
+    ]
+    observed_contract_account_canonical: str | None = Field(
+        default=None, max_length=76
+    )
+    asset_binding_status: Literal["provider_snapshot_match", "unavailable"]
+    jetton_master_account_canonical: str | None = Field(
+        default=None, max_length=76
+    )
+    provider_asset_observation_key: str | None = Field(
+        default=None, max_length=128
+    )
+    asset_decimals: int | None = Field(default=None, ge=0, le=255)
+    asset_symbol: str | None = Field(default=None, min_length=1, max_length=64)
+    asset_snapshot_run_ids: list[PositiveStrictRunId] = Field(max_length=50)
+    transaction_fee_evidence_status: Literal[
+        "exact_transaction_match", "unavailable"
+    ]
+    transaction_fee_nanoton: str | None = Field(
+        default=None, pattern=r"^(?:0|[1-9][0-9]*)$"
+    )
+    transaction_fee_ton: str | None = Field(
+        default=None, pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$"
+    )
+    fee_source_run_ids: list[PositiveStrictRunId] = Field(max_length=50)
+    provider_snapshot_is_local_master_proof: Literal[False] = False
+    fee_allocation_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl_calculation: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _asset_and_fee_evidence_must_be_coherent(self):
+        if self.occurrence_count != len(self.occurrences):
+            raise ValueError("jetton payload occurrence count changed")
+        if self.source_run_ids != sorted({row.run_id for row in self.occurrences}):
+            raise ValueError("jetton payload occurrence source runs changed")
+        coordinates = [
+            (row.run_id, row.capture_id, row.verification_id)
+            for row in self.occurrences
+        ]
+        if coordinates != sorted(coordinates) or len(coordinates) != len(
+            set(coordinates)
+        ):
+            raise ValueError("jetton payload occurrence coordinates changed")
+        asset_values = (
+            self.jetton_master_account_canonical,
+            self.provider_asset_observation_key,
+            self.asset_decimals,
+        )
+        asset_matched = self.asset_binding_status == "provider_snapshot_match"
+        if asset_matched != all(value is not None for value in asset_values):
+            raise ValueError("provider asset evidence shape changed")
+        if asset_matched != bool(self.asset_snapshot_run_ids):
+            raise ValueError("provider asset source runs changed")
+        if not asset_matched and self.asset_symbol is not None:
+            raise ValueError("unmatched provider asset has metadata")
+        fee_values = (self.transaction_fee_nanoton, self.transaction_fee_ton)
+        fee_matched = (
+            self.transaction_fee_evidence_status == "exact_transaction_match"
+        )
+        if fee_matched != all(value is not None for value in fee_values):
+            raise ValueError("transaction fee evidence shape changed")
+        if fee_matched != bool(self.fee_source_run_ids):
+            raise ValueError("transaction fee source runs changed")
+        if fee_matched and (
+            Decimal(self.transaction_fee_ton) * Decimal("1000000000")
+            != Decimal(self.transaction_fee_nanoton)
+        ):
+            raise ValueError("transaction fee TON and nanoton diverged")
+        return self
+
+
+class WalletJettonEvidenceSummaryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selected_capture_count: Annotated[int, Field(strict=True, ge=0, le=2500)]
+    verified_capture_count: Annotated[int, Field(strict=True, ge=0, le=2500)]
+    source_message_count: Annotated[int, Field(strict=True, ge=0, le=115200)]
+    recognized_payload_occurrence_count: Annotated[
+        int, Field(strict=True, ge=0, le=115200)
+    ]
+    unrecognized_message_count: Annotated[
+        int, Field(strict=True, ge=0, le=115200)
+    ]
+    deduplicated_payload_observation_count: Annotated[
+        int, Field(strict=True, ge=0, le=10000)
+    ]
+    suppressed_payload_occurrence_count: Annotated[
+        int, Field(strict=True, ge=0, le=115200)
+    ]
+    provider_jetton_snapshot_count: Annotated[
+        int, Field(strict=True, ge=0, le=5000)
+    ]
+    valid_provider_asset_snapshot_count: Annotated[
+        int, Field(strict=True, ge=0, le=5000)
+    ]
+    invalid_provider_asset_snapshot_count: Annotated[
+        int, Field(strict=True, ge=0, le=5000)
+    ]
+    asset_matched_observation_count: Annotated[
+        int, Field(strict=True, ge=0, le=10000)
+    ]
+    asset_unmatched_observation_count: Annotated[
+        int, Field(strict=True, ge=0, le=10000)
+    ]
+    fee_linked_observation_count: Annotated[
+        int, Field(strict=True, ge=0, le=10000)
+    ]
+    fee_unlinked_observation_count: Annotated[
+        int, Field(strict=True, ge=0, le=10000)
+    ]
+    linked_fee_transaction_count: Annotated[
+        int, Field(strict=True, ge=0, le=10000)
+    ]
+    linked_fee_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    linked_fee_ton: str = Field(
+        pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$"
+    )
+
+
+class WalletMultiAssetOperationCountRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: JettonPayloadOperation
+    count: Annotated[int, Field(strict=True, ge=1, le=10000)]
+
+
+class WalletMultiAssetPnlReadinessResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_multi_asset_pnl_readiness_v1"]
+    target_run_id: PositiveStrictRunId
+    selected_run_ids: list[PositiveStrictRunId] = Field(min_length=2, max_length=50)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    wallet_account_canonical: str = Field(max_length=76)
+    source_native_analysis_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    native_flow_summary: WalletNativeActivityPnlFlowSummaryRecord
+    jetton_evidence_summary: WalletJettonEvidenceSummaryRecord
+    operations: list[WalletMultiAssetOperationCountRecord]
+    evidence: list[WalletJettonAssetFeeEvidenceRecord]
+    requirements: list[WalletMultiAssetPnlRequirementRecord]
+    blocked_requirement_codes: list[MultiAssetPnlRequirementCode]
+    analysis_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    analysis_status: Literal["blocked_missing_evidence"]
+    calculation_mode: Literal["evidence_reconciliation_only"]
+    cost_basis_method: Literal["unavailable"]
+    cost_basis_usd: None = None
+    realized_pnl_usd: None = None
+    unrealized_pnl_usd: None = None
+    native_activity_deduplication_applied: Literal[True]
+    jetton_observation_deduplication_applied: Literal[True]
+    jetton_payload_semantics_used_by_pnl_readiness: bool
+    provider_asset_evidence_used_by_pnl_readiness: bool
+    transaction_fee_evidence_used_by_pnl_readiness: bool
+    provider_snapshot_asset_identity_is_authoritative: Literal[False] = False
+    transaction_fee_allocation_applied: Literal[False] = False
+    provider_requests_performed: Literal[False] = False
+    message_bodies_returned: Literal[False] = False
+    used_by_pnl_calculation: Literal[False] = False
+    establishes_complete_wallet_history: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    is_cost_basis: Literal[False] = False
+    is_real_pnl: Literal[False] = False
+    real_pnl_locked: Literal[True]
+    message: str = Field(min_length=1, max_length=700)
+
+    @model_validator(mode="after")
+    def _multi_asset_readiness_must_stay_coherent(self):
+        summary = self.jetton_evidence_summary
+        if summary.verified_capture_count > summary.selected_capture_count:
+            raise ValueError("verified capture count changed")
+        if summary.source_message_count != (
+            summary.recognized_payload_occurrence_count
+            + summary.unrecognized_message_count
+        ):
+            raise ValueError("jetton source message count changed")
+        if summary.recognized_payload_occurrence_count != (
+            summary.deduplicated_payload_observation_count
+            + summary.suppressed_payload_occurrence_count
+        ):
+            raise ValueError("jetton observation dedup count changed")
+        if summary.deduplicated_payload_observation_count != len(self.evidence):
+            raise ValueError("jetton evidence row count changed")
+        if (
+            summary.asset_matched_observation_count
+            + summary.asset_unmatched_observation_count
+            != len(self.evidence)
+        ):
+            raise ValueError("jetton asset match count changed")
+        if (
+            summary.fee_linked_observation_count
+            + summary.fee_unlinked_observation_count
+            != len(self.evidence)
+        ):
+            raise ValueError("jetton fee match count changed")
+        if summary.provider_jetton_snapshot_count != (
+            summary.valid_provider_asset_snapshot_count
+            + summary.invalid_provider_asset_snapshot_count
+        ):
+            raise ValueError("provider snapshot validation count changed")
+        if [row.ordinal for row in self.evidence] != list(range(len(self.evidence))):
+            raise ValueError("multi-asset evidence order changed")
+        selected = set(self.selected_run_ids)
+        if (
+            len(selected) != len(self.selected_run_ids)
+            or self.target_run_id not in selected
+            or any(
+                not set(row.source_run_ids).issubset(selected)
+                or not set(row.asset_snapshot_run_ids).issubset(selected)
+                or not set(row.fee_source_run_ids).issubset(selected)
+                or row.occurrence_count < len(row.source_run_ids)
+                for row in self.evidence
+            )
+        ):
+            raise ValueError("multi-asset selected-run provenance changed")
+        matched_assets = sum(
+            row.asset_binding_status == "provider_snapshot_match"
+            for row in self.evidence
+        )
+        linked_fees = sum(
+            row.transaction_fee_evidence_status == "exact_transaction_match"
+            for row in self.evidence
+        )
+        if (
+            matched_assets != summary.asset_matched_observation_count
+            or linked_fees != summary.fee_linked_observation_count
+        ):
+            raise ValueError("multi-asset row evidence counts changed")
+        fee_transactions = {
+            row.transaction_hash: Decimal(row.transaction_fee_nanoton)
+            for row in self.evidence
+            if row.transaction_fee_nanoton is not None
+        }
+        if (
+            len(fee_transactions) != summary.linked_fee_transaction_count
+            or sum(fee_transactions.values(), Decimal(0))
+            != Decimal(summary.linked_fee_nanoton)
+            or Decimal(summary.linked_fee_ton) * Decimal("1000000000")
+            != Decimal(summary.linked_fee_nanoton)
+        ):
+            raise ValueError("multi-asset linked fee summary changed")
+        counts = {row.operation: row.count for row in self.operations}
+        if len(counts) != len(self.operations) or any(
+            counts.get(operation) != sum(row.operation == operation for row in self.evidence)
+            for operation in counts
+        ) or sum(counts.values()) != len(self.evidence):
+            raise ValueError("multi-asset operation grouping changed")
+        expected_codes = [
+            "deduplicated_native_activity",
+            "verified_jetton_payload_semantics",
+            "provider_scoped_jetton_asset_evidence",
+            "exact_transaction_fee_evidence",
+            "complete_wallet_history",
+            "authoritative_trade_semantics",
+            "historical_trade_prices",
+            "transaction_fee_allocation",
+            "acquisition_lots_and_cost_basis",
+        ]
+        if [row.code for row in self.requirements] != expected_codes:
+            raise ValueError("multi-asset readiness requirements changed")
+        availability = [row.available for row in self.requirements]
+        if not availability[0] or any(availability[4:]):
+            raise ValueError("multi-asset readiness was promoted")
+        expected_dynamic = [
+            True,
+            bool(self.evidence),
+            bool(self.evidence) and matched_assets == len(self.evidence),
+            bool(self.evidence) and linked_fees == len(self.evidence),
+        ]
+        if availability[:4] != expected_dynamic:
+            raise ValueError("multi-asset dynamic readiness changed")
+        if any((row.reason is None) == (not row.available) for row in self.requirements):
+            raise ValueError("multi-asset readiness reasons changed")
+        expected_blocked = [row.code for row in self.requirements if not row.available]
+        if self.blocked_requirement_codes != expected_blocked:
+            raise ValueError("multi-asset blocked requirement codes changed")
+        if self.jetton_payload_semantics_used_by_pnl_readiness != bool(self.evidence):
+            raise ValueError("jetton readiness usage flag changed")
+        if self.provider_asset_evidence_used_by_pnl_readiness != bool(summary.asset_matched_observation_count):
+            raise ValueError("asset readiness usage flag changed")
+        if self.transaction_fee_evidence_used_by_pnl_readiness != bool(summary.fee_linked_observation_count):
+            raise ValueError("fee readiness usage flag changed")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

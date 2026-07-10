@@ -1,19 +1,20 @@
-# TON Wallet Intelligence Dashboard — v0.25.0 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.26.0 Promotion Checklist
 
-Operational gates for verified jetton payload observations.
+Operational gates for multi-asset PnL-readiness evidence.
 
 ## Version and migration
 
-- Product label is `v0.25.0 VERIFIED JETTON PAYLOADS`; backend API version stays
+- Product label is `v0.26.0 MULTI-ASSET PNL READINESS`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is `ton_jetton_payload_observations_v1`; BOC verification,
+- New public contract is `ton_multi_asset_pnl_readiness_v1`; payload, BOC,
   native readiness, dedup, merge, and all persisted contracts remain unchanged.
 - Alembic head is `20260710_0008`, adding native activity ledgers and rows on
   top of the unchanged 0007 BOC tables.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
   have model parity. Drift, orphan fragments, unexpected rows/indexes/FKs,
   offline SQL, and downgrade fail closed.
-- README and release operations describe the exact v0.25.0 payload scope.
+- No migration is added. README and release operations describe the exact
+  v0.26.0 evidence and non-authority boundaries.
 
 ## Verification contract
 
@@ -42,6 +43,23 @@ Operational gates for verified jetton payload observations.
 
 ## Endpoint and UI
 
+- POST `.../{target_run_id}/multi-asset-pnl-readiness` is provider-free and
+  first revalidates the unchanged native PnL-readiness chain.
+- Every selected trace capture with BOC verification is fully reparsed through
+  the v0.25.0 payload contract. Payload identities are content-deduplicated;
+  conflicting semantics under one identity fail closed.
+- Observed wallet/master contract roles match only strict canonical addresses
+  from persisted real/live TonAPI jetton snapshots. Ambiguous master or decimal
+  evidence fails closed; malformed legacy wallet-object strings stay invalid.
+- Exact persisted transaction fees match by network-scoped canonical hash and
+  conserve TON/nanoton. They remain unallocated evidence and never become lot
+  costs.
+- The nine-item gate may mark verified payload, provider snapshot, or exact fee
+  evidence available, while complete history, authoritative trades, historical
+  prices, fee allocation, acquisition lots, cost basis, and Real PnL remain
+  unavailable.
+- The UI shows native flow, payload dedup, asset and fee matches, bounded rows,
+  every requirement reason, digest, and the permanent PnL lock.
 - GET `.../boc-verification/jetton-payloads` is provider-free and first performs
   full BOC/message revalidation before a separate local body reparse.
 - Active TEP-74 transfer, notification, burn, and excess layouts are decoded;
@@ -118,10 +136,12 @@ Operational gates for verified jetton payload observations.
   validation and stable digests, plus flow reconciliation and stable analysis digest,
   response validation, ordering, duplicate grouping, canonical
   winner selection, complete suppression provenance, semantic-conflict
-  rejection, response validation, and incompatible-wallet rejection.
+  rejection, response validation, incompatible-wallet rejection, canonical
+  snapshot validation, payload dedup, asset/fee binding, exact nanoton
+  conversion, legacy snapshot rejection, and dynamic readiness gates.
 - Credential/prohibited-brand scans are clean and README matches the release.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.25.0` on the merge commit.
+  a ready PR, then create annotated tag `v0.26.0` on the merge commit.
 
 ## Rollback
 

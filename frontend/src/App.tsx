@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.25.0 VERIFIED JETTON PAYLOADS";
+const RELEASE_LABEL = "v0.26.0 MULTI-ASSET PNL READINESS";
 
 const navItems = [
   "DASHBOARD",
@@ -942,15 +942,20 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Locally decoded TEP-74 payload observations</strong>
+            <strong>Verified multi-asset evidence reconciliation</strong>
             <p>
-              Recognized jetton message layouts are decoded from fully
-              revalidated BOCs without returning body contents. Contract roles
-              remain observations; master and asset identity stay unresolved.
+              Selected runs now combine native dedup, verified TEP-74
+              observations, provider snapshot asset matches, and exact
+              transaction fees. Cost basis and PnL remain locked.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Multi-asset PnL readiness"
+            text="The provider-free gate revalidates every selected native ledger and BOC capture, deduplicates jetton observations, matches only canonical TonAPI snapshot contracts, and links exact transaction fees. Snapshot matches are not local master proofs, and fees remain unallocated evidence."
+          />
           <ReleaseReadinessItem
             tone="scoped"
             label="Verified jetton payload observations"
@@ -1114,7 +1119,7 @@ function EvidenceColumn({
         <EvidenceItem
           tone="warning"
           title="No authoritative high-level action identity"
-          text="A provider-scoped event/LT/action-index coordinate can identify an observation and expose conflicts. The provider action can still change and is not authoritative transfer or swap identity."
+          text="A provider-scoped event coordinate or jetton snapshot match can identify an observation and expose conflicts. Neither is authoritative transfer, trade, or locally verified jetton-master identity."
         />
         <EvidenceItem
           tone="warning"

@@ -1,52 +1,56 @@
-# TON Wallet Intelligence Dashboard - v0.10.7 Public Release
+# TON Wallet Intelligence Dashboard - v0.26.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
 ## Public Scope
 
-- Dark matrix-style TON wallet intelligence dashboard.
-- Provider status with endpoint coverage and online/degraded/offline counts.
-- Shared provider preview workspace for TonAPI wallet intelligence, TonAPI
-  account jettons, and STON.fi pools.
-- Explicit data honesty surfaces for provider limitations, unavailable data,
-  scoped previews, and mock-aware legacy analytics.
-- Legacy token/wallet report with buyers, PnL, clustering, common holdings,
-  interesting wallets, and exports.
-- Experimental Bitquery and CSV/JSON import tools remain provider-limited.
+- Responsive TON wallet evidence workspace with guarded real TonAPI ingestion.
+- Bounded transaction/event pagination and network-scoped identities.
+- Immutable trace capture and local transaction/message BOC verification.
+- Body-safe TEP-74 payload observations for recognized jetton layouts.
+- Immutable native activity ledgers with explicit multi-run merge and dedup.
+- Provider-free multi-asset PnL readiness over native flow, verified jetton
+  observations, provider snapshot asset matches, and exact transaction fees.
+- Stored-run signals, estimated PnL preview, clustering, exports, provider
+  previews, and visible limitations remain separate scoped surfaces.
 
 ## Release Contract
 
-- Product release label: `v0.10.7`.
+- Product release label: `v0.26.0 MULTI-ASSET PNL READINESS`.
 - Backend API `VERSION` remains `0.2.1`.
 - `DATA_MODE=mock` remains the default.
-- Provider previews may use real sources only within their documented scope.
-- Missing provider data is shown as unavailable/provider-limited and is not
-  inferred.
+- Guarded live wallet ingestion requires explicit real/TonAPI/live settings.
+- Multi-asset readiness performs no provider request and never returns BOC or
+  message-body contents.
+- Provider snapshot matches are not local jetton-master proofs. Exact fee
+  matches are not fee allocation. Real PnL remains locked.
 
 ## Known Limitations
 
-- TonAPI wallet intelligence is jettons-only, not full wallet intelligence.
-- Full transaction history, transfers, DEX swaps, current TON balances, and
-  full behavior analysis are not implemented yet.
-- Legacy buyers, PnL, clustering, and exports remain mock-aware or deferred.
+- Selected bounded intervals and captures do not establish complete history.
+- TEP-74 layouts do not alone prove successful economic execution or a trade.
+- Historical trade prices, ordered acquisition lots, and fee allocation are
+  not established by the multi-asset readiness contract.
+- Legacy buyers and the top-level report remain separate and mock-aware.
 - Bitquery TON coverage remains schema/provider limited.
-- Export endpoints rerun analysis instead of exporting a specific stored run id.
 
 ## Verification Summary
 
-Before tagging `v0.10.7`, confirm:
+Before tagging `v0.26.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `RELEASE v0.10.7`.
-- Provider Status can show `Endpoint coverage` and `5/5 providers` when the
-  backend is running.
+- UI shows `RELEASE v0.26.0 MULTI-ASSET PNL READINESS`.
+- Real stored-run multi-asset readiness is provider-free, digest-stable, and
+  fail-closed for unavailable/malformed evidence.
+- Credential and prohibited-brand scans are clean.
 
 ## Next Tracks
 
-After this public baseline, `v0.11.1 SCHEMA` added wallet activity schema
+The original v0.10.7 public baseline was followed by `v0.11.1 SCHEMA`, which
+added wallet activity schema
 scaffolding, `v0.11.2 MOCK INGEST` proves that schema with deterministic
 mock-normalized ingestion, `v0.11.3 INGEST UI` adds the dashboard workflow, and
 `v0.11.4 ADAPTERS` adds the backend wallet activity adapter interface with the

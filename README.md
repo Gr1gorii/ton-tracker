@@ -4,10 +4,30 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.25.0 — Verified Jetton Payloads**<br>
+Current product release: **v0.26.0 — Multi-Asset PnL Readiness**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.25.0 adds
+## What v0.26.0 adds
+
+The selected-run PnL evidence gate now reconciles four independent layers in
+one provider-free, digest-bound response:
+
+- the unchanged cross-run native TON dedup and exact native flow;
+- locally verified and content-deduplicated TEP-74 payload observations;
+- exact canonical contract matches against persisted live TonAPI jetton
+  balance snapshots;
+- exact transaction-hash fee matches with nanoton/TON conservation.
+
+Provider snapshot matches remain provider-scoped observations, not locally
+verified jetton-master proofs. Transaction fees remain unallocated evidence,
+not acquisition/disposal lot costs. Complete history, authoritative trade
+semantics, historical trade prices, cost basis, and Real PnL stay locked.
+
+Fresh TonAPI ingestion now normalizes nested jetton wallet records to the exact
+canonical contract address. Legacy stringified records are rejected instead of
+being guessed or repaired during readiness analysis.
+
+## v0.25.0 verified-payload foundation
 
 An explicit provider-free trace-card action now decodes recognized TEP-74
 jetton message layouts from the already verified transaction BOCs. It returns
@@ -60,6 +80,7 @@ profit, ownership proof, or complete wallet history.
 - Immutable native activity ledgers, multi-run merge, and cross-run dedup.
 - v0.24.0 native TON flow reconciliation and fail-closed PnL readiness.
 - v0.25.0 provider-free verified TEP-74 payload observations.
+- v0.26.0 multi-run jetton asset/fee evidence reconciliation with locked PnL.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.
@@ -72,6 +93,8 @@ The application deliberately separates these concepts:
 - a locally verified BOC is not a blockchain inclusion proof;
 - a message endpoint is not an identified actor or owner;
 - a native TON movement is not necessarily a trade;
+- a provider jetton snapshot match is not a locally verified master proof;
+- an exact transaction fee match is not fee allocation;
 - adjacent selected windows are not complete wallet history;
 - net wallet flow is not PnL;
 - cost basis is unavailable until acquisition lots, prices, and fees are
@@ -170,14 +193,14 @@ local ignored environment file.
 6. Build the immutable native activity ledger for verified captures.
 7. Use **Decode TEP-74 payloads** to inspect recognized jetton layouts without
    returning body contents or assigning an asset identity.
-8. In **Native activity PnL readiness**, enter one or more other compatible run
+8. In **Multi-asset PnL readiness**, enter one or more other compatible run
    IDs. The target run is included automatically.
-9. Review canonical activity count, suppressed repeats, native TON flow, and
-   every available or blocked PnL requirement.
+9. Review canonical native flow, deduplicated jetton observations, provider
+   snapshot matches, exact fee evidence, and every blocked PnL requirement.
 
-The v0.24.0 readiness request is provider-free. It revalidates persisted
-ledgers, merge and dedup evidence on every call and performs no hidden price or
-provider lookup.
+Both readiness requests are provider-free. v0.26.0 revalidates the v0.24.0
+native chain plus every selected BOC capture, snapshot match, and fee record on
+every call. It performs no hidden price or provider lookup.
 
 ## Core wallet API
 
@@ -200,18 +223,19 @@ provider lookup.
 | `POST` | `/api/wallets/ingest/{target_run_id}/native-activity-merge` | Merge 2–50 compatible ledgers |
 | `POST` | `/api/wallets/ingest/{target_run_id}/native-activity-dedup` | Resolve repeated native activity identities |
 | `POST` | `/api/wallets/ingest/{target_run_id}/native-activity-pnl-readiness` | Reconcile native flow and evaluate PnL prerequisites |
+| `POST` | `/api/wallets/ingest/{target_run_id}/multi-asset-pnl-readiness` | Reconcile native, verified jetton, snapshot asset, and fee evidence |
 | `GET` | `/api/wallets/ingest/{run_id}/pnl-preview` | Read the separate run-scoped estimated PnL preview |
 | `GET` | `/api/wallets/ingest/{run_id}/signals` | Read rule-based evidence signals |
 
 The `...` paths continue from
 `/api/wallets/ingest/{run_id}/transactions/{hash}/trace-evidence`.
 
-## v0.24.0 PnL-readiness contract
+## v0.26.0 multi-asset PnL-readiness contract
 
 Request:
 
 ```http
-POST /api/wallets/ingest/33/native-activity-pnl-readiness
+POST /api/wallets/ingest/33/multi-asset-pnl-readiness
 Content-Type: application/json
 
 {"run_ids":[32,33]}
@@ -219,20 +243,26 @@ Content-Type: application/json
 
 Important response fields:
 
-- `contract_version`: `ton_native_activity_pnl_readiness_v1`
-- `source_dedup_digest_sha256` and `analysis_digest_sha256`
-- `flow_summary`: exact native counts and nanoton/TON totals
-- `requirements`: seven explicit evidence gates
+- `contract_version`: `ton_multi_asset_pnl_readiness_v1`
+- `source_native_analysis_digest_sha256` and `analysis_digest_sha256`
+- `native_flow_summary`: exact native counts and nanoton/TON totals
+- `jetton_evidence_summary`: capture/message, payload dedup, asset-match, and
+  fee-match conservation counts
+- `evidence`: bounded content-deduplicated payload rows with provider-scoped
+  asset and exact transaction-fee evidence
+- `requirements`: nine explicit evidence gates
 - `blocked_requirement_codes`: every unavailable prerequisite
-- `native_activity_used_by_pnl_readiness: true`
-- `native_activity_used_by_pnl_calculation: false`
+- `provider_requests_performed: false`
+- `provider_snapshot_asset_identity_is_authoritative: false`
+- `transaction_fee_allocation_applied: false`
+- `used_by_pnl_calculation: false`
 - `eligible_for_cost_basis: false`
 - `is_real_pnl: false`
 - `real_pnl_locked: true`
 
-The endpoint returns `409` when selected runs, wallet/network identity, ledger
-evidence, or duplicate semantics are incompatible. Storage failures return a
-sanitized `503`.
+The endpoint returns `409` when selected runs, wallet/network identity, ledger,
+BOC, duplicate payload, snapshot, or fee evidence is incompatible. Storage
+failures return a sanitized `503`.
 
 ## Testing
 
@@ -256,10 +286,11 @@ npm audit --audit-level=moderate
 Release gates also include migration parity, credential/prohibited-brand scans,
 live local contract checks, and responsive browser QA.
 
-The v0.24.0 baseline passed 966 backend tests, 99 frontend tests, the production
-build, Python compilation, and the dependency audit with zero reported
-vulnerabilities. v0.25.0 adds strict per-opcode backend fixtures and explicit
-frontend interaction/contract tests on top of that baseline.
+The v0.26.0 release candidate passed 986 backend tests, 101 frontend tests, the
+production build, Python compilation, and the dependency audit with zero
+reported vulnerabilities. Live checks covered stable provider-free analysis on
+runs 32+33 and a fresh keyed TonAPI ingestion with 100/100 canonical jetton
+wallet-contract snapshot addresses.
 
 ## Current limitations
 
@@ -273,7 +304,10 @@ frontend interaction/contract tests on top of that baseline.
   while v0.25.0 exposes verified jetton payload observations separately. A
   recognized payload does not prove successful economic execution.
 - Jetton master and cross-wallet asset identity are not derived from payload
-  layout alone.
+  layout alone. v0.26.0 can expose an exact provider snapshot match, but that
+  match is not a locally verified master-contract proof.
+- Exact stored transaction fees are linked by canonical hash but are not
+  allocated to acquisitions or disposals.
 - v0.24.0 reconciles native wallet flow but intentionally does not calculate
   cost basis, realized PnL, or unrealized PnL from that flow.
 - The older run-scoped PnL preview is a separate estimate path and may unlock
