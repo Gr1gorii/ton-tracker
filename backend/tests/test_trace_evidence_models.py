@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from database import Base, create_database_engine
 from models import (
     WalletIngestionRun,
+    WalletTraceBocTransaction,
+    WalletTraceBocVerification,
     WalletTraceEvidenceCapture,
     WalletTraceEvidenceMessage,
     WalletTraceEvidenceNode,
@@ -27,6 +29,7 @@ SECOND_ACCOUNT = "0:" + "34" * 32
 LOGICAL_TIME = "89156526000001"
 SECOND_LOGICAL_TIME = "89156526000002"
 CONTRACT_VERSION = "tonapi_low_level_trace_evidence_v1"
+BOC_CONTRACT_VERSION = "ton_boc_trace_verification_v1"
 
 
 def _engine():
@@ -166,6 +169,47 @@ def _counts(session: Session) -> tuple[int, int, int]:
     )
 
 
+def _boc_verification() -> WalletTraceBocVerification:
+    return WalletTraceBocVerification(
+        contract_version=BOC_CONTRACT_VERSION,
+        verifier_name="pytoniq-core",
+        verifier_version="0.1.46",
+        network="ton-mainnet",
+        transaction_count=1,
+        message_count=1,
+        total_boc_bytes=1,
+        normalized_external_in_hash_count=0,
+        direct_cell_hash_message_count=1,
+        body_hash_count=1,
+        opcode_count=0,
+        evidence_digest_sha256="78" * 32,
+        verified_at=datetime(2026, 7, 10, 13, 0, tzinfo=timezone.utc),
+    )
+
+
+def _boc_transaction() -> WalletTraceBocTransaction:
+    return WalletTraceBocTransaction(
+        preorder_index=0,
+        transaction_hash=TRANSACTION_HASH,
+        transaction_boc_hex="00",
+        transaction_boc_bytes=1,
+        transaction_cell_hash=TRANSACTION_HASH,
+        message_count=1,
+        message_evidence_digest_sha256="9a" * 32,
+    )
+
+
+def _boc_counts(session: Session) -> tuple[int, int]:
+    return (
+        session.scalar(
+            select(func.count()).select_from(WalletTraceBocVerification)
+        ),
+        session.scalar(
+            select(func.count()).select_from(WalletTraceBocTransaction)
+        ),
+    )
+
+
 def test_relationships_persist_one_complete_trace_tree():
     engine = _engine()
     with Session(engine) as session:
@@ -177,6 +221,95 @@ def test_relationships_persist_one_complete_trace_tree():
         assert len(capture.nodes) == 1
         assert len(capture.nodes[0].messages) == 1
         assert _counts(session) == (1, 1, 1)
+    engine.dispose()
+
+
+def test_boc_verification_relationships_persist_one_bound_transaction():
+    engine = _engine()
+    with Session(engine) as session:
+        _run_id, _transaction_id, capture_id, node_id = _seed_tree(session)
+        capture = session.get(WalletTraceEvidenceCapture, capture_id)
+        node = session.get(WalletTraceEvidenceNode, node_id)
+        verification = _boc_verification()
+        boc_transaction = _boc_transaction()
+        with session.no_autoflush:
+            boc_transaction.node = node
+            verification.transactions.append(boc_transaction)
+            capture.boc_verifications.append(verification)
+            session.add(verification)
+        session.commit()
+
+        assert verification.capture is capture
+        assert verification.transactions == [boc_transaction]
+        assert boc_transaction.node is node
+        assert node.boc_transactions == [boc_transaction]
+        assert _boc_counts(session) == (1, 1)
+    engine.dispose()
+
+
+def test_deleting_capture_cascades_boc_verification_and_transactions():
+    engine = _engine()
+    with Session(engine) as session:
+        _run_id, _transaction_id, capture_id, node_id = _seed_tree(session)
+        verification = _boc_verification()
+        verification.capture_id = capture_id
+        boc_transaction = _boc_transaction()
+        boc_transaction.node_id = node_id
+        verification.transactions.append(boc_transaction)
+        session.add(verification)
+        session.commit()
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DELETE FROM wallet_trace_evidence_captures WHERE id=?",
+            (capture_id,),
+        )
+
+    with Session(engine) as session:
+        assert _boc_counts(session) == (0, 0)
+    engine.dispose()
+
+
+def test_boc_verification_contract_is_unique_per_capture():
+    engine = _engine()
+    with Session(engine) as session:
+        _run_id, _transaction_id, capture_id, _node_id = _seed_tree(session)
+        first = _boc_verification()
+        first.capture_id = capture_id
+        second = _boc_verification()
+        second.capture_id = capture_id
+        session.add_all((first, second))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "changed_field",
+    ["node_id", "preorder_index", "transaction_hash"],
+)
+def test_boc_transaction_identity_is_unique_within_verification(changed_field):
+    engine = _engine()
+    with Session(engine) as session:
+        _run_id, _transaction_id, capture_id, node_id = _seed_tree(session)
+        verification = _boc_verification()
+        verification.capture_id = capture_id
+        first = _boc_transaction()
+        first.node_id = node_id
+        second = _boc_transaction()
+        second.node_id = node_id
+        if changed_field != "node_id":
+            second.node_id = node_id
+        if changed_field != "preorder_index":
+            second.preorder_index = 1
+        if changed_field != "transaction_hash":
+            second.transaction_hash = SECOND_TRANSACTION_HASH
+        verification.transactions.extend((first, second))
+        session.add(verification)
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
     engine.dispose()
 
 

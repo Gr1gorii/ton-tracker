@@ -6,14 +6,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   WalletPersistedTransactionTraceEvidenceResponse,
+  WalletTraceBocVerificationResponse,
   WalletTransactionRecord,
   WalletTransactionTraceEvidenceResponse,
 } from "../types";
 
 const apiMocks = vi.hoisted(() => ({
   getPersistedWalletTransactionTraceEvidence: vi.fn(),
+  getWalletTransactionTraceBocVerification: vi.fn(),
   getWalletTransactionTraceEvidence: vi.fn(),
   persistWalletTransactionTraceEvidence: vi.fn(),
+  verifyWalletTransactionTraceBocs: vi.fn(),
 }));
 
 vi.mock("../api", () => apiMocks);
@@ -153,6 +156,70 @@ function persistedResponse(
   };
 }
 
+function bocResponse(
+  runId: number,
+  selected: WalletTransactionRecord,
+): WalletTraceBocVerificationResponse {
+  const persisted = persistedResponse(runId, selected);
+  const hashes = [
+    persisted.summary.root_transaction_hash,
+    selected.transaction_identity.hash_canonical!,
+    "f".repeat(64),
+  ];
+  return {
+    contract_version: "ton_boc_trace_verification_v1",
+    verification_id: "4",
+    capture_id: persisted.capture_id,
+    run_id: String(runId),
+    provider: "tonapi",
+    source_status: "live",
+    network: "ton-mainnet",
+    verified_at: "2026-07-10T13:00:00.123456Z",
+    verifier: { name: "pytoniq-core", version: "0.1.46" },
+    anchor: persisted.anchor,
+    capture_evidence_digest_sha256: persisted.evidence_digest_sha256,
+    evidence_digest_sha256: "9".repeat(64),
+    summary: {
+      transaction_count: 3,
+      message_count: 5,
+      total_boc_bytes: 1200,
+      normalized_external_in_hash_count: 1,
+      direct_cell_hash_message_count: 4,
+      body_hash_count: 5,
+      opcode_count: 2,
+    },
+    transactions: hashes.map((hash, index) => ({
+      preorder_index: index,
+      transaction_hash: hash,
+      transaction_boc_bytes: 400,
+      transaction_cell_hash: hash,
+      raw_out_message_count: index === 0 ? 2 : 0,
+      message_count: index < 2 ? 2 : 1,
+      body_hash_count: index < 2 ? 2 : 1,
+      opcode_count: index < 2 ? 1 : 0,
+      message_evidence_digest_sha256: String(index + 1).repeat(64),
+    })),
+    transaction_bocs_deserialized_locally: true,
+    transaction_cell_hashes_verified: true,
+    transaction_headers_verified: true,
+    message_hashes_verified: true,
+    message_headers_verified: true,
+    message_body_hashes_derived: true,
+    raw_boc_persisted: true,
+    raw_boc_returned: false,
+    message_bodies_returned: false,
+    is_blockchain_inclusion_proof_verified: false,
+    is_authoritative_activity_identity: false,
+    semantic_reconstruction_applied: false,
+    activity_merge_applied: false,
+    deduplication_applied: false,
+    eligible_for_cost_basis: false,
+    used_by_pnl: false,
+    is_ownership_proof: false,
+    message: "Locally reparsed transaction BOC evidence.",
+  };
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -169,8 +236,50 @@ describe("WalletTransactionTraceEvidenceCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     apiMocks.getPersistedWalletTransactionTraceEvidence.mockReset().mockResolvedValue(null);
+    apiMocks.getWalletTransactionTraceBocVerification.mockReset().mockResolvedValue(null);
     apiMocks.getWalletTransactionTraceEvidence.mockReset();
     apiMocks.persistWalletTransactionTraceEvidence.mockReset();
+    apiMocks.verifyWalletTransactionTraceBocs.mockReset();
+  });
+
+  it("reads local BOC state automatically and verifies only on explicit click", async () => {
+    const user = userEvent.setup();
+    const stored = transaction();
+    const persisted = persistedResponse(25, stored);
+    const verified = bocResponse(25, stored);
+    apiMocks.getPersistedWalletTransactionTraceEvidence.mockResolvedValue(
+      persisted,
+    );
+    apiMocks.getWalletTransactionTraceBocVerification.mockResolvedValue(null);
+    apiMocks.verifyWalletTransactionTraceBocs.mockResolvedValue(verified);
+
+    render(
+      <WalletTransactionTraceEvidenceCard
+        runId={25}
+        dataMode="real"
+        transactions={[stored]}
+      />,
+    );
+
+    const verifyButton = await screen.findByRole("button", {
+      name: "Verify transaction BOCs",
+    });
+    expect(apiMocks.getWalletTransactionTraceBocVerification).toHaveBeenCalledWith(
+      25,
+      "a".repeat(64),
+      expect.any(AbortSignal),
+    );
+    expect(apiMocks.verifyWalletTransactionTraceBocs).not.toHaveBeenCalled();
+
+    await user.click(verifyButton);
+    expect(apiMocks.verifyWalletTransactionTraceBocs).toHaveBeenCalledWith(
+      25,
+      "a".repeat(64),
+      expect.any(AbortSignal),
+    );
+    expect(await screen.findByText("Transaction cells and messages matched")).toBeTruthy();
+    expect(screen.getByText("RAW BOC HIDDEN")).toBeTruthy();
+    expect(screen.queryByText(/transaction_boc_hex/i)).toBeNull();
   });
 
   it("stays network-silent and exposes permanent limits for mock runs", () => {

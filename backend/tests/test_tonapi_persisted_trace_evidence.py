@@ -487,3 +487,114 @@ def test_persisted_trace_normalizer_does_not_mutate_provider_payload():
     _normalize(payload)
 
     assert payload == before
+
+
+def _boc_candidate_payload() -> dict:
+    payload = _finalized_trace()
+    payload["transaction"]["raw"] = "B5EE9C72"
+    payload["children"][0]["transaction"]["raw"] = "00ff"
+    return payload
+
+
+def test_boc_candidate_normalizer_adds_only_bounded_canonical_transaction_bocs():
+    payload = _boc_candidate_payload()
+
+    result = TonapiAdapter.normalize_transaction_trace_boc_verification_response(
+        payload,
+        requested_transaction_hash=ROOT_HASH,
+        network="ton-mainnet",
+    )
+
+    assert set(result) == {"trace", "transaction_bocs", "total_boc_bytes"}
+    assert result["trace"] == _normalize(payload)
+    assert result["transaction_bocs"] == [
+        {
+            "preorder_index": 0,
+            "transaction_hash": ROOT_HASH,
+            "transaction_boc_hex": "b5ee9c72",
+            "transaction_boc_bytes": 4,
+        },
+        {
+            "preorder_index": 1,
+            "transaction_hash": CHILD_HASH,
+            "transaction_boc_hex": "00ff",
+            "transaction_boc_bytes": 2,
+        },
+    ]
+    assert result["total_boc_bytes"] == 6
+    assert "raw" not in json.dumps(result["trace"])
+
+
+@pytest.mark.parametrize("raw_boc", [None, "", "abc", "0x00", "zz", " 00"])
+def test_boc_candidate_normalizer_rejects_malformed_transaction_boc(raw_boc):
+    payload = _boc_candidate_payload()
+    payload["transaction"]["raw"] = raw_boc
+
+    with pytest.raises(ValueError, match="raw BOC"):
+        TonapiAdapter.normalize_transaction_trace_boc_verification_response(
+            payload,
+            requested_transaction_hash=ROOT_HASH,
+            network="ton-mainnet",
+        )
+
+
+def test_boc_candidate_normalizer_rejects_per_transaction_size_overflow():
+    payload = _boc_candidate_payload()
+    payload["transaction"]["raw"] = "00" * (1024 * 1024 + 1)
+
+    with pytest.raises(ValueError, match="per-node limit"):
+        TonapiAdapter.normalize_transaction_trace_boc_verification_response(
+            payload,
+            requested_transaction_hash=ROOT_HASH,
+            network="ton-mainnet",
+        )
+
+
+def test_boc_candidate_adapter_makes_exactly_one_provider_call(monkeypatch):
+    calls: list[tuple[str, object, str, object]] = []
+
+    def fake_fetch(self, path, query=None, method="GET", body=None, timeout=10):
+        calls.append((path, query, method, body))
+        return ProviderResult.success(_boc_candidate_payload(), source="real")
+
+    monkeypatch.setattr(TonapiAdapter, "fetch_json", fake_fetch)
+    result = TonapiAdapter(
+        _settings()
+    ).get_transaction_trace_boc_verification_candidate(
+        ROOT_HASH,
+        "ton-mainnet",
+    )
+
+    assert result.ok is True
+    assert result.data["total_boc_bytes"] == 6
+    assert calls == [(f"/v2/traces/{ROOT_HASH}", None, "GET", None)]
+
+
+@pytest.mark.parametrize(
+    ("transaction_hash", "network", "mode"),
+    [
+        ("AB" * 32, "ton-mainnet", "real"),
+        (ROOT_HASH, "ton-unknown", "real"),
+        (ROOT_HASH, "ton-mainnet", "mock"),
+    ],
+)
+def test_boc_candidate_adapter_rejects_ineligible_input_without_call(
+    monkeypatch,
+    transaction_hash,
+    network,
+    mode,
+):
+    monkeypatch.setattr(
+        TonapiAdapter,
+        "fetch_json",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("provider must not be called")
+        ),
+    )
+    result = TonapiAdapter(
+        _settings(mode)
+    ).get_transaction_trace_boc_verification_candidate(
+        transaction_hash,
+        network,
+    )
+    assert result.ok is False

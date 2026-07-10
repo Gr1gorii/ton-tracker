@@ -3,6 +3,7 @@ uvicorn[standard]>=0.30
 pydantic>=2.7
 SQLAlchemy>=2.0
 alembic>=1.18,<2.0
+pytoniq-core==0.1.46
 
 # Dev / test
 pytest>=8.0

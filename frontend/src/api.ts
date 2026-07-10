@@ -356,6 +356,59 @@ export async function persistWalletTransactionTraceEvidence(
   return await res.json();
 }
 
+export async function getWalletTransactionTraceBocVerification(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<unknown | null> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence/boc-verification`,
+    { cache: "no-store", signal },
+  );
+
+  if (res.status === 404) {
+    let detail = "Local transaction BOC verification read failed (404)";
+    try {
+      const body = await res.json();
+      if (
+        body?.detail === "Locally verified transaction BOC evidence not found"
+      ) {
+        return null;
+      }
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // Only the exact absence contract is converted to null.
+    }
+    throw new Error(detail);
+  }
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Local transaction BOC verification read failed"),
+    );
+  }
+  return await res.json();
+}
+
+export async function verifyWalletTransactionTraceBocs(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence/boc-verification`,
+    { method: "POST", cache: "no-store", signal },
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Local transaction BOC verification failed"),
+    );
+  }
+  return await res.json();
+}
+
 export async function getWalletRunSignals(
   runId: number,
 ): Promise<WalletRunSignalsResponse> {

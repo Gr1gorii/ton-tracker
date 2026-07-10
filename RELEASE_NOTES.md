@@ -1,3 +1,32 @@
+# TON Wallet Intelligence Dashboard — v0.23.2 LOCAL BOC VERIFICATION
+
+v0.23.2 adds a separate `ton_boc_trace_verification_v1` record on top of an
+existing finalized v0.23.1 trace capture. The first explicit verification
+performs exactly one TonAPI trace request, persists each bounded transaction
+BOC, and locally deserializes it with pinned `pytoniq-core==0.1.46`. Existing
+verification GET and idempotent POST are provider-free and reparse every BOC.
+
+- Transaction root cell hash, account hash, LT, unix time, aborted state, and
+  out-message count must match the immutable trace node.
+- Internal and external message types, normalized external-in hashes, direct
+  cell hashes, canonical endpoints, amounts, fees, flags, and timestamps must
+  match the persisted message graph.
+- Parent outgoing messages must partition exactly into child inbound edges and
+  remaining outbound messages. Body hashes and available 32-bit opcode prefixes
+  are derived locally without semantic promotion.
+- Raw BOCs are capped at 1 MiB each and 8 MiB per verification, stored only in
+  the database, covered by canonical SHA-256 digests, and never returned to the
+  browser. Message bodies are also never returned.
+- Alembic `20260710_0007` adds `wallet_trace_boc_verifications` and
+  `wallet_trace_boc_transactions`; the migration repairs only exact empty
+  interrupted DDL and otherwise fails closed.
+- The trace card automatically reads the local verification record after the
+  persisted graph. Verification remains an explicit action and is clearly
+  separated from blockchain inclusion proof, semantic reconstruction,
+  authoritative identity, ownership, merge/deduplication, cost basis, and PnL.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.1 PERSISTED TRACE EVIDENCE
 
 v0.23.1 adds an explicit finalized-only persistence boundary for one bounded

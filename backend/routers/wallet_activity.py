@@ -19,6 +19,7 @@ from schemas import (
     WalletIngestionRunResponse,
     WalletPersistedTraceEvidenceResponse,
     WalletRunSignalsResponse,
+    WalletTraceBocVerificationResponse,
     WalletTransactionTraceEvidenceResponse,
 )
 from schemas import WalletRunPnlPreviewResponse
@@ -46,6 +47,12 @@ from services.wallet_persisted_trace_evidence import (
     WalletPersistedTraceEvidenceFailure,
     capture_persisted_wallet_transaction_trace_evidence,
     get_persisted_wallet_transaction_trace_evidence,
+)
+from services.wallet_trace_boc_verification import (
+    WalletTraceBocVerificationConflict,
+    WalletTraceBocVerificationFailure,
+    get_wallet_transaction_trace_boc_verification,
+    verify_wallet_transaction_trace_bocs,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -361,6 +368,142 @@ def capture_persisted_wallet_transaction_trace_evidence_route(
         raise HTTPException(
             status_code=503,
             detail="Persisted trace evidence storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/boc-verification",
+    response_model=WalletTraceBocVerificationResponse,
+)
+def read_wallet_transaction_trace_boc_verification(
+    response: Response,
+    run_id: str = Path(
+        ...,
+        description="Canonical positive persisted run id.",
+    ),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Reparse stored transaction BOCs without provider access."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result = get_wallet_transaction_trace_boc_verification(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Locally verified transaction BOC evidence not found",
+                headers=no_store_headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletTraceBocVerificationConflict,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletPersistedTraceEvidenceFailure,
+        WalletTraceBocVerificationFailure,
+        SQLAlchemyError,
+    ) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Local transaction BOC verification storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
+
+
+@router.post(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/boc-verification",
+    response_model=WalletTraceBocVerificationResponse,
+)
+def verify_wallet_transaction_trace_bocs_route(
+    response: Response,
+    run_id: str = Path(
+        ...,
+        description="Canonical positive persisted run id.",
+    ),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Fetch once and persist locally verified transaction BOCs."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result, created = verify_wallet_transaction_trace_bocs(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if created:
+            response.status_code = 201
+        return result
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletTraceBocVerificationConflict,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except WalletTraceEvidenceProviderFailure as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletPersistedTraceEvidenceFailure,
+        WalletTraceBocVerificationFailure,
+        SQLAlchemyError,
+    ) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Local transaction BOC verification storage is unavailable.",
             headers=no_store_headers,
         ) from exc
 

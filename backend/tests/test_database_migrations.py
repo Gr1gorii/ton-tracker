@@ -37,13 +37,16 @@ TRANSACTION_IDENTITY_REVISION = "20260710_0003"
 ACQUISITION_EVIDENCE_REVISION = "20260710_0004"
 EVENT_ACTION_IDENTITY_REVISION = "20260710_0005"
 TRACE_EVIDENCE_REVISION = "20260710_0006"
-CURRENT_REVISION = TRACE_EVIDENCE_REVISION
+TRACE_BOC_VERIFICATION_REVISION = "20260710_0007"
+CURRENT_REVISION = TRACE_BOC_VERIFICATION_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
 TRACE_CAPTURES_TABLE = "wallet_trace_evidence_captures"
 TRACE_NODES_TABLE = "wallet_trace_evidence_nodes"
 TRACE_MESSAGES_TABLE = "wallet_trace_evidence_messages"
+TRACE_BOC_VERIFICATIONS_TABLE = "wallet_trace_boc_verifications"
+TRACE_BOC_TRANSACTIONS_TABLE = "wallet_trace_boc_transactions"
 
 ACCOUNT_ID = "ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 RAW_ADDRESS = f"0:{ACCOUNT_ID}"
@@ -313,6 +316,21 @@ def _trace_evidence_counts(engine: Engine) -> tuple[int, int, int]:
                 TRACE_CAPTURES_TABLE,
                 TRACE_NODES_TABLE,
                 TRACE_MESSAGES_TABLE,
+            )
+        )
+
+
+def _trace_boc_verification_counts(engine: Engine) -> tuple[int, int]:
+    with engine.connect() as connection:
+        return tuple(
+            int(
+                connection.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {_quote(table_name)}"
+                ).scalar_one()
+            )
+            for table_name in (
+                TRACE_BOC_VERIFICATIONS_TABLE,
+                TRACE_BOC_TRANSACTIONS_TABLE,
             )
         )
 
@@ -943,6 +961,80 @@ def _assert_trace_evidence_schema(engine: Engine) -> None:
     }
 
 
+def _assert_trace_boc_verification_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    assert {
+        TRACE_BOC_VERIFICATIONS_TABLE,
+        TRACE_BOC_TRANSACTIONS_TABLE,
+    }.issubset(inspector.get_table_names())
+
+    def indexes(table_name: str):
+        return {
+            (
+                index["name"],
+                tuple(index.get("column_names") or ()),
+                bool(index.get("unique")),
+            )
+            for index in inspector.get_indexes(table_name)
+        }
+
+    assert indexes(TRACE_BOC_VERIFICATIONS_TABLE) == {
+        (
+            "uq_wallet_trace_boc_verifications_capture_contract",
+            ("capture_id", "contract_version"),
+            True,
+        ),
+        (
+            "ix_wallet_trace_boc_verifications_digest",
+            ("evidence_digest_sha256",),
+            False,
+        ),
+    }
+    assert indexes(TRACE_BOC_TRANSACTIONS_TABLE) == {
+        (
+            "uq_wallet_trace_boc_transactions_verification_node",
+            ("verification_id", "node_id"),
+            True,
+        ),
+        (
+            "uq_wallet_trace_boc_transactions_verification_preorder",
+            ("verification_id", "preorder_index"),
+            True,
+        ),
+        (
+            "uq_wallet_trace_boc_transactions_verification_hash",
+            ("verification_id", "transaction_hash"),
+            True,
+        ),
+    }
+    assert _reflected_foreign_key_signature(
+        inspector, TRACE_BOC_VERIFICATIONS_TABLE
+    ) == {
+        (
+            ("capture_id",),
+            TRACE_CAPTURES_TABLE,
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        )
+    }
+    assert _reflected_foreign_key_signature(
+        inspector, TRACE_BOC_TRANSACTIONS_TABLE
+    ) == {
+        (
+            ("verification_id",),
+            TRACE_BOC_VERIFICATIONS_TABLE,
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        ),
+        (
+            ("node_id",),
+            TRACE_NODES_TABLE,
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        ),
+    }
+
+
 def _expected_event_action_identity_indexes(
     table_name: str,
 ) -> set[tuple[str, tuple[str, ...], bool]]:
@@ -1161,6 +1253,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
@@ -1168,8 +1261,10 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
     _assert_acquisition_evidence_schema(engine)
     _assert_event_action_identity_schema(engine)
     _assert_trace_evidence_schema(engine)
+    _assert_trace_boc_verification_schema(engine)
     assert _acquisition_evidence_counts(engine) == (0, 0)
     assert _trace_evidence_counts(engine) == (0, 0, 0)
+    assert _trace_boc_verification_counts(engine) == (0, 0)
 
     engine.dispose()
     reopened = _engine(tmp_path / "fresh.db")
@@ -1196,6 +1291,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1235,6 +1331,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1367,6 +1464,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1507,6 +1605,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1651,6 +1750,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2076,6 +2176,7 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
     assert report.applied_revisions == (
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2161,6 +2262,7 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
     assert report.applied_revisions == (
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2350,12 +2452,17 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
 
     assert report.action == "upgraded"
     assert report.revision_before == EVENT_ACTION_IDENTITY_REVISION
-    assert report.revision_after == TRACE_EVIDENCE_REVISION
-    assert report.applied_revisions == (TRACE_EVIDENCE_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
+    )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
+    assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_schema_matches_models(engine)
     _assert_trace_evidence_schema(engine)
+    _assert_trace_boc_verification_schema(engine)
     engine.dispose()
 
 
@@ -2576,12 +2683,211 @@ def test_trace_evidence_migration_is_forward_only(tmp_path):
                 EVENT_ACTION_IDENTITY_REVISION,
             )
 
-    _assert_schema_matches_models(engine)
     _assert_trace_evidence_schema(engine)
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
         ).scalar_one() == TRACE_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
+    engine = _engine(tmp_path / "trace-boc-verification-upgrade.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == TRACE_EVIDENCE_REVISION
+    assert report.revision_after == TRACE_BOC_VERIFICATION_REVISION
+    assert report.applied_revisions == (TRACE_BOC_VERIFICATION_REVISION,)
+    assert _trace_boc_verification_counts(engine) == (0, 0)
+    _assert_schema_matches_models(engine)
+    _assert_trace_boc_verification_schema(engine)
+    engine.dispose()
+
+
+def test_trace_boc_verification_repairs_exact_empty_partial_sqlite_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "partial-trace-boc-verification.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            TRACE_BOC_VERIFICATIONS_TABLE,
+        )
+        _create_model_table_without_indexes(
+            connection,
+            TRACE_BOC_TRANSACTIONS_TABLE,
+        )
+
+    _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    _assert_trace_boc_verification_schema(engine)
+    assert _trace_boc_verification_counts(engine) == (0, 0)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRACE_BOC_VERIFICATION_REVISION
+    engine.dispose()
+
+
+def test_trace_boc_verification_orphan_transaction_table_fails_closed(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "orphan-trace-boc-transaction.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            TRACE_BOC_TRANSACTIONS_TABLE,
+        )
+
+    with pytest.raises(RuntimeError, match="without their verification table"):
+        _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    assert TRACE_BOC_VERIFICATIONS_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRACE_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_trace_boc_verification_requires_complete_0006_schema(tmp_path):
+    engine = _engine(tmp_path / "incomplete-0006-for-boc-verification.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(f"DROP TABLE {TRACE_MESSAGES_TABLE}")
+
+    with pytest.raises(RuntimeError, match="requires the exact revision 0006"):
+        _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    tables = set(inspect(engine).get_table_names())
+    assert TRACE_BOC_VERIFICATIONS_TABLE not in tables
+    assert TRACE_BOC_TRANSACTIONS_TABLE not in tables
+    engine.dispose()
+
+
+def test_trace_boc_verification_malformed_partial_columns_fail_before_child_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "malformed-trace-boc-columns.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            TRACE_BOC_VERIFICATIONS_TABLE,
+        )
+    _rewrite_table_sql(
+        engine,
+        TRACE_BOC_VERIFICATIONS_TABLE,
+        "contract_version VARCHAR(48)",
+        "contract_version VARCHAR(64)",
+    )
+
+    with pytest.raises(RuntimeError, match="columns do not match revision 0007"):
+        _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    assert TRACE_BOC_TRANSACTIONS_TABLE not in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_trace_boc_verification_wrong_partial_index_fails_closed(tmp_path):
+    engine = _engine(tmp_path / "wrong-trace-boc-index.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            TRACE_BOC_VERIFICATIONS_TABLE,
+        )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX "
+            "uq_wallet_trace_boc_verifications_capture_contract "
+            "ON wallet_trace_boc_verifications "
+            "(contract_version, capture_id)"
+        )
+
+    with pytest.raises(RuntimeError, match="index does not match revision 0007"):
+        _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    assert TRACE_BOC_TRANSACTIONS_TABLE not in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_trace_boc_verification_pre_revision_rows_are_never_adopted(tmp_path):
+    engine = _engine(tmp_path / "unexpected-trace-boc-data.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_transaction(connection, transaction_id=1, run_id=1)
+        connection.exec_driver_sql(
+            "INSERT INTO wallet_trace_evidence_captures ("
+            "id, run_id, captured_via_transaction_id, capture_slot, provider, "
+            "contract_version, network, root_transaction_hash, trace_state, "
+            "transaction_count, max_depth, message_count, "
+            "root_inbound_message_count, child_internal_message_count, "
+            "remaining_out_message_count, internal_message_count, "
+            "external_in_message_count, external_out_message_count, "
+            "successful_transaction_count, failed_transaction_count, "
+            "aborted_transaction_count, unique_account_count, "
+            "evidence_digest_sha256, captured_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?)",
+            (
+                1, 1, 1, 0, "tonapi", "tonapi_low_level_trace_evidence_v1",
+                "ton-mainnet", TRANSACTION_HASH, "finalized", 1, 0, 0, 0,
+                0, 0, 0, 0, 0, 1, 0, 0, 1, "ab" * 32,
+                "2026-07-10 12:00:00.000000",
+            ),
+        )
+        _create_model_table_without_indexes(
+            connection,
+            TRACE_BOC_VERIFICATIONS_TABLE,
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO wallet_trace_boc_verifications ("
+            "id, capture_id, contract_version, verifier_name, "
+            "verifier_version, network, transaction_count, message_count, "
+            "total_boc_bytes, normalized_external_in_hash_count, "
+            "direct_cell_hash_message_count, body_hash_count, opcode_count, "
+            "evidence_digest_sha256, verified_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1, 1, "ton_boc_trace_verification_v1", "pytoniq-core",
+                "0.1.46", "ton-mainnet", 1, 0, 1, 0, 0, 0, 0,
+                "cd" * 32, "2026-07-10 13:00:00.000000",
+            ),
+        )
+
+    with pytest.raises(RuntimeError, match="unexpected pre-revision data"):
+        _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    assert TRACE_BOC_TRANSACTIONS_TABLE not in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_trace_boc_verification_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "trace-boc-verification-forward-only.db")
+    _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    with engine.begin() as connection:
+        with pytest.raises(
+            RuntimeError,
+            match="Trace BOC verification downgrade would discard",
+        ):
+            command.downgrade(
+                migration_config(connection),
+                TRACE_EVIDENCE_REVISION,
+            )
+
+    _assert_schema_matches_models(engine)
+    _assert_trace_boc_verification_schema(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRACE_BOC_VERIFICATION_REVISION
     engine.dispose()
 
 
@@ -2781,6 +3087,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
+        TRACE_BOC_VERIFICATION_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

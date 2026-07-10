@@ -703,6 +703,63 @@ export interface WalletPersistedTransactionTraceEvidenceResponse {
   message: string;
 }
 
+export interface WalletTraceBocVerificationSummary {
+  transaction_count: number;
+  message_count: number;
+  total_boc_bytes: number;
+  normalized_external_in_hash_count: number;
+  direct_cell_hash_message_count: number;
+  body_hash_count: number;
+  opcode_count: number;
+}
+
+export interface WalletTraceBocVerifiedTransaction {
+  preorder_index: number;
+  transaction_hash: string;
+  transaction_boc_bytes: number;
+  transaction_cell_hash: string;
+  raw_out_message_count: number;
+  message_count: number;
+  body_hash_count: number;
+  opcode_count: number;
+  message_evidence_digest_sha256: string;
+}
+
+export interface WalletTraceBocVerificationResponse {
+  contract_version: "ton_boc_trace_verification_v1";
+  verification_id: string;
+  capture_id: string;
+  run_id: string;
+  provider: "tonapi";
+  source_status: "live";
+  network: "ton-mainnet" | "ton-testnet";
+  verified_at: string;
+  verifier: { name: "pytoniq-core"; version: "0.1.46" };
+  anchor: WalletTransactionTraceEvidenceAnchor;
+  capture_evidence_digest_sha256: string;
+  evidence_digest_sha256: string;
+  summary: WalletTraceBocVerificationSummary;
+  transactions: WalletTraceBocVerifiedTransaction[];
+  transaction_bocs_deserialized_locally: true;
+  transaction_cell_hashes_verified: true;
+  transaction_headers_verified: true;
+  message_hashes_verified: true;
+  message_headers_verified: true;
+  message_body_hashes_derived: true;
+  raw_boc_persisted: true;
+  raw_boc_returned: false;
+  message_bodies_returned: false;
+  is_blockchain_inclusion_proof_verified: false;
+  is_authoritative_activity_identity: false;
+  semantic_reconstruction_applied: false;
+  activity_merge_applied: false;
+  deduplication_applied: false;
+  eligible_for_cost_basis: false;
+  used_by_pnl: false;
+  is_ownership_proof: false;
+  message: string;
+}
+
 export interface WalletSwapRecord {
   tx_hash?: string | null;
   timestamp?: string | null;

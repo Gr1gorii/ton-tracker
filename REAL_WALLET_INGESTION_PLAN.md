@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.23.1 PERSISTED TRACE EVIDENCE
+# TON Wallet Intelligence Dashboard — v0.23.2 LOCAL BOC VERIFICATION
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -14,6 +14,10 @@ persistence, identity, readiness, interval, cost-basis, or PnL contract.
 v0.23.1 adds a separate finalized-only relational trace/message observation
 ledger with provider-free readback and mandatory local graph revalidation. It
 still changes no activity, semantic identity, cost-basis, or PnL contract.
+v0.23.2 adds a capture-bound local transaction BOC ledger. Each read reparses
+the bounded raw BOCs, re-derives transaction/message hashes and headers, and
+checks outgoing edges against the v0.23.1 graph. This is still provider-delivered
+evidence rather than blockchain inclusion proof or semantic activity.
 
 ## Objective
 
@@ -476,7 +480,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.23.1
+## Surface status in v0.23.2
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -487,6 +491,7 @@ intervals are contiguous.
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
 | Transaction trace preview | One explicit guarded TonAPI trace read for an eligible stored transaction | Sanitized provider lifecycle/structure preview only; not persisted, locally verified, reconstructed, authoritative, or used by PnL |
 | Persisted trace evidence | Explicit finalized-only capture plus provider-free locally revalidated readback | Immutable provider-indexed transaction/message header graph; no raw BOC/body, blockchain proof, semantic reconstruction, merge, cost basis, or PnL |
+| Local BOC verification | One explicit TonAPI trace fetch followed by pinned local TLB deserialization; provider-free readback reparses every stored BOC | Transaction/message cell and bounded header consistency with the persisted graph; no inclusion proof, semantic activity, merge, cost basis, ownership, or PnL |
 | Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
@@ -642,7 +647,7 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.23.1
+## Roadmap beyond v0.23.2
 
 1. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
