@@ -1,13 +1,13 @@
-# TON Wallet Intelligence Dashboard — v0.23.3 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.23.4 Promotion Checklist
 
-Operational gates for body-safe, provider-free message evidence.
+Operational gates for account-scoped native TON flow observations.
 
 ## Version and migration
 
-- Product label is `v0.23.3 MESSAGE BODY EVIDENCE`; backend API version stays
+- Product label is `v0.23.4 NATIVE TON FLOW OBSERVATIONS`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is exactly `ton_boc_message_evidence_v1`; v0.23.0 preview,
-  v0.23.1 graph, and v0.23.2 BOC verification contracts remain unchanged.
+- New public contract is exactly `ton_native_flow_observations_v1`; prior trace,
+  BOC verification, and body-safe message contracts remain unchanged.
 - Alembic head is `20260710_0007`, adding only
   `wallet_trace_boc_verifications` and `wallet_trace_boc_transactions`.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
@@ -42,6 +42,10 @@ Operational gates for body-safe, provider-free message evidence.
 
 ## Endpoint and UI
 
+- `GET .../boc-verification/native-ton-flows` is provider-free and includes
+  only verified internal messages involving the stored run account.
+- Direction, nanotons, counterparty endpoint, totals, and deterministic
+  observation identity re-derive exactly. Non-authority/PnL flags stay false.
 - `GET .../boc-verification/messages` is provider-free and reparses every stored
   BOC before returning message evidence.
 - Each row exposes only transaction binding, trace role, verified hashes and
@@ -63,11 +67,11 @@ Operational gates for body-safe, provider-free message evidence.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Live message evidence GET returns 200 with two locally re-derived rows and no
-  provider call; BOC verification digest binding is stable.
+- Live run 32 derives one 3 TON outgoing observation provider-free from the
+  verified message evidence; the observed counterparty remains non-authoritative.
 - Credential/prohibited-brand scans are clean and README has no diff.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.23.3` on the merge commit.
+  a ready PR, then create annotated tag `v0.23.4` on the merge commit.
 
 ## Rollback
 

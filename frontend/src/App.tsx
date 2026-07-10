@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.3 MESSAGE BODY EVIDENCE";
+const RELEASE_LABEL = "v0.23.4 NATIVE TON FLOW OBSERVATIONS";
 
 const navItems = [
   "DASHBOARD",
@@ -942,16 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Body-safe per-message evidence</strong>
+            <strong>Account-scoped native TON flow observations</strong>
             <p>
-              Reparse the stored transaction BOCs without a provider call and
-              inspect each verified message header, body hash, bit/ref count,
-              and available 32-bit opcode prefix. Bodies and semantic meanings
-              stay hidden and no activity or PnL identity is created.
+              Classify verified internal-message value as incoming, outgoing,
+              or self relative to the stored run account. Amount and observed
+              counterparty come from the verified header only and never become
+              an authoritative transfer, actor, cost-basis, or PnL identity.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Native TON flow observations"
+            text="Provider-free account perspective classifies verified internal-message value and records a stable observation identity. Counterparties remain message-header endpoints; payload semantics, authoritative transfer identity, merge, deduplication, cost basis, and PnL stay disabled."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Message body evidence"
