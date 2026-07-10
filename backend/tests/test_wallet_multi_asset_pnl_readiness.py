@@ -274,6 +274,12 @@ def test_full_readiness_uses_evidence_without_unlocking_pnl(monkeypatch):
     }
     assert first["historical_price_requests_performed"] is False
     assert first["acquisition_lot_construction_applied"] is False
+    assert first["real_pnl_gate"]["calculation_authorized"] is False
+    assert first["real_pnl_gate"]["refuses_partial_calculation"] is True
+    assert first["real_pnl_gate"]["blocking_requirement_codes"] == first[
+        "blocked_requirement_codes"
+    ]
+    assert len(first["real_pnl_gate"]["gate_digest_sha256"]) == 64
     assert first["analysis_digest_sha256"] == second["analysis_digest_sha256"]
     WalletMultiAssetPnlReadinessResponse.model_validate(first)
 
