@@ -30,11 +30,14 @@ from schemas import (
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
+    WalletTransactionInclusionCatalogResponse,
     WalletJettonPayloadObservationsResponse,
     WalletJettonContractVerificationRequest,
     WalletJettonContractVerificationResponse,
     WalletJettonContractVerificationCatalogResponse,
     WalletTransactionTraceEvidenceResponse,
+    WalletCanonicalLedgerResponse,
+    WalletCanonicalActivityReportResponse,
 )
 from schemas import WalletRunPnlPreviewResponse
 from services import export
@@ -105,6 +108,19 @@ from services.wallet_jetton_contract_verification import (
     WalletJettonContractVerificationNotFound,
     list_wallet_jetton_contract_verifications,
     verify_wallet_jetton_contract_relationship,
+)
+from services.wallet_transaction_inclusion_proof import (
+    WalletTransactionInclusionProofConflict,
+    WalletTransactionInclusionProofFailure,
+    WalletTransactionInclusionProofNotFound,
+    create_wallet_transaction_inclusion_proofs,
+    get_wallet_transaction_inclusion_proofs,
+)
+from services.wallet_canonical_ledger import (
+    WalletCanonicalLedgerConflict,
+    WalletCanonicalLedgerNotFound,
+    build_wallet_canonical_report,
+    get_wallet_canonical_ledger,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -1129,6 +1145,85 @@ def verify_wallet_transaction_trace_bocs_route(
         ) from exc
 
 
+@router.post(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/"
+    "boc-verification/block-inclusion",
+    response_model=WalletTransactionInclusionCatalogResponse,
+)
+def prove_wallet_transaction_boc_inclusion_route(
+    response: Response,
+    run_id: str = Path(...),
+    transaction_hash: str = Path(...),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Persist Merkle proofs for every transaction BOC in a trace."""
+    headers = {"Cache-Control": "no-store"}
+    response.headers.update(headers)
+    canonical_run_id = _validated_trace_path(run_id, transaction_hash, headers)
+    try:
+        existing = get_wallet_transaction_inclusion_proofs(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if existing is not None:
+            return existing
+        result = create_wallet_transaction_inclusion_proofs(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        response.status_code = 201
+        return result
+    except WalletTransactionInclusionProofNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc), headers=headers) from exc
+    except (
+        WalletTraceBocVerificationConflict,
+        WalletTransactionInclusionProofConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc), headers=headers) from exc
+    except WalletTransactionInclusionProofFailure as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail=str(exc), headers=headers) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/"
+    "boc-verification/block-inclusion",
+    response_model=WalletTransactionInclusionCatalogResponse,
+)
+def read_wallet_transaction_boc_inclusion_route(
+    response: Response,
+    run_id: str = Path(...),
+    transaction_hash: str = Path(...),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Provider-free revalidate stored transaction inclusion proofs."""
+    headers = {"Cache-Control": "no-store"}
+    response.headers.update(headers)
+    canonical_run_id = _validated_trace_path(run_id, transaction_hash, headers)
+    try:
+        result = get_wallet_transaction_inclusion_proofs(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Transaction inclusion proofs not found",
+                headers=headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTransactionInclusionProofConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc), headers=headers) from exc
+    except WalletTransactionInclusionProofFailure as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail=str(exc), headers=headers) from exc
+
+
 def _validated_trace_path(
     run_id: str,
     transaction_hash: str,
@@ -1154,6 +1249,135 @@ def _validated_trace_path(
             headers=headers,
         )
     return canonical_run_id
+
+
+@router.get(
+    "/ingest/{run_id}/canonical-ledger",
+    response_model=WalletCanonicalLedgerResponse,
+)
+def read_wallet_canonical_ledger(
+    response: Response,
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read the block-proved canonical activity ledger for one run."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return get_wallet_canonical_ledger(run_id, session)
+    except WalletCanonicalLedgerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletCanonicalLedgerConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/ingest/{run_id}/canonical-ledger/export.json")
+def export_wallet_canonical_ledger_json(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    try:
+        ledger = get_wallet_canonical_ledger(run_id, session)
+    except WalletCanonicalLedgerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletCanonicalLedgerConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content=json.dumps(ledger, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f"attachment; filename=wallet_canonical_ledger_{run_id}.json"
+            ),
+        },
+    )
+
+
+@router.get("/ingest/{run_id}/canonical-ledger/export.csv")
+def export_wallet_canonical_ledger_csv(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    try:
+        ledger = get_wallet_canonical_ledger(run_id, session)
+    except WalletCanonicalLedgerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletCanonicalLedgerConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content=export.wallet_canonical_ledger_to_csv(ledger),
+        media_type="text/csv",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f"attachment; filename=wallet_canonical_ledger_{run_id}.csv"
+            ),
+        },
+    )
+
+
+@router.get(
+    "/ingest/{run_id}/canonical-report",
+    response_model=WalletCanonicalActivityReportResponse,
+)
+def read_wallet_canonical_report(
+    response: Response,
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return build_wallet_canonical_report(run_id, session)
+    except WalletCanonicalLedgerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletCanonicalLedgerConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/ingest/{run_id}/canonical-report/export.json")
+def export_wallet_canonical_report_json(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    try:
+        report = build_wallet_canonical_report(run_id, session)
+    except WalletCanonicalLedgerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletCanonicalLedgerConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content=json.dumps(report, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f"attachment; filename=wallet_canonical_report_{run_id}.json"
+            ),
+        },
+    )
+
+
+@router.get("/ingest/{run_id}/canonical-report/export.csv")
+def export_wallet_canonical_report_csv(
+    run_id: int = Path(..., ge=1),
+    session: Session = Depends(get_session),
+) -> Response:
+    try:
+        report = build_wallet_canonical_report(run_id, session)
+    except WalletCanonicalLedgerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletCanonicalLedgerConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return Response(
+        content=export.wallet_canonical_report_to_csv(report),
+        media_type="text/csv",
+        headers={
+            "Cache-Control": "no-store",
+            "Content-Disposition": (
+                f"attachment; filename=wallet_canonical_report_{run_id}.csv"
+            ),
+        },
+    )
 
 
 @router.get(

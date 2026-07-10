@@ -1,15 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { analyze, API_BASE, getProvidersStatus } from "./api";
-import type { AnalysisResult, ProvidersStatus, TimeWindow } from "./types";
-import PoolUrlInput from "./components/PoolUrlInput";
-import TimeWindowPicker from "./components/TimeWindowPicker";
+import { getProvidersStatus } from "./api";
+import type { ProvidersStatus } from "./types";
 import ProviderStatus from "./components/ProviderStatus";
-import TokenOverview from "./components/TokenOverview";
-import BuyersTable from "./components/BuyersTable";
-import WalletGroups from "./components/WalletGroups";
-import CommonHoldings from "./components/CommonHoldings";
-import InterestingWallets from "./components/InterestingWallets";
-import ExportButtons from "./components/ExportButtons";
 import HistoricalPricesPreviewPanel from "./components/HistoricalPricesPreviewPanel";
 import ImportPreviewPanel from "./components/ImportPreviewPanel";
 import BitqueryTokenTradesPanel from "./components/BitqueryTokenTradesPanel";
@@ -19,9 +11,7 @@ import TonapiWalletIntelligencePreviewPanel from "./components/TonapiWalletIntel
 import WalletIngestionWorkspace from "./components/WalletIngestionWorkspace";
 import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils";
 
-const SAMPLE_URL =
-  "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.30.0 REAL PNL SAFETY GATE";
+const RELEASE_LABEL = "v0.31.0 CRYPTO PROOF + CANONICAL LEDGER";
 
 const navItems = [
   "DASHBOARD",
@@ -96,11 +86,6 @@ function formatRunTime(date: Date): string {
 }
 
 export default function App() {
-  const [poolUrl, setPoolUrl] = useState(SAMPLE_URL);
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
-
   const [workspaceAccount, setWorkspaceAccount] = useState("");
   const [workspaceLimit, setWorkspaceLimit] = useState("10");
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("ingestion");
@@ -111,10 +96,6 @@ export default function App() {
   });
   const [workspaceRunState, setWorkspaceRunState] =
     useState<WorkspaceRunState | null>(null);
-
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
 
   const [providers, setProviders] = useState<ProvidersStatus | null>(null);
   const [providersError, setProvidersError] = useState<string | null>(null);
@@ -128,8 +109,8 @@ export default function App() {
       );
   }, []);
 
-  const dataMode = result?.data_quality.mode ?? providers?.data_mode ?? "unknown";
-  const providerSnapshot = result?.providers ?? providers;
+  const dataMode = providers?.data_mode ?? "unknown";
+  const providerSnapshot = providers;
   const availableProviders = providerSnapshot
     ? [
         providerSnapshot.geckoterminal,
@@ -160,7 +141,7 @@ export default function App() {
       : { label: "PROVIDERS LOADING", className: "badge badge-provider" };
   const dataBadge =
     dataMode === "mock"
-      ? { label: "DATA MODE MOCK", className: "badge badge-mock" }
+      ? { label: "PRODUCTION DATA DISABLED", className: "badge badge-warning" }
       : dataMode === "real"
         ? { label: "DATA MODE REAL", className: "badge badge-real" }
         : { label: "DATA MODE UNKNOWN", className: "badge badge-provider" };
@@ -168,7 +149,7 @@ export default function App() {
     dataMode === "real"
       ? "LIVE/PREVIEW"
       : dataMode === "mock"
-        ? "MOCK/OFFLINE"
+        ? "CONFIGURATION REQUIRED"
         : "STATUS UNKNOWN";
   const sourceBadgeClass =
     dataMode === "real"
@@ -178,50 +159,10 @@ export default function App() {
         : "badge badge-warning";
   const bannerText =
     dataMode === "mock"
-      ? "Mock mode is active. No real on-chain wallet data is used."
+      ? "Production data mode is disabled. Configure the real provider path before using this workspace."
       : dataMode === "real"
-        ? "Provider previews may use real sources, while legacy wallet buyers, PnL and clusters remain mock-aware."
-        : "Provider status is unavailable. Preview scopes remain visible; legacy wallet buyers, PnL and clusters remain mock-aware.";
-
-  async function handleAnalyze() {
-    if (!poolUrl.trim()) {
-      setError("Please enter a pool URL.");
-      return;
-    }
-    if (timeWindow === "custom") {
-      if (!customStart || !customEnd) {
-        setError("Please choose both a start and end date for a custom window.");
-        return;
-      }
-      if (new Date(customStart) >= new Date(customEnd)) {
-        setError("Custom range end must be after the start.");
-        return;
-      }
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await analyze({
-        pool_url: poolUrl.trim(),
-        time_window: timeWindow,
-        custom_start:
-          timeWindow === "custom"
-            ? new Date(customStart).toISOString()
-            : undefined,
-        custom_end:
-          timeWindow === "custom"
-            ? new Date(customEnd).toISOString()
-            : undefined,
-      });
-      setResult(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Unknown error");
-      setResult(null);
-    } finally {
-      setLoading(false);
-    }
-  }
+        ? "Real provider mode is active. Canonical reports require persisted block-inclusion evidence."
+        : "Provider status is unavailable. Evidence-dependent actions remain fail-closed.";
 
   function markWorkspaceInputsChanged(nextAccount: string, nextLimit: string) {
     const target = workspaceTargets[workspaceView];
@@ -385,7 +326,7 @@ export default function App() {
 
         <div className="sidebar-status">
           <span>Data mode</span>
-          <strong>{dataMode}</strong>
+          <strong>{dataMode === "real" ? "REAL" : "DISABLED"}</strong>
           <small>Provider scope visible</small>
         </div>
       </aside>
@@ -403,7 +344,7 @@ export default function App() {
             </span>
             <span className="badge badge-real">RELEASE {RELEASE_LABEL}</span>
             <span className="badge badge-provider">
-              ENV {dataMode === "real" ? "PROVIDER MODE" : "LOCAL MOCK"}
+              ENV {dataMode === "real" ? "PROVIDER MODE" : "CONFIG REQUIRED"}
             </span>
             <span className={sourceBadgeClass}>SOURCE {sourceLabel}</span>
           </div>
@@ -433,7 +374,7 @@ export default function App() {
             >
               <ProviderStatus
                 providers={providerSnapshot}
-                dataQuality={result?.data_quality ?? null}
+                dataQuality={null}
                 error={providersError}
               />
             </DashboardSection>
@@ -535,112 +476,6 @@ export default function App() {
                 />
               </DashboardSection>
             </div>
-
-            <DashboardSection
-              className="dashboard-section-secondary"
-              id="legacy-dashboard-report"
-              eyebrow="Legacy / mock-aware analysis"
-              title="Legacy Token and Wallet Clustering Report"
-              description="Legacy report workspace remains mock-aware and separate from provider previews."
-            >
-              <div className="dashboard-workbench">
-                <div className="dashboard-workbench-head">
-                  <div>
-                    <span className="section-eyebrow">
-                      Legacy / mock-aware analysis
-                    </span>
-                    <h3>Token and wallet clustering report</h3>
-                  </div>
-                  <span className="badge badge-provider">mock-aware</span>
-                </div>
-
-                <div className="controls-card">
-                  <PoolUrlInput
-                    value={poolUrl}
-                    onChange={setPoolUrl}
-                    disabled={loading}
-                  />
-                  <TimeWindowPicker
-                    value={timeWindow}
-                    onChange={setTimeWindow}
-                    customStart={customStart}
-                    customEnd={customEnd}
-                    onCustomStartChange={setCustomStart}
-                    onCustomEndChange={setCustomEnd}
-                    disabled={loading}
-                  />
-                  <div className="controls-actions">
-                    <button
-                      className="btn btn-primary"
-                      type="button"
-                      onClick={handleAnalyze}
-                      disabled={loading}
-                      aria-busy={loading}
-                      aria-label="Run mock-aware token and wallet analysis"
-                    >
-                      {loading ? "Analyzing..." : "Analyze"}
-                    </button>
-                    {result && (
-                      <ExportButtons
-                        poolUrl={result.pool_url}
-                        timeWindow={result.time_window}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {error && (
-                  <div
-                    className="state-box error-box dashboard-state"
-                    role="alert"
-                  >
-                    <strong>Request failed.</strong> {error}
-                    <div className="muted small">
-                      Is the backend running at <code>{API_BASE}</code>? Start it
-                      with <code>uvicorn main:app --reload</code>.
-                    </div>
-                  </div>
-                )}
-
-                {loading && (
-                  <div
-                    className="state-box loading-box dashboard-state"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <span className="spinner" aria-hidden="true" /> Crunching
-                    mock wallet data...
-                  </div>
-                )}
-
-                {!loading && !result && !error && (
-                  <div
-                    className="state-box empty-box dashboard-state"
-                    role="note"
-                  >
-                    Enter a TON pool URL and pick a time window, then press{" "}
-                    <strong>Analyze</strong> to generate a mock-aware
-                    intelligence report.
-                  </div>
-                )}
-
-                {!loading && result && (
-                  <main className="results">
-                    <TokenOverview result={result} />
-                    <TokenStatsDivider />
-                    <BuyersTable wallets={result.wallets} />
-                    <WalletGroups groups={result.groups} />
-                    <div className="two-col">
-                      <CommonHoldings holdings={result.common_holdings} />
-                      <InterestingWallets wallets={result.interesting_wallets} />
-                    </div>
-                    <footer className="app-footer muted small">
-                      {result.disclaimer}
-                    </footer>
-                  </main>
-                )}
-              </div>
-            </DashboardSection>
 
             <DashboardSection
               id="historical-prices"
@@ -896,7 +731,7 @@ function WorkspaceControl({
           <span>Result contract</span>
           <strong>
             {view === "ingestion"
-              ? "Mock ingestion, not analytics"
+              ? "Source-labeled ingestion"
               : "Provider preview, not full analysis"}
           </strong>
         </div>
@@ -942,15 +777,51 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Real PnL safety gate</strong>
+            <strong>Verified evidence pipeline</strong>
             <p>
-              Every required evidence state is partitioned into satisfied and
-              blocking inputs, digest-bound, and checked before calculation.
-              Partial real PnL is explicitly refused.
+              Ownership, block inclusion, canonical activity, DEX identity,
+              and production operations now have explicit verification states.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Wallet ownership proof"
+            text="Single-use TON Connect challenges validate domain, TTL, StateInit-derived address, proof-checked wallet public key, and Ed25519 signature. Replays fail closed."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Transaction block inclusion"
+            text="Stored Merkle proofs bind every verified transaction BOC to an exact block root and are revalidated provider-free."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Account-state inclusion"
+            text="Full account-state BOCs, account proofs, and shard proofs are persisted and checked back to a masterchain anchor."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Canonical ledger consumers"
+            text="Real clustering, reports, and JSON/CSV exports consume only deduplicated native activities backed by transaction inclusion proofs."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Multi-protocol DEX identity"
+            text="STON.fi v1/v2, DeDust v2/v3/Memepad, TONCO, MemesLab, and TON.fun labels are normalized without promoting unknown providers."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Production operations"
+            text="Readiness, Prometheus metrics and alerts, verified SQLite backups, retention, and hardened container deployment are configured."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Provider scope"
+            text={providerScopeText}
+          />
+        </div>
+        <div className="release-readiness-list" hidden>
           <ReleaseReadinessItem
             tone="ready"
             label="Real PnL safety gate"
@@ -1063,11 +934,6 @@ function EvidenceColumn({
           />
           <ReleaseReadinessItem
             tone="scoped"
-            label="Legacy analytics"
-            text="Legacy buyers and the top-level report remain separate from ingestion runs; run-scoped PnL, exports, probabilistic cluster comparison, and evidence signals operate on stored runs."
-          />
-          <ReleaseReadinessItem
-            tone="scoped"
             label="Data contract"
             text="Low-level transaction identity and provider event-action observation identity are explicit, but neither proves ownership. Event actions remain mutable, non-authoritative, and unused as a PnL identity key."
           />
@@ -1142,9 +1008,9 @@ function EvidenceColumn({
           text="A provider-scoped event coordinate remains an observation, while a separately verified jetton master now establishes network-scoped asset identity. Neither alone is an authoritative transfer, trade, complete activity history, cost basis, or PnL record."
         />
         <EvidenceItem
-          tone="warning"
-          title="No ownership proof"
-          text="Jetton account-state proofs establish contract state at a recorded masterchain anchor, while transaction tuples remain deduplication evidence. Neither proves wallet ownership, actor identity, intent, or a complete transaction history."
+          tone="info"
+          title="Ownership is explicit and separate"
+          text="A successful TON Connect signature challenge proves control of the selected wallet key at challenge time. It does not prove beneficial ownership, intent, or complete wallet history."
         />
         <EvidenceItem
           tone="warning"
@@ -1172,7 +1038,9 @@ function EvidenceColumn({
       <section className="evidence-card data-quality-card">
         <div className="evidence-card-head">
           <h2>Data confidence</h2>
-          <span className="badge badge-provider">{dataMode.toUpperCase()}</span>
+          <span className="badge badge-provider">
+            {dataMode === "real" ? "REAL" : "DISABLED"}
+          </span>
         </div>
         <QualityRow label="Completeness" value="Scoped" tone="warning" />
         <QualityRow label="Freshness" value="Run-scoped" tone="success" />
@@ -1243,10 +1111,6 @@ function QualityRow({
       <strong className={`quality-${tone}`}>{value}</strong>
     </div>
   );
-}
-
-function TokenStatsDivider() {
-  return <div className="divider" />;
 }
 
 function DashboardSection({

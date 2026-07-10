@@ -644,6 +644,71 @@ class WalletTraceBocVerificationResponse(BaseModel):
         return self
 
 
+class WalletTransactionInclusionBlockRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workchain: Annotated[int, Field(strict=True, ge=-1, le=0)]
+    shard: str = Field(pattern=r"^-?[0-9]{1,20}$")
+    seqno: Annotated[int, Field(strict=True, ge=1)]
+    root_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    file_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class WalletTransactionInclusionProofRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_transaction_inclusion_v1"]
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    trust_level: Annotated[int, Field(strict=True, ge=0, le=1)]
+    account_address_canonical: str = Field(min_length=66, max_length=76)
+    logical_time: str = Field(pattern=r"^[1-9][0-9]{0,19}$")
+    transaction_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    block: WalletTransactionInclusionBlockRecord
+    masterchain_anchor: WalletTransactionInclusionBlockRecord
+    transaction_boc_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    block_proof_boc_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verified_at: str
+    block_merkle_proof_verified: Literal[True]
+    canonical_block_chain_verified_at_capture: bool
+    provider_free_revalidated: Literal[True]
+    raw_bocs_returned: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _transaction_inclusion_trust_must_be_coherent(self):
+        if self.canonical_block_chain_verified_at_capture != (
+            self.trust_level == 0
+        ):
+            raise ValueError("transaction inclusion trust boundary changed")
+        return self
+
+
+class WalletTransactionInclusionCatalogResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_transaction_inclusion_v1"]
+    boc_verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    proof_count: Annotated[int, Field(strict=True, ge=1, le=256)]
+    proof_digests: list[str] = Field(min_length=1, max_length=256)
+    proofs: list[WalletTransactionInclusionProofRecord] = Field(
+        min_length=1,
+        max_length=256,
+    )
+    catalog_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provider_requests_performed: Literal[False] = False
+    all_transaction_bocs_included_in_blocks: Literal[True]
+    raw_bocs_returned: Literal[False] = False
+    message: str = Field(min_length=1, max_length=400)
+
+    @model_validator(mode="after")
+    def _transaction_inclusion_catalog_must_be_complete(self):
+        if self.proof_count != len(self.proofs) or self.proof_digests != [
+            row.evidence_digest_sha256 for row in self.proofs
+        ]:
+            raise ValueError("transaction inclusion catalog changed")
+        return self
+
+
 class WalletTraceBocMessageEvidenceRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -888,6 +953,35 @@ class WalletJettonContractVerificationAnchorRecord(BaseModel):
     file_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class WalletAccountStateInclusionProofRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_account_state_inclusion_v1"]
+    account_role: Literal["jetton_master", "jetton_wallet"]
+    account_address_canonical: str = Field(min_length=66, max_length=76)
+    shard_block: WalletJettonContractVerificationAnchorRecord
+    boc_sha256: dict[str, str]
+    evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verified_at: str
+    provider_requests_performed: Literal[False] = False
+    provider_free_revalidated: Literal[True]
+    raw_bocs_returned: Literal[False] = False
+
+    @model_validator(mode="after")
+    def _account_inclusion_hashes_must_be_complete(self):
+        expected = {
+            "state_boc_hex",
+            "account_proof_boc_hex",
+            "shard_proof_boc_hex",
+        }
+        if set(self.boc_sha256) != expected or any(
+            re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in self.boc_sha256.values()
+        ):
+            raise ValueError("account inclusion BOC hashes changed")
+        return self
+
+
 class WalletJettonContractVerificationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -913,6 +1007,9 @@ class WalletJettonContractVerificationResponse(BaseModel):
     master_data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     jetton_content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     account_state_boc_hashes: dict[str, str]
+    account_state_inclusion_proofs: list[
+        WalletAccountStateInclusionProofRecord
+    ] = Field(max_length=2)
     evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     verified_at: str
     account_state_proof_verified: Literal[True]
@@ -922,7 +1019,7 @@ class WalletJettonContractVerificationResponse(BaseModel):
     master_wallet_address_verified: Literal[True]
     wallet_code_consistency_verified: Literal[True]
     jetton_asset_identity_applied: Literal[True]
-    raw_account_state_bocs_persisted: Literal[True]
+    raw_account_state_bocs_persisted: bool
     raw_account_state_bocs_returned: Literal[False] = False
     is_blockchain_inclusion_proof_verified: bool
     eligible_for_cost_basis: Literal[False] = False
@@ -940,12 +1037,28 @@ class WalletJettonContractVerificationResponse(BaseModel):
             raise ValueError("jetton asset identity key changed")
         if self.jetton_wallet_account_canonical == self.jetton_master_account_canonical:
             raise ValueError("jetton wallet and master addresses must differ")
+        has_inclusion_proofs = len(self.account_state_inclusion_proofs) == 2
         checkpoint_verified = self.trust_level == 0
         if (
             self.masterchain_checkpoint_chain_verified != checkpoint_verified
-            or self.is_blockchain_inclusion_proof_verified != checkpoint_verified
+            or self.is_blockchain_inclusion_proof_verified
+            != (checkpoint_verified and has_inclusion_proofs)
+            or self.raw_account_state_bocs_persisted != has_inclusion_proofs
         ):
             raise ValueError("jetton proof trust boundary changed")
+        if has_inclusion_proofs:
+            roles = {row.account_role for row in self.account_state_inclusion_proofs}
+            addresses = {
+                row.account_role: row.account_address_canonical
+                for row in self.account_state_inclusion_proofs
+            }
+            if roles != {"jetton_master", "jetton_wallet"} or addresses != {
+                "jetton_master": self.jetton_master_account_canonical,
+                "jetton_wallet": self.jetton_wallet_account_canonical,
+            }:
+                raise ValueError("jetton account inclusion roles changed")
+        elif self.account_state_inclusion_proofs:
+            raise ValueError("partial account inclusion proofs are forbidden")
         expected_boc_fields = {
             "wallet_code_boc_hex",
             "wallet_data_boc_hex",
@@ -987,6 +1100,59 @@ class WalletJettonContractVerificationCatalogResponse(BaseModel):
         if any(row.run_id != self.run_id for row in self.verifications):
             raise ValueError("jetton verification catalog run changed")
         return self
+
+
+class WalletOwnershipChallengeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_wallet: str | None = Field(default=None, min_length=66, max_length=76)
+
+
+class WalletOwnershipChallengeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    challenge_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    payload: str = Field(min_length=43, max_length=128)
+    expected_domain: str = Field(min_length=1, max_length=255)
+    expected_network: Literal["ton-mainnet", "ton-testnet"]
+    expected_wallet_account_canonical: str | None = Field(default=None, max_length=76)
+    issued_at: str
+    expires_at: str
+    single_use: Literal[True]
+
+
+class WalletTonProofDomain(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lengthBytes: Annotated[int, Field(strict=True, ge=1, le=255)]
+    value: str = Field(min_length=1, max_length=255)
+
+
+class WalletTonProofRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    timestamp: Annotated[int, Field(strict=True, ge=1, le=2**63 - 1)]
+    domain: WalletTonProofDomain
+    payload: str = Field(min_length=43, max_length=128)
+    signature: str = Field(min_length=88, max_length=88)
+
+
+class WalletOwnershipProofRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    address: str = Field(min_length=66, max_length=76)
+    network: Literal["ton-mainnet", "ton-testnet"]
+    wallet_state_init: str = Field(min_length=8, max_length=350000)
+    proof: WalletTonProofRecord
+
+
+class WalletOwnershipProofResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    challenge_id: str = Field(pattern=r"^[0-9a-f-]{36}$")
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    network: Literal["ton-mainnet", "ton-testnet"]
+    domain: str = Field(min_length=1, max_length=255)
+    verified_at: str
+    signature_verified: Literal[True]
+    state_init_address_binding_verified: Literal[True]
+    public_key_resolved_from_proof_checked_account: Literal[True]
+    challenge_consumed: Literal[True]
+    is_ownership_proof: Literal[True]
 
 
 class WalletNativeTonFlowObservationRecord(BaseModel):
@@ -1254,6 +1420,125 @@ class WalletNativeActivityLedgerResponse(BaseModel):
             self.self_nanoton,
         ):
             raise ValueError("activity totals do not match rows")
+        return self
+
+
+class WalletCanonicalLedgerSourceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ledger_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    ledger_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    transaction_inclusion_proof_digests: list[
+        Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    ]
+
+
+class WalletCanonicalLedgerOccurrenceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_ledger_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    source_capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    transaction_inclusion_proof_digest_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+
+
+class WalletCanonicalActivityRecord(WalletNativeActivityRecord):
+    source_ledger_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    source_capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    transaction_inclusion_proof_digest_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    canonical_index: Annotated[int, Field(strict=True, ge=0, le=2303)]
+    occurrence_count: Annotated[int, Field(strict=True, ge=1, le=2304)]
+    source_occurrences: list[WalletCanonicalLedgerOccurrenceRecord]
+
+
+class WalletCanonicalDuplicateResolutionRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activity_identity_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    occurrence_count: Annotated[int, Field(strict=True, ge=2, le=2304)]
+    canonical_source: WalletCanonicalLedgerOccurrenceRecord
+    suppressed_sources: list[WalletCanonicalLedgerOccurrenceRecord] = Field(
+        min_length=1
+    )
+
+
+class WalletCanonicalLedgerResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_canonical_activity_ledger_v1"]
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    sources: list[WalletCanonicalLedgerSourceRecord]
+    activities: list[WalletCanonicalActivityRecord]
+    duplicate_resolutions: list[WalletCanonicalDuplicateResolutionRecord]
+    source_ledger_count: Annotated[int, Field(strict=True, ge=1)]
+    source_occurrence_count: Annotated[int, Field(strict=True, ge=0)]
+    canonical_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    suppressed_occurrence_count: Annotated[int, Field(strict=True, ge=0)]
+    canonical_ledger_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    transaction_block_inclusion_required: Literal[True]
+    provider_free_revalidated: Literal[True]
+    cross_ledger_deduplication_applied: Literal[True]
+    native_ton_only: Literal[True]
+    establishes_complete_wallet_history: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _canonical_ledger_counts_must_match(self):
+        if (
+            len(self.sources) != self.source_ledger_count
+            or len(self.activities) != self.canonical_activity_count
+            or self.source_occurrence_count
+            != self.canonical_activity_count + self.suppressed_occurrence_count
+            or [row.canonical_index for row in self.activities]
+            != list(range(len(self.activities)))
+        ):
+            raise ValueError("canonical ledger counts changed")
+        return self
+
+
+class WalletCanonicalActivityReportResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_canonical_activity_report_v1"]
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    canonical_ledger_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    canonical_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    incoming_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    outgoing_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    self_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    incoming_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    outgoing_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    self_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    unique_counterparty_count: Annotated[int, Field(strict=True, ge=0)]
+    counterparties: list[str]
+    first_activity_unix_time: int | None
+    last_activity_unix_time: int | None
+    native_ton_only: Literal[True]
+    establishes_complete_wallet_history: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    report_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _canonical_report_counts_must_match(self):
+        if (
+            self.incoming_activity_count
+            + self.outgoing_activity_count
+            + self.self_activity_count
+            != self.canonical_activity_count
+            or len(self.counterparties) != self.unique_counterparty_count
+        ):
+            raise ValueError("canonical report counts changed")
         return self
 
 
@@ -1989,10 +2274,39 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
         return self
 
 
+class WalletDexProtocolIdentityRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["recognized", "unknown", "missing"]
+    protocol_id: Literal[
+        "dedust",
+        "dedust_v3",
+        "dedust_v3_memepad",
+        "stonfi_v1",
+        "stonfi_v2",
+        "tonco",
+        "memeslab",
+        "tonfun",
+    ] | None = None
+    family: str | None = None
+    version: str | None = None
+    provider_label: str | None = None
+
+    @model_validator(mode="after")
+    def _dex_protocol_identity_must_be_coherent(self):
+        if self.status == "recognized":
+            if self.protocol_id is None or self.family is None:
+                raise ValueError("recognized DEX protocol lost its identity")
+        elif self.protocol_id is not None or self.family is not None or self.version is not None:
+            raise ValueError("unrecognized DEX protocol gained an identity")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None
     dex: str | None = None
+    dex_protocol: WalletDexProtocolIdentityRecord
     token_in: str | None = None
     token_in_address: str | None = None
     amount_in: str | None = None
@@ -2138,6 +2452,18 @@ class WalletSignalsRecord(BaseModel):
     sell_swap_count: int
     avg_ton_per_buy_swap: str | None = None
     first_buy_at: str | None = None
+    signal_basis: Literal[
+        "legacy_mock_fixture",
+        "canonical_native_activity_ledger",
+    ] = "legacy_mock_fixture"
+    canonical_ledger_digest_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    canonical_activity_count: int = 0
+    incoming_activity_count: int = 0
+    outgoing_activity_count: int = 0
+    counterparties: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -2149,6 +2475,7 @@ class WalletClusterPairRecord(BaseModel):
     score: float
     band: str
     shared_tokens: list[str] = Field(default_factory=list)
+    shared_counterparties: list[str] = Field(default_factory=list)
     note: str
 
 
@@ -2157,6 +2484,10 @@ class WalletClusterCompareResponse(BaseModel):
     comparison_window_seconds: float
     pairs: list[WalletClusterPairRecord]
     is_cluster_proof: bool = False
+    signal_basis: Literal[
+        "legacy_mock_fixture",
+        "canonical_native_activity_ledger",
+    ] = "legacy_mock_fixture"
     note: str
 
 

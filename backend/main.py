@@ -10,10 +10,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 import json
+import time
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from adapters.stonfi import StonfiAdapter
@@ -34,8 +37,10 @@ from routers.prices import router as prices_router
 from routers.stonfi import router as stonfi_router
 from routers.tonapi import router as tonapi_router
 from routers.wallet_activity import router as wallet_activity_router
+from routers.wallet_ownership import router as wallet_ownership_router
 from services import export
 from services.analysis import analyze, get_providers_status
+from services.monitoring import observe_http_request, render_prometheus_metrics
 
 VERSION = "0.2.1"
 
@@ -71,12 +76,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def record_request_metrics(request: Request, call_next):
+    started = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", request.url.path)
+        observe_http_request(
+            request.method,
+            route_path,
+            status,
+            time.perf_counter() - started,
+        )
+
 app.include_router(bitquery_router)
 app.include_router(import_trades_router)
 app.include_router(prices_router)
 app.include_router(stonfi_router)
 app.include_router(tonapi_router)
 app.include_router(wallet_activity_router)
+app.include_router(wallet_ownership_router)
 
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
@@ -86,6 +111,34 @@ def health() -> HealthResponse:
         version=VERSION,
         is_mock=settings.is_mock,
         data_mode=settings.data_mode,
+    )
+
+
+@app.get("/api/ready")
+def readiness(response: Response, session: Session = Depends(get_session)) -> dict:
+    """Dependency-aware readiness probe for production orchestrators."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        session.execute(text("SELECT 1")).scalar_one()
+    except SQLAlchemyError as exc:
+        raise HTTPException(status_code=503, detail="database unavailable") from exc
+    return {"status": "ready", "database": "ready", "version": VERSION}
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics(session: Session = Depends(get_session)) -> Response:
+    database_ready = True
+    try:
+        session.execute(text("SELECT 1")).scalar_one()
+    except SQLAlchemyError:
+        database_ready = False
+    return Response(
+        content=render_prometheus_metrics(
+            version=VERSION,
+            database_ready=database_ready,
+        ),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
     )
 
 

@@ -69,6 +69,10 @@ ACTIVITY_CSV_COLUMNS = [
     "direction",
     "counterparty",
     "dex",
+    "dex_protocol_status",
+    "dex_protocol_id",
+    "dex_protocol_family",
+    "dex_protocol_version",
     "token_in",
     "amount_in",
     "token_out",
@@ -195,12 +199,17 @@ def wallet_ingestion_run_to_csv(run: dict) -> str:
             }
         )
     for item in run.get("swaps", []):
+        dex_protocol = item.get("dex_protocol") or {}
         writer.writerow(
             {
                 "surface": "swap",
                 "tx_hash": item.get("tx_hash"),
                 "timestamp": item.get("timestamp"),
                 "dex": item.get("dex"),
+                "dex_protocol_status": dex_protocol.get("status"),
+                "dex_protocol_id": dex_protocol.get("protocol_id"),
+                "dex_protocol_family": dex_protocol.get("family"),
+                "dex_protocol_version": dex_protocol.get("version"),
                 "token_in": item.get("token_in"),
                 "amount_in": item.get("amount_in"),
                 "token_out": item.get("token_out"),
@@ -412,4 +421,73 @@ def wallet_run_signals_to_csv(result: dict) -> str:
                 "reason": item.get("reason"),
             }
         )
+    return buffer.getvalue()
+
+
+CANONICAL_LEDGER_CSV_COLUMNS = [
+    "canonical_index",
+    "activity_identity_key",
+    "transaction_hash",
+    "message_hash",
+    "direction",
+    "activity_kind",
+    "asset_identity_key",
+    "counterparty_account_canonical",
+    "amount_base_units",
+    "created_logical_time",
+    "unix_time",
+    "opcode_hex",
+    "bounce",
+    "bounced",
+    "occurrence_count",
+    "source_ledger_id",
+    "source_capture_id",
+    "transaction_inclusion_proof_digest_sha256",
+]
+
+
+def wallet_canonical_ledger_to_csv(ledger: dict) -> str:
+    """Export only canonical, block-proved activity rows."""
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=CANONICAL_LEDGER_CSV_COLUMNS,
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    writer.writerows(ledger.get("activities", []))
+    return buffer.getvalue()
+
+
+CANONICAL_REPORT_CSV_COLUMNS = [
+    "run_id",
+    "network",
+    "wallet_account_canonical",
+    "canonical_ledger_digest_sha256",
+    "canonical_activity_count",
+    "incoming_activity_count",
+    "outgoing_activity_count",
+    "self_activity_count",
+    "incoming_nanoton",
+    "outgoing_nanoton",
+    "self_nanoton",
+    "unique_counterparty_count",
+    "counterparties",
+    "first_activity_unix_time",
+    "last_activity_unix_time",
+    "report_digest_sha256",
+]
+
+
+def wallet_canonical_report_to_csv(report: dict) -> str:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=CANONICAL_REPORT_CSV_COLUMNS,
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    row = dict(report)
+    row["counterparties"] = "|".join(report.get("counterparties", []))
+    writer.writerow(row)
     return buffer.getvalue()

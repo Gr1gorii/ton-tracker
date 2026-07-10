@@ -570,11 +570,19 @@ export function walletRunSignalsCsvExportUrl(runId: number): string {
 }
 
 export function walletRunExportUrl(runId: number): string {
-  return `${API_BASE}/api/wallets/ingest/${runId}/export.json`;
+  return `${API_BASE}/api/wallets/ingest/${runId}/canonical-ledger/export.json`;
 }
 
 export function walletRunExportCsvUrl(runId: number): string {
-  return `${API_BASE}/api/wallets/ingest/${runId}/export.csv`;
+  return `${API_BASE}/api/wallets/ingest/${runId}/canonical-ledger/export.csv`;
+}
+
+export function walletCanonicalReportExportUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/canonical-report/export.json`;
+}
+
+export function walletCanonicalReportCsvExportUrl(runId: number): string {
+  return `${API_BASE}/api/wallets/ingest/${runId}/canonical-report/export.csv`;
 }
 
 export function walletClusterCompareExportUrl(runIds: number[]): string {

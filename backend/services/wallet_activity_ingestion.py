@@ -29,6 +29,7 @@ from adapters.wallet_activity import (
 )
 from config import get_settings, tonapi_base_url_network
 from services.pricing import price_assets
+from services.dex_protocols import classify_dex_protocol
 from services.ton_address_identity import (
     TonAddressIdentity,
     derive_ton_wallet_identity,
@@ -917,11 +918,14 @@ def _swap_models(
             surface="swaps",
         )
         _claim_event_action_identity(identity.key, seen_identity_keys)
+        dex_protocol = classify_dex_protocol(item.dex)
         models.append(
             WalletSwap(
                 tx_hash=item.tx_hash,
                 timestamp=_parse_datetime(item.timestamp),
                 dex=item.dex,
+                dex_protocol_id=dex_protocol["protocol_id"],
+                dex_protocol_status=dex_protocol["status"],
                 token_in=item.token_in,
                 amount_in=_decimal(item.amount_in),
                 token_out=item.token_out,
@@ -1119,10 +1123,18 @@ def _transaction_identity_record(
 def _swap_record(item: WalletSwap) -> dict[str, Any]:
     raw = _json_loads(item.raw_json)
     raw_dict = raw if isinstance(raw, dict) else {}
+    dex_protocol = classify_dex_protocol(item.dex)
+    if item.dex_protocol_status is not None:
+        dex_protocol = {
+            **dex_protocol,
+            "protocol_id": item.dex_protocol_id,
+            "status": item.dex_protocol_status,
+        }
     return {
         "tx_hash": item.tx_hash,
         "timestamp": _isoformat(item.timestamp),
         "dex": item.dex,
+        "dex_protocol": dex_protocol,
         "token_in": item.token_in,
         "token_in_address": raw_dict.get("token_in_address"),
         "amount_in": _balance_value_from_raw(raw, "normalized_amount_in")

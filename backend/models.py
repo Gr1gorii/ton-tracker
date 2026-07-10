@@ -763,6 +763,61 @@ class WalletTraceBocTransaction(Base):
         "WalletTraceEvidenceNode",
         back_populates="boc_transactions",
     )
+    inclusion_proof = relationship(
+        "WalletTransactionInclusionProof",
+        back_populates="boc_transaction",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class WalletTransactionInclusionProof(Base):
+    """Merkle proof binding a persisted transaction BOC to an exact block."""
+
+    __tablename__ = "wallet_transaction_inclusion_proofs"
+    __table_args__ = (
+        Index(
+            "uq_wallet_transaction_inclusion_boc_transaction",
+            "boc_transaction_id",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_transaction_inclusion_digest",
+            "evidence_digest_sha256",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    boc_transaction_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_boc_transactions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    network = Column(String(16), nullable=False)
+    trust_level = Column(Integer, nullable=False)
+    account_address_canonical = Column(String(76), nullable=False)
+    logical_time = Column(String(20), nullable=False)
+    transaction_hash = Column(String(64), nullable=False)
+    block_workchain = Column(Integer, nullable=False)
+    block_shard = Column(String(24), nullable=False)
+    block_seqno = Column(Integer, nullable=False)
+    block_root_hash = Column(String(64), nullable=False)
+    block_file_hash = Column(String(64), nullable=False)
+    anchor_workchain = Column(Integer, nullable=False)
+    anchor_shard = Column(String(24), nullable=False)
+    anchor_seqno = Column(Integer, nullable=False)
+    anchor_root_hash = Column(String(64), nullable=False)
+    anchor_file_hash = Column(String(64), nullable=False)
+    block_proof_boc_hex = Column(Text, nullable=False)
+    transaction_boc_sha256 = Column(String(64), nullable=False)
+    block_proof_boc_sha256 = Column(String(64), nullable=False)
+    evidence_digest_sha256 = Column(String(64), nullable=False)
+    verified_at = Column(DateTime, nullable=False)
+
+    boc_transaction = relationship(
+        "WalletTraceBocTransaction",
+        back_populates="inclusion_proof",
+    )
 
 
 class WalletNativeActivityLedger(Base):
@@ -931,6 +986,8 @@ class WalletSwap(Base):
     event_action_index = Column(Integer, nullable=True)
     event_action_type = Column(String(32), nullable=True)
     event_action_identity_key = Column(String(256), nullable=True)
+    dex_protocol_id = Column(String(32), nullable=True)
+    dex_protocol_status = Column(String(16), nullable=True)
 
     run = relationship("WalletIngestionRun", back_populates="swaps")
 
@@ -1034,6 +1091,88 @@ class WalletJettonContractVerification(Base):
     balance_snapshot = relationship(
         "WalletBalanceSnapshot",
         back_populates="jetton_contract_verifications",
+    )
+    account_inclusion_proofs = relationship(
+        "WalletAccountStateInclusionProof",
+        back_populates="verification",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletAccountStateInclusionProof(Base):
+    """Raw Merkle evidence binding one account state to a shard block."""
+
+    __tablename__ = "wallet_account_state_inclusion_proofs"
+    __table_args__ = (
+        Index(
+            "uq_wallet_account_state_inclusion_role",
+            "verification_id",
+            "account_role",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_account_state_inclusion_digest",
+            "evidence_digest_sha256",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    verification_id = Column(
+        Integer,
+        ForeignKey(
+            "wallet_jetton_contract_verifications.id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    account_role = Column(String(24), nullable=False)
+    account_address_canonical = Column(String(76), nullable=False)
+    shard_workchain = Column(Integer, nullable=False)
+    shard = Column(String(24), nullable=False)
+    shard_seqno = Column(Integer, nullable=False)
+    shard_root_hash = Column(String(64), nullable=False)
+    shard_file_hash = Column(String(64), nullable=False)
+    state_boc_hex = Column(Text, nullable=False)
+    account_proof_boc_hex = Column(Text, nullable=False)
+    shard_proof_boc_hex = Column(Text, nullable=False)
+    state_boc_sha256 = Column(String(64), nullable=False)
+    account_proof_boc_sha256 = Column(String(64), nullable=False)
+    shard_proof_boc_sha256 = Column(String(64), nullable=False)
+    evidence_digest_sha256 = Column(String(64), nullable=False)
+    verified_at = Column(DateTime, nullable=False)
+
+    verification = relationship(
+        "WalletJettonContractVerification",
+        back_populates="account_inclusion_proofs",
+    )
+
+
+class WalletOwnershipChallenge(Base):
+    """Single-use TON Connect proof nonce and verified ownership result."""
+
+    __tablename__ = "wallet_ownership_challenges"
+    __table_args__ = (
+        Index("uq_wallet_ownership_challenge_id", "challenge_id", unique=True),
+        Index("uq_wallet_ownership_payload_hash", "payload_hash", unique=True),
+        Index("ix_wallet_ownership_challenge_expiry", "expires_at"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    challenge_id = Column(String(36), nullable=False)
+    payload = Column(String(128), nullable=False)
+    payload_hash = Column(String(64), nullable=False)
+    expected_wallet_account_canonical = Column(String(76), nullable=True)
+    expected_domain = Column(String(255), nullable=False)
+    issued_at = Column(DateTime, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    consumed_at = Column(DateTime, nullable=True)
+    verified_wallet_account_canonical = Column(String(76), nullable=True)
+    signature_digest_sha256 = Column(String(64), nullable=True)
+    expected_network = Column(
+        String(16),
+        nullable=False,
+        default="ton-unknown",
+        server_default="ton-unknown",
     )
 
 

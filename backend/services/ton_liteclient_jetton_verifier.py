@@ -9,6 +9,11 @@ from typing import Any
 from pytoniq import LiteBalancer
 from pytoniq_core import Address, Cell, Slice, begin_cell
 
+from services.ton_account_inclusion_proof import (
+    TonAccountInclusionProofFailure,
+    capture_account_inclusion_proof,
+)
+
 
 class TonLiteclientJettonVerificationFailure(RuntimeError):
     """Liteserver proof retrieval or local TVM execution failed."""
@@ -46,13 +51,15 @@ async def verify_jetton_contract_relationship_async(
             raise TonLiteclientJettonVerificationFailure(
                 "Liteserver consensus did not produce a masterchain anchor."
             )
-        wallet_account, _ = await client.raw_get_account_state(
-            jetton_wallet_account_canonical,
-            block=anchor,
+        wallet_account, wallet_inclusion = await capture_account_inclusion_proof(
+            client,
+            account_address=jetton_wallet_account_canonical,
+            masterchain_anchor=anchor,
         )
-        master_account, _ = await client.raw_get_account_state(
-            jetton_master_account_canonical,
-            block=anchor,
+        master_account, master_inclusion = await capture_account_inclusion_proof(
+            client,
+            account_address=jetton_master_account_canonical,
+            masterchain_anchor=anchor,
         )
         wallet_state = _active_state(wallet_account, "jetton wallet")
         master_state = _active_state(master_account, "jetton master")
@@ -133,9 +140,15 @@ async def verify_jetton_contract_relationship_async(
             "account_state_proof_verified": True,
             "masterchain_checkpoint_chain_verified": trust_level == 0,
             "local_tvm_execution_applied": True,
+            "account_inclusion_proofs": {
+                "jetton_wallet": wallet_inclusion,
+                "jetton_master": master_inclusion,
+            },
         }
     except TonLiteclientJettonVerificationFailure:
         raise
+    except TonAccountInclusionProofFailure as exc:
+        raise TonLiteclientJettonVerificationFailure(str(exc)) from exc
     except Exception as exc:
         raise TonLiteclientJettonVerificationFailure(
             "Proof-checked jetton contract verification failed."

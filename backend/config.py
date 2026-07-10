@@ -76,6 +76,8 @@ class Settings:
     ton_network: str = "mainnet"
     ton_liteclient_trust_level: int = 1
     ton_liteclient_timeout_seconds: int = 20
+    tonconnect_expected_domain: str = "127.0.0.1:5173"
+    tonconnect_proof_ttl_seconds: int = 900
 
     @property
     def is_mock(self) -> bool:
@@ -186,6 +188,12 @@ def get_settings() -> Settings:
         ),
         ton_liteclient_timeout_seconds=_env_int(
             "TON_LITECLIENT_TIMEOUT_SECONDS", 20, 5, 60
+        ),
+        tonconnect_expected_domain=_env(
+            "TONCONNECT_EXPECTED_DOMAIN", "127.0.0.1:5173"
+        ),
+        tonconnect_proof_ttl_seconds=_env_int(
+            "TONCONNECT_PROOF_TTL_SECONDS", 900, 60, 3600
         ),
     )
 
