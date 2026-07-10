@@ -525,6 +525,11 @@ class WalletTraceEvidenceCapture(Base):
         back_populates="capture",
         cascade="all, delete-orphan",
     )
+    native_activity_ledgers = relationship(
+        "WalletNativeActivityLedger",
+        back_populates="capture",
+        cascade="all, delete-orphan",
+    )
 
 
 class WalletTraceEvidenceNode(Base):
@@ -752,6 +757,106 @@ class WalletTraceBocTransaction(Base):
     node = relationship(
         "WalletTraceEvidenceNode",
         back_populates="boc_transactions",
+    )
+
+
+class WalletNativeActivityLedger(Base):
+    """Immutable native TON semantic rows derived from one verified capture."""
+
+    __tablename__ = "wallet_native_activity_ledgers"
+    __table_args__ = (
+        Index(
+            "uq_wallet_native_activity_ledgers_capture_contract",
+            "capture_id",
+            "contract_version",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_native_activity_ledgers_digest",
+            "evidence_digest_sha256",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    capture_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_evidence_captures.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    contract_version = Column(String(48), nullable=False)
+    network = Column(String(16), nullable=False)
+    wallet_account_canonical = Column(String(76), nullable=False)
+    source_message_evidence_digest_sha256 = Column(String(64), nullable=False)
+    activity_count = Column(Integer, nullable=False)
+    incoming_nanoton = Column(String(32), nullable=False)
+    outgoing_nanoton = Column(String(32), nullable=False)
+    self_nanoton = Column(String(32), nullable=False)
+    evidence_digest_sha256 = Column(String(64), nullable=False)
+    built_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    capture = relationship(
+        "WalletTraceEvidenceCapture",
+        back_populates="native_activity_ledgers",
+    )
+    rows = relationship(
+        "WalletNativeActivityRow",
+        back_populates="ledger",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletNativeActivityRow(Base):
+    """One content-addressed native TON activity observation."""
+
+    __tablename__ = "wallet_native_activity_rows"
+    __table_args__ = (
+        Index(
+            "uq_wallet_native_activity_rows_ledger_identity",
+            "ledger_id",
+            "activity_identity_key",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_native_activity_rows_ledger_message",
+            "ledger_id",
+            "message_hash",
+            unique=True,
+        ),
+        Index("ix_wallet_native_activity_rows_identity", "activity_identity_key"),
+        Index("ix_wallet_native_activity_rows_counterparty", "counterparty_identity_key"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    ledger_id = Column(
+        Integer,
+        ForeignKey("wallet_native_activity_ledgers.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ordinal = Column(Integer, nullable=False)
+    activity_identity_key = Column(String(64), nullable=False)
+    source_flow_observation_identity = Column(String(64), nullable=False)
+    transaction_hash = Column(String(64), nullable=False)
+    message_hash = Column(String(64), nullable=False)
+    direction = Column(String(12), nullable=False)
+    activity_kind = Column(String(32), nullable=False)
+    asset_identity_key = Column(String(96), nullable=False)
+    counterparty_identity_key = Column(String(180), nullable=False)
+    counterparty_account_canonical = Column(String(76), nullable=False)
+    amount_base_units = Column(String(32), nullable=False)
+    created_logical_time = Column(String(20), nullable=False)
+    unix_time = Column(Integer, nullable=False)
+    body_hash = Column(String(64), nullable=False)
+    opcode_hex = Column(String(10), nullable=True)
+    bounce = Column(Boolean, nullable=False)
+    bounced = Column(Boolean, nullable=False)
+
+    ledger = relationship(
+        "WalletNativeActivityLedger",
+        back_populates="rows",
     )
 
 

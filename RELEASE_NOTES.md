@@ -1,3 +1,17 @@
+# TON Wallet Intelligence Dashboard — v0.23.7 IMMUTABLE NATIVE ACTIVITY LEDGER
+
+v0.23.7 adds forward-only Alembic revision `20260710_0008`, capture-bound
+`wallet_native_activity_ledgers` and `wallet_native_activity_rows`, plus
+provider-free GET/POST `.../native-activity-ledger`. The first POST materializes
+verified native TON flows with canonical asset and counterparty observation
+keys; repeated POST and GET re-derive the BOC-backed source, every row, totals,
+and canonical digest before returning. Semantic reconstruction is now explicit
+for native message transfers, but the ledger remains trace-scoped,
+non-authoritative, unmerged across runs, ineligible for cost basis, and unused
+by PnL.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.6 COUNTERPARTY OBSERVATION IDENTITY
 
 v0.23.6 adds provider-free `GET .../boc-verification/counterparties`.

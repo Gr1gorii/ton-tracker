@@ -21,6 +21,7 @@ from schemas import (
     WalletNativeTonFlowObservationsResponse,
     WalletNativeTonAssetBindingResponse,
     WalletCounterpartyObservationBindingResponse,
+    WalletNativeActivityLedgerResponse,
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
@@ -63,6 +64,12 @@ from services.wallet_native_ton_flow_observations import (
     get_wallet_counterparty_observation_binding,
     get_wallet_native_ton_asset_binding,
     get_wallet_native_ton_flow_observations,
+)
+from services.wallet_native_activity_ledger import (
+    WalletNativeActivityLedgerConflict,
+    WalletNativeActivityLedgerFailure,
+    build_wallet_native_activity_ledger,
+    get_wallet_native_activity_ledger,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -691,6 +698,66 @@ def read_wallet_native_ton_flow_observations(
             detail="Native TON BOC flow observation storage is unavailable.",
             headers=no_store_headers,
         ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/native-activity-ledger",
+    response_model=WalletNativeActivityLedgerResponse,
+)
+def read_wallet_native_activity_ledger(
+    response: Response,
+    run_id: str = Path(...),
+    transaction_hash: str = Path(...),
+    session: Session = Depends(get_session),
+) -> dict:
+    headers = {"Cache-Control": "no-store"}
+    response.headers.update(headers)
+    canonical_run_id = _validated_trace_path(run_id, transaction_hash, headers)
+    try:
+        result = get_wallet_native_activity_ledger(
+            canonical_run_id, transaction_hash, session
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="Native activity ledger not found", headers=headers)
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc), headers=headers) from exc
+    except (WalletTraceEvidenceIneligible, WalletNativeActivityLedgerConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc), headers=headers) from exc
+    except (WalletNativeActivityLedgerFailure, SQLAlchemyError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail="Native activity ledger storage is unavailable.", headers=headers) from exc
+
+
+@router.post(
+    "/ingest/{run_id}/transactions/{transaction_hash}/native-activity-ledger",
+    response_model=WalletNativeActivityLedgerResponse,
+)
+def build_wallet_native_activity_ledger_route(
+    response: Response,
+    run_id: str = Path(...),
+    transaction_hash: str = Path(...),
+    session: Session = Depends(get_session),
+) -> dict:
+    headers = {"Cache-Control": "no-store"}
+    response.headers.update(headers)
+    canonical_run_id = _validated_trace_path(run_id, transaction_hash, headers)
+    try:
+        result, created = build_wallet_native_activity_ledger(
+            canonical_run_id, transaction_hash, session
+        )
+        if created:
+            response.status_code = 201
+        return result
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc), headers=headers) from exc
+    except (WalletTraceEvidenceIneligible, WalletNativeActivityLedgerConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc), headers=headers) from exc
+    except (WalletNativeActivityLedgerFailure, SQLAlchemyError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail="Native activity ledger storage is unavailable.", headers=headers) from exc
 
 
 @router.post(
