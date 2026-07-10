@@ -48,6 +48,7 @@ import PreviewReadinessStrip, {
   type PreviewReadinessTone,
 } from "./PreviewReadinessStrip";
 import WalletHistoryIntervalCoverageCard from "./WalletHistoryIntervalCoverageCard";
+import WalletJettonContractVerificationPanel from "./WalletJettonContractVerificationPanel";
 import WalletNativePnlReadinessCard from "./WalletNativePnlReadinessCard";
 import WalletRunCatalog from "./WalletRunCatalog";
 import WalletTransactionTraceEvidenceCard from "./WalletTransactionTraceEvidenceCard";
@@ -113,7 +114,7 @@ const CAN_SHOW = [
 
 const CANNOT_SHOW = [
   "Full-history acquisition cost basis",
-  "Authoritative transfer, swap-action, asset, and counterparty identity",
+  "Authoritative transfer, trade, and actor identity",
   "Legacy buyers/report wiring",
   "Ownership proof",
 ];
@@ -2763,6 +2764,12 @@ function WalletActivityTables({ result }: { result: WalletIngestionRunResponse }
       <TransactionsTable transactions={result.transactions} />
       <SwapsTable swaps={result.swaps} />
       <BalancesTable balances={result.balances} />
+      <WalletJettonContractVerificationPanel
+        runId={result.run_id}
+        dataMode={result.data_mode}
+        network={result.wallet_identity.network}
+        balances={result.balances}
+      />
       <RunWarningsTable warnings={result.warnings} />
     </div>
   );

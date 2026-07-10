@@ -869,6 +869,68 @@ export interface WalletBalanceSnapshotRecord {
   raw?: Record<string, unknown> | null;
 }
 
+export interface WalletJettonContractVerificationAnchorRecord {
+  workchain: -1 | 0;
+  shard: string;
+  seqno: number;
+  root_hash: string;
+  file_hash: string;
+}
+
+export interface WalletJettonContractVerificationResponse {
+  contract_version: "ton_jetton_contract_verification_v1";
+  verification_id: string;
+  run_id: string;
+  balance_snapshot_id: string;
+  verifier_name: "pytoniq-pytvm";
+  verifier_version: string;
+  network: "ton-mainnet" | "ton-testnet";
+  trust_level: 0 | 1;
+  anchor: WalletJettonContractVerificationAnchorRecord;
+  owner_account_canonical: string;
+  jetton_wallet_account_canonical: string;
+  jetton_master_account_canonical: string;
+  asset_identity_key: string;
+  wallet_balance_base_units: string;
+  total_supply_base_units: string;
+  mintable: boolean;
+  wallet_code_hash: string;
+  wallet_data_hash: string;
+  master_code_hash: string;
+  master_data_hash: string;
+  jetton_content_hash: string;
+  account_state_boc_hashes: Record<string, string>;
+  evidence_digest_sha256: string;
+  verified_at: string;
+  account_state_proof_verified: true;
+  masterchain_checkpoint_chain_verified: boolean;
+  local_tvm_execution_applied: true;
+  wallet_owner_master_verified: true;
+  master_wallet_address_verified: true;
+  wallet_code_consistency_verified: true;
+  jetton_asset_identity_applied: true;
+  raw_account_state_bocs_persisted: true;
+  raw_account_state_bocs_returned: false;
+  is_blockchain_inclusion_proof_verified: boolean;
+  eligible_for_cost_basis: false;
+  used_by_pnl: false;
+  is_ownership_proof: false;
+  message: string;
+}
+
+export interface WalletJettonContractVerificationCatalogResponse {
+  contract_version: "ton_jetton_contract_verification_v1";
+  run_id: string;
+  network: "ton-mainnet" | "ton-testnet";
+  verification_count: number;
+  verification_digests: string[];
+  verifications: WalletJettonContractVerificationResponse[];
+  catalog_digest_sha256: string;
+  provider_requests_performed: false;
+  raw_account_state_bocs_returned: false;
+  message: string;
+}
+
 export interface WalletIngestionWarningRecord {
   severity: "info" | "warning" | "error" | "critical";
   provider?: string | null;

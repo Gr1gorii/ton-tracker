@@ -18,6 +18,8 @@ import type {
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
+  WalletJettonContractVerificationCatalogResponse,
+  WalletJettonContractVerificationResponse,
   WalletJettonPayloadObservationsResponse,
   WalletNativeActivityPnlReadinessResponse,
   WalletMultiAssetPnlReadinessResponse,
@@ -428,6 +430,49 @@ export async function getWalletTransactionJettonPayloadObservations(
     );
   }
   return (await res.json()) as WalletJettonPayloadObservationsResponse;
+}
+
+export async function getWalletJettonContractVerifications(
+  runId: number,
+  signal?: AbortSignal,
+): Promise<WalletJettonContractVerificationCatalogResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/jetton-contract-verifications`,
+    { cache: "no-store", signal },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Jetton contract verification read failed"),
+    );
+  }
+  return (await res.json()) as WalletJettonContractVerificationCatalogResponse;
+}
+
+export async function verifyWalletJettonContractRelationship(
+  runId: number,
+  jettonWalletAccountCanonical: string,
+  jettonMasterAccountCanonical: string,
+  signal?: AbortSignal,
+): Promise<WalletJettonContractVerificationResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/jetton-contract-verifications`,
+    {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jetton_wallet_account_canonical: jettonWalletAccountCanonical,
+        jetton_master_account_canonical: jettonMasterAccountCanonical,
+      }),
+      signal,
+    },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Jetton contract proof verification failed"),
+    );
+  }
+  return (await res.json()) as WalletJettonContractVerificationResponse;
 }
 
 export async function getWalletRunSignals(

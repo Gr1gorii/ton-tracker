@@ -39,7 +39,8 @@ EVENT_ACTION_IDENTITY_REVISION = "20260710_0005"
 TRACE_EVIDENCE_REVISION = "20260710_0006"
 TRACE_BOC_VERIFICATION_REVISION = "20260710_0007"
 NATIVE_ACTIVITY_LEDGER_REVISION = "20260710_0008"
-CURRENT_REVISION = NATIVE_ACTIVITY_LEDGER_REVISION
+JETTON_CONTRACT_VERIFICATION_REVISION = "20260710_0009"
+CURRENT_REVISION = JETTON_CONTRACT_VERIFICATION_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -48,6 +49,9 @@ TRACE_NODES_TABLE = "wallet_trace_evidence_nodes"
 TRACE_MESSAGES_TABLE = "wallet_trace_evidence_messages"
 TRACE_BOC_VERIFICATIONS_TABLE = "wallet_trace_boc_verifications"
 TRACE_BOC_TRANSACTIONS_TABLE = "wallet_trace_boc_transactions"
+JETTON_CONTRACT_VERIFICATIONS_TABLE = (
+    "wallet_jetton_contract_verifications"
+)
 
 ACCOUNT_ID = "ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 RAW_ADDRESS = f"0:{ACCOUNT_ID}"
@@ -1256,6 +1260,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
@@ -1295,6 +1300,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1336,6 +1342,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1470,6 +1477,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1612,6 +1620,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1758,6 +1767,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2185,6 +2195,7 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2272,6 +2283,7 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2466,6 +2478,7 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -2713,21 +2726,83 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
     assert report.applied_revisions == (
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_trace_boc_verification_schema(engine)
     engine.dispose()
 
 
-def test_native_activity_ledger_upgrade_from_0007_reaches_model_parity(tmp_path):
+def test_upgrade_from_0007_reaches_current_model_parity(tmp_path):
     engine = _engine(tmp_path / "native-activity-ledger-upgrade.db")
     _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
 
     report = run_database_migrations(engine)
 
     assert report.revision_before == TRACE_BOC_VERIFICATION_REVISION
-    assert report.revision_after == NATIVE_ACTIVITY_LEDGER_REVISION
-    assert report.applied_revisions == (NATIVE_ACTIVITY_LEDGER_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
+    )
+    assert {
+        "wallet_native_activity_ledgers",
+        "wallet_native_activity_rows",
+    }.issubset(inspect(engine).get_table_names())
+    engine.dispose()
+
+
+def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
+    engine = _engine(tmp_path / "jetton-contract-verification-upgrade.db")
+    _upgrade_to_revision(engine, NATIVE_ACTIVITY_LEDGER_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == NATIVE_ACTIVITY_LEDGER_REVISION
+    assert report.revision_after == JETTON_CONTRACT_VERIFICATION_REVISION
+    assert report.applied_revisions == (
+        JETTON_CONTRACT_VERIFICATION_REVISION,
+    )
+    assert inspect(engine).get_table_names().count(
+        JETTON_CONTRACT_VERIFICATIONS_TABLE
+    ) == 1
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            f"SELECT COUNT(*) FROM {JETTON_CONTRACT_VERIFICATIONS_TABLE}"
+        ).scalar_one() == 0
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_jetton_contract_verification_rejects_partial_fragments(tmp_path):
+    engine = _engine(tmp_path / "partial-jetton-contract-verification.db")
+    _upgrade_to_revision(engine, NATIVE_ACTIVITY_LEDGER_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            JETTON_CONTRACT_VERIFICATIONS_TABLE,
+        )
+
+    with pytest.raises(RuntimeError, match="refuses a pre-existing"):
+        _upgrade_to_revision(engine, JETTON_CONTRACT_VERIFICATION_REVISION)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == NATIVE_ACTIVITY_LEDGER_REVISION
+    engine.dispose()
+
+
+def test_jetton_contract_verification_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "jetton-contract-verification-forward-only.db")
+    _upgrade_to_revision(engine, JETTON_CONTRACT_VERIFICATION_REVISION)
+
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                NATIVE_ACTIVITY_LEDGER_REVISION,
+            )
+
     _assert_schema_matches_models(engine)
     engine.dispose()
 
@@ -2758,7 +2833,10 @@ def test_native_activity_ledger_migration_is_forward_only(tmp_path):
                 TRACE_BOC_VERIFICATION_REVISION,
             )
 
-    _assert_schema_matches_models(engine)
+    assert {
+        "wallet_native_activity_ledgers",
+        "wallet_native_activity_rows",
+    }.issubset(inspect(engine).get_table_names())
     engine.dispose()
 
 
@@ -3143,6 +3221,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
+        JETTON_CONTRACT_VERIFICATION_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()
