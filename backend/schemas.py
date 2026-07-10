@@ -278,6 +278,131 @@ class WalletClusterCompareResponse(BaseModel):
     note: str
 
 
+class WalletHistoryReadinessRequest(BaseModel):
+    target_run_id: int = Field(
+        ...,
+        ge=1,
+        description="Persisted run used as the explicit diagnostic target.",
+    )
+    run_ids: list[int] = Field(
+        ...,
+        min_length=2,
+        max_length=50,
+        description=(
+            "Distinct persisted runs for the same wallet and data mode to "
+            "inspect for history-readiness evidence."
+        ),
+    )
+
+    @field_validator("run_ids")
+    @classmethod
+    def _run_ids_must_be_positive(cls, value: list[int]) -> list[int]:
+        if any(run_id < 1 for run_id in value):
+            raise ValueError("Every run_id must be a positive integer.")
+        return value
+
+    @model_validator(mode="after")
+    def _target_must_be_in_scope(self):
+        if self.target_run_id not in self.run_ids:
+            raise ValueError("target_run_id must be included in run_ids.")
+        return self
+
+
+class WalletHistoryRunScopeRecord(BaseModel):
+    run_id: int
+    is_target: bool
+    time_window: str
+    status: WalletIngestionStatus
+    created_at: str | None = None
+    requested_start: str | None = None
+    requested_end: str | None = None
+    requested_bounds_verified: Literal[False] = False
+    observed_activity_start: str | None = None
+    observed_activity_end: str | None = None
+    transfer_count: int = Field(ge=0)
+    transaction_count: int = Field(ge=0)
+    swap_count: int = Field(ge=0)
+    timestamped_activity_count: int = Field(ge=0)
+    untimestamped_activity_count: int = Field(ge=0)
+    outside_requested_bounds_count: int = Field(ge=0)
+    requested_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
+    unavailable_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
+
+
+class WalletHistoryIdentityGroupRecord(BaseModel):
+    identity: str
+    identity_type: Literal[
+        "transaction_hash",
+        "event_action",
+        "event_reference",
+        "swap_fingerprint",
+    ]
+    identity_strength: Literal["exact", "weak"]
+    run_ids: list[int]
+    observation_count: int = Field(ge=2)
+    distinct_payload_count: int = Field(ge=1)
+    has_conflict: bool
+
+
+class WalletHistoryCoverageRecord(BaseModel):
+    activity_observations: int = Field(ge=0)
+    timestamped_activity_observations: int = Field(ge=0)
+    transaction_observations: int = Field(ge=0)
+    transaction_observations_with_hash: int = Field(ge=0)
+    overlapping_transaction_identity_groups: int = Field(ge=0)
+    conflicting_transaction_identity_groups: int = Field(ge=0)
+    swap_observations: int = Field(ge=0)
+    swap_observations_with_exact_identity: int = Field(ge=0)
+    overlapping_exact_swap_identity_groups: int = Field(ge=0)
+    overlapping_weak_swap_identity_groups: int = Field(ge=0)
+    conflicting_swap_identity_groups: int = Field(ge=0)
+    non_ton_swap_legs: int = Field(ge=0)
+    addressed_non_ton_swap_legs: int = Field(ge=0)
+    asset_address_coverage_state: Literal["not_observed", "complete", "incomplete"]
+    fee_link_candidate_swaps: int = Field(ge=0)
+    same_run_fee_hash_match_candidates: int = Field(ge=0)
+    fee_hash_match_coverage_state: Literal[
+        "not_observed", "complete", "incomplete"
+    ]
+    fee_linkage_contract_verified: Literal[False] = False
+
+
+class WalletHistoryBlockerRecord(BaseModel):
+    code: str
+    reason: str
+    run_ids: list[int] = Field(default_factory=list)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class WalletHistoryReadinessResponse(BaseModel):
+    analysis_version: Literal["wallet_history_readiness_v0.22.0"]
+    target_run_id: int
+    run_ids: list[int]
+    wallet_address: str
+    data_mode: Literal["mock", "real"]
+    requested_bounds_verified: Literal[False] = False
+    observed_activity_start: str | None = None
+    observed_activity_end: str | None = None
+    runs: list[WalletHistoryRunScopeRecord]
+    transaction_identity_groups: list[WalletHistoryIdentityGroupRecord] = Field(
+        default_factory=list
+    )
+    swap_identity_groups: list[WalletHistoryIdentityGroupRecord] = Field(
+        default_factory=list
+    )
+    transaction_identity_groups_total: int = Field(ge=0)
+    swap_identity_groups_total: int = Field(ge=0)
+    evidence_groups_truncated: bool
+    coverage: WalletHistoryCoverageRecord
+    blockers: list[WalletHistoryBlockerRecord] = Field(default_factory=list)
+    history_complete: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    is_cost_basis: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    note: str
+
+
 class WalletEvidenceSignalRecord(BaseModel):
     code: str
     title: str

@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.21.3 UNREALIZED EXPORTS
+# TON Wallet Intelligence Dashboard — v0.22.0 HISTORY READINESS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.21.3 UNREALIZED EXPORTS status — persisted runs expose optional spot-based unrealized valuation in the UI and JSON/CSV exports, with price-source attribution, explicit unavailable records, coverage counts, and priced-subtotal semantics.**
+> **v0.22.0 HISTORY READINESS status — persisted runs can be inspected together through a diagnostic-only readiness report that surfaces overlap, identity strength, observed bounds, coverage, conflicts, and blockers. It does not merge history, establish cost basis, or change PnL semantics.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -39,6 +39,13 @@ executable ingestion path.
 > - Persisted ingestion runs can be compared pairwise (2-25 runs) as a
 >   probabilistic behavioral-similarity signal with JSON/CSV export — never
 >   proof of common ownership.
+> - Multi-run history readiness accepts an explicit target run and 2-50
+>   distinct run ids for the same wallet and data mode. It reports exact
+>   transaction overlap, weak swap-identity candidates, observed timestamp
+>   bounds, asset-address and fee hash-match coverage, conflicts, and blockers.
+>   Every report remains diagnostic (`is_cost_basis: false`,
+>   `eligible_for_cost_basis: false`, `used_by_pnl: false`) and is never passed
+>   into PnL.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -106,7 +113,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.21.3 UNREALIZED EXPORTS` product label
+> - User-facing UI copy uses the `v0.22.0 HISTORY READINESS` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -114,8 +121,8 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.21.3
->   UNREALIZED EXPORTS` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.0 HISTORY
+>   READINESS` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -168,6 +175,8 @@ backend/
                          Adapter-backed wallet activity ingestion persistence
     wallet_activity_clustering.py
                          Pairwise run comparison (probabilistic similarity)
+    wallet_history_readiness.py
+                         Read-only multi-run overlap and coverage diagnostics
     wallet_activity_signals.py
                          Rule-based evidence signals with confidence levels
     pnl_preview.py       Evidence-gated run-scoped PnL preview
@@ -265,7 +274,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.21.3 UNREALIZED EXPORTS)
+## Data modes & providers (v0.22.0 HISTORY READINESS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -317,7 +326,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.21.3 UNREALIZED EXPORTS` is the current
+API-version field, while `v0.22.0 HISTORY READINESS` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -444,6 +453,16 @@ candidates were derived and does not prove that the wallet has no holdings.
 The default export stays offline.
 Whether figures amount to Real PnL is decided solely by requirement rows.
 
+### `POST /api/wallets/history/readiness`
+
+Inspects an explicit set of 2-50 persisted runs for one exact wallet address
+and data mode against a target run. The response reports observed bounds,
+transaction overlap, swap-identity evidence, conflicts, asset-address and fee
+hash-match coverage, and blockers. Diagnostic only: it does not deduplicate or
+merge activity, prove complete history, establish cost basis, or change any PnL
+result; `history_complete`, `deduplication_applied`, `is_cost_basis`,
+`eligible_for_cost_basis`, and `used_by_pnl` remain `false`.
+
 ### `GET /api/prices/historical/preview`
 Returns provider-reported historical rate points for one `token` (`"ton"` or
 a jetton master address) between `start` and `end` (ISO datetimes, window
@@ -564,13 +583,12 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.21.3 UNREALIZED EXPORTS`).
+  tracks the current release (`v0.22.0 HISTORY READINESS`).
 
-## Roadmap beyond v0.21.3 UNREALIZED EXPORTS
+## Roadmap beyond v0.22.0 HISTORY READINESS
 
-- Extend acquisition history beyond a single run window (multi-run or
-  full-history ingestion) so cost basis can also cover sells of holdings
-  acquired before the window.
+- Build canonical, paginated history ingestion and a migration-backed identity
+  contract before any multi-run data can become a cost-basis source.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
   into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.
