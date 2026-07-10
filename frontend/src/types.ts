@@ -601,9 +601,24 @@ export interface WalletActivitySummary {
   };
 }
 
+export interface WalletIdentityRecord {
+  status: "network_scoped" | "unscoped" | "unavailable";
+  version: string;
+  network: "ton-mainnet" | "ton-testnet" | "ton-unknown";
+  canonical_address?: string | null;
+  workchain_id?: number | null;
+  account_id_hex?: string | null;
+  submitted_format: "user_friendly" | "raw" | "unrecognized";
+  bounceable?: boolean | null;
+  testnet_only?: boolean | null;
+  is_account_existence_proof: false;
+  is_ownership_proof: false;
+}
+
 export interface WalletIngestionRunResponse {
   run_id?: number | null;
   wallet_address: string;
+  wallet_identity: WalletIdentityRecord;
   time_window: string;
   status: WalletIngestionStatus;
   data_mode: "mock" | "real";

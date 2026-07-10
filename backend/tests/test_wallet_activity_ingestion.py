@@ -15,6 +15,16 @@ from database import Base, get_session
 from main import app
 
 
+VALID_MAINNET_WALLET = "EQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPrHF"
+VALID_MAINNET_WALLET_NONBOUNCEABLE = (
+    "UQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPuwA"
+)
+VALID_TESTNET_WALLET = "kQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPgpP"
+VALID_MAINNET_CANONICAL = (
+    "0:ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
+)
+
+
 @pytest.fixture
 def client():
     engine = create_engine(
@@ -69,6 +79,120 @@ def test_wallet_ingestion_preview_returns_mock_coverage(client, monkeypatch):
     assert evidence["normalized_count"] == 6
 
 
+def test_wallet_ingestion_persists_network_scoped_identity_variants(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    monkeypatch.setenv("TON_NETWORK", "mainnet")
+
+    bodies = []
+    for address in (VALID_MAINNET_WALLET, VALID_MAINNET_WALLET_NONBOUNCEABLE):
+        response = client.post(
+            "/api/wallets/ingest",
+            json={
+                "wallet_address": address,
+                "time_window": "24h",
+                "surfaces": ["transactions"],
+            },
+        )
+        assert response.status_code == 200
+        bodies.append(response.json())
+
+    assert [body["wallet_address"] for body in bodies] == [
+        VALID_MAINNET_WALLET,
+        VALID_MAINNET_WALLET_NONBOUNCEABLE,
+    ]
+    assert {
+        body["wallet_identity"]["canonical_address"] for body in bodies
+    } == {VALID_MAINNET_CANONICAL}
+    assert {body["wallet_identity"]["network"] for body in bodies} == {
+        "ton-mainnet"
+    }
+    assert [body["wallet_identity"]["bounceable"] for body in bodies] == [
+        True,
+        False,
+    ]
+    assert all(
+        body["wallet_identity"]["status"] == "network_scoped"
+        and body["wallet_identity"]["is_account_existence_proof"] is False
+        and body["wallet_identity"]["is_ownership_proof"] is False
+        for body in bodies
+    )
+
+
+def test_mock_placeholder_identity_stays_explicitly_unavailable(client, monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQfixtureOnly",
+            "time_window": "24h",
+            "surfaces": ["transactions"],
+        },
+    )
+
+    assert response.status_code == 200
+    identity = response.json()["wallet_identity"]
+    assert identity["status"] == "unavailable"
+    assert identity["network"] == "ton-unknown"
+    assert identity["canonical_address"] is None
+    assert identity["submitted_format"] == "unrecognized"
+
+
+def test_guarded_live_tonapi_rejects_unavailable_wallet_identity(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQnotAValidTonAddress",
+            "time_window": "24h",
+            "surfaces": ["balances"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "valid standard TON wallet address" in response.json()["detail"]
+
+
+def test_guarded_live_tonapi_rejects_official_host_network_mismatch(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TON_NETWORK", "testnet")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    def forbid_network(*args, **kwargs):
+        raise AssertionError("Network must not be called for mismatched scope")
+
+    monkeypatch.setattr(
+        "adapters.tonapi.urllib.request.urlopen",
+        forbid_network,
+    )
+
+    response = client.post(
+        "/api/wallets/ingest/preview",
+        json={
+            "wallet_address": VALID_TESTNET_WALLET,
+            "time_window": "24h",
+            "surfaces": ["balances"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "base URL network does not match" in response.json()["detail"]
+
+
 def test_wallet_ingestion_explicit_provider_scaffold_returns_limited_coverage(
     client,
     monkeypatch,
@@ -80,7 +204,7 @@ def test_wallet_ingestion_explicit_provider_scaffold_returns_limited_coverage(
     response = client.post(
         "/api/wallets/ingest/preview",
         json={
-            "wallet_address": "EQwallet",
+            "wallet_address": VALID_MAINNET_WALLET,
             "time_window": "24h",
             "surfaces": ["jettons"],
         },
@@ -156,7 +280,7 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_jetton_snapshot(
     response = client.post(
         "/api/wallets/ingest",
         json={
-            "wallet_address": "EQwallet",
+            "wallet_address": VALID_MAINNET_WALLET,
             "time_window": "24h",
             "surfaces": ["jettons"],
         },
@@ -234,7 +358,7 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_native_balance_snapshot(
     response = client.post(
         "/api/wallets/ingest",
         json={
-            "wallet_address": "EQwallet",
+            "wallet_address": VALID_MAINNET_WALLET,
             "time_window": "24h",
             "surfaces": ["balances"],
         },
@@ -302,7 +426,7 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
     response = client.post(
         "/api/wallets/ingest",
         json={
-            "wallet_address": "EQwallet",
+            "wallet_address": VALID_MAINNET_WALLET,
             "time_window": "24h",
             "surfaces": ["transactions"],
         },
@@ -383,7 +507,7 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
     response = client.post(
         "/api/wallets/ingest",
         json={
-            "wallet_address": "EQwallet",
+            "wallet_address": VALID_MAINNET_WALLET,
             "time_window": "24h",
             "surfaces": ["transfers"],
         },
@@ -461,7 +585,7 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
     response = client.post(
         "/api/wallets/ingest",
         json={
-            "wallet_address": "EQwallet",
+            "wallet_address": VALID_MAINNET_WALLET,
             "time_window": "24h",
             "surfaces": ["swaps"],
         },

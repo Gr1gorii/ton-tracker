@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
+from alembic import command
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
 import database
 import models  # noqa: F401 - register every table on database.Base.metadata
@@ -18,12 +23,117 @@ from migrations.legacy_baseline import BASELINE_REVISION
 from services.database_migrations import (
     MigrationBootstrapError,
     MigrationReport,
+    _config as migration_config,
     run_database_migrations,
 )
 
 
 LEGACY_FIXTURE = Path(__file__).parent / "fixtures" / "legacy_v0_22_0.sql"
 DOMAIN_TABLES = tuple(sorted(database.Base.metadata.tables))
+WALLET_IDENTITY_REVISION = "20260710_0002"
+
+ACCOUNT_ID = "ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
+RAW_ADDRESS = f"0:{ACCOUNT_ID}"
+BOUNCEABLE_MAINNET = "EQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPrHF"
+NON_BOUNCEABLE_MAINNET = "UQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPuwA"
+BOUNCEABLE_TESTNET = "kQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPgpP"
+INVALID_CHECKSUM = "EQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPrHG"
+
+PRE_0002_COLUMNS: dict[str, tuple[str, ...]] = {
+    "analysis_runs": (
+        "id",
+        "pool_url",
+        "time_window",
+        "created_at",
+        "result_json",
+    ),
+    "wallet_ingestion_runs": (
+        "id",
+        "wallet_address",
+        "time_window",
+        "custom_start",
+        "custom_end",
+        "data_mode",
+        "status",
+        "requested_surfaces_json",
+        "provider_summary_json",
+        "created_at",
+        "updated_at",
+    ),
+    "wallet_transfers": (
+        "id",
+        "run_id",
+        "tx_hash",
+        "logical_time",
+        "timestamp",
+        "asset",
+        "amount",
+        "direction",
+        "counterparty",
+        "provider",
+        "source_status",
+        "raw_json",
+    ),
+    "wallet_transactions": (
+        "id",
+        "run_id",
+        "tx_hash",
+        "logical_time",
+        "timestamp",
+        "fee_ton",
+        "success",
+        "provider",
+        "source_status",
+        "raw_json",
+    ),
+    "wallet_swaps": (
+        "id",
+        "run_id",
+        "tx_hash",
+        "timestamp",
+        "dex",
+        "token_in",
+        "amount_in",
+        "token_out",
+        "amount_out",
+        "estimated_usd",
+        "provider",
+        "source_status",
+        "raw_json",
+    ),
+    "wallet_balance_snapshots": (
+        "id",
+        "run_id",
+        "asset",
+        "balance",
+        "balance_usd",
+        "provider",
+        "source_status",
+        "snapshot_at",
+        "raw_json",
+    ),
+    "wallet_ingestion_warnings": (
+        "id",
+        "run_id",
+        "severity",
+        "provider",
+        "message",
+        "evidence_key",
+        "created_at",
+    ),
+}
+
+IDENTITY_COLUMNS = (
+    "wallet_identity_status",
+    "wallet_identity_version",
+    "wallet_network",
+    "wallet_address_canonical",
+    "wallet_workchain_id",
+    "wallet_account_id_hex",
+    "wallet_address_format",
+    "wallet_address_bounceable",
+    "wallet_address_testnet_only",
+)
 
 
 def _engine(path: Path) -> Engine:
@@ -33,9 +143,74 @@ def _engine(path: Path) -> Engine:
     )
 
 
+def _upgrade_to_revision(engine: Engine, revision: str) -> None:
+    with engine.begin() as connection:
+        command.upgrade(migration_config(connection), revision)
+
+
+def _rewrite_table_sql(
+    engine: Engine,
+    table_name: str,
+    old: str,
+    new: str,
+) -> None:
+    """Inject deterministic SQLite schema drift without changing table data."""
+    with engine.begin() as connection:
+        schema_sql = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        ).scalar_one()
+        assert old in schema_sql
+        rewritten = schema_sql.replace(old, new, 1)
+        connection.exec_driver_sql("PRAGMA writable_schema=ON")
+        connection.exec_driver_sql(
+            "UPDATE sqlite_master SET sql=? WHERE type='table' AND name=?",
+            (rewritten, table_name),
+        )
+        schema_version = connection.exec_driver_sql(
+            "PRAGMA schema_version"
+        ).scalar_one()
+        connection.exec_driver_sql(f"PRAGMA schema_version={schema_version + 1}")
+        connection.exec_driver_sql("PRAGMA writable_schema=OFF")
+
+
 def _load_legacy_fixture(path: Path) -> None:
     with sqlite3.connect(path) as connection:
         connection.executescript(LEGACY_FIXTURE.read_text(encoding="utf-8"))
+
+
+def _insert_legacy_address_rows(path: Path) -> None:
+    addresses = (
+        (8, BOUNCEABLE_MAINNET),
+        (9, NON_BOUNCEABLE_MAINNET),
+        (10, RAW_ADDRESS.upper()),
+        (11, BOUNCEABLE_TESTNET),
+        (12, INVALID_CHECKSUM),
+    )
+    with sqlite3.connect(path) as connection:
+        connection.executemany(
+            "INSERT INTO wallet_ingestion_runs ("
+            "id, wallet_address, time_window, custom_start, custom_end, "
+            "data_mode, status, requested_surfaces_json, provider_summary_json, "
+            "created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    run_id,
+                    address,
+                    "24h",
+                    None,
+                    None,
+                    "real",
+                    "success",
+                    "[]",
+                    '{"message":"identity backfill fixture"}',
+                    "2026-06-02 00:00:00.000000",
+                    "2026-06-02 00:00:00.000000",
+                )
+                for run_id, address in addresses
+            ],
+        )
 
 
 def _quote(identifier: str) -> str:
@@ -43,14 +218,28 @@ def _quote(identifier: str) -> str:
 
 
 def _data_snapshot(engine: Engine) -> dict[str, list[tuple[Any, ...]]]:
+    """Snapshot only the frozen columns that existed before revision 0002."""
     snapshot: dict[str, list[tuple[Any, ...]]] = {}
     with engine.connect() as connection:
         for table_name in DOMAIN_TABLES:
+            columns = ", ".join(
+                _quote(column) for column in PRE_0002_COLUMNS[table_name]
+            )
             rows = connection.exec_driver_sql(
-                f"SELECT * FROM {_quote(table_name)} ORDER BY id"
+                f"SELECT {columns} FROM {_quote(table_name)} ORDER BY id"
             ).fetchall()
             snapshot[table_name] = [tuple(row) for row in rows]
     return snapshot
+
+
+def _identity_snapshot(engine: Engine) -> dict[int, tuple[Any, ...]]:
+    selected = ("id", "wallet_address", *IDENTITY_COLUMNS)
+    columns = ", ".join(_quote(column) for column in selected)
+    with engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            f"SELECT {columns} FROM wallet_ingestion_runs ORDER BY id"
+        ).fetchall()
+    return {int(row[0]): tuple(row[1:]) for row in rows}
 
 
 def _schema_snapshot(engine: Engine) -> list[tuple[Any, ...]]:
@@ -176,6 +365,103 @@ def _assert_schema_matches_models(
     assert violations == []
 
 
+def _assert_wallet_identity_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("wallet_ingestion_runs")}
+    assert set(IDENTITY_COLUMNS).issubset(columns)
+    indexes = {
+        (
+            index["name"],
+            tuple(index.get("column_names") or ()),
+            bool(index.get("unique")),
+        )
+        for index in inspector.get_indexes("wallet_ingestion_runs")
+    }
+    assert (
+        "ix_wallet_ingestion_runs_wallet_identity",
+        ("wallet_network", "wallet_address_canonical"),
+        False,
+    ) in indexes
+
+
+def _assert_legacy_identity_backfill(engine: Engine) -> None:
+    rows = _identity_snapshot(engine)
+
+    # The original frozen fixture intentionally contains an invalid fake address.
+    assert rows[7] == (
+        "EQlegacyWallet",
+        "unavailable",
+        "unavailable",
+        "ton-unknown",
+        None,
+        None,
+        None,
+        "unrecognized",
+        None,
+        None,
+    )
+    assert rows[8] == (
+        BOUNCEABLE_MAINNET,
+        "network_scoped",
+        "ton_std_address_v1",
+        "ton-mainnet",
+        RAW_ADDRESS,
+        0,
+        ACCOUNT_ID,
+        "user_friendly",
+        True,
+        False,
+    )
+    assert rows[9] == (
+        NON_BOUNCEABLE_MAINNET,
+        "network_scoped",
+        "ton_std_address_v1",
+        "ton-mainnet",
+        RAW_ADDRESS,
+        0,
+        ACCOUNT_ID,
+        "user_friendly",
+        False,
+        False,
+    )
+    assert rows[10] == (
+        RAW_ADDRESS.upper(),
+        "unscoped",
+        "ton_raw_address_v1",
+        "ton-unknown",
+        RAW_ADDRESS,
+        0,
+        ACCOUNT_ID,
+        "raw",
+        None,
+        None,
+    )
+    assert rows[11] == (
+        BOUNCEABLE_TESTNET,
+        "network_scoped",
+        "ton_std_address_v1",
+        "ton-testnet",
+        RAW_ADDRESS,
+        0,
+        ACCOUNT_ID,
+        "user_friendly",
+        True,
+        True,
+    )
+    assert rows[12] == (
+        INVALID_CHECKSUM,
+        "unavailable",
+        "unavailable",
+        "ton-unknown",
+        None,
+        None,
+        None,
+        "unrecognized",
+        None,
+        None,
+    )
+
+
 def _revision_cell(
     engine: Engine,
     expected_revision: str,
@@ -207,9 +493,13 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
     assert isinstance(report, MigrationReport)
     assert report.action == "created"
     assert report.revision_before is None
-    assert report.revision_after == BASELINE_REVISION
-    assert report.applied_revisions == (BASELINE_REVISION,)
+    assert report.revision_after == WALLET_IDENTITY_REVISION
+    assert report.applied_revisions == (
+        BASELINE_REVISION,
+        WALLET_IDENTITY_REVISION,
+    )
     _assert_schema_matches_models(engine)
+    _assert_wallet_identity_schema(engine)
 
     engine.dispose()
     reopened = _engine(tmp_path / "fresh.db")
@@ -220,6 +510,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
 def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
     path = tmp_path / "legacy.db"
     _load_legacy_fixture(path)
+    _insert_legacy_address_rows(path)
     engine = _engine(path)
     before = _data_snapshot(engine)
 
@@ -228,10 +519,12 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
     assert isinstance(report, MigrationReport)
     assert report.action == "adopted_legacy"
     assert report.revision_before is None
-    assert report.revision_after == BASELINE_REVISION
-    assert report.applied_revisions == ()
+    assert report.revision_after == WALLET_IDENTITY_REVISION
+    assert report.applied_revisions == (WALLET_IDENTITY_REVISION,)
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
+    _assert_wallet_identity_schema(engine)
+    _assert_legacy_identity_backfill(engine)
     engine.dispose()
 
 
@@ -251,6 +544,8 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
     report = run_database_migrations(engine)
 
     assert report.action == "adopted_legacy"
+    assert report.revision_after == WALLET_IDENTITY_REVISION
+    assert report.applied_revisions == (WALLET_IDENTITY_REVISION,)
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
@@ -262,10 +557,12 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
 def test_runner_is_idempotent_at_head(tmp_path):
     path = tmp_path / "idempotent.db"
     _load_legacy_fixture(path)
+    _insert_legacy_address_rows(path)
     engine = _engine(path)
     first = run_database_migrations(engine)
     schema_after_first = _schema_snapshot(engine)
     data_after_first = _data_snapshot(engine)
+    identities_after_first = _identity_snapshot(engine)
 
     second = run_database_migrations(engine)
 
@@ -276,6 +573,112 @@ def test_runner_is_idempotent_at_head(tmp_path):
     assert not second.applied_revisions
     assert _schema_snapshot(engine) == schema_after_first
     assert _data_snapshot(engine) == data_after_first
+    assert _identity_snapshot(engine) == identities_after_first
+    _assert_legacy_identity_backfill(engine)
+    engine.dispose()
+
+
+def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_path):
+    engine = _engine(tmp_path / "interrupted-identity.db")
+    _upgrade_to_revision(engine, BASELINE_REVISION)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "INSERT INTO wallet_ingestion_runs ("
+            "id, wallet_address, time_window, custom_start, custom_end, "
+            "data_mode, status, requested_surfaces_json, provider_summary_json, "
+            "created_at, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                BOUNCEABLE_MAINNET,
+                "24h",
+                None,
+                None,
+                "real",
+                "success",
+                "[]",
+                '{"message":"interrupted migration fixture"}',
+                "2026-06-02 00:00:00.000000",
+                "2026-06-02 00:00:00.000000",
+            ),
+        )
+        connection.exec_driver_sql(
+            "CREATE TRIGGER reject_identity_update "
+            "BEFORE UPDATE ON wallet_ingestion_runs "
+            "BEGIN SELECT RAISE(ABORT, 'forced backfill failure'); END"
+        )
+    data_before = _data_snapshot(engine)
+
+    with pytest.raises(IntegrityError, match="forced backfill failure"):
+        run_database_migrations(engine)
+
+    assert _data_snapshot(engine) == data_before
+    inspector = inspect(engine)
+    columns_after_failure = {
+        column["name"]
+        for column in inspector.get_columns("wallet_ingestion_runs")
+    }
+    assert set(IDENTITY_COLUMNS).issubset(columns_after_failure)
+    assert "ix_wallet_ingestion_runs_wallet_identity" not in {
+        index["name"]
+        for index in inspector.get_indexes("wallet_ingestion_runs")
+    }
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == BASELINE_REVISION
+
+    # Simulate interruption after index creation as well. A retry must accept
+    # both the already-added columns and an already-correct index.
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TRIGGER reject_identity_update")
+        connection.exec_driver_sql(
+            "CREATE INDEX ix_wallet_ingestion_runs_wallet_identity "
+            "ON wallet_ingestion_runs "
+            "(wallet_network, wallet_address_canonical)"
+        )
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == BASELINE_REVISION
+    assert report.revision_after == WALLET_IDENTITY_REVISION
+    assert report.applied_revisions == (WALLET_IDENTITY_REVISION,)
+    assert _data_snapshot(engine) == data_before
+    identity = _identity_snapshot(engine)[1]
+    assert identity[0] == BOUNCEABLE_MAINNET
+    assert identity[1:5] == (
+        "network_scoped",
+        "ton_std_address_v1",
+        "ton-mainnet",
+        RAW_ADDRESS,
+    )
+    _assert_schema_matches_models(engine)
+    _assert_wallet_identity_schema(engine)
+    engine.dispose()
+
+
+def test_partial_identity_column_with_wrong_shape_fails_before_more_ddl(tmp_path):
+    engine = _engine(tmp_path / "malformed-partial-identity.db")
+    _upgrade_to_revision(engine, BASELINE_REVISION)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE wallet_ingestion_runs ADD COLUMN "
+            "wallet_identity_status TEXT DEFAULT 'unavailable' NOT NULL"
+        )
+
+    with pytest.raises(RuntimeError, match="do not match revision 0002"):
+        run_database_migrations(engine)
+
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("wallet_ingestion_runs")
+    }
+    assert columns & set(IDENTITY_COLUMNS) == {"wallet_identity_status"}
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == BASELINE_REVISION
     engine.dispose()
 
 
@@ -283,9 +686,7 @@ def test_incompatible_unversioned_database_fails_closed_without_mutation(tmp_pat
     path = tmp_path / "incompatible.db"
     _load_legacy_fixture(path)
     with sqlite3.connect(path) as connection:
-        connection.execute(
-            "ALTER TABLE wallet_transactions RENAME COLUMN fee_ton TO legacy_fee"
-        )
+        connection.execute("DROP INDEX ix_wallet_transactions_tx_hash")
     engine = _engine(path)
     schema_before = _schema_snapshot(engine)
     data_before = _data_snapshot(engine)
@@ -326,6 +727,136 @@ def test_unknown_revision_is_rejected_without_touching_domain_data(tmp_path):
     engine.dispose()
 
 
+def test_clean_process_current_head_missing_schema_fails_closed(tmp_path):
+    path = tmp_path / "current-head-without-domain-schema.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO alembic_version (version_num) VALUES (?)",
+            (WALLET_IDENTITY_REVISION,),
+        )
+
+    environment = os.environ.copy()
+    environment["TON_CHECK_DB_URL"] = f"sqlite:///{path}"
+    completed = subprocess.run(
+        [sys.executable, "-m", "services.database_migrations"],
+        cwd=Path(__file__).resolve().parents[1],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    output = completed.stdout + completed.stderr
+    assert "Missing current domain tables" in output
+
+
+@pytest.mark.parametrize(
+    ("table_name", "old", "new"),
+    [
+        (
+            "wallet_ingestion_runs",
+            "wallet_identity_status VARCHAR(20)",
+            "wallet_identity_status VARCHAR(200)",
+        ),
+        (
+            "wallet_transfers",
+            "amount NUMERIC(38, 18)",
+            "amount NUMERIC(18, 4)",
+        ),
+        (
+            "wallet_ingestion_runs",
+            "wallet_identity_status VARCHAR(20) DEFAULT 'unavailable'",
+            "wallet_identity_status VARCHAR(20) DEFAULT 'corrupt'",
+        ),
+    ],
+)
+def test_current_schema_rejects_column_type_and_default_drift(
+    tmp_path,
+    table_name,
+    old,
+    new,
+):
+    engine = _engine(tmp_path / f"column-drift-{table_name}.db")
+    run_database_migrations(engine)
+    _rewrite_table_sql(engine, table_name, old, new)
+
+    with pytest.raises(MigrationBootstrapError, match="current columns differ"):
+        run_database_migrations(engine)
+
+    engine.dispose()
+
+
+def test_current_schema_rejects_unique_and_check_constraint_drift(tmp_path):
+    engine = _engine(tmp_path / "constraint-drift.db")
+    run_database_migrations(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE analysis_runs")
+        connection.exec_driver_sql(
+            "CREATE TABLE analysis_runs ("
+            "id INTEGER NOT NULL, "
+            "pool_url VARCHAR NOT NULL, "
+            "time_window VARCHAR NOT NULL, "
+            "created_at DATETIME NOT NULL, "
+            "result_json TEXT NOT NULL, "
+            "PRIMARY KEY (id), "
+            "UNIQUE (pool_url), "
+            "CHECK (length(pool_url) > 0)"
+            ")"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX ix_analysis_runs_id ON analysis_runs (id)"
+        )
+
+    with pytest.raises(MigrationBootstrapError) as exc_info:
+        run_database_migrations(engine)
+
+    message = str(exc_info.value)
+    assert "current unique constraints differ" in message
+    assert "current check constraints differ" in message
+    engine.dispose()
+
+
+def test_current_schema_rejects_foreign_key_option_drift(tmp_path):
+    engine = _engine(tmp_path / "foreign-key-option-drift.db")
+    run_database_migrations(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP TABLE wallet_ingestion_warnings")
+        connection.exec_driver_sql(
+            "CREATE TABLE wallet_ingestion_warnings ("
+            "id INTEGER NOT NULL, "
+            "run_id INTEGER NOT NULL, "
+            "severity VARCHAR NOT NULL, "
+            "provider VARCHAR, "
+            "message TEXT NOT NULL, "
+            "evidence_key VARCHAR, "
+            "created_at DATETIME NOT NULL, "
+            "PRIMARY KEY (id), "
+            "FOREIGN KEY(run_id) REFERENCES wallet_ingestion_runs (id) "
+            "ON DELETE CASCADE"
+            ")"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX ix_wallet_ingestion_warnings_id "
+            "ON wallet_ingestion_warnings (id)"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX ix_wallet_ingestion_warnings_run_id "
+            "ON wallet_ingestion_warnings (run_id)"
+        )
+
+    with pytest.raises(
+        MigrationBootstrapError,
+        match="current foreign keys differ",
+    ):
+        run_database_migrations(engine)
+
+    engine.dispose()
+
+
 def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypatch):
     target_engine = _engine(tmp_path / "init-db.db")
 
@@ -339,7 +870,11 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
 
     assert isinstance(report, MigrationReport)
     assert report.action == "created"
-    assert report.revision_after == BASELINE_REVISION
+    assert report.revision_after == WALLET_IDENTITY_REVISION
+    assert report.applied_revisions == (
+        BASELINE_REVISION,
+        WALLET_IDENTITY_REVISION,
+    )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from alembic import command
 from alembic.config import Config
@@ -12,7 +12,7 @@ from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from alembic.script.revision import RangeNotAncestorError, ResolutionError
 from alembic.util.exc import CommandError
-from sqlalchemy import Engine, inspect, text
+from sqlalchemy import CheckConstraint, Engine, UniqueConstraint, inspect, text
 from sqlalchemy.engine import Connection
 
 from migrations.legacy_baseline import (
@@ -128,20 +128,192 @@ def _assert_legacy_compatible(connection: Connection) -> None:
         )
 
 
-def _assert_current_schema(connection: Connection) -> None:
-    """Validate the current release schema after migration.
+def _type_signature(value: Any) -> str:
+    return "".join(str(value).upper().split())
 
-    v0.22.1 introduces the baseline and intentionally makes no model changes,
-    so the frozen v0.22.0 manifest is also the current release manifest. A
-    later schema-changing revision must update this check with its own current
-    manifest while leaving the legacy baseline immutable.
-    """
+
+def _default_signature(value: Any) -> str | None:
+    if value is None:
+        return None
+    return "".join(str(value).split())
+
+
+def _metadata_default_signature(column) -> str | None:
+    if column.server_default is None:
+        return None
+    argument = column.server_default.arg
+    if isinstance(argument, str):
+        # SQLAlchemy quotes string-valued server defaults when it emits DDL.
+        return _default_signature(repr(argument))
+    return _default_signature(argument.compile(compile_kwargs={"literal_binds": True}))
+
+
+def _options_signature(options: dict[str, Any] | None) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        sorted((str(key), str(value)) for key, value in (options or {}).items())
+    )
+
+
+def _metadata_fk_options(constraint) -> tuple[tuple[str, str], ...]:
+    options = {
+        "onupdate": constraint.onupdate,
+        "ondelete": constraint.ondelete,
+        "deferrable": constraint.deferrable,
+        "initially": constraint.initially,
+        "match": constraint.match,
+    }
+    return _options_signature(
+        {key: value for key, value in options.items() if value is not None}
+    )
+
+
+def _check_text_signature(value: Any) -> str:
+    return " ".join(str(value).split())
+
+
+def _assert_current_schema(connection: Connection) -> None:
+    """Validate migrated domain tables against current SQLAlchemy metadata."""
+    import models as _models  # noqa: F401 - register every mapped table.
+    from database import Base
+
     errors = _sqlite_integrity_errors(connection)
-    errors.extend(validate_legacy_schema(connection))
+    schema_inspector = inspect(connection)
+    actual_tables = set(schema_inspector.get_table_names())
+    expected_tables = set(Base.metadata.tables)
+    missing_tables = sorted(expected_tables - actual_tables)
+    if missing_tables:
+        errors.append(f"Missing current domain tables: {missing_tables}")
+
+    for table_name in sorted(expected_tables & actual_tables):
+        table = Base.metadata.tables[table_name]
+        expected_columns = tuple(
+            (
+                column.name,
+                _type_signature(column.type),
+                bool(column.nullable),
+                _metadata_default_signature(column),
+            )
+            for column in table.columns
+        )
+        actual_columns = tuple(
+            (
+                column["name"],
+                _type_signature(column["type"]),
+                bool(column["nullable"]),
+                _default_signature(column.get("default")),
+            )
+            for column in schema_inspector.get_columns(table_name)
+        )
+        if actual_columns != expected_columns:
+            errors.append(
+                f"{table_name}: current columns differ; "
+                f"expected={expected_columns}, actual={actual_columns}"
+            )
+
+        expected_pk = tuple(column.name for column in table.primary_key.columns)
+        actual_pk = tuple(
+            schema_inspector.get_pk_constraint(table_name).get(
+                "constrained_columns"
+            )
+            or ()
+        )
+        if actual_pk != expected_pk:
+            errors.append(
+                f"{table_name}: current primary key differs; "
+                f"expected={expected_pk}, actual={actual_pk}"
+            )
+
+        expected_indexes = {
+            (
+                index.name,
+                tuple(column.name for column in index.columns),
+                bool(index.unique),
+            )
+            for index in table.indexes
+        }
+        actual_indexes = {
+            (
+                index["name"],
+                tuple(index.get("column_names") or ()),
+                bool(index.get("unique")),
+            )
+            for index in schema_inspector.get_indexes(table_name)
+        }
+        if actual_indexes != expected_indexes:
+            errors.append(
+                f"{table_name}: current indexes differ; "
+                f"expected={sorted(expected_indexes)}, "
+                f"actual={sorted(actual_indexes)}"
+            )
+
+        expected_fks = {
+            (
+                tuple(element.parent.name for element in constraint.elements),
+                constraint.elements[0].column.table.schema,
+                constraint.elements[0].column.table.name,
+                tuple(element.column.name for element in constraint.elements),
+                _metadata_fk_options(constraint),
+            )
+            for constraint in table.foreign_key_constraints
+        }
+        actual_fks = {
+            (
+                tuple(foreign_key.get("constrained_columns") or ()),
+                foreign_key.get("referred_schema"),
+                foreign_key.get("referred_table"),
+                tuple(foreign_key.get("referred_columns") or ()),
+                _options_signature(foreign_key.get("options")),
+            )
+            for foreign_key in schema_inspector.get_foreign_keys(table_name)
+        }
+        if actual_fks != expected_fks:
+            errors.append(
+                f"{table_name}: current foreign keys differ; "
+                f"expected={sorted(expected_fks)}, actual={sorted(actual_fks)}"
+            )
+
+        expected_uniques = {
+            (
+                constraint.name,
+                tuple(column.name for column in constraint.columns),
+            )
+            for constraint in table.constraints
+            if isinstance(constraint, UniqueConstraint)
+        }
+        actual_uniques = {
+            (
+                unique.get("name"),
+                tuple(unique.get("column_names") or ()),
+            )
+            for unique in schema_inspector.get_unique_constraints(table_name)
+        }
+        if actual_uniques != expected_uniques:
+            errors.append(
+                f"{table_name}: current unique constraints differ; "
+                f"expected={sorted(expected_uniques, key=repr)}, "
+                f"actual={sorted(actual_uniques, key=repr)}"
+            )
+
+        expected_checks = {
+            (constraint.name, _check_text_signature(constraint.sqltext))
+            for constraint in table.constraints
+            if isinstance(constraint, CheckConstraint)
+        }
+        actual_checks = {
+            (check.get("name"), _check_text_signature(check.get("sqltext")))
+            for check in schema_inspector.get_check_constraints(table_name)
+        }
+        if actual_checks != expected_checks:
+            errors.append(
+                f"{table_name}: current check constraints differ; "
+                f"expected={sorted(expected_checks, key=repr)}, "
+                f"actual={sorted(actual_checks, key=repr)}"
+            )
+
     if errors:
         details = "; ".join(errors[:20])
         raise MigrationBootstrapError(
-            f"Migrated database does not match the v0.22.1 schema: {details}"
+            f"Migrated database does not match current model metadata: {details}"
         )
 
 

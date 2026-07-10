@@ -3,6 +3,8 @@
 from datetime import datetime, timezone
 
 from config import (
+    DEFAULT_TONAPI_BASE_URL,
+    DEFAULT_TONAPI_TESTNET_BASE_URL,
     ERROR_PROVIDER_NOT_CONFIGURED,
     Settings,
     get_settings,
@@ -54,6 +56,28 @@ def test_wallet_activity_live_guard_env(monkeypatch):
     assert settings.wallet_activity_provider == "tonapi"
     assert settings.wallet_activity_live_enabled is True
     assert settings.wallet_activity_live_jetton_limit == 500
+
+
+def test_ton_network_scope_from_env(monkeypatch):
+    monkeypatch.delenv("TONAPI_BASE_URL", raising=False)
+    monkeypatch.setenv("TON_NETWORK", "testnet")
+    settings = get_settings()
+    assert settings.ton_network == "testnet"
+    assert settings.tonapi_base_url == DEFAULT_TONAPI_TESTNET_BASE_URL
+
+
+def test_invalid_ton_network_falls_back_to_mainnet(monkeypatch):
+    monkeypatch.delenv("TONAPI_BASE_URL", raising=False)
+    monkeypatch.setenv("TON_NETWORK", "not-a-network")
+    settings = get_settings()
+    assert settings.ton_network == "mainnet"
+    assert settings.tonapi_base_url == DEFAULT_TONAPI_BASE_URL
+
+
+def test_explicit_tonapi_base_url_is_preserved_for_custom_gateway(monkeypatch):
+    monkeypatch.setenv("TON_NETWORK", "testnet")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.internal.example")
+    assert get_settings().tonapi_base_url == "https://tonapi.internal.example"
 
 
 def test_ton_real_missing_config_returns_not_configured():

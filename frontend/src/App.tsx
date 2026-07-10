@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.1 MIGRATION FOUNDATION";
+const RELEASE_LABEL = "v0.22.2 WALLET IDENTITY";
 
 const navItems = [
   "DASHBOARD",
@@ -442,7 +442,7 @@ export default function App() {
               id="wallet-ingestion-workspace"
               eyebrow="Wallet Activity"
               title="Wallet Activity Ingestion Workspace"
-              description="Preview coverage, persist mock-normalized activity, and inspect source-aware rows before analytics wiring."
+              description="Preview coverage, persist source-labeled activity, and inspect normalized rows before analytics wiring."
             >
               <WalletIngestionWorkspace
                 accountAddress={workspaceAccount}
@@ -942,11 +942,13 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Versioned database migrations</strong>
+            <strong>Canonical TON wallet identity</strong>
             <p>
-              Backend schema evolution now has a checked-in migration path.
-              This infrastructure release does not add canonical identity,
-              broader history, cost basis, or new PnL behavior.
+              Valid TON wallet inputs can resolve to a persisted,
+              migration-backed run-wallet identity while the submitted
+              representation remains visible. Activity-row identity,
+              pagination, history completeness, cost basis, and PnL are
+              unchanged.
             </p>
           </div>
         </div>
@@ -982,6 +984,11 @@ function EvidenceColumn({
             text="Ownership proof remains unavailable; cluster comparison stays probabilistic; unlocked Real PnL covers in-window realized swaps only, while spot-based unrealized valuation remains separate and informational."
           />
           <ReleaseReadinessItem
+            tone="ready"
+            label="Wallet identity"
+            text="The canonical contract covers only the run wallet address. Invalid or legacy placeholders stay explicit; transaction, swap-action, jetton, and counterparty identities are not inferred."
+          />
+          <ReleaseReadinessItem
             tone="scoped"
             label="History readiness"
             text="Explicit stored-run sets can be inspected against a target run. Results stay diagnostic: is_cost_basis and eligible_for_cost_basis remain false and no readiness output enters PnL."
@@ -989,7 +996,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Versioned revisions make database upgrades explicit and testable; application API and analytics contracts are unchanged in this release."
+            text="Versioned revisions make database upgrades explicit and testable; additive wallet identity fields are persisted and backfilled through the migration path."
           />
           <ReleaseReadinessItem
             tone="ready"

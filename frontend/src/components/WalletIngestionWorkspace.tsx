@@ -22,6 +22,7 @@ import type {
   WalletBalanceSnapshotRecord,
   WalletClusterCompareResponse,
   WalletEvidenceSignalRecord,
+  WalletIdentityRecord,
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
@@ -63,7 +64,7 @@ const SURFACE_OPTIONS: Array<{
   {
     value: "swaps",
     label: "DEX swaps",
-    description: "Mock-normalized swap-side activity",
+    description: "Normalized swap-side activity",
   },
   {
     value: "balances",
@@ -81,7 +82,7 @@ const DEFAULT_SURFACES = SURFACE_OPTIONS.map((item) => item.value);
 
 const CAN_SHOW = [
   "Coverage preview",
-  "Persisted mock run",
+  "Persisted source-labeled run",
   "Transfers",
   "Transactions",
   "Swaps",
@@ -93,6 +94,7 @@ const CAN_SHOW = [
 
 const CANNOT_SHOW = [
   "Full-history acquisition cost basis",
+  "Canonical activity-row identity",
   "Legacy buyers/report wiring",
   "Ownership proof",
 ];
@@ -193,6 +195,9 @@ export default function WalletIngestionWorkspace({
   const visibleWarnings = runResult
     ? runResult.warnings.map((warning) => warning.message)
     : previewResult?.warnings ?? [];
+  const displayedDataMode =
+    runResult?.data_mode ?? previewResultDataMode(previewResult);
+  const displayedIsLive = displayedDataMode === "real";
   const readiness = buildReadiness({
     busy,
     loadingAction,
@@ -201,6 +206,7 @@ export default function WalletIngestionWorkspace({
     previewResult,
     runResult,
     resultIsStale,
+    displayedDataMode,
   });
 
   function makePayload(): { payload: WalletIngestionRequest } | { error: string } {
@@ -274,7 +280,7 @@ export default function WalletIngestionWorkspace({
     onAccountAddressChange(request.payload.wallet_address);
     onPreviewRunStateChange?.({
       status: "running",
-      message: "Previewing mock-normalized wallet activity coverage.",
+      message: "Previewing source-labeled wallet activity coverage.",
       accountAddress: request.payload.wallet_address,
       limit: formatSurfaces(request.payload.surfaces),
     });
@@ -284,9 +290,10 @@ export default function WalletIngestionWorkspace({
       if (activeRequestId.current !== requestId) return;
       setPreviewResult(data);
       setResultSnapshot(snapshotForPayload(request.payload));
+      const previewMode = previewResultDataMode(data);
       onPreviewRunStateChange?.({
         status: "success",
-        message: `Coverage preview returned ${data.provider_coverage[0]?.normalized_count ?? 0} mock-normalized rows.`,
+        message: `Coverage preview returned ${data.provider_coverage[0]?.normalized_count ?? 0} ${previewMode === "real" ? "live" : "mock-normalized"} rows.`,
         accountAddress: request.payload.wallet_address,
         limit: formatSurfaces(request.payload.surfaces),
       });
@@ -395,9 +402,11 @@ export default function WalletIngestionWorkspace({
       <div className="wallet-intelligence-head">
         <div>
           <span className="section-eyebrow">
-            {runResult?.data_mode === "real"
+            {displayedIsLive
               ? "Guarded live ingestion"
-              : "Mock-normalized ingestion"}
+              : displayedDataMode === "mock"
+                ? "Mock-normalized ingestion"
+                : "Source-labeled ingestion"}
           </span>
           <h2>Wallet Activity Ingestion Workspace</h2>
           <p>
@@ -408,9 +417,13 @@ export default function WalletIngestionWorkspace({
         <div className="wallet-intelligence-badges">
           <span className="badge badge-provider">WORKSPACE</span>
           <span
-            className={`badge ${runResult?.data_mode === "real" ? "badge-real" : "badge-mock"}`}
+            className={`badge ${displayedIsLive ? "badge-real" : displayedDataMode === "mock" ? "badge-mock" : "badge-provider"}`}
           >
-            {runResult?.data_mode === "real" ? "LIVE SOURCE" : "MOCK SOURCE"}
+            {displayedIsLive
+              ? "LIVE SOURCE"
+              : displayedDataMode === "mock"
+                ? "MOCK SOURCE"
+                : "SOURCE PENDING"}
           </span>
           {runResult && <span className="badge badge-real">RUN #{runResult.run_id}</span>}
         </div>
@@ -423,9 +436,15 @@ export default function WalletIngestionWorkspace({
 
       <div className="tonapi-wallet-note wallet-ingestion-note">
         <div>
-          {runResult?.data_mode === "real"
+          {runResult && displayedIsLive
             ? "This run used the guarded live TonAPI path. Rows are real on-chain account data, persisted and source-labeled. Stored activity feeds signals; swaps and balances feed cluster comparison; swaps and transaction evidence feed the PnL preview below."
-            : "The ingestion workspace uses deterministic backend fixtures. Rows are persisted and source-labeled. Stored activity feeds signals; swaps and balances feed cluster comparison; swaps and transaction evidence feed the PnL preview below. These are not real on-chain rows."}
+            : runResult
+              ? "This run used deterministic backend fixtures. Rows are persisted and source-labeled. Stored activity feeds signals; swaps and balances feed cluster comparison; swaps and transaction evidence feed the PnL preview below. These are not real on-chain rows."
+              : previewResult && displayedIsLive
+                ? "This coverage preview used the guarded live TonAPI path. Returned rows are real account-level provider evidence but are not persisted until you run ingestion."
+                : previewResult
+                  ? "This coverage preview used deterministic backend fixtures. Preview rows are not persisted and are not real on-chain data."
+                  : "Preview coverage first to confirm whether the configured path is guarded live TonAPI or deterministic mock data. Every result stays source-labeled."}
         </div>
       </div>
 
@@ -606,7 +625,11 @@ export default function WalletIngestionWorkspace({
                 <span className="badge badge-provider">STATUS {runResult.status}</span>
               </>
             )}
-            <span className="badge badge-mock">SOURCE MOCK</span>
+            <span
+              className={`badge ${displayedIsLive ? "badge-real" : "badge-mock"}`}
+            >
+              SOURCE {displayedIsLive ? "LIVE" : "MOCK"}
+            </span>
             <span className="badge badge-provider">
               ROWS {runResult ? activityCount(runResult) : visibleEvidence[0]?.normalized_count ?? 0}
             </span>
@@ -638,6 +661,8 @@ export default function WalletIngestionWorkspace({
               },
             ]}
           />
+
+          {runResult && <WalletIdentityEvidence result={runResult} />}
 
           <div className="scope-strip">
             {runResult?.message ?? previewResult?.message}
@@ -712,6 +737,7 @@ function buildReadiness({
   previewResult,
   runResult,
   resultIsStale,
+  displayedDataMode,
 }: {
   busy: boolean;
   loadingAction: "preview" | "run" | "read" | null;
@@ -720,6 +746,7 @@ function buildReadiness({
   previewResult: WalletIngestionPreviewResponse | null;
   runResult: WalletIngestionRunResponse | null;
   resultIsStale: boolean;
+  displayedDataMode: "mock" | "real" | null;
 }): { tone: PreviewReadinessTone; label: string; message: string } {
   if (busy) {
     const label =
@@ -751,21 +778,30 @@ function buildReadiness({
     return {
       tone: "fresh",
       label: "RUN STORED",
-      message: "Persisted mock-normalized wallet activity run matches current inputs.",
+      message: `Persisted ${displayedDataMode === "real" ? "live" : "mock-normalized"} wallet activity run matches current inputs.`,
     };
   }
   if (previewResult) {
     return {
       tone: "fresh",
       label: "COVERAGE READY",
-      message: "Coverage preview matches current inputs. You can persist a mock run.",
+      message: `Coverage preview matches current inputs. You can persist a ${displayedDataMode === "real" ? "guarded live" : "mock-normalized"} run.`,
     };
   }
   return {
     tone: "ready",
     label: "READY",
-    message: "Ready to preview or persist deterministic mock wallet activity.",
+    message: "Ready to preview or persist source-labeled wallet activity.",
   };
+}
+
+function previewResultDataMode(
+  preview: WalletIngestionPreviewResponse | null,
+): "mock" | "real" | null {
+  if (!preview) return null;
+  return preview.provider_coverage.some((item) => item.data_mode === "real")
+    ? "real"
+    : "mock";
 }
 
 function activityCount(result: WalletIngestionRunResponse): number {
@@ -774,6 +810,61 @@ function activityCount(result: WalletIngestionRunResponse): number {
     result.transactions.length +
     result.swaps.length +
     result.balances.length
+  );
+}
+
+function WalletIdentityEvidence({
+  result,
+}: {
+  result: WalletIngestionRunResponse;
+}) {
+  const identity: WalletIdentityRecord = result.wallet_identity ?? {
+    status: "unavailable",
+    version: "unavailable",
+    network: "ton-unknown",
+    submitted_format: "unrecognized",
+    is_account_existence_proof: false,
+    is_ownership_proof: false,
+  };
+  const canonical = identity.canonical_address ?? "Unavailable";
+  const workchain =
+    identity.workchain_id == null
+      ? "Workchain unavailable"
+      : `Workchain ${identity.workchain_id}`;
+  const bounce =
+    identity.bounceable == null
+      ? "Bounce flag unavailable"
+      : identity.bounceable
+        ? "Bounceable input"
+        : "Non-bounceable input";
+  const scopeDetail =
+    identity.status === "network_scoped" && identity.canonical_address
+      ? `${workchain}. Network scope is part of the identity key.`
+      : `${workchain}. No network-scoped identity key is available.`;
+
+  return (
+    <div className="wallet-evidence-grid" aria-label="Persisted wallet identity">
+      <div className="wallet-evidence-card">
+        <span>Canonical wallet</span>
+        <strong>{canonical}</strong>
+        <p>The submitted address remains stored separately for audit.</p>
+      </div>
+      <div className="wallet-evidence-card">
+        <span>TON scope</span>
+        <strong>{identity.network}</strong>
+        <p>{scopeDetail}</p>
+      </div>
+      <div className="wallet-evidence-card">
+        <span>Identity contract</span>
+        <strong>
+          {identity.status} · {identity.version}
+        </strong>
+        <p>
+          {identity.submitted_format} · {bounce}. Syntax identity only; not
+          account-existence or ownership proof.
+        </p>
+      </div>
+    </div>
   );
 }
 

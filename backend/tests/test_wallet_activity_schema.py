@@ -20,6 +20,7 @@ from models import (
 )
 from schemas import (
     WalletActivityProviderEvidence,
+    WalletIdentityRecord,
     WalletIngestionPreviewRequest,
     WalletIngestionRunResponse,
     WalletTransferRecord,
@@ -193,6 +194,12 @@ def test_wallet_ingestion_response_contract_preserves_provider_evidence():
         time_window="24h",
         status="planned",
         data_mode="mock",
+        wallet_identity=WalletIdentityRecord(
+            status="unavailable",
+            version="unavailable",
+            network="ton-unknown",
+            submitted_format="unrecognized",
+        ),
         requested_surfaces=["transfers", "balances"],
         provider_evidence=[
             WalletActivityProviderEvidence(
@@ -226,5 +233,7 @@ def test_wallet_ingestion_response_contract_preserves_provider_evidence():
     )
 
     assert response.provider_evidence[0].source_status == "limited"
+    assert response.wallet_identity.status == "unavailable"
+    assert response.wallet_identity.is_ownership_proof is False
     assert response.transfers[0].asset == "TON"
     assert response.warnings[0].evidence_key == "wallet_history"

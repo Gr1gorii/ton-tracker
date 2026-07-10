@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.1 MIGRATION FOUNDATION
+# TON Wallet Intelligence Dashboard — v0.22.2 WALLET IDENTITY
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,12 +19,12 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.1 MIGRATION FOUNDATION status — database schema evolution now has a checked-in, versioned migration path. This infrastructure release adds no canonical identity, broader history, cost-basis, or PnL capability.**
+> **v0.22.2 WALLET IDENTITY status — valid TON wallet addresses can be stored as a versioned, migration-backed canonical run-wallet identity while the submitted representation remains available for audit. Legacy or invalid fixture addresses stay explicitly unavailable. This release does not canonicalize activity rows, paginate ingestion, prove history completeness, establish cost basis, or change PnL.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
 > - Wallet activity ingestion now has a dashboard workspace for coverage
->   preview, persisted mock runs, run refresh, evidence, warnings, and
+>   preview, persisted source-labeled runs, run refresh, evidence, warnings, and
 >   normalized activity tables.
 > - Wallet activity preview/run orchestration now goes through
 >   `backend/adapters/wallet_activity.py`.
@@ -40,17 +40,27 @@ executable ingestion path.
 >   probabilistic behavioral-similarity signal with JSON/CSV export — never
 >   proof of common ownership.
 > - Multi-run history readiness accepts an explicit target run and 2-50
->   distinct run ids for the same wallet and data mode. It reports exact
->   transaction overlap, weak swap-identity candidates, observed timestamp
->   bounds, asset-address and fee hash-match coverage, conflicts, and blockers.
+>   distinct run ids for the same network-scoped canonical run-wallet identity
+>   and data mode. When canonical identity is unavailable, only an exact
+>   submitted-address match is accepted as a legacy diagnostic fallback. It
+>   reports exact transaction overlap, weak swap-identity candidates, observed
+>   timestamp bounds, asset-address and fee hash-match coverage, conflicts, and
+>   blockers.
 >   Every report remains diagnostic (`is_cost_basis: false`,
 >   `eligible_for_cost_basis: false`, `used_by_pnl: false`) and is never passed
 >   into PnL.
+> - The wallet identity contract applies only to the wallet that owns an
+>   ingestion run. For valid inputs the response exposes the persisted
+>   canonical identity and contract metadata; invalid or legacy placeholder
+>   values never receive an inferred identity. Transaction, swap-action,
+>   jetton, and counterparty identity remain outside this release.
 > - Versioned Alembic revisions now provide a reviewable upgrade path for the
 >   existing SQLAlchemy schema. Startup creates fresh databases from the
 >   baseline, adopts only an exact frozen v0.22.0 legacy schema, and fails
->   closed on partial, drifted, corrupt, or unknown revisions. Application
->   payloads, history-readiness diagnostics, and PnL semantics are unchanged.
+>   closed on partial, drifted, corrupt, or unknown revisions. The additive
+>   wallet identity revision persists and backfills explicit identity status;
+>   activity-row identity, history completeness, cost basis, and PnL semantics
+>   remain unchanged.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -118,7 +128,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.1 MIGRATION FOUNDATION` product label
+> - User-facing UI copy uses the `v0.22.2 WALLET IDENTITY` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -126,8 +136,8 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.1 MIGRATION
->   FOUNDATION` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.2 WALLET
+>   IDENTITY` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -163,7 +173,11 @@ backend/
   migrations/
     env.py             Metadata, URL, and shared-connection wiring
     legacy_baseline.py Frozen v0.22.0 schema compatibility manifest
-    versions/          Versioned schema revisions
+    versions/
+      20260710_0001_baseline.py
+                       Frozen v0.22.0-compatible schema baseline
+      20260710_0002_wallet_identity.py
+                       Additive run-wallet identity fields + backfill
   routers/
     tonapi.py          TonAPI account jettons + wallet intelligence previews
     stonfi.py          STON.fi pools preview
@@ -175,6 +189,8 @@ backend/
     analysis.py        Orchestration + data_quality + provider status
     database_migrations.py
                        Fail-closed fresh/legacy migration runner
+    ton_address_identity.py
+                       Strict TON address parsing + canonical run-wallet identity
     pnl.py             Decimal-based PnL calculations
     clustering.py      Probabilistic wallet similarity / grouping
     mock_data.py       Hand-crafted mock token/pool/wallet fixtures
@@ -305,7 +321,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.1 MIGRATION FOUNDATION)
+## Data modes & providers (v0.22.2 WALLET IDENTITY)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -314,13 +330,14 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | ------------------------ | -------------------------------------------------- |
 | `DATA_MODE`              | `mock` (default) or `real`                         |
 | `TON_CHECK_DB_URL`       | Optional SQLite SQLAlchemy URL; defaults locally  |
+| `TON_NETWORK`            | `mainnet` (default) or `testnet`; scopes raw TON wallet identities and the guarded live path |
 | `GECKOTERMINAL_BASE_URL` | GeckoTerminal v2 API base (public, no key)         |
 | `TON_API_BASE_URL`       | TON indexer base URL (real TON data)               |
 | `TON_API_KEY`            | TON indexer API key                                |
 | `BITQUERY_API_URL`       | Bitquery endpoint (real DEX trades)                |
 | `BITQUERY_API_KEY`       | Bitquery API key                                   |
 | `STONFI_BASE_URL`        | STON.fi API base for pool previews                 |
-| `TONAPI_BASE_URL`        | TonAPI API base for account balance and jetton previews |
+| `TONAPI_BASE_URL`        | Optional TonAPI base; empty selects the official host for `TON_NETWORK`, and explicit official hosts must match it |
 | `TONAPI_API_KEY`         | Optional TonAPI API key                            |
 | `WALLET_ACTIVITY_PROVIDER` | `mock`, `tonapi`, `ton_provider`, `stonfi`, or `bitquery` |
 | `WALLET_ACTIVITY_LIVE_ENABLED` | `false` by default; enables the guarded TonAPI live path only when `DATA_MODE=real` and `WALLET_ACTIVITY_PROVIDER=tonapi` |
@@ -328,6 +345,10 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | `WALLET_ACTIVITY_LIVE_TX_LIMIT` | TonAPI live transaction-history page size, clamped to `1..1000` |
 | `WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT` | TonAPI live transfer-history (account events) page size, clamped to `1..1000` |
 | `WALLET_ACTIVITY_LIVE_SWAP_LIMIT` | TonAPI live DEX-swap (account events) page size, clamped to `1..1000` |
+
+When `TONAPI_BASE_URL` is empty, the backend selects `https://tonapi.io` for
+mainnet or `https://testnet.tonapi.io` for testnet. A configured official host
+that conflicts with `TON_NETWORK` is rejected before any live provider call.
 
 What is real, preview-only, mock-aware, planned, and scaffolded in this
 milestone:
@@ -358,7 +379,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.1 MIGRATION FOUNDATION` is the current
+API-version field, while `v0.22.2 WALLET IDENTITY` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -413,11 +434,21 @@ provider evidence, normalized rows, unavailable surfaces, and warnings. The
 default path persists deterministic mock-normalized rows. The TonAPI
 live guard persists native TON balance snapshots, account jetton balance
 snapshots, ordered transaction-history rows, TON/jetton transfer rows, and DEX
-swap rows only.
+swap rows only. The submitted `wallet_address` remains unchanged for audit,
+and `wallet_identity` exposes the persisted identity status, contract version,
+TON network, canonical raw address, workchain, account id, submitted format,
+and friendly-address flags. Identity metadata describes address syntax and
+network scope only; `is_account_existence_proof` and `is_ownership_proof`
+remain `false`.
 
 ### `GET /api/wallets/ingest/{run_id}`
 Returns one persisted wallet activity run by id, including provider evidence,
-unavailable surfaces, normalized rows, and warnings.
+unavailable surfaces, normalized rows, warnings, the original submitted
+`wallet_address`, and its persisted `wallet_identity`. Valid bounceable and
+non-bounceable friendly forms can share one network-scoped canonical identity;
+mainnet and testnet identities remain distinct. Invalid or legacy placeholder
+values return explicit unavailable identity metadata instead of an inferred
+address.
 
 ### `GET /api/wallets/ingest/{run_id}/export.json` and `.../export.csv`
 Download one persisted run as JSON, or as flattened one-row-per-activity CSV.
@@ -487,13 +518,19 @@ Whether figures amount to Real PnL is decided solely by requirement rows.
 
 ### `POST /api/wallets/history/readiness`
 
-Inspects an explicit set of 2-50 persisted runs for one exact wallet address
-and data mode against a target run. The response reports observed bounds,
-transaction overlap, swap-identity evidence, conflicts, asset-address and fee
-hash-match coverage, and blockers. Diagnostic only: it does not deduplicate or
-merge activity, prove complete history, establish cost basis, or change any PnL
-result; `history_complete`, `deduplication_applied`, `is_cost_basis`,
-`eligible_for_cost_basis`, and `used_by_pnl` remain `false`.
+Inspects an explicit set of 2-50 persisted runs for one network-scoped
+canonical run-wallet identity and data mode against a target run. Runs with
+different submitted bounceable/non-bounceable representations can be grouped
+when their persisted canonical identity and TON network match. If any run lacks
+complete canonical identity, all runs must use the exact same submitted
+`wallet_address`; that fallback stays visible as a legacy diagnostic blocker.
+The response preserves each submitted address, exposes wallet identity at the
+target and per-run scope, and reports observed bounds, transaction overlap,
+swap-identity evidence, conflicts, asset-address and fee hash-match coverage,
+and blockers. Diagnostic only: it does not canonicalize activity rows,
+deduplicate or merge activity, prove complete history, establish cost basis, or
+change any PnL result; `history_complete`, `deduplication_applied`,
+`is_cost_basis`, `eligible_for_cost_basis`, and `used_by_pnl` remain `false`.
 
 ### `GET /api/prices/historical/preview`
 Returns provider-reported historical rate points for one `token` (`"ton"` or
@@ -615,13 +652,13 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.1 MIGRATION FOUNDATION`).
+  tracks the current release (`v0.22.2 WALLET IDENTITY`).
 
-## Roadmap beyond v0.22.1 MIGRATION FOUNDATION
+## Roadmap beyond v0.22.2 WALLET IDENTITY
 
-- Build canonical, paginated history ingestion and a persisted identity
-  contract on top of the migration foundation before any multi-run data can
-  become a cost-basis source.
+- Build paginated ingestion plus canonical transaction, swap-action,
+  jetton-asset, and counterparty identity contracts before multi-run data can
+  become complete history or a cost-basis source.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
   into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.

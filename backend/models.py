@@ -9,7 +9,17 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+)
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -36,6 +46,13 @@ class WalletIngestionRun(Base):
     """
 
     __tablename__ = "wallet_ingestion_runs"
+    __table_args__ = (
+        Index(
+            "ix_wallet_ingestion_runs_wallet_identity",
+            "wallet_network",
+            "wallet_address_canonical",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     wallet_address = Column(String, nullable=False, index=True)
@@ -55,6 +72,26 @@ class WalletIngestionRun(Base):
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
+    wallet_identity_status = Column(
+        String(20), nullable=False, default="unavailable", server_default="unavailable"
+    )
+    wallet_identity_version = Column(
+        String(24), nullable=False, default="unavailable", server_default="unavailable"
+    )
+    wallet_network = Column(
+        String(16), nullable=False, default="ton-unknown", server_default="ton-unknown"
+    )
+    wallet_address_canonical = Column(String(76), nullable=True)
+    wallet_workchain_id = Column(Integer, nullable=True)
+    wallet_account_id_hex = Column(String(64), nullable=True)
+    wallet_address_format = Column(
+        String(16),
+        nullable=False,
+        default="unrecognized",
+        server_default="unrecognized",
+    )
+    wallet_address_bounceable = Column(Boolean, nullable=True)
+    wallet_address_testnet_only = Column(Boolean, nullable=True)
 
     transfers = relationship(
         "WalletTransfer",
