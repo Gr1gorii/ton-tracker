@@ -287,16 +287,26 @@ export async function previewHistoricalPrices(
   return (await res.json()) as HistoricalPricesPreviewResponse;
 }
 
+function walletPnlPreviewQuery(
+  includeHistorical: boolean,
+  includeUnrealized: boolean,
+): string {
+  const params = new URLSearchParams();
+  if (includeHistorical) params.set("include_historical", "true");
+  if (includeUnrealized) params.set("include_unrealized", "true");
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
 export async function getWalletRunPnlPreview(
   runId: number,
   includeHistorical = false,
   includeUnrealized = false,
 ): Promise<WalletRunPnlPreviewResponse> {
-  const params = new URLSearchParams();
-  if (includeHistorical) params.set("include_historical", "true");
-  if (includeUnrealized) params.set("include_unrealized", "true");
-  const query = params.toString();
-  const suffix = query ? `?${query}` : "";
+  const suffix = walletPnlPreviewQuery(
+    includeHistorical,
+    includeUnrealized,
+  );
   const res = await fetch(
     `${API_BASE}/api/wallets/ingest/${runId}/pnl-preview${suffix}`,
   );
@@ -311,16 +321,24 @@ export async function getWalletRunPnlPreview(
 export function walletRunPnlPreviewExportUrl(
   runId: number,
   includeHistorical = false,
+  includeUnrealized = false,
 ): string {
-  const suffix = includeHistorical ? "?include_historical=true" : "";
+  const suffix = walletPnlPreviewQuery(
+    includeHistorical,
+    includeUnrealized,
+  );
   return `${API_BASE}/api/wallets/ingest/${runId}/pnl-preview/export.json${suffix}`;
 }
 
 export function walletRunPnlPreviewCsvExportUrl(
   runId: number,
   includeHistorical = false,
+  includeUnrealized = false,
 ): string {
-  const suffix = includeHistorical ? "?include_historical=true" : "";
+  const suffix = walletPnlPreviewQuery(
+    includeHistorical,
+    includeUnrealized,
+  );
   return `${API_BASE}/api/wallets/ingest/${runId}/pnl-preview/export.csv${suffix}`;
 }
 

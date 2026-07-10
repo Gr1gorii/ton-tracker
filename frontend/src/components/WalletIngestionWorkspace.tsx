@@ -1212,9 +1212,12 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
   }
 
   const canRenderUnrealized =
-    includeUnrealized &&
     pnlResultScope?.runId === runId &&
     pnlResultScope.includeUnrealized;
+  const displayedIncludeHistorical =
+    pnlResultScope?.runId === runId && pnlResultScope.includeHistorical;
+  const displayedIncludeUnrealized =
+    pnlResultScope?.runId === runId && pnlResultScope.includeUnrealized;
 
   return (
     <div className="intelligence-table-block" aria-label="Wallet PnL preview">
@@ -1271,14 +1274,22 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
             </span>
             <a
               className="btn btn-ghost"
-              href={walletRunPnlPreviewExportUrl(runId, includeHistorical)}
+              href={walletRunPnlPreviewExportUrl(
+                runId,
+                displayedIncludeHistorical,
+                displayedIncludeUnrealized,
+              )}
               download
             >
               Export preview (JSON)
             </a>
             <a
               className="btn btn-ghost"
-              href={walletRunPnlPreviewCsvExportUrl(runId, includeHistorical)}
+              href={walletRunPnlPreviewCsvExportUrl(
+                runId,
+                displayedIncludeHistorical,
+                displayedIncludeUnrealized,
+              )}
               download
             >
               Export preview (CSV)
@@ -1306,10 +1317,17 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
                 : "Add unrealized valuation (spot)"}
             </button>
           </div>
-          {includeUnrealized && (
+          {canRenderUnrealized && (
             <p className="muted small">
-              JSON/CSV exports include historical and realized enrichment;
-              the displayed spot snapshot is view-only.
+              JSON/CSV exports match the last successfully displayed historical
+              and spot scope; unavailable holdings remain separate from the
+              priced subtotal.
+            </p>
+          )}
+          {(loading || previewError) && pnlResultScope?.runId === runId && (
+            <p className="muted small">
+              Export links keep the last successful result scope until the
+              requested refresh succeeds.
             </p>
           )}
 

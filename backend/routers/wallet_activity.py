@@ -28,6 +28,19 @@ from services.wallet_activity_ingestion import (
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
 
 
+def _derive_pnl_preview(
+    result: dict,
+    *,
+    include_historical: bool,
+    include_unrealized: bool,
+) -> dict:
+    if include_unrealized:
+        return derive_run_pnl_preview_with_unrealized(result)
+    if include_historical:
+        return derive_run_pnl_preview_with_historical(result)
+    return derive_run_pnl_preview(result)
+
+
 @router.post(
     "/ingest/preview",
     response_model=WalletIngestionPreviewResponse,
@@ -97,8 +110,9 @@ def read_wallet_ingestion_run_pnl_preview(
     include_historical: bool = Query(
         False,
         description=(
-            "Also value TON-side swap legs in USD at the nearest historical "
-            "TON/USD point. In-window flows only, never cost-basis PnL."
+            "Also value TON-side swap legs at historical TON/USD points and "
+            "derive in-window cost basis. Real PnL still requires every "
+            "evidence requirement."
         ),
     ),
     include_unrealized: bool = Query(
@@ -123,11 +137,11 @@ def read_wallet_ingestion_run_pnl_preview(
     result = get_wallet_ingestion_run(run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
-    if include_unrealized:
-        return derive_run_pnl_preview_with_unrealized(result)
-    if include_historical:
-        return derive_run_pnl_preview_with_historical(result)
-    return derive_run_pnl_preview(result)
+    return _derive_pnl_preview(
+        result,
+        include_historical=include_historical,
+        include_unrealized=include_unrealized,
+    )
 
 
 @router.get("/ingest/{run_id}/pnl-preview/export.json")
@@ -138,6 +152,13 @@ def export_wallet_ingestion_run_pnl_preview(
         description=(
             "Include USD-valued swap legs and in-window realized cost-basis "
             "results computed from historical price points."
+        ),
+    ),
+    include_unrealized: bool = Query(
+        False,
+        description=(
+            "Include spot-based unrealized records and their priced subtotal "
+            "(implies include_historical)."
         ),
     ),
     session: Session = Depends(get_session),
@@ -151,10 +172,10 @@ def export_wallet_ingestion_run_pnl_preview(
     result = get_wallet_ingestion_run(run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
-    preview = (
-        derive_run_pnl_preview_with_historical(result)
-        if include_historical
-        else derive_run_pnl_preview(result)
+    preview = _derive_pnl_preview(
+        result,
+        include_historical=include_historical,
+        include_unrealized=include_unrealized,
     )
     body = json.dumps(preview, ensure_ascii=False, indent=2)
     return Response(
@@ -178,21 +199,28 @@ def export_wallet_ingestion_run_pnl_preview_csv(
             "results computed from historical price points."
         ),
     ),
+    include_unrealized: bool = Query(
+        False,
+        description=(
+            "Include spot-based unrealized records plus optional coverage and "
+            "priced-subtotal rows (implies include_historical)."
+        ),
+    ),
     session: Session = Depends(get_session),
 ) -> Response:
     """Download the PnL preview for one persisted run as CSV.
 
-    One row per token flow, optional USD flow or realized cost-basis record,
-    and Real-PnL requirement record; whether the figures amount to Real PnL
-    is decided solely by the requirement rows.
+    One row per token flow, optional USD flow, realized cost-basis or
+    unrealized record, optional unrealized coverage and priced-subtotal rows,
+    and each Real-PnL requirement. Real PnL is decided solely by requirements.
     """
     result = get_wallet_ingestion_run(run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
-    preview = (
-        derive_run_pnl_preview_with_historical(result)
-        if include_historical
-        else derive_run_pnl_preview(result)
+    preview = _derive_pnl_preview(
+        result,
+        include_historical=include_historical,
+        include_unrealized=include_unrealized,
     )
     return Response(
         content=export.wallet_pnl_preview_to_csv(preview),

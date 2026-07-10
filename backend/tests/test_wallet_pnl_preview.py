@@ -230,7 +230,11 @@ def test_wallet_pnl_preview_to_csv_flattens_flows_and_requirements():
         "token_sold_qty,ton_spent,ton_received,net_ton_flow,fee_ton,"
         "net_ton_flow_after_fees,matched_swap_count,usd_spent,usd_received,"
         "net_usd_flow,status,sell_leg_count,proceeds_usd,cost_basis_usd,"
-        "realized_pnl_usd,remaining_qty,code,available,reason"
+        "realized_pnl_usd,remaining_qty,code,available,reason,"
+        "remaining_cost_usd,spot_price_usd,"
+        "priced_by,market_value_usd,unrealized_pnl_usd,"
+        "total_unrealized_pnl_usd,priced_record_count,"
+        "unavailable_record_count,note"
     )
     assert lines[1].startswith("token_flow,JETA,1,0,100,0,10,0,-10,")
     requirement_rows = [
@@ -359,6 +363,9 @@ def test_pnl_preview_csv_export_default_stays_offline(client, monkeypatch):
     data_rows = response.text.strip().splitlines()[1:]
     assert not any(row.startswith("usd_flow,") for row in data_rows)
     assert not any(row.startswith("realized,") for row in data_rows)
+    assert not any(row.startswith("unrealized,") for row in data_rows)
+    assert not any(row.startswith("unrealized_coverage,") for row in data_rows)
+    assert not any(row.startswith("unrealized_subtotal,") for row in data_rows)
 
 
 def test_pnl_preview_json_export_with_historical_includes_realized(

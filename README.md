@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.21.2 UNREALIZED
+# TON Wallet Intelligence Dashboard — v0.21.3 UNREALIZED EXPORTS
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.21.2 UNREALIZED status — persisted runs expose optional spot-based unrealized valuation with price-source attribution, explicit unavailable records, and a separate informational UI, on top of realized PnL, exports, cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
+> **v0.21.3 UNREALIZED EXPORTS status — persisted runs expose optional spot-based unrealized valuation in the UI and JSON/CSV exports, with price-source attribution, explicit unavailable records, coverage counts, and priced-subtotal semantics.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -76,9 +76,12 @@ executable ingestion path.
 >   switches to `pnl_mode: real_pnl` (in-window realized only; unrealized
 >   holdings and activity outside the window are excluded). Otherwise Real
 >   PnL stays locked and partial calculations are never labeled Real PnL.
-> - PnL preview JSON/CSV exports accept `include_historical=true` and then
->   carry the USD-valued flows and realized cost-basis rows alongside the
->   requirement checklist; the default export stays offline and unchanged.
+> - PnL preview JSON/CSV exports accept `include_historical=true` for
+>   USD/realized rows and `include_unrealized=true` for spot rows. CSV keeps
+>   unavailable records separate, reports coverage counts, and emits a priced
+>   subtotal only when at least one record is computed; the default export
+>   stays offline and unchanged. Empty `0/0` coverage proves only that no
+>   candidates were derived, not that the wallet has no holdings.
 > - `include_unrealized=true` implies historical enrichment, derives remaining
 >   in-window holdings from the cost-basis pass, and values them with a
 >   deterministic mock fixture or real provider-reported spot prices. Derived
@@ -103,7 +106,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.21.2 UNREALIZED` product label
+> - User-facing UI copy uses the `v0.21.3 UNREALIZED EXPORTS` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -111,8 +114,8 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.21.2
->   UNREALIZED` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.21.3
+>   UNREALIZED EXPORTS` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -262,7 +265,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.21.2 UNREALIZED)
+## Data modes & providers (v0.21.3 UNREALIZED EXPORTS)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -314,8 +317,8 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.21.2 UNREALIZED` is the current user-facing
-product release label.
+API-version field, while `v0.21.3 UNREALIZED EXPORTS` is the current
+user-facing product release label.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
@@ -430,12 +433,16 @@ Real-PnL evidence checklist.
 
 ### `GET /api/wallets/ingest/{run_id}/pnl-preview/export.json` and `.../export.csv`
 Download the PnL preview as JSON, or as flattened CSV with one row per token
-flow, USD flow, realized cost-basis record, or Real-PnL requirement record
-(tagged by `record_type`). Both accept `include_historical=true` to include
-the USD-valued flows and realized rows; the default export stays offline.
-Whether the figures amount to Real PnL is decided solely by the requirement
-rows. Spot-based unrealized rows are currently view-only and are not included
-in these JSON/CSV exports.
+flow, USD flow, realized cost-basis record, spot-based unrealized record, or
+Real-PnL requirement (tagged by `record_type`). Both accept
+`include_historical=true` for USD/realized enrichment and
+`include_unrealized=true` for unrealized rows (`include_historical` implied).
+CSV preserves unavailable records, adds a coverage row, and emits a numeric
+`unrealized_subtotal` row only when at least one record is computed; that
+subtotal excludes unavailable records. An empty `0/0` coverage row means no
+candidates were derived and does not prove that the wallet has no holdings.
+The default export stays offline.
+Whether figures amount to Real PnL is decided solely by requirement rows.
 
 ### `GET /api/prices/historical/preview`
 Returns provider-reported historical rate points for one `token` (`"ton"` or
@@ -557,12 +564,10 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.21.2 UNREALIZED`).
+  tracks the current release (`v0.21.3 UNREALIZED EXPORTS`).
 
-## Roadmap beyond v0.21.2 UNREALIZED
+## Roadmap beyond v0.21.3 UNREALIZED EXPORTS
 
-- Add spot-based unrealized records to the PnL JSON/CSV exports while keeping
-  source attribution, unavailable holdings, and priced-subtotal semantics.
 - Extend acquisition history beyond a single run window (multi-run or
   full-history ingestion) so cost basis can also cover sells of holdings
   acquired before the window.
