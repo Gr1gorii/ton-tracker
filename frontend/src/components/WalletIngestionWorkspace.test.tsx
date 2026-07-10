@@ -1,6 +1,13 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +19,7 @@ import type {
 
 const apiMocks = vi.hoisted(() => ({
   getWalletIngestionRun: vi.fn(),
+  getWalletIngestionRunCatalog: vi.fn(),
   previewWalletIngestion: vi.fn(),
   runWalletIngestion: vi.fn(),
   inspectWalletHistoryReadiness: vi.fn(),
@@ -86,6 +94,21 @@ function previewResponse(walletAddress: string): WalletIngestionPreviewResponse 
   };
 }
 
+function catalogResponse(runIds: string[], truncated = false) {
+  return {
+    runs: runIds.map((runId) => ({
+      run_id: runId,
+      wallet_hint: "EQstor…ored",
+      time_window: "custom" as const,
+      created_at: "2026-07-10T00:00:00Z",
+      status: "success" as const,
+      data_mode: "real" as const,
+    })),
+    limit: 8,
+    truncated,
+  };
+}
+
 function Harness() {
   const [accountAddress, setAccountAddress] = useState("");
   return (
@@ -97,6 +120,31 @@ function Harness() {
   );
 }
 
+function ExternalPreviewHarness() {
+  const [accountAddress, setAccountAddress] = useState("EQexternal");
+  const [runRequestId, setRunRequestId] = useState(0);
+  return (
+    <>
+      <button type="button" onClick={() => setRunRequestId((value) => value + 1)}>
+        Trigger external preview
+      </button>
+      <WalletIngestionWorkspace
+        accountAddress={accountAddress}
+        runRequestId={runRequestId}
+        onAccountAddressChange={setAccountAddress}
+      />
+    </>
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("persisted run loader", () => {
   afterEach(() => {
     cleanup();
@@ -105,6 +153,11 @@ describe("persisted run loader", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    apiMocks.getWalletIngestionRunCatalog.mockResolvedValue({
+      runs: [],
+      limit: 8,
+      truncated: false,
+    });
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0);
       return 1;
@@ -155,6 +208,146 @@ describe("persisted run loader", () => {
         .value,
     ).toBe("");
     expect(screen.queryByText("Run #25 is open read-only.")).toBeNull();
+  });
+
+  it("discovers a recent run and opens it only through the full stored-run GET", async () => {
+    const user = userEvent.setup();
+    apiMocks.getWalletIngestionRunCatalog.mockResolvedValueOnce(
+      catalogResponse(["25"]),
+    );
+    apiMocks.getWalletIngestionRun.mockResolvedValueOnce(runResponse(25));
+    render(<Harness />);
+
+    const open = await screen.findByRole("button", {
+      name: "Open stored run #25, wallet EQstor…ored",
+    });
+    expect(apiMocks.getWalletIngestionRunCatalog).toHaveBeenCalledWith(
+      8,
+      expect.any(AbortSignal),
+    );
+    expect(apiMocks.getWalletIngestionRun).not.toHaveBeenCalled();
+
+    await user.click(open);
+
+    expect(await screen.findByText("Run #25 is open read-only.")).toBeTruthy();
+    expect(apiMocks.getWalletIngestionRun).toHaveBeenCalledWith(25);
+    expect(open.getAttribute("aria-current")).toBe("true");
+    expect((screen.getByLabelText("Stored run ID") as HTMLInputElement).value).toBe(
+      "25",
+    );
+  });
+
+  it("keeps the prior catalog selection current when another row fails to open", async () => {
+    const user = userEvent.setup();
+    apiMocks.getWalletIngestionRunCatalog.mockResolvedValueOnce(
+      catalogResponse(["26", "25"]),
+    );
+    apiMocks.getWalletIngestionRun
+      .mockResolvedValueOnce(runResponse(25))
+      .mockRejectedValueOnce(new Error("Wallet ingestion run not found"));
+    render(<Harness />);
+
+    const open25 = await screen.findByRole("button", {
+      name: "Open stored run #25, wallet EQstor…ored",
+    });
+    await user.click(open25);
+    expect(await screen.findByText("Run #25 is open read-only.")).toBeTruthy();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Open stored run #26, wallet EQstor…ored",
+      }),
+    );
+
+    expect(await screen.findByText("Stored run could not be loaded.")).toBeTruthy();
+    expect(open25.getAttribute("aria-current")).toBe("true");
+    expect(screen.getByText("Run #25 is open read-only.")).toBeTruthy();
+  });
+
+  it("releases a stale opening row when an external preview supersedes its load", async () => {
+    const user = userEvent.setup();
+    const pendingLoad = deferred<WalletIngestionRunResponse>();
+    apiMocks.getWalletIngestionRunCatalog.mockResolvedValueOnce(
+      catalogResponse(["25"]),
+    );
+    apiMocks.getWalletIngestionRun.mockReturnValueOnce(pendingLoad.promise);
+    apiMocks.previewWalletIngestion.mockImplementation(async (request) =>
+      previewResponse(request.wallet_address),
+    );
+    render(<ExternalPreviewHarness />);
+
+    const open = await screen.findByRole("button", {
+      name: "Open stored run #25, wallet EQstor…ored",
+    });
+    await user.click(open);
+    expect(await screen.findByText("Opening")).toBeTruthy();
+
+    await user.click(
+      screen.getByRole("button", { name: "Trigger external preview" }),
+    );
+    expect(await screen.findByText("COVERAGE")).toBeTruthy();
+    expect((open as HTMLButtonElement).disabled).toBe(false);
+
+    pendingLoad.resolve(runResponse(25));
+    await act(async () => Promise.resolve());
+    expect((open as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("Run #25 is open read-only.")).toBeNull();
+  });
+
+  it("does not refresh the catalog when a deferred ingestion settles after unmount", async () => {
+    const user = userEvent.setup();
+    const pendingRun = deferred<WalletIngestionRunResponse>();
+    apiMocks.runWalletIngestion.mockReturnValueOnce(pendingRun.promise);
+    const rendered = render(<Harness />);
+    await waitFor(() =>
+      expect(apiMocks.getWalletIngestionRunCatalog).toHaveBeenCalledTimes(1),
+    );
+
+    await user.type(screen.getByLabelText("Wallet address"), "EQpending");
+    await user.click(screen.getByRole("button", { name: "Run ingestion" }));
+    await waitFor(() => expect(apiMocks.runWalletIngestion).toHaveBeenCalledTimes(1));
+    rendered.unmount();
+
+    pendingRun.resolve(runResponse(33));
+    await act(async () => Promise.resolve());
+    expect(apiMocks.getWalletIngestionRunCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes recent runs after a successful ingestion commit", async () => {
+    const user = userEvent.setup();
+    apiMocks.getWalletIngestionRunCatalog
+      .mockResolvedValueOnce(catalogResponse([]))
+      .mockResolvedValueOnce(catalogResponse(["33"]));
+    apiMocks.runWalletIngestion.mockResolvedValueOnce({
+      ...runResponse(33),
+      wallet_address: "EQnewrun",
+      time_window: "24h",
+      custom_start: null,
+      custom_end: null,
+      requested_surfaces: [
+        "transfers",
+        "transactions",
+        "swaps",
+        "balances",
+        "jettons",
+      ],
+    });
+    render(<Harness />);
+    await waitFor(() =>
+      expect(apiMocks.getWalletIngestionRunCatalog).toHaveBeenCalledTimes(1),
+    );
+
+    await user.type(screen.getByLabelText("Wallet address"), "EQnewrun");
+    await user.click(screen.getByRole("button", { name: "Run ingestion" }));
+
+    await waitFor(() =>
+      expect(apiMocks.getWalletIngestionRunCatalog).toHaveBeenCalledTimes(2),
+    );
+    expect(
+      await screen.findByRole("button", {
+        name: "Open stored run #33, wallet EQstor…ored",
+      }),
+    ).toBeTruthy();
   });
 
   it("preserves the prior run after a failed load", async () => {

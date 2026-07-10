@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from adapters.wallet_activity import (
@@ -163,6 +164,59 @@ def get_wallet_ingestion_run(run_id: int, session: Session) -> dict[str, Any] | 
     if run is None:
         return None
     return wallet_ingestion_run_to_response(run)
+
+
+def list_wallet_ingestion_runs(
+    *,
+    limit: int,
+    session: Session,
+) -> dict[str, Any]:
+    """Return one bounded newest-first page of persisted run summaries."""
+    statement = (
+        select(
+            WalletIngestionRun.id,
+            func.substr(WalletIngestionRun.wallet_address, 1, 6).label(
+                "wallet_prefix"
+            ),
+            func.substr(WalletIngestionRun.wallet_address, -4, 4).label(
+                "wallet_suffix"
+            ),
+            func.length(WalletIngestionRun.wallet_address).label(
+                "wallet_length"
+            ),
+            WalletIngestionRun.time_window,
+            WalletIngestionRun.created_at,
+            WalletIngestionRun.status,
+            WalletIngestionRun.data_mode,
+        )
+        .order_by(WalletIngestionRun.id.desc())
+        .limit(limit + 1)
+    )
+    candidates = list(session.execute(statement).mappings())
+    truncated = len(candidates) > limit
+    runs = candidates[:limit]
+
+    return {
+        "runs": [_wallet_ingestion_run_catalog_item(run) for run in runs],
+        "limit": limit,
+        "truncated": truncated,
+    }
+
+
+def _wallet_ingestion_run_catalog_item(run) -> dict[str, Any]:
+    wallet_hint = (
+        f'{run["wallet_prefix"]}…{run["wallet_suffix"]}'
+        if run["wallet_length"] >= 16
+        else "stored…run"
+    )
+    return {
+        "run_id": str(run["id"]),
+        "wallet_hint": wallet_hint,
+        "time_window": run["time_window"],
+        "created_at": _isoformat(run["created_at"]),
+        "status": run["status"],
+        "data_mode": run["data_mode"],
+    }
 
 
 def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:

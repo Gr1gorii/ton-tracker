@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.8 PERSISTED RUN LOADER
+# TON Wallet Intelligence Dashboard — v0.22.9 RECENT RUN CATALOG
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.8 PERSISTED RUN LOADER status — the wallet workspace can load a previously persisted ingestion run through the existing `GET /api/wallets/ingest/{run_id}` endpoint. The backend accepts only canonical positive signed-64-bit URL ids (`[1-9][0-9]*`, at most `9223372036854775807`): an existing run returns 200, a canonical missing run returns 404, and malformed, noncanonical, zero, negative, or out-of-range input returns 422. Readback is database-only: it performs no ingestion, provider call, or database mutation. The response includes exact persisted `custom_start`, `custom_end`, and `created_at` values. The browser applies the narrower positive JavaScript safe-integer gate, restores stored controls only after a coherent response, atomically replaces preview/run state, preserves the prior run after a failed load, and remounts run-scoped cards when the selected run id changes. Datetime request signatures are normalized before stale-state comparison. The `wallet_history_readiness_v0.22.7` analysis and `wallet_multi_run_interval_coverage_v1` contract remain unchanged; no activity merge, deduplication, global history, cost basis, or PnL claim is introduced.**
+> **v0.22.9 RECENT RUN CATALOG status — `GET /api/wallets/ingest?limit=8` returns one privacy-bounded newest-first catalog of persisted runs. `limit` is an optional canonical positive decimal from `1` through `50`; duplicate, unknown, malformed, noncanonical, or out-of-range query input returns 422. Every item contains exactly six fields: canonical signed-64-bit `run_id` as a decimal string, bounded masked `wallet_hint`, `time_window`, `created_at`, `status`, and `data_mode`. The fixed ID-descending query projects only those values from `wallet_ingestion_runs`, fetches at most `limit + 1`, and reports `truncated` instead of exposing an offset, cursor, total count, activity rows, provider evidence, full address, or custom bounds. Both server and browser use `no-store`. Catalog discovery and `GET /api/wallets/ingest/{run_id}` readback perform no ingestion, provider call, or database mutation. The workspace shows three of the eight requested entries until expanded, keeps the last successful catalog on refresh failure, rejects stale or malformed responses, and opens only JavaScript-safe IDs through the full stored-run endpoint. The `wallet_history_readiness_v0.22.7` analysis and `wallet_multi_run_interval_coverage_v1` contract remain unchanged; no activity merge, deduplication, global history, cost basis, or PnL claim is introduced.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -35,6 +35,12 @@ executable ingestion path.
 >   immediate preview/run action until the corresponding field is edited, so
 >   DST folds and
 >   sub-millisecond precision are not silently changed by `datetime-local`.
+> - A separate recent-run catalog requests the newest eight persisted runs and
+>   initially shows three. It can expand to all eight, refresh independently,
+>   retry after failure, and retains the last successful list while a refresh
+>   fails. Selecting a safe row delegates to the existing full stored-run GET;
+>   signed-64-bit ids outside the browser safe-integer range remain visible as
+>   exact decimal strings but cannot be opened from that browser control.
 > - Wallet activity preview/run orchestration now goes through
 >   `backend/adapters/wallet_activity.py`.
 > - `WALLET_ACTIVITY_PROVIDER=mock` remains the default. Explicit
@@ -91,9 +97,9 @@ executable ingestion path.
 >   Revision 0005 adds retry-safe provider event/action observation fields and
 >   indexes to transfers and swaps. v0.22.5 rows lack the original action index,
 >   so they remain explicitly unavailable instead of receiving a guessed key.
->   v0.22.7 added no database migration, and v0.22.8 also adds none; Alembic
->   head remains `20260710_0005`. Interval coverage and persisted-run readback
->   remain read-only over existing evidence.
+>   v0.22.7, v0.22.8, and v0.22.9 add no database migration; Alembic head
+>   remains `20260710_0005`. Interval coverage, persisted-run readback, and the
+>   recent-run catalog remain read-only over existing evidence.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -161,7 +167,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.8 PERSISTED RUN LOADER` product label
+> - User-facing UI copy uses the `v0.22.9 RECENT RUN CATALOG` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -171,8 +177,8 @@ executable ingestion path.
 >   provider evidence.
 > - The frontend uses Vite 8 and Vitest 4 for its build/test toolchain; the
 >   checked-in dependency graph reports zero `npm audit` vulnerabilities.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.8 PERSISTED
->   RUN LOADER` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.9 RECENT RUN
+>   CATALOG` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -283,6 +289,10 @@ frontend/
     api.ts             API client + export URLs
     types.ts           Types mirroring the backend payload
     format.ts          Display formatting helpers
+    useWalletRunCatalog.ts
+                       Abortable newest-run catalog state and refresh lifecycle
+    walletRunCatalog.ts
+                       Strict six-field catalog response validation
     components/
       PoolUrlInput.tsx
       TimeWindowPicker.tsx
@@ -290,6 +300,8 @@ frontend/
       PreviewReadinessStrip.tsx
       PreviewFreshnessStrip.tsx
       WalletIngestionWorkspace.tsx
+      WalletRunCatalog.tsx
+                       Collapsed privacy-bounded recent-run selector
       TonapiWalletIntelligencePreviewPanel.tsx
       TonapiAccountJettonsPreviewPanel.tsx
       StonfiPoolsPreviewPanel.tsx
@@ -374,7 +386,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.8 PERSISTED RUN LOADER)
+## Data modes & providers (v0.22.9 RECENT RUN CATALOG)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -436,7 +448,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.8 PERSISTED RUN LOADER` is the current
+API-version field, while `v0.22.9 RECENT RUN CATALOG` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -539,6 +551,47 @@ nodes, and 128 characters per numeric token. Oversized, excessively nested,
 malformed, non-finite, or invalidly encoded JSON is reported as sanitized
 provider protocol evidence rather than an uncaught parser/resource failure.
 
+### `GET /api/wallets/ingest?limit=8`
+
+Returns a bounded catalog of the newest persisted wallet-ingestion runs. The
+default limit is `8`; an explicit `limit` must be one canonical ASCII decimal
+integer from `1` through `50`. Leading zeros, signs, whitespace, decimals,
+booleans, empty values, duplicates, unknown query parameters, and values above
+`50` return 422.
+
+The response contains only `runs`, the validated `limit`, and `truncated`.
+Each run summary has exactly these six fields:
+
+- `run_id`: canonical positive signed-64-bit decimal string;
+- `wallet_hint`: at most 11 characters, formed from the first six and last four
+  submitted-address characters with one ellipsis between them; legacy values
+  shorter than 16 characters use the non-reconstructing `stored…run` sentinel;
+- `time_window`;
+- `created_at`;
+- `status`;
+- `data_mode`.
+
+The full submitted address, canonical account identity, custom bounds,
+requested surfaces, provider evidence, activity rows and counts, messages, and
+warnings are not catalog fields. Newest means fixed descending persisted run
+id. The endpoint has no offset, cursor, client-selected sort, filter, or total
+count: it projects only the six summary values from `wallet_ingestion_runs`,
+reads at most `limit + 1` rows in one SELECT, and sets `truncated: true` when an
+older run exists. It never loads child activity tables, settings, or an
+ingestion provider, and performs no database mutation. The response and browser
+request both use `no-store`.
+
+The wallet input is bounded to 128 characters in both backend validation and
+the browser control. The UI requests eight entries, shows the newest three
+while collapsed, and can expand to all eight. Its catalog request has an
+independent abort controller and sequence guard, so a stale refresh cannot
+replace a newer result or interfere with ingestion and full-run loading. A
+refresh failure preserves the last successful catalog and exposes retry; a
+successful ingestion refreshes the catalog. Selecting a row still loads the
+complete run through `GET /api/wallets/ingest/{run_id}`. Decimal ids outside
+the JavaScript safe-integer range remain displayable but their open action is
+disabled rather than rounded.
+
 ### `GET /api/wallets/ingest/{run_id}`
 Returns one persisted wallet activity run by id, including provider evidence,
 unavailable surfaces, normalized rows, warnings, the original submitted
@@ -566,8 +619,9 @@ event display stream. Runs created before migration 0004 have no synthesized
 stream or page records; their pagination state remains unavailable rather than
 inferred.
 
-This is the existing persisted-run read endpoint reused by the v0.22.8 loader;
-loading does not create a second endpoint or a new run. The URL id must be a
+This is the existing persisted-run read endpoint introduced into the workspace
+by v0.22.8 and still used by v0.22.9 catalog selection; loading does not create
+a second full-run endpoint or a new run. The URL id must be a
 canonical positive decimal string matching `[1-9][0-9]*` and fit the positive
 signed-64-bit range (`1..9223372036854775807`). A stored run returns 200, a
 canonical but absent id returns 404, and malformed, noncanonical, zero,
@@ -835,9 +889,9 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.8 PERSISTED RUN LOADER`).
+  tracks the current release (`v0.22.9 RECENT RUN CATALOG`).
 
-## Roadmap beyond v0.22.8 PERSISTED RUN LOADER
+## Roadmap beyond v0.22.9 RECENT RUN CATALOG
 
 - Add authoritative low-level transfer/trade acquisition or trace-backed
   reconstruction before treating derived transfer or swap actions as complete.

@@ -258,6 +258,23 @@ export async function getWalletIngestionRun(
   return (await res.json()) as WalletIngestionRunResponse;
 }
 
+export async function getWalletIngestionRunCatalog(
+  limit: number,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(`${API_BASE}/api/wallets/ingest?${params}`, {
+    cache: "no-store",
+    signal,
+  });
+
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Wallet run catalog read failed"));
+  }
+
+  return await res.json();
+}
+
 export async function getWalletRunSignals(
   runId: number,
 ): Promise<WalletRunSignalsResponse> {

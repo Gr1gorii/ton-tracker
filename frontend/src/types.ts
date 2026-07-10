@@ -707,11 +707,26 @@ export interface WalletIdentityRecord {
   is_ownership_proof: false;
 }
 
+export interface WalletIngestionRunCatalogItem {
+  run_id: string;
+  wallet_hint: string;
+  time_window: TimeWindow;
+  created_at: string;
+  status: WalletIngestionStatus;
+  data_mode: "mock" | "real";
+}
+
+export interface WalletIngestionRunCatalogResponse {
+  runs: WalletIngestionRunCatalogItem[];
+  limit: number;
+  truncated: boolean;
+}
+
 export interface WalletIngestionRunResponse {
   run_id: number;
   wallet_address: string;
   wallet_identity: WalletIdentityRecord;
-  time_window: string;
+  time_window: TimeWindow;
   custom_start: string | null;
   custom_end: string | null;
   created_at: string;

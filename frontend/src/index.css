@@ -4030,6 +4030,208 @@ body {
   color: var(--error);
 }
 
+.wallet-run-catalog {
+  grid-column: 1 / -1;
+  min-width: 0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(33, 74, 49, 0.68);
+}
+
+.wallet-run-catalog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wallet-run-catalog-head > div {
+  min-width: 0;
+}
+
+.wallet-run-catalog-head strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.wallet-run-catalog-head p {
+  max-width: 760px;
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.wallet-run-catalog-refresh {
+  flex: 0 0 auto;
+  min-height: 44px;
+}
+
+.wallet-run-catalog-loading,
+.wallet-run-catalog-empty,
+.wallet-run-catalog-error {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid rgba(33, 74, 49, 0.66);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.wallet-run-catalog-loading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.wallet-run-catalog-loading .spinner {
+  width: 16px;
+  height: 16px;
+}
+
+.wallet-run-catalog-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-color: rgba(255, 92, 92, 0.42);
+  background: rgba(255, 92, 92, 0.07);
+  color: var(--error);
+}
+
+.wallet-run-catalog-error strong,
+.wallet-run-catalog-error small {
+  display: block;
+}
+
+.wallet-run-catalog-error small {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.wallet-run-catalog-list {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wallet-run-catalog-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(260px, 1.4fr) minmax(112px, auto);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid rgba(33, 74, 49, 0.6);
+  border-radius: 7px;
+  background: rgba(2, 6, 4, 0.46);
+}
+
+.wallet-run-catalog-row-current {
+  border-color: rgba(0, 230, 118, 0.58);
+  background: rgba(0, 230, 118, 0.055);
+  box-shadow: inset 3px 0 0 rgba(0, 230, 118, 0.72);
+}
+
+.wallet-run-catalog-identity,
+.wallet-run-catalog-meta,
+.wallet-run-catalog-action {
+  min-width: 0;
+}
+
+.wallet-run-catalog-identity > div,
+.wallet-run-catalog-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.wallet-run-catalog-identity code {
+  color: var(--peak-green);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.wallet-run-catalog-identity > span {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10.5px;
+}
+
+.wallet-run-catalog-meta {
+  color: var(--text-secondary);
+  font-size: 10.5px;
+}
+
+.wallet-run-catalog-meta time {
+  color: var(--muted);
+}
+
+.wallet-run-catalog-action {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+}
+
+.wallet-run-catalog-action .btn {
+  min-width: 104px;
+  min-height: 44px;
+}
+
+.wallet-run-catalog-action small {
+  max-width: 220px;
+  color: var(--warning);
+  font-size: 9.5px;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.wallet-run-catalog-expand {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary-green);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wallet-run-catalog-expand:hover {
+  color: var(--peak-green);
+}
+
+.wallet-run-catalog-expand:focus-visible,
+.wallet-run-catalog-row .btn:focus-visible,
+.wallet-run-catalog-refresh:focus-visible {
+  outline: 2px solid rgba(0, 230, 118, 0.78);
+  outline-offset: 3px;
+}
+
+.wallet-run-catalog-truncated {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.wallet-run-catalog-error .btn {
+  min-height: 44px;
+}
+
 .wallet-stored-run-scope {
   overflow-wrap: anywhere;
 }
@@ -4202,6 +4404,56 @@ body {
 
   .wallet-run-loader-button {
     width: 100%;
+  }
+
+  .wallet-run-catalog-head,
+  .wallet-run-catalog-error {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .wallet-run-catalog-refresh,
+  .wallet-run-catalog-error .btn {
+    width: 100%;
+  }
+
+  .wallet-run-catalog-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .wallet-run-catalog-meta {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .wallet-run-catalog-action {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 460px) {
+  .wallet-run-catalog-row {
+    grid-template-columns: 1fr;
+  }
+
+  .wallet-run-catalog-meta,
+  .wallet-run-catalog-action {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .wallet-run-catalog-action {
+    justify-items: stretch;
+  }
+
+  .wallet-run-catalog-action .btn {
+    width: 100%;
+  }
+
+  .wallet-run-catalog-action small {
+    max-width: none;
+    text-align: left;
   }
 }
 

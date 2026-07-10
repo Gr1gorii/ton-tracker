@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,11 @@ from database import get_session
 from schemas import WalletClusterCompareRequest, WalletClusterCompareResponse
 from schemas import WalletHistoryReadinessRequest, WalletHistoryReadinessResponse
 from schemas import WalletIngestionPreviewRequest, WalletIngestionPreviewResponse
-from schemas import WalletIngestionRunResponse, WalletRunSignalsResponse
+from schemas import (
+    WalletIngestionRunCatalogResponse,
+    WalletIngestionRunResponse,
+    WalletRunSignalsResponse,
+)
 from schemas import WalletRunPnlPreviewResponse
 from services import export
 from services.pnl_preview import derive_run_pnl_preview
@@ -24,11 +28,13 @@ from services.wallet_activity_signals import derive_run_signals
 from services.wallet_activity_ingestion import (
     build_wallet_ingestion_preview,
     get_wallet_ingestion_run,
+    list_wallet_ingestion_runs,
     persist_mock_wallet_ingestion,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
 _MAX_SQLITE_RUN_ID = 2**63 - 1
+_MAX_RUN_CATALOG_LIMIT = 50
 
 
 def _derive_pnl_preview(
@@ -71,6 +77,60 @@ def run_wallet_ingestion(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _canonical_positive_integer(
+    raw_value: str,
+    *,
+    field_name: str,
+    maximum: int,
+) -> int:
+    value = int(raw_value, 10)
+    if value > maximum:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{field_name} must be a canonical positive integer no greater than {maximum}",
+        )
+    return value
+
+
+@router.get(
+    "/ingest",
+    response_model=WalletIngestionRunCatalogResponse,
+)
+def read_wallet_ingestion_run_catalog(
+    request: Request,
+    response: Response,
+    limit: str = Query(
+        "8",
+        pattern=r"^[1-9][0-9]*$",
+        max_length=2,
+        description="Canonical page size from 1 through 50.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """List a bounded newest-first page of persisted runs without ingestion."""
+    query_pairs = request.query_params.multi_items()
+    if any(name != "limit" for name, _value in query_pairs):
+        raise HTTPException(
+            status_code=422,
+            detail="wallet run catalog accepts only the limit query parameter",
+        )
+    if len(request.query_params.getlist("limit")) > 1:
+        raise HTTPException(
+            status_code=422,
+            detail="wallet run catalog limit must be provided at most once",
+        )
+    canonical_limit = _canonical_positive_integer(
+        limit,
+        field_name="limit",
+        maximum=_MAX_RUN_CATALOG_LIMIT,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return list_wallet_ingestion_runs(
+        limit=canonical_limit,
+        session=session,
+    )
+
+
 @router.get(
     "/ingest/{run_id}",
     response_model=WalletIngestionRunResponse,
@@ -85,12 +145,11 @@ def read_wallet_ingestion_run(
     session: Session = Depends(get_session),
 ) -> dict:
     """Read one persisted wallet ingestion run."""
-    canonical_run_id = int(run_id, 10)
-    if canonical_run_id > _MAX_SQLITE_RUN_ID:
-        raise HTTPException(
-            status_code=422,
-            detail="run_id must be a canonical positive signed 64-bit integer",
-        )
+    canonical_run_id = _canonical_positive_integer(
+        run_id,
+        field_name="run_id",
+        maximum=_MAX_SQLITE_RUN_ID,
+    )
     result = get_wallet_ingestion_run(canonical_run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")

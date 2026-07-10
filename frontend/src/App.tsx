@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.8 PERSISTED RUN LOADER";
+const RELEASE_LABEL = "v0.22.9 RECENT RUN CATALOG";
 
 const navItems = [
   "DASHBOARD",
@@ -942,20 +942,25 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Read-only persisted-run resume</strong>
+            <strong>Privacy-bounded recent-run discovery</strong>
             <p>
-              Open any canonical stored run ID without executing ingestion or
-              mutating the database. The workspace restores its exact request
-              scope and remounts run-scoped diagnostics while failed loads keep
-              the current result visible.
+              Discover the newest persisted runs through masked wallet hints and
+              minimal metadata, then open one through the existing read-only
+              loader. Catalog reads use one bounded query, never call providers,
+              and never mutate stored evidence.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="ready"
+            label="Recent run catalog"
+            text="The newest eight run IDs are listed newest-first with bounded masked wallet hints, status, mode, window, and persistence time only. The response is no-store and intentionally excludes full addresses, provider evidence, activity rows, counts, and custom bounds."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
             label="Stored run resume"
-            text="Canonical positive run IDs load through the persisted-run GET path; related signal and PnL cards may issue their own read-only GETs. No loader action writes data or calls ingestion providers."
+            text="Selecting a safe catalog ID still loads the complete run through the canonical persisted-run GET path. Failed opens preserve the previous result, and exact IDs outside the browser safe-integer range stay visible but disabled."
           />
           <ReleaseReadinessItem
             tone="ready"

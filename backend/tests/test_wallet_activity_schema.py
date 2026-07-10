@@ -23,6 +23,7 @@ from schemas import (
     WalletEventActionIdentityRecord,
     WalletIdentityRecord,
     WalletIngestionPreviewRequest,
+    WalletIngestionRunCatalogResponse,
     WalletIngestionRunResponse,
     WalletTransferRecord,
 )
@@ -199,6 +200,12 @@ def test_wallet_ingestion_preview_request_validates_scope():
 
     with pytest.raises(ValidationError):
         WalletIngestionPreviewRequest(
+            wallet_address="E" * 129,
+            time_window="24h",
+        )
+
+    with pytest.raises(ValidationError):
+        WalletIngestionPreviewRequest(
             wallet_address="EQwallet",
             time_window="custom",
             custom_start="2026-06-01T00:00:00Z",
@@ -281,3 +288,82 @@ def test_wallet_ingestion_response_contract_preserves_provider_evidence():
         is False
     )
     assert response.warnings[0].evidence_key == "wallet_history"
+
+
+def test_wallet_ingestion_catalog_schema_enforces_canonical_order_and_bounds():
+    response = WalletIngestionRunCatalogResponse(
+        runs=[
+            {
+                "run_id": "9",
+                "wallet_hint": "EQwall…llet",
+                "time_window": "24h",
+                "created_at": "2026-07-10T00:00:00Z",
+                "status": "success",
+                "data_mode": "real",
+            },
+            {
+                "run_id": "8",
+                "wallet_hint": "EQwall…llet",
+                "time_window": "custom",
+                "created_at": "2026-07-09T00:00:00Z",
+                "status": "partial",
+                "data_mode": "real",
+            },
+        ],
+        limit=2,
+        truncated=True,
+    )
+
+    assert [run.run_id for run in response.runs] == ["9", "8"]
+
+    with pytest.raises(ValidationError):
+        WalletIngestionRunCatalogResponse(
+            runs=[response.runs[1], response.runs[0]],
+            limit=2,
+            truncated=True,
+        )
+    with pytest.raises(ValidationError):
+        WalletIngestionRunCatalogResponse(
+            runs=[response.runs[0], response.runs[0]],
+            limit=2,
+            truncated=True,
+        )
+    with pytest.raises(ValidationError):
+        WalletIngestionRunCatalogResponse(
+            runs=[response.runs[0]],
+            limit=2,
+            truncated=True,
+        )
+    with pytest.raises(ValidationError):
+        WalletIngestionRunCatalogResponse(
+            runs=[
+                {
+                    **response.runs[0].model_dump(),
+                    "run_id": str(2**63),
+                }
+            ],
+            limit=1,
+            truncated=False,
+        )
+    with pytest.raises(ValidationError):
+        WalletIngestionRunCatalogResponse(
+            runs=[
+                {
+                    **response.runs[0].model_dump(),
+                    "wallet_hint": "EQshort",
+                }
+            ],
+            limit=1,
+            truncated=False,
+        )
+    with pytest.raises(ValidationError):
+        WalletIngestionRunCatalogResponse(
+            limit=1,
+            truncated=False,
+        )
+    with pytest.raises(ValidationError):
+        WalletIngestionRunCatalogResponse(
+            runs=[],
+            limit=1,
+            truncated="false",
+        )
