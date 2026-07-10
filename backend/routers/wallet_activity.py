@@ -20,6 +20,7 @@ from schemas import (
     WalletPersistedTraceEvidenceResponse,
     WalletNativeTonFlowObservationsResponse,
     WalletNativeTonAssetBindingResponse,
+    WalletCounterpartyObservationBindingResponse,
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
@@ -59,6 +60,7 @@ from services.wallet_trace_boc_verification import (
     verify_wallet_transaction_trace_bocs,
 )
 from services.wallet_native_ton_flow_observations import (
+    get_wallet_counterparty_observation_binding,
     get_wallet_native_ton_asset_binding,
     get_wallet_native_ton_flow_observations,
 )
@@ -145,6 +147,54 @@ def read_wallet_native_ton_asset_binding(
             status_code=503,
             detail="Native TON asset binding storage is unavailable.",
             headers=no_store_headers,
+        ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/boc-verification/counterparties",
+    response_model=WalletCounterpartyObservationBindingResponse,
+)
+def read_wallet_counterparty_observation_binding(
+    response: Response,
+    run_id: str = Path(..., description="Canonical positive persisted run id."),
+    transaction_hash: str = Path(..., description="Canonical transaction hash."),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Group verified flow endpoints under non-authoritative account keys."""
+    headers = {"Cache-Control": "no-store"}
+    response.headers.update(headers)
+    canonical_run_id = _validated_trace_path(run_id, transaction_hash, headers)
+    try:
+        result = get_wallet_counterparty_observation_binding(
+            canonical_run_id, transaction_hash, session
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Counterparty observation binding not found",
+                headers=headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc), headers=headers) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletTraceBocVerificationConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc), headers=headers) from exc
+    except (
+        WalletPersistedTraceEvidenceFailure,
+        WalletTraceBocVerificationFailure,
+        SQLAlchemyError,
+    ) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Counterparty observation storage is unavailable.",
+            headers=headers,
         ) from exc
 
 

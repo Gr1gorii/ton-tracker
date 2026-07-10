@@ -1,13 +1,13 @@
-# TON Wallet Intelligence Dashboard — v0.23.5 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.23.6 Promotion Checklist
 
-Operational gates for canonical native Toncoin asset identity binding.
+Operational gates for network-scoped counterparty observation identity.
 
 ## Version and migration
 
-- Product label is `v0.23.5 NATIVE TON ASSET IDENTITY`; backend API version stays
+- Product label is `v0.23.6 COUNTERPARTY OBSERVATION IDENTITY`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is exactly `ton_native_asset_binding_v1`; prior trace,
-  BOC, message, and native-flow contracts remain unchanged.
+- New public contract is `ton_counterparty_observation_binding_v1`; all prior
+  evidence, flow, and asset contracts remain unchanged.
 - Alembic head is `20260710_0007`, adding only
   `wallet_trace_boc_verifications` and `wallet_trace_boc_transactions`.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
@@ -42,6 +42,10 @@ Operational gates for canonical native Toncoin asset identity binding.
 
 ## Endpoint and UI
 
+- `GET .../boc-verification/counterparties` groups only verified flow endpoints
+  by canonical network/account and recomputes directional totals.
+- Keys explicitly identify observations, never actors, owners, beneficiaries,
+  intent, or authority.
 - `GET .../boc-verification/native-ton-asset` binds every upstream flow identity
   to `ton_native_asset_v1|{network}`, nine decimals, and nanoton base units.
 - Binding count, asset key, upstream digest, and canonical binding digest must
@@ -71,11 +75,11 @@ Operational gates for canonical native Toncoin asset identity binding.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Live run 32 binds one 3 TON observation to the mainnet native asset and
-  produces a stable binding digest provider-free.
+- Live run 32 groups one observed counterparty and its 3 TON outgoing evidence
+  provider-free while every actor/ownership/PnL flag remains false.
 - Credential/prohibited-brand scans are clean and README has no diff.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.23.5` on the merge commit.
+  a ready PR, then create annotated tag `v0.23.6` on the merge commit.
 
 ## Rollback
 

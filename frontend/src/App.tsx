@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.5 NATIVE TON ASSET IDENTITY";
+const RELEASE_LABEL = "v0.23.6 COUNTERPARTY OBSERVATION IDENTITY";
 
 const navItems = [
   "DASHBOARD",
@@ -942,16 +942,20 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Canonical network-scoped Toncoin identity</strong>
+            <strong>Network-scoped counterparty observations</strong>
             <p>
-              Bind every verified native flow to one canonical TON asset key,
-              nine decimals, and nanoton base units. Jetton and counterparty
-              identities remain separate future contracts; cost basis and PnL
-              still cannot consume these observations.
+              Group verified header endpoints under stable network/account keys.
+              These keys identify evidence rows only — never an actor, owner,
+              beneficiary, intent, cost-basis identity, or PnL counterparty.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Counterparty observation identity"
+            text="Canonical network/account keys group flow evidence and totals deterministically. They identify message-header observations only and never prove an actor, owner, beneficiary, or intent."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Native Toncoin asset identity"

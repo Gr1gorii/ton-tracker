@@ -21,6 +21,8 @@ NATIVE_TON_FLOW_CONTRACT_VERSION = "ton_native_flow_observations_v1"
 NATIVE_TON_FLOW_IDENTITY_VERSION = "ton_native_message_flow_obs_v1"
 NATIVE_TON_ASSET_BINDING_CONTRACT_VERSION = "ton_native_asset_binding_v1"
 NATIVE_TON_ASSET_IDENTITY_VERSION = "ton_native_asset_v1"
+COUNTERPARTY_BINDING_CONTRACT_VERSION = "ton_counterparty_observation_binding_v1"
+COUNTERPARTY_IDENTITY_VERSION = "ton_counterparty_account_obs_v1"
 
 
 def get_wallet_native_ton_flow_observations(
@@ -229,11 +231,114 @@ def get_wallet_native_ton_asset_binding(
     }
 
 
+def get_wallet_counterparty_observation_binding(
+    run_id: int,
+    transaction_hash: str,
+    session: Session,
+) -> dict[str, Any] | None:
+    """Group header endpoints under explicit non-authoritative account keys."""
+    flows = get_wallet_native_ton_flow_observations(
+        run_id,
+        transaction_hash,
+        session,
+    )
+    if flows is None:
+        return None
+    grouped: dict[str, dict[str, Any]] = {}
+    for flow in flows["flows"]:
+        account = flow["counterparty_account_observed"]
+        workchain_text, account_hex = account.split(":", 1)
+        record = grouped.setdefault(
+            account,
+            {
+                "identity_version": COUNTERPARTY_IDENTITY_VERSION,
+                "identity_key": "|".join(
+                    (COUNTERPARTY_IDENTITY_VERSION, flows["network"], account)
+                ),
+                "network": flows["network"],
+                "account_canonical": account,
+                "workchain_id": int(workchain_text, 10),
+                "account_id_hex": account_hex,
+                "flow_observation_identities": [],
+                "directions": set(),
+                "incoming_nanoton": 0,
+                "outgoing_nanoton": 0,
+                "self_nanoton": 0,
+            },
+        )
+        record["flow_observation_identities"].append(
+            flow["observation_identity"]
+        )
+        record["directions"].add(flow["direction"])
+        record[f"{flow['direction']}_nanoton"] += int(
+            flow["amount_nanoton"], 10
+        )
+    counterparties = []
+    for account in sorted(grouped):
+        record = grouped[account]
+        counterparties.append(
+            {
+                **record,
+                "flow_observation_identities": sorted(
+                    record["flow_observation_identities"]
+                ),
+                "directions": sorted(record["directions"]),
+                "incoming_nanoton": str(record["incoming_nanoton"]),
+                "outgoing_nanoton": str(record["outgoing_nanoton"]),
+                "self_nanoton": str(record["self_nanoton"]),
+            }
+        )
+    document = {
+        "contract_version": COUNTERPARTY_BINDING_CONTRACT_VERSION,
+        "message_evidence_digest_sha256": flows[
+            "message_evidence_digest_sha256"
+        ],
+        "counterparties": counterparties,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            document,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "contract_version": COUNTERPARTY_BINDING_CONTRACT_VERSION,
+        "verification_id": flows["verification_id"],
+        "capture_id": flows["capture_id"],
+        "run_id": flows["run_id"],
+        "network": flows["network"],
+        "wallet_account_canonical": flows["wallet_account_canonical"],
+        "anchor": flows["anchor"],
+        "message_evidence_digest_sha256": flows[
+            "message_evidence_digest_sha256"
+        ],
+        "counterparty_count": len(counterparties),
+        "counterparties": counterparties,
+        "counterparty_binding_digest_sha256": digest,
+        "network_scoped_account_observation_identity": True,
+        "is_authoritative_actor_identity": False,
+        "is_ownership_proof": False,
+        "activity_merge_applied": False,
+        "deduplication_applied": False,
+        "eligible_for_cost_basis": False,
+        "used_by_pnl": False,
+        "message": (
+            "Message-header counterparty endpoints were grouped by canonical "
+            "network account. These keys identify observations, not actors, "
+            "owners, beneficiaries, or transaction intent."
+        ),
+    }
 __all__ = [
+    "COUNTERPARTY_BINDING_CONTRACT_VERSION",
+    "COUNTERPARTY_IDENTITY_VERSION",
     "NATIVE_TON_ASSET_BINDING_CONTRACT_VERSION",
     "NATIVE_TON_ASSET_IDENTITY_VERSION",
     "NATIVE_TON_FLOW_CONTRACT_VERSION",
     "NATIVE_TON_FLOW_IDENTITY_VERSION",
     "get_wallet_native_ton_flow_observations",
     "get_wallet_native_ton_asset_binding",
+    "get_wallet_counterparty_observation_binding",
 ]

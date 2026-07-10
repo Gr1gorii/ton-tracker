@@ -839,6 +839,69 @@ class WalletNativeTonAssetBindingResponse(BaseModel):
         return self
 
 
+class WalletCounterpartyObservationRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    identity_version: Literal["ton_counterparty_account_obs_v1"]
+    identity_key: str = Field(min_length=70, max_length=180)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    account_canonical: str = Field(min_length=66, max_length=76)
+    workchain_id: Annotated[int, Field(strict=True, ge=-(2**31), le=2**31 - 1)]
+    account_id_hex: str = Field(pattern=r"^[0-9a-f]{64}$")
+    flow_observation_identities: list[
+        Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    ]
+    directions: list[Literal["incoming", "outgoing", "self"]]
+    incoming_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    outgoing_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    self_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+
+    @model_validator(mode="after")
+    def _counterparty_identity_must_match_account(self):
+        expected = f"ton_counterparty_account_obs_v1|{self.network}|{self.account_canonical}"
+        if self.identity_key != expected:
+            raise ValueError("counterparty observation identity changed")
+        if self.account_canonical != f"{self.workchain_id}:{self.account_id_hex}":
+            raise ValueError("counterparty canonical account changed")
+        if len(set(self.flow_observation_identities)) != len(
+            self.flow_observation_identities
+        ):
+            raise ValueError("counterparty flow identities are invalid")
+        return self
+
+
+class WalletCounterpartyObservationBindingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_counterparty_observation_binding_v1"]
+    verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    anchor: WalletTransactionTraceAnchorRecord
+    message_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    counterparty_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    counterparties: list[WalletCounterpartyObservationRecord]
+    counterparty_binding_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    network_scoped_account_observation_identity: Literal[True]
+    is_authoritative_actor_identity: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _counterparty_rows_must_match_count(self):
+        if len(self.counterparties) != self.counterparty_count:
+            raise ValueError("counterparties must match counterparty_count")
+        if any(row.network != self.network for row in self.counterparties):
+            raise ValueError("counterparty network changed")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

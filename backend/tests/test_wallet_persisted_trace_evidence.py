@@ -30,6 +30,7 @@ from schemas import (
     WalletPersistedTraceEvidenceResponse,
     WalletNativeTonFlowObservationsResponse,
     WalletNativeTonAssetBindingResponse,
+    WalletCounterpartyObservationBindingResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
 )
@@ -807,6 +808,10 @@ def _native_asset_url(
     return f"{_boc_url(run_id, transaction_hash)}/native-ton-asset"
 
 
+def _counterparty_url(run_id: int | str, transaction_hash: str = ROOT_HASH) -> str:
+    return f"{_boc_url(run_id, transaction_hash)}/counterparties"
+
+
 def _fake_boc_derived(_capture, raw_rows):
     hashes = (ROOT_HASH, CHILD_HASH)
     owned_counts = (2, 1)
@@ -1039,7 +1044,7 @@ def test_boc_message_evidence_is_provider_free_body_safe_and_digest_bound(
 
     response = client.get(_boc_messages_url(run_id))
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     payload = response.json()
     WalletTraceBocMessageEvidenceResponse.model_validate(payload)
@@ -1155,7 +1160,7 @@ def test_native_ton_asset_binding_is_network_scoped_and_digest_bound(
 
     response = client.get(_native_asset_url(run_id))
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     WalletNativeTonAssetBindingResponse.model_validate(payload)
     assert payload["asset"] == {
@@ -1173,6 +1178,57 @@ def test_native_ton_asset_binding_is_network_scoped_and_digest_bound(
     assert payload["bindings"][0]["amount_base_units"] == "2500000000"
     assert payload["jetton_asset_identity_applied"] is False
     assert payload["counterparty_identity_applied"] is False
+
+
+def test_counterparty_binding_is_network_scoped_but_not_actor_identity(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, _testing_session, run_id = persisted_trace_client
+    flows = {
+        "verification_id": "1",
+        "capture_id": "2",
+        "run_id": str(run_id),
+        "network": "ton-mainnet",
+        "wallet_account_canonical": ROOT_ACCOUNT,
+        "anchor": {
+            "transaction_hash": ROOT_HASH,
+            "logical_time": ROOT_LT,
+            "account_canonical": ROOT_ACCOUNT,
+            "matches_stored_transaction": True,
+        },
+        "message_evidence_digest_sha256": "ab" * 32,
+        "flows": [
+            {
+                "observation_identity": "cd" * 32,
+                "transaction_hash": ROOT_HASH,
+                "message_hash": ROOT_OUT_HASH,
+                "direction": "outgoing",
+                "counterparty_account_observed": CHILD_ACCOUNT,
+                "amount_nanoton": "2500000000",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        native_flow_service,
+        "get_wallet_native_ton_flow_observations",
+        lambda *args, **kwargs: flows,
+    )
+
+    response = client.get(_counterparty_url(run_id))
+
+    assert response.status_code == 200
+    payload = response.json()
+    WalletCounterpartyObservationBindingResponse.model_validate(payload)
+    assert payload["counterparty_count"] == 1
+    row = payload["counterparties"][0]
+    assert row["identity_key"] == (
+        f"ton_counterparty_account_obs_v1|ton-mainnet|{CHILD_ACCOUNT}"
+    )
+    assert row["outgoing_nanoton"] == "2500000000"
+    assert payload["network_scoped_account_observation_identity"] is True
+    assert payload["is_authoritative_actor_identity"] is False
+    assert payload["is_ownership_proof"] is False
 
 
 def _storage_transaction_boc() -> tuple[str, str]:

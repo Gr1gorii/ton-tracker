@@ -1,3 +1,15 @@
+# TON Wallet Intelligence Dashboard — v0.23.6 COUNTERPARTY OBSERVATION IDENTITY
+
+v0.23.6 adds provider-free `GET .../boc-verification/counterparties`.
+Observed native-flow endpoints are grouped by
+`ton_counterparty_account_obs_v1|{network}|{canonical_account}` with exact
+workchain/account-id decomposition, bound flow identities, directions, and
+nanoton totals. The canonical digest covers the upstream message evidence and
+sorted groups. This is observation identity only, never actor, owner,
+beneficiary, intent, cost-basis, or PnL identity.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.5 NATIVE TON ASSET IDENTITY
 
 v0.23.5 adds provider-free
