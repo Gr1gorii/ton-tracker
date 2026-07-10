@@ -28,10 +28,12 @@ from models import (
 )
 from schemas import (
     WalletPersistedTraceEvidenceResponse,
+    WalletNativeTonFlowObservationsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
 )
 import services.wallet_trace_boc_verification as boc_service
+import services.wallet_native_ton_flow_observations as native_flow_service
 from services.wallet_trace_boc_verification import (
     WalletTraceBocVerificationConflict,
 )
@@ -790,6 +792,13 @@ def _boc_messages_url(
     return f"{_boc_url(run_id, transaction_hash)}/messages"
 
 
+def _native_flow_url(
+    run_id: int | str,
+    transaction_hash: str = ROOT_HASH,
+) -> str:
+    return f"{_boc_url(run_id, transaction_hash)}/native-ton-flows"
+
+
 def _fake_boc_derived(_capture, raw_rows):
     hashes = (ROOT_HASH, CHILD_HASH)
     owned_counts = (2, 1)
@@ -1036,6 +1045,70 @@ def test_boc_message_evidence_is_provider_free_body_safe_and_digest_bound(
     assert "transaction_boc_hex" not in json.dumps(payload)
     assert payload["message_bodies_returned"] is False
     assert payload["semantic_reconstruction_applied"] is False
+
+
+def test_native_ton_flows_are_account_scoped_provider_free_observations(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, _testing_session, run_id = persisted_trace_client
+    evidence = {
+        "verification_id": "1",
+        "capture_id": "2",
+        "run_id": str(run_id),
+        "network": "ton-mainnet",
+        "anchor": {
+            "transaction_hash": ROOT_HASH,
+            "logical_time": ROOT_LT,
+            "account_canonical": ROOT_ACCOUNT,
+            "matches_stored_transaction": True,
+        },
+        "message_evidence_digest_sha256": "ab" * 32,
+        "messages": [
+            {
+                "transaction_preorder_index": 0,
+                "transaction_hash": ROOT_HASH,
+                "role": "remaining_outbound",
+                "ordinal": 0,
+                "message_hash": ROOT_OUT_HASH,
+                "message_type": "int_msg",
+                "source_account_canonical": ROOT_ACCOUNT,
+                "destination_account_canonical": CHILD_ACCOUNT,
+                "value_nanoton": "2500000000",
+                "created_logical_time": ROOT_LT,
+                "unix_time": 1_717_236_000,
+                "body_hash": "98" * 32,
+                "opcode_hex": None,
+                "bounce": True,
+                "bounced": False,
+            },
+            {
+                "message_type": "ext_in_msg",
+                "source_account_canonical": None,
+                "destination_account_canonical": ROOT_ACCOUNT,
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        native_flow_service,
+        "get_wallet_transaction_boc_message_evidence",
+        lambda *args, **kwargs: evidence,
+    )
+
+    response = client.get(_native_flow_url(run_id))
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    WalletNativeTonFlowObservationsResponse.model_validate(payload)
+    assert payload["flow_count"] == 1
+    assert payload["outgoing_nanoton"] == "2500000000"
+    assert payload["incoming_nanoton"] == "0"
+    assert payload["flows"][0]["direction"] == "outgoing"
+    assert payload["flows"][0]["counterparty_account_observed"] == CHILD_ACCOUNT
+    assert payload["counterparty_is_header_observation"] is True
+    assert payload["is_authoritative_transfer_ledger"] is False
+    assert payload["eligible_for_cost_basis"] is False
 
 
 def _storage_transaction_boc() -> tuple[str, str]:

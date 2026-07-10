@@ -18,6 +18,7 @@ from schemas import (
     WalletIngestionRunCatalogResponse,
     WalletIngestionRunResponse,
     WalletPersistedTraceEvidenceResponse,
+    WalletNativeTonFlowObservationsResponse,
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
@@ -55,6 +56,9 @@ from services.wallet_trace_boc_verification import (
     get_wallet_transaction_boc_message_evidence,
     get_wallet_transaction_trace_boc_verification,
     verify_wallet_transaction_trace_bocs,
+)
+from services.wallet_native_ton_flow_observations import (
+    get_wallet_native_ton_flow_observations,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -503,6 +507,71 @@ def read_wallet_transaction_boc_message_evidence(
         raise HTTPException(
             status_code=503,
             detail="Local message BOC evidence storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/boc-verification/native-ton-flows",
+    response_model=WalletNativeTonFlowObservationsResponse,
+)
+def read_wallet_native_ton_flow_observations(
+    response: Response,
+    run_id: str = Path(..., description="Canonical positive persisted run id."),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Return provider-free native TON value observations for the run account."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result = get_wallet_native_ton_flow_observations(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Native TON BOC flow observations not found",
+                headers=no_store_headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletTraceBocVerificationConflict,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletPersistedTraceEvidenceFailure,
+        WalletTraceBocVerificationFailure,
+        SQLAlchemyError,
+    ) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Native TON BOC flow observation storage is unavailable.",
             headers=no_store_headers,
         ) from exc
 

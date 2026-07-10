@@ -704,6 +704,76 @@ class WalletTraceBocMessageEvidenceResponse(BaseModel):
         return self
 
 
+class WalletNativeTonFlowObservationRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    observation_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+    transaction_preorder_index: Annotated[int, Field(strict=True, ge=0, le=255)]
+    transaction_hash: CanonicalTraceTransactionHash
+    message_role: Literal["root_inbound", "child_inbound", "remaining_outbound"]
+    message_ordinal: Annotated[int, Field(strict=True, ge=0, le=2047)]
+    message_hash: CanonicalTraceTransactionHash
+    direction: Literal["incoming", "outgoing", "self"]
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    counterparty_account_observed: str = Field(min_length=66, max_length=76)
+    amount_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    created_logical_time: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    unix_time: Annotated[int, Field(strict=True, ge=0, le=2**63 - 1)]
+    body_hash: CanonicalTraceTransactionHash
+    opcode_hex: str | None = Field(default=None, pattern=r"^0x[0-9a-f]{8}$")
+    bounce: bool
+    bounced: bool
+
+
+class WalletNativeTonFlowObservationsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_native_flow_observations_v1"]
+    identity_version: Literal["ton_native_message_flow_obs_v1"]
+    verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    provider: Literal["tonapi"]
+    source_status: Literal["live"]
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$", max_length=16)
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    anchor: WalletTransactionTraceAnchorRecord
+    message_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    flow_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    incoming_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    outgoing_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    self_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    flows: list[WalletNativeTonFlowObservationRecord]
+    derived_from_verified_message_headers: Literal[True]
+    native_ton_only: Literal[True]
+    counterparty_is_header_observation: Literal[True]
+    is_authoritative_transfer_ledger: Literal[False] = False
+    semantic_payload_decoding_applied: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _native_flow_totals_must_match_rows(self):
+        if len(self.flows) != self.flow_count:
+            raise ValueError("native flow rows must match flow_count")
+        totals = {"incoming": 0, "outgoing": 0, "self": 0}
+        for flow in self.flows:
+            if flow.wallet_account_canonical != self.wallet_account_canonical:
+                raise ValueError("native flow wallet account changed")
+            totals[flow.direction] += int(flow.amount_nanoton, 10)
+        if (
+            str(totals["incoming"]) != self.incoming_nanoton
+            or str(totals["outgoing"]) != self.outgoing_nanoton
+            or str(totals["self"]) != self.self_nanoton
+        ):
+            raise ValueError("native flow totals do not match rows")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

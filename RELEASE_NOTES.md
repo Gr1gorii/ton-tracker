@@ -1,3 +1,17 @@
+# TON Wallet Intelligence Dashboard — v0.23.4 NATIVE TON FLOW OBSERVATIONS
+
+v0.23.4 adds provider-free
+`GET .../boc-verification/native-ton-flows`. Verified internal-message headers
+that involve the stored run account are classified as incoming, outgoing, or
+self. Each row carries a deterministic `ton_native_message_flow_obs_v1`
+identity, nanotons, message/transaction binding, observed counterparty endpoint,
+body hash, opcode prefix, and bounce state. Totals are recomputed from rows.
+This is native TON header evidence only: payload semantic decoding,
+authoritative transfer/counterparty identity, activity merge, deduplication,
+ownership, cost basis, and PnL remain false.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.3 MESSAGE BODY EVIDENCE
 
 v0.23.3 adds provider-free
