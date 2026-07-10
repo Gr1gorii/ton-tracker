@@ -10,6 +10,8 @@ import {
   walletClusterCompareExportUrl,
   walletRunExportCsvUrl,
   walletRunExportUrl,
+  walletCanonicalReportCsvExportUrl,
+  walletCanonicalReportExportUrl,
   walletRunPnlPreviewCsvExportUrl,
   walletRunPnlPreviewExportUrl,
   walletRunSignalsCsvExportUrl,
@@ -115,8 +117,8 @@ const CAN_SHOW = [
 const CANNOT_SHOW = [
   "Full-history acquisition cost basis",
   "Authoritative transfer, trade, and actor identity",
-  "Legacy buyers/report wiring",
-  "Ownership proof",
+  "Unproved or incomplete wallet history",
+  "Wallet signature prompt (verification API is available)",
 ];
 
 interface RequestSnapshot {
@@ -680,12 +682,12 @@ export default function WalletIngestionWorkspace({
           {runResult && displayedIsLive
             ? "This run used the guarded live TonAPI path. Rows are real on-chain account data, persisted and source-labeled. Stored activity feeds signals; swaps and balances feed cluster comparison; swaps and transaction evidence feed the PnL preview below."
             : runResult
-              ? "This run used deterministic backend fixtures. Rows are persisted and source-labeled. Stored activity feeds signals; swaps and balances feed cluster comparison; swaps and transaction evidence feed the PnL preview below. These are not real on-chain rows."
+              ? "This stored run is not production provider evidence. Use a real-mode run for canonical ledger, reports, and clustering."
               : previewResult && displayedIsLive
                 ? "This coverage preview used the guarded live TonAPI path. Returned rows are real account-level provider evidence but are not persisted until you run ingestion."
                 : previewResult
-                  ? "This coverage preview used deterministic backend fixtures. Preview rows are not persisted and are not real on-chain data."
-                  : "Load a stored run ID to resume read-only, or preview coverage to confirm whether the configured path is guarded live TonAPI or deterministic mock data. Every result stays source-labeled."}
+                  ? "This preview is not production provider evidence and cannot create a canonical ledger."
+                  : "Load a stored run ID to resume read-only, or preview coverage to confirm the configured real provider path. Every result stays source-labeled."}
         </div>
       </div>
 
@@ -924,7 +926,7 @@ export default function WalletIngestionWorkspace({
               href={walletRunExportUrl(runResult.run_id)}
               download
             >
-              Export run (JSON)
+              Canonical ledger (JSON)
             </a>
           )}
           {runResult?.run_id != null && (
@@ -933,7 +935,25 @@ export default function WalletIngestionWorkspace({
               href={walletRunExportCsvUrl(runResult.run_id)}
               download
             >
-              Export run (CSV)
+              Canonical ledger (CSV)
+            </a>
+          )}
+          {runResult?.run_id != null && (
+            <a
+              className="btn btn-ghost"
+              href={walletCanonicalReportExportUrl(runResult.run_id)}
+              download
+            >
+              Canonical report (JSON)
+            </a>
+          )}
+          {runResult?.run_id != null && (
+            <a
+              className="btn btn-ghost"
+              href={walletCanonicalReportCsvExportUrl(runResult.run_id)}
+              download
+            >
+              Canonical report (CSV)
             </a>
           )}
           <button
@@ -1071,12 +1091,6 @@ export default function WalletIngestionWorkspace({
             <ActivitySummaryCard summary={runResult.activity_summary} />
           )}
           {runResult && <WalletActivityTables result={runResult} />}
-          {runResult?.run_id != null && (
-            <WalletEvidenceSignalsCard
-              key={`signals-${runResult.run_id}`}
-              runId={runResult.run_id}
-            />
-          )}
           {runResult?.run_id != null && (
             <WalletPnlPreviewCard
               key={`pnl-${runResult.run_id}`}

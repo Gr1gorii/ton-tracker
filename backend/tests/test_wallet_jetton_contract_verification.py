@@ -24,6 +24,7 @@ from schemas import (
     WalletJettonContractVerificationResponse,
 )
 import routers.wallet_activity as wallet_activity_router
+import services.wallet_jetton_contract_verification as jetton_service
 from services.ton_liteclient_jetton_verifier import (
     TonLiteclientJettonVerificationFailure,
     _address_from_slice,
@@ -59,6 +60,14 @@ def _live_result(*, trust_level: int) -> dict:
     wallet_data = _cell(2)
     master_code = _cell(3)
     master_data = _cell(4)
+    proof_boc = _cell(9).to_boc().hex()
+    shard_block = {
+        "workchain": 0,
+        "shard": -9223372036854775808,
+        "seqno": 456,
+        "root_hash": "77" * 32,
+        "file_hash": "88" * 32,
+    }
     return {
         "verifier_name": "pytoniq-pytvm",
         "verifier_version": "pytoniq-test/pytvm-test",
@@ -85,7 +94,32 @@ def _live_result(*, trust_level: int) -> dict:
         "account_state_proof_verified": True,
         "masterchain_checkpoint_chain_verified": trust_level == 0,
         "local_tvm_execution_applied": True,
+        "account_inclusion_proofs": {
+            "jetton_wallet": {
+                "account_address": JETTON_WALLET,
+                "shard_block": shard_block,
+                "state_boc_hex": proof_boc,
+                "account_proof_boc_hex": proof_boc,
+                "shard_proof_boc_hex": proof_boc,
+            },
+            "jetton_master": {
+                "account_address": JETTON_MASTER,
+                "shard_block": shard_block,
+                "state_boc_hex": proof_boc,
+                "account_proof_boc_hex": proof_boc,
+                "shard_proof_boc_hex": proof_boc,
+            },
+        },
     }
+
+
+@pytest.fixture(autouse=True)
+def _accept_synthetic_account_proofs(monkeypatch):
+    monkeypatch.setattr(
+        jetton_service,
+        "_verify_and_match_account_proof",
+        lambda *_args, **_kwargs: None,
+    )
 
 
 def _session_with_run():
@@ -242,6 +276,11 @@ def test_verification_is_immutable_idempotent_and_provider_free_on_readback():
     assert created["master_wallet_address_verified"] is True
     assert created["eligible_for_cost_basis"] is False
     assert created["used_by_pnl"] is False
+    assert len(created["account_state_inclusion_proofs"]) == 2
+    assert all(
+        row["provider_free_revalidated"] is True
+        for row in created["account_state_inclusion_proofs"]
+    )
     assert set(created["account_state_boc_hashes"]) == {
         "wallet_code_boc_hex",
         "wallet_data_boc_hex",

@@ -846,6 +846,22 @@ export interface WalletSwapRecord {
   tx_hash?: string | null;
   timestamp?: string | null;
   dex?: string | null;
+  dex_protocol: {
+    status: "recognized" | "unknown" | "missing";
+    protocol_id?:
+      | "dedust"
+      | "dedust_v3"
+      | "dedust_v3_memepad"
+      | "stonfi_v1"
+      | "stonfi_v2"
+      | "tonco"
+      | "memeslab"
+      | "tonfun"
+      | null;
+    family?: string | null;
+    version?: string | null;
+    provider_label?: string | null;
+  };
   token_in?: string | null;
   token_in_address?: string | null;
   amount_in?: string | null;

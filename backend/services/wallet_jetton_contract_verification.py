@@ -14,9 +14,15 @@ from sqlalchemy.orm import Session
 
 from config import get_settings
 from models import (
+    WalletAccountStateInclusionProof,
     WalletBalanceSnapshot,
     WalletIngestionRun,
     WalletJettonContractVerification,
+)
+from services.ton_account_inclusion_proof import (
+    TonAccountInclusionProofFailure,
+    inclusion_hashes,
+    verify_account_inclusion_proof,
 )
 from services.ton_address_identity import derive_ton_wallet_identity
 from services.ton_liteclient_jetton_verifier import (
@@ -96,6 +102,8 @@ def verify_wallet_jetton_contract_relationship(
     _validate_live_result(
         verified,
         expected_trust_level=settings.ton_liteclient_trust_level,
+        expected_wallet=wallet,
+        expected_master=master,
     )
     verified_at = datetime.now(timezone.utc)
     values = {
@@ -134,6 +142,17 @@ def verify_wallet_jetton_contract_relationship(
     )
     record = WalletJettonContractVerification(**values)
     session.add(record)
+    session.flush()
+    for role, evidence in verified["account_inclusion_proofs"].items():
+        proof_values = _account_proof_values(
+            record,
+            role,
+            evidence,
+            verified_at,
+        )
+        record.account_inclusion_proofs.append(
+            WalletAccountStateInclusionProof(**proof_values)
+        )
     session.flush()
     result = _record_response(record)
     session.commit()
@@ -199,6 +218,8 @@ def _record_response(record: WalletJettonContractVerification) -> dict[str, Any]
         raise WalletJettonContractVerificationConflict(
             "Stored jetton contract verification digest changed."
         )
+    inclusion_proofs = _revalidate_account_inclusion_proofs(record)
+    has_persisted_inclusion = len(inclusion_proofs) == 2
     return {
         "contract_version": record.contract_version,
         "verification_id": str(record.id),
@@ -222,6 +243,7 @@ def _record_response(record: WalletJettonContractVerification) -> dict[str, Any]
         "master_data_hash": record.master_data_hash,
         "jetton_content_hash": record.jetton_content_hash,
         "account_state_boc_hashes": document["account_state_boc_hashes"],
+        "account_state_inclusion_proofs": inclusion_proofs,
         "evidence_digest_sha256": digest,
         "verified_at": _iso(record.verified_at),
         "account_state_proof_verified": True,
@@ -231,17 +253,25 @@ def _record_response(record: WalletJettonContractVerification) -> dict[str, Any]
         "master_wallet_address_verified": True,
         "wallet_code_consistency_verified": True,
         "jetton_asset_identity_applied": True,
-        "raw_account_state_bocs_persisted": True,
+        "raw_account_state_bocs_persisted": has_persisted_inclusion,
         "raw_account_state_bocs_returned": False,
-        "is_blockchain_inclusion_proof_verified": record.trust_level == 0,
+        "is_blockchain_inclusion_proof_verified": (
+            record.trust_level == 0 and has_persisted_inclusion
+        ),
         "eligible_for_cost_basis": False,
         "used_by_pnl": False,
         "is_ownership_proof": False,
         "message": (
-            "Proof-checked account states and locally executed jetton getters "
-            "agree on owner, master, wallet address, and wallet code. This "
-            "establishes a network-scoped jetton asset relationship, not wallet "
-            "ownership, complete activity history, cost basis, or PnL."
+            (
+                "Stored Merkle proofs bind both full account-state BOCs to exact "
+                "shard blocks and the selected masterchain anchor. "
+                if has_persisted_inclusion
+                else "This legacy verification predates persisted Merkle proofs. "
+            )
+            + "Locally executed jetton getters agree on owner, master, wallet "
+            "address, and wallet code. This establishes a network-scoped jetton "
+            "asset relationship, not wallet ownership, complete activity history, "
+            "cost basis, or PnL."
         ),
     }
 
@@ -352,6 +382,8 @@ def _validate_live_result(
     value: dict[str, Any],
     *,
     expected_trust_level: int,
+    expected_wallet: str,
+    expected_master: str,
 ) -> None:
     required = {
         "verifier_name",
@@ -373,6 +405,7 @@ def _validate_live_result(
         "account_state_proof_verified",
         "masterchain_checkpoint_chain_verified",
         "local_tvm_execution_applied",
+        "account_inclusion_proofs",
     }
     if not isinstance(value, dict) or set(value) != required:
         raise WalletJettonContractVerificationConflict(
@@ -437,6 +470,232 @@ def _validate_live_result(
             raise WalletJettonContractVerificationConflict(
                 "Local jetton verifier BOC/hash evidence is incoherent."
             )
+    proofs = value["account_inclusion_proofs"]
+    if not isinstance(proofs, dict) or set(proofs) != {
+        "jetton_wallet",
+        "jetton_master",
+    }:
+        raise WalletJettonContractVerificationConflict(
+            "Local jetton verifier omitted account inclusion evidence."
+        )
+    expected_addresses = {
+        "jetton_wallet": expected_wallet,
+        "jetton_master": expected_master,
+    }
+    if any(
+        not _valid_account_inclusion_shape(proofs[role], expected_addresses[role])
+        for role in proofs
+    ):
+        raise WalletJettonContractVerificationConflict(
+            "Local account inclusion evidence is malformed."
+        )
+
+
+def _account_proof_values(
+    record: WalletJettonContractVerification,
+    role: str,
+    evidence: dict[str, Any],
+    verified_at: datetime,
+) -> dict[str, Any]:
+    expected_address = (
+        record.jetton_wallet_account_canonical
+        if role == "jetton_wallet"
+        else record.jetton_master_account_canonical
+    )
+    if not _valid_account_inclusion_shape(evidence, expected_address):
+        raise WalletJettonContractVerificationConflict(
+            "Account inclusion evidence changed before persistence."
+        )
+    _verify_and_match_account_proof(record, role, evidence)
+    hashes = inclusion_hashes(evidence)
+    shard = evidence["shard_block"]
+    document = {
+        "contract_version": "ton_account_state_inclusion_v1",
+        "verification_id": record.id,
+        "account_role": role,
+        "account_address_canonical": expected_address,
+        "masterchain_anchor": {
+            "workchain": record.anchor_workchain,
+            "shard": int(record.anchor_shard),
+            "seqno": record.anchor_seqno,
+            "root_hash": record.anchor_root_hash,
+            "file_hash": record.anchor_file_hash,
+        },
+        "shard_block": shard,
+        "boc_sha256": hashes,
+        "verified_at": _iso(verified_at),
+    }
+    return {
+        "account_role": role,
+        "account_address_canonical": expected_address,
+        "shard_workchain": shard["workchain"],
+        "shard": str(shard["shard"]),
+        "shard_seqno": shard["seqno"],
+        "shard_root_hash": shard["root_hash"],
+        "shard_file_hash": shard["file_hash"],
+        "state_boc_hex": evidence["state_boc_hex"],
+        "account_proof_boc_hex": evidence["account_proof_boc_hex"],
+        "shard_proof_boc_hex": evidence["shard_proof_boc_hex"],
+        "state_boc_sha256": hashes["state_boc_hex"],
+        "account_proof_boc_sha256": hashes["account_proof_boc_hex"],
+        "shard_proof_boc_sha256": hashes["shard_proof_boc_hex"],
+        "evidence_digest_sha256": _digest_json(document),
+        "verified_at": verified_at,
+    }
+
+
+def _revalidate_account_inclusion_proofs(
+    record: WalletJettonContractVerification,
+) -> list[dict[str, Any]]:
+    proofs = sorted(record.account_inclusion_proofs, key=lambda row: row.account_role)
+    if not proofs:
+        return []
+    if [row.account_role for row in proofs] != ["jetton_master", "jetton_wallet"]:
+        raise WalletJettonContractVerificationConflict(
+            "Stored jetton verification does not contain both account proofs."
+        )
+    result = []
+    for row in proofs:
+        evidence = {
+            "account_address": row.account_address_canonical,
+            "shard_block": {
+                "workchain": row.shard_workchain,
+                "shard": int(row.shard),
+                "seqno": row.shard_seqno,
+                "root_hash": row.shard_root_hash,
+                "file_hash": row.shard_file_hash,
+            },
+            "state_boc_hex": row.state_boc_hex,
+            "account_proof_boc_hex": row.account_proof_boc_hex,
+            "shard_proof_boc_hex": row.shard_proof_boc_hex,
+        }
+        expected = _account_proof_values(
+            record,
+            row.account_role,
+            evidence,
+            row.verified_at,
+        )
+        for field in (
+            "account_address_canonical",
+            "shard_workchain",
+            "shard",
+            "shard_seqno",
+            "shard_root_hash",
+            "shard_file_hash",
+            "state_boc_sha256",
+            "account_proof_boc_sha256",
+            "shard_proof_boc_sha256",
+            "evidence_digest_sha256",
+        ):
+            if getattr(row, field) != expected[field]:
+                raise WalletJettonContractVerificationConflict(
+                    "Stored account inclusion proof digest or metadata changed."
+                )
+        result.append(
+            {
+                "contract_version": "ton_account_state_inclusion_v1",
+                "account_role": row.account_role,
+                "account_address_canonical": row.account_address_canonical,
+                "shard_block": {
+                    **evidence["shard_block"],
+                    "shard": row.shard,
+                },
+                "boc_sha256": {
+                    "state_boc_hex": row.state_boc_sha256,
+                    "account_proof_boc_hex": row.account_proof_boc_sha256,
+                    "shard_proof_boc_hex": row.shard_proof_boc_sha256,
+                },
+                "evidence_digest_sha256": row.evidence_digest_sha256,
+                "verified_at": _iso(row.verified_at),
+                "provider_requests_performed": False,
+                "provider_free_revalidated": True,
+                "raw_bocs_returned": False,
+            }
+        )
+    return result
+
+
+def _verify_and_match_account_proof(
+    record: WalletJettonContractVerification,
+    role: str,
+    evidence: dict[str, Any],
+) -> None:
+    anchor = {
+        "workchain": record.anchor_workchain,
+        "shard": int(record.anchor_shard),
+        "seqno": record.anchor_seqno,
+        "root_hash": record.anchor_root_hash,
+        "file_hash": record.anchor_file_hash,
+    }
+    try:
+        account = verify_account_inclusion_proof(
+            evidence,
+            masterchain_anchor=anchor,
+        )
+        state = account.storage.state.state_init
+        expected_code = (
+            record.wallet_code_hash if role == "jetton_wallet" else record.master_code_hash
+        )
+        expected_data = (
+            record.wallet_data_hash if role == "jetton_wallet" else record.master_data_hash
+        )
+        if (
+            account.storage.state.type_ != "account_active"
+            or state.code is None
+            or state.data is None
+            or state.code.hash.hex() != expected_code
+            or state.data.hash.hex() != expected_data
+        ):
+            raise WalletJettonContractVerificationConflict(
+                "Proved full account state differs from stored code/data BOCs."
+            )
+    except TonAccountInclusionProofFailure as exc:
+        raise WalletJettonContractVerificationConflict(str(exc)) from exc
+
+
+def _valid_account_inclusion_shape(value: Any, expected_address: str) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "account_address",
+        "shard_block",
+        "state_boc_hex",
+        "account_proof_boc_hex",
+        "shard_proof_boc_hex",
+    }:
+        return False
+    shard = value["shard_block"]
+    canonical_hash = re.compile(r"^[0-9a-f]{64}$")
+    if not (
+        value["account_address"] == expected_address
+        and isinstance(shard, dict)
+        and set(shard) == {"workchain", "shard", "seqno", "root_hash", "file_hash"}
+        and type(shard["workchain"]) is int
+        and shard["workchain"] in {-1, 0}
+        and type(shard["shard"]) is int
+        and type(shard["seqno"]) is int
+        and shard["seqno"] > 0
+        and canonical_hash.fullmatch(shard["root_hash"] or "")
+        and canonical_hash.fullmatch(shard["file_hash"] or "")
+    ):
+        return False
+    for field in (
+        "state_boc_hex",
+        "account_proof_boc_hex",
+        "shard_proof_boc_hex",
+    ):
+        raw = value[field]
+        if (
+            not isinstance(raw, str)
+            or not raw
+            or len(raw) > 8 * 1024 * 1024
+            or len(raw) % 2
+            or raw != raw.lower()
+        ):
+            return False
+        try:
+            bytes.fromhex(raw)
+        except ValueError:
+            return False
+    return True
 
 
 def _one_boc(value: Any, field: str) -> Cell:

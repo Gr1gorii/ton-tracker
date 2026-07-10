@@ -40,7 +40,12 @@ TRACE_EVIDENCE_REVISION = "20260710_0006"
 TRACE_BOC_VERIFICATION_REVISION = "20260710_0007"
 NATIVE_ACTIVITY_LEDGER_REVISION = "20260710_0008"
 JETTON_CONTRACT_VERIFICATION_REVISION = "20260710_0009"
-CURRENT_REVISION = JETTON_CONTRACT_VERIFICATION_REVISION
+WALLET_OWNERSHIP_CHALLENGE_REVISION = "20260710_0010"
+ACCOUNT_STATE_INCLUSION_REVISION = "20260710_0011"
+TRANSACTION_INCLUSION_REVISION = "20260710_0012"
+DEX_PROTOCOL_IDENTITY_REVISION = "20260710_0013"
+OWNERSHIP_NETWORK_SCOPE_REVISION = "20260710_0014"
+CURRENT_REVISION = OWNERSHIP_NETWORK_SCOPE_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -1261,6 +1266,11 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
@@ -1301,6 +1311,11 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1343,6 +1358,11 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1478,6 +1498,11 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1621,6 +1646,11 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1768,6 +1798,11 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2196,6 +2231,11 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2284,6 +2324,11 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2479,6 +2524,11 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -2727,6 +2777,11 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_trace_boc_verification_schema(engine)
@@ -2744,6 +2799,11 @@ def test_upgrade_from_0007_reaches_current_model_parity(tmp_path):
     assert report.applied_revisions == (
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert {
         "wallet_native_activity_ledgers",
@@ -2759,9 +2819,14 @@ def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
     report = run_database_migrations(engine)
 
     assert report.revision_before == NATIVE_ACTIVITY_LEDGER_REVISION
-    assert report.revision_after == JETTON_CONTRACT_VERIFICATION_REVISION
+    assert report.revision_after == CURRENT_REVISION
     assert report.applied_revisions == (
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     assert inspect(engine).get_table_names().count(
         JETTON_CONTRACT_VERIFICATIONS_TABLE
@@ -2770,7 +2835,163 @@ def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
         assert connection.exec_driver_sql(
             f"SELECT COUNT(*) FROM {JETTON_CONTRACT_VERIFICATIONS_TABLE}"
         ).scalar_one() == 0
+    assert JETTON_CONTRACT_VERIFICATIONS_TABLE in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_wallet_ownership_challenge_upgrade_from_0009_reaches_model_parity(tmp_path):
+    engine = _engine(tmp_path / "wallet-ownership-challenge-upgrade.db")
+    _upgrade_to_revision(engine, JETTON_CONTRACT_VERIFICATION_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == JETTON_CONTRACT_VERIFICATION_REVISION
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
+    )
     _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_ownership_challenge_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "wallet-ownership-challenge-forward-only.db")
+    _upgrade_to_revision(engine, WALLET_OWNERSHIP_CHALLENGE_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                JETTON_CONTRACT_VERIFICATION_REVISION,
+            )
+    assert "wallet_ownership_challenges" in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_account_state_inclusion_upgrade_from_0010_reaches_model_parity(tmp_path):
+    engine = _engine(tmp_path / "account-state-inclusion-upgrade.db")
+    _upgrade_to_revision(engine, WALLET_OWNERSHIP_CHALLENGE_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == WALLET_OWNERSHIP_CHALLENGE_REVISION
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
+    )
+    assert "wallet_account_state_inclusion_proofs" in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_transaction_inclusion_upgrade_from_0011_reaches_model_parity(tmp_path):
+    engine = _engine(tmp_path / "transaction-inclusion-upgrade.db")
+    _upgrade_to_revision(engine, ACCOUNT_STATE_INCLUSION_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == ACCOUNT_STATE_INCLUSION_REVISION
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
+    )
+    assert "wallet_transaction_inclusion_proofs" in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_dex_protocol_identity_upgrade_from_0012_reaches_model_parity(tmp_path):
+    engine = _engine(tmp_path / "dex-protocol-identity-upgrade.db")
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == TRANSACTION_INCLUSION_REVISION
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
+    )
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("wallet_swaps")
+    }
+    assert {"dex_protocol_id", "dex_protocol_status"}.issubset(columns)
+    engine.dispose()
+
+
+def test_ownership_network_scope_upgrade_from_0013_reaches_model_parity(tmp_path):
+    engine = _engine(tmp_path / "ownership-network-scope-upgrade.db")
+    _upgrade_to_revision(engine, DEX_PROTOCOL_IDENTITY_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == DEX_PROTOCOL_IDENTITY_REVISION
+    assert report.revision_after == OWNERSHIP_NETWORK_SCOPE_REVISION
+    assert report.applied_revisions == (OWNERSHIP_NETWORK_SCOPE_REVISION,)
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_ownership_network_scope_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "ownership-network-scope-forward-only.db")
+    _upgrade_to_revision(engine, OWNERSHIP_NETWORK_SCOPE_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would weaken"):
+            command.downgrade(
+                migration_config(connection),
+                DEX_PROTOCOL_IDENTITY_REVISION,
+            )
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_dex_protocol_identity_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "dex-protocol-identity-forward-only.db")
+    _upgrade_to_revision(engine, DEX_PROTOCOL_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                TRANSACTION_INCLUSION_REVISION,
+            )
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("wallet_swaps")
+    }
+    assert {"dex_protocol_id", "dex_protocol_status"}.issubset(columns)
+    engine.dispose()
+
+
+def test_transaction_inclusion_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "transaction-inclusion-forward-only.db")
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                ACCOUNT_STATE_INCLUSION_REVISION,
+            )
+    assert "wallet_transaction_inclusion_proofs" in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_account_state_inclusion_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "account-state-inclusion-forward-only.db")
+    _upgrade_to_revision(engine, ACCOUNT_STATE_INCLUSION_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                WALLET_OWNERSHIP_CHALLENGE_REVISION,
+            )
+    assert "wallet_account_state_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
 
 
@@ -2803,7 +3024,7 @@ def test_jetton_contract_verification_migration_is_forward_only(tmp_path):
                 NATIVE_ACTIVITY_LEDGER_REVISION,
             )
 
-    _assert_schema_matches_models(engine)
+    assert JETTON_CONTRACT_VERIFICATIONS_TABLE in inspect(engine).get_table_names()
     engine.dispose()
 
 
@@ -3222,6 +3443,11 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         TRACE_BOC_VERIFICATION_REVISION,
         NATIVE_ACTIVITY_LEDGER_REVISION,
         JETTON_CONTRACT_VERIFICATION_REVISION,
+        WALLET_OWNERSHIP_CHALLENGE_REVISION,
+        ACCOUNT_STATE_INCLUSION_REVISION,
+        TRANSACTION_INCLUSION_REVISION,
+        DEX_PROTOCOL_IDENTITY_REVISION,
+        OWNERSHIP_NETWORK_SCOPE_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

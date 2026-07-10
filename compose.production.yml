@@ -1,0 +1,91 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATA_MODE: real
+      TON_NETWORK: ${TON_NETWORK:-mainnet}
+      TON_CHECK_DB_URL: sqlite:////data/ton_check.db
+      TONAPI_BASE_URL: ${TONAPI_BASE_URL:-https://tonapi.io}
+      TONAPI_API_KEY: ${TONAPI_API_KEY:?TONAPI_API_KEY is required}
+      WALLET_ACTIVITY_PROVIDER: tonapi
+      WALLET_ACTIVITY_LIVE_ENABLED: "true"
+      TON_LITECLIENT_TRUST_LEVEL: "0"
+      TON_LITECLIENT_TIMEOUT_SECONDS: ${TON_LITECLIENT_TIMEOUT_SECONDS:-20}
+      TONCONNECT_EXPECTED_DOMAIN: ${TONCONNECT_EXPECTED_DOMAIN:?TONCONNECT_EXPECTED_DOMAIN is required}
+      TONCONNECT_PROOF_TTL_SECONDS: ${TONCONNECT_PROOF_TTL_SECONDS:-900}
+    volumes:
+      - ton_tracker_data:/data
+    expose:
+      - "8000"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    expose:
+      - "9090"
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+
+  backup:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    command: ["python", "/app/ops/backup_sqlite.py", "--loop"]
+    environment:
+      TON_CHECK_DB_URL: sqlite:////data/ton_check.db
+      BACKUP_DIR: /backups
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-14}
+    volumes:
+      - ton_tracker_data:/data:ro
+      - ton_tracker_backups:/backups
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+
+volumes:
+  ton_tracker_data:
+  ton_tracker_backups:
+  prometheus_data:

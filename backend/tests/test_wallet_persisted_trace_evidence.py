@@ -36,10 +36,15 @@ from schemas import (
     WalletNativeActivityLedgerResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
+    WalletTransactionInclusionCatalogResponse,
+    WalletCanonicalLedgerResponse,
+    WalletCanonicalActivityReportResponse,
 )
+import routers.wallet_activity as wallet_activity_router
 import services.wallet_trace_boc_verification as boc_service
 import services.wallet_native_ton_flow_observations as native_flow_service
 import services.wallet_native_activity_ledger as activity_ledger_service
+import services.wallet_transaction_inclusion_proof as inclusion_service
 from services.wallet_trace_boc_verification import (
     WalletTraceBocVerificationConflict,
 )
@@ -1018,6 +1023,80 @@ def test_boc_verification_is_atomic_idempotent_and_never_returns_raw_bocs(
         ) == 2
 
 
+def test_transaction_bocs_receive_provider_free_block_inclusion_proofs(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, _testing_session, run_id = persisted_trace_client
+    _capture_then_verify_bocs(client, run_id, monkeypatch)
+    assert client.post(_boc_url(run_id)).status_code == 201
+
+    monkeypatch.setattr(
+        inclusion_service,
+        "_verify_proof",
+        lambda *_args, **_kwargs: None,
+    )
+    calls = []
+
+    def fake_live_verifier(**kwargs):
+        calls.append(kwargs["requests"])
+        result = []
+        bocs = {ROOT_HASH: "00", CHILD_HASH: "01"}
+        for index, request in enumerate(kwargs["requests"], start=1):
+            result.append(
+                {
+                    **request,
+                    "block": {
+                        "workchain": 0,
+                        "shard": -9223372036854775808,
+                        "seqno": 100 + index,
+                        "root_hash": f"{index:064x}",
+                        "file_hash": f"{index + 10:064x}",
+                    },
+                    "masterchain_anchor": {
+                        "workchain": -1,
+                        "shard": -9223372036854775808,
+                        "seqno": 200,
+                        "root_hash": "aa" * 32,
+                        "file_hash": "bb" * 32,
+                    },
+                    "transaction_boc_hex": bocs[request["transaction_hash"]],
+                    "block_proof_boc_hex": "cc",
+                    "trust_level": kwargs["trust_level"],
+                }
+            )
+        return result
+
+    def endpoint_create(selected_run_id, selected_hash, session):
+        return inclusion_service.create_wallet_transaction_inclusion_proofs(
+            selected_run_id,
+            selected_hash,
+            session,
+            live_verifier=fake_live_verifier,
+        )
+
+    monkeypatch.setattr(
+        wallet_activity_router,
+        "create_wallet_transaction_inclusion_proofs",
+        endpoint_create,
+    )
+    url = f"{_boc_url(run_id)}/block-inclusion"
+    created = client.post(url)
+    assert created.status_code == 201
+    payload = created.json()
+    WalletTransactionInclusionCatalogResponse.model_validate(payload)
+    assert payload["proof_count"] == 2
+    assert payload["all_transaction_bocs_included_in_blocks"] is True
+    assert "block_proof_boc_hex" not in json.dumps(payload)
+    assert len(calls) == 1
+
+    repeated = client.post(url)
+    assert repeated.status_code == 200
+    assert repeated.json() == payload
+    assert client.get(url).json() == payload
+    assert len(calls) == 1
+
+
 def test_boc_verification_readback_rejects_relational_tampering(
     persisted_trace_client,
     monkeypatch,
@@ -1309,6 +1388,127 @@ def test_native_activity_ledger_is_atomic_idempotent_and_revalidated(
     corrupt = client.get(_activity_ledger_url(run_id))
     assert corrupt.status_code == 409
     assert "failed local revalidation" in corrupt.json()["detail"]
+
+
+def test_canonical_ledger_report_and_exports_require_block_proved_rows(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, _testing_session, run_id = persisted_trace_client
+    _capture_then_verify_bocs(client, run_id, monkeypatch)
+    assert client.post(_boc_url(run_id)).status_code == 201
+    source = {
+        "network": "ton-mainnet",
+        "wallet_account_canonical": ROOT_ACCOUNT,
+        "anchor": {
+            "transaction_hash": ROOT_HASH,
+            "logical_time": ROOT_LT,
+            "account_canonical": ROOT_ACCOUNT,
+            "matches_stored_transaction": True,
+        },
+        "message_evidence_digest_sha256": "ab" * 32,
+        "incoming_nanoton": "0",
+        "outgoing_nanoton": "2500000000",
+        "self_nanoton": "0",
+        "flows": [
+            {
+                "observation_identity": "cd" * 32,
+                "transaction_hash": ROOT_HASH,
+                "message_hash": ROOT_OUT_HASH,
+                "direction": "outgoing",
+                "counterparty_account_observed": CHILD_ACCOUNT,
+                "amount_nanoton": "2500000000",
+                "created_logical_time": ROOT_LT,
+                "unix_time": 1_717_236_000,
+                "body_hash": "98" * 32,
+                "opcode_hex": None,
+                "bounce": True,
+                "bounced": False,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        activity_ledger_service,
+        "get_wallet_native_ton_flow_observations",
+        lambda *args, **kwargs: source,
+    )
+    assert client.post(_activity_ledger_url(run_id)).status_code == 201
+
+    absent = client.get(f"/api/wallets/ingest/{run_id}/canonical-ledger")
+    assert absent.status_code == 409
+    assert "block-inclusion proof" in absent.json()["detail"]
+
+    monkeypatch.setattr(
+        inclusion_service,
+        "_verify_proof",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def fake_live_verifier(**kwargs):
+        bocs = {ROOT_HASH: "00", CHILD_HASH: "01"}
+        return [
+            {
+                **request,
+                "block": {
+                    "workchain": 0,
+                    "shard": -9223372036854775808,
+                    "seqno": 100 + index,
+                    "root_hash": f"{index:064x}",
+                    "file_hash": f"{index + 10:064x}",
+                },
+                "masterchain_anchor": {
+                    "workchain": -1,
+                    "shard": -9223372036854775808,
+                    "seqno": 200,
+                    "root_hash": "aa" * 32,
+                    "file_hash": "bb" * 32,
+                },
+                "transaction_boc_hex": bocs[request["transaction_hash"]],
+                "block_proof_boc_hex": "cc",
+                "trust_level": kwargs["trust_level"],
+            }
+            for index, request in enumerate(kwargs["requests"], start=1)
+        ]
+
+    def endpoint_create(selected_run_id, selected_hash, session):
+        return inclusion_service.create_wallet_transaction_inclusion_proofs(
+            selected_run_id,
+            selected_hash,
+            session,
+            live_verifier=fake_live_verifier,
+        )
+
+    monkeypatch.setattr(
+        wallet_activity_router,
+        "create_wallet_transaction_inclusion_proofs",
+        endpoint_create,
+    )
+    assert client.post(f"{_boc_url(run_id)}/block-inclusion").status_code == 201
+
+    ledger_url = f"/api/wallets/ingest/{run_id}/canonical-ledger"
+    ledger_response = client.get(ledger_url)
+    assert ledger_response.status_code == 200, ledger_response.text
+    ledger = ledger_response.json()
+    WalletCanonicalLedgerResponse.model_validate(ledger)
+    assert ledger["canonical_activity_count"] == 1
+    assert ledger["transaction_block_inclusion_required"] is True
+    assert ledger["activities"][0]["direction"] == "outgoing"
+
+    report_url = f"/api/wallets/ingest/{run_id}/canonical-report"
+    report_response = client.get(report_url)
+    assert report_response.status_code == 200
+    report = report_response.json()
+    WalletCanonicalActivityReportResponse.model_validate(report)
+    assert report["outgoing_nanoton"] == "2500000000"
+    assert report["counterparties"] == [CHILD_ACCOUNT]
+
+    assert client.get(f"{ledger_url}/export.json").status_code == 200
+    ledger_csv = client.get(f"{ledger_url}/export.csv")
+    assert ledger_csv.status_code == 200
+    assert ROOT_HASH in ledger_csv.text
+    report_csv = client.get(f"{report_url}/export.csv")
+    assert report_csv.status_code == 200
+    assert CHILD_ACCOUNT in report_csv.text
 
 
 def _storage_transaction_boc() -> tuple[str, str]:
