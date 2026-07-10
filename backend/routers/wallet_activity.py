@@ -22,6 +22,8 @@ from schemas import (
     WalletNativeTonAssetBindingResponse,
     WalletCounterpartyObservationBindingResponse,
     WalletNativeActivityLedgerResponse,
+    WalletNativeActivityMergeRequest,
+    WalletNativeActivityMergeResponse,
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
@@ -70,6 +72,10 @@ from services.wallet_native_activity_ledger import (
     WalletNativeActivityLedgerFailure,
     build_wallet_native_activity_ledger,
     get_wallet_native_activity_ledger,
+)
+from services.wallet_native_activity_merge import (
+    WalletNativeActivityMergeConflict,
+    merge_wallet_native_activity_ledgers,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -758,6 +764,36 @@ def build_wallet_native_activity_ledger_route(
     except (WalletNativeActivityLedgerFailure, SQLAlchemyError) as exc:
         session.rollback()
         raise HTTPException(status_code=503, detail="Native activity ledger storage is unavailable.", headers=headers) from exc
+
+
+@router.post(
+    "/ingest/{target_run_id}/native-activity-merge",
+    response_model=WalletNativeActivityMergeResponse,
+)
+def merge_wallet_native_activity_ledgers_route(
+    payload: WalletNativeActivityMergeRequest,
+    response: Response,
+    target_run_id: str = Path(..., pattern=r"^[1-9][0-9]*$", max_length=19),
+    session: Session = Depends(get_session),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    canonical_target = _canonical_positive_integer(
+        target_run_id,
+        field_name="target_run_id",
+        maximum=_MAX_SQLITE_RUN_ID,
+    )
+    try:
+        return merge_wallet_native_activity_ledgers(
+            canonical_target, payload.run_ids, session
+        )
+    except WalletNativeActivityMergeConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Native activity merge storage is unavailable.",
+        ) from exc
 
 
 @router.post(

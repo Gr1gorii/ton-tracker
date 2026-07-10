@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.23.7 IMMUTABLE NATIVE ACTIVITY LEDGER
+# TON Wallet Intelligence Dashboard — v0.23.8 MULTI-RUN NATIVE ACTIVITY MERGE
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -28,6 +28,8 @@ v0.23.6 groups observed endpoints by canonical network/account identity while
 explicitly refusing to infer actors, owners, beneficiaries, or intent.
 v0.23.7 materializes the verified native observations as a capture-bound,
 content-addressed semantic ledger with provider-free full revalidation.
+v0.23.8 explicitly selects compatible runs, revalidates every ledger, and
+creates a deterministic chronological merge while retaining duplicates.
 
 ## Objective
 
@@ -490,7 +492,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.23.7
+## Surface status in v0.23.8
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -507,6 +509,7 @@ intervals are contiguous.
 | Native TON asset binding | Digest-bound `ton_native_asset_v1` identity on every verified native flow | Network-scoped Toncoin with nine decimals and nanoton units; no jetton/counterparty identity, merge, cost basis, or PnL |
 | Counterparty observations | Network/account grouping of verified native-flow endpoints | Stable evidence grouping only; no actor, ownership, intent, merge, cost basis, or PnL identity |
 | Native activity ledger | Explicit local POST and provider-free GET over migration-0008 relational rows | Immutable trace-scoped native transfer semantics; non-authoritative, not cross-run merged/deduplicated, and not a PnL source |
+| Multi-run native merge | Explicit 2–50 run selection and full source-ledger revalidation | Chronological merged rows plus duplicate groups; duplicates retained, history still bounded, no cost basis or PnL |
 | Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
@@ -662,7 +665,7 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.23.7
+## Roadmap beyond v0.23.8
 
 1. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
