@@ -5991,9 +5991,149 @@ input {
   margin: 0;
 }
 
+.native-pnl-readiness-card {
+  display: grid;
+  gap: 13px;
+  border-color: rgba(0, 230, 118, 0.32);
+  background:
+    linear-gradient(145deg, rgba(0, 230, 118, 0.035), transparent 46%),
+    rgba(2, 7, 4, 0.72);
+}
+
+.native-pnl-toolbar {
+  align-items: flex-start;
+}
+
+.native-pnl-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.native-pnl-results {
+  display: grid;
+  gap: 12px;
+}
+
+.native-pnl-flow-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.native-pnl-flow-metric {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(33, 74, 49, 0.68);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.native-pnl-flow-metric > span,
+.native-pnl-gate span {
+  color: var(--muted);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.native-pnl-flow-metric strong {
+  color: var(--text);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.native-pnl-flow-metric small {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.native-pnl-gate {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.32fr) minmax(0, 1fr);
+  gap: 14px;
+  padding: 11px;
+  border: 1px solid rgba(230, 180, 80, 0.38);
+  border-radius: 7px;
+  background: rgba(230, 180, 80, 0.055);
+}
+
+.native-pnl-gate > div {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+}
+
+.native-pnl-gate strong {
+  color: #f2cc73;
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 11px;
+}
+
+.native-pnl-gate p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.native-pnl-requirements {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.native-pnl-requirements li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid rgba(33, 74, 49, 0.55);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.native-pnl-requirements li > span {
+  color: var(--success);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-weight: 900;
+}
+
+.native-pnl-requirements li.is-blocked > span {
+  color: #f2cc73;
+}
+
+.native-pnl-requirements strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.native-pnl-requirements p {
+  margin: 3px 0 0;
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.native-pnl-digest {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 900px) {
   .interval-contract-strip,
-  .interval-layer-metrics {
+  .interval-layer-metrics,
+  .native-pnl-flow-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -6018,12 +6158,17 @@ input {
   }
 
   .interval-coverage-form,
+  .native-pnl-form,
   .interval-contract-strip,
-  .interval-layer-metrics {
+  .interval-layer-metrics,
+  .native-pnl-flow-grid,
+  .native-pnl-requirements,
+  .native-pnl-gate {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .interval-coverage-form .btn {
+  .interval-coverage-form .btn,
+  .native-pnl-form .btn {
     width: 100%;
   }
 

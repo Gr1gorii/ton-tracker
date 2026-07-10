@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.23.9 CROSS-RUN NATIVE ACTIVITY DEDUP
+# TON Wallet Intelligence Dashboard — v0.24.0 NATIVE ACTIVITY PNL READINESS
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -36,6 +36,12 @@ activity identity becomes canonical; all suppressed source coordinates remain
 in resolution evidence. Any semantic disagreement under one identity fails
 closed. This establishes explicit cross-run deduplication, not history
 completeness, acquisition cost basis, or PnL eligibility.
+v0.24.0 consumes the canonical dedup result through
+`ton_native_activity_pnl_readiness_v1`, reconciles exact native TON flow, and
+evaluates a complete fail-closed evidence checklist. It integrates verified
+native activity into PnL readiness only: native message values do not become
+trade legs, acquisition lots, historical valuations, allocated fees, cost
+basis, or profit.
 
 ## Objective
 
@@ -498,7 +504,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.23.9
+## Surface status in v0.24.0
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -517,6 +523,7 @@ intervals are contiguous.
 | Native activity ledger | Explicit local POST and provider-free GET over migration-0008 relational rows | Immutable trace-scoped native transfer semantics; non-authoritative, not cross-run merged/deduplicated, and not a PnL source |
 | Multi-run native merge | Explicit 2–50 run selection and full source-ledger revalidation | Chronological merged rows plus duplicate groups; duplicates retained, history still bounded, no cost basis or PnL |
 | Cross-run native dedup | Explicit selected-run merge followed by content-addressed canonical resolution | One canonical row per identity plus complete suppression provenance; conflicting semantics fail closed, no history/cost-basis/PnL promotion |
+| Native activity PnL readiness | Provider-free selected-run dedup consumption and exact native TON flow reconciliation | Digest-bound prerequisite checklist; native evidence is used by readiness, never by a cost-basis/PnL calculation without missing trade facts |
 | Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
@@ -608,8 +615,9 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - No proof of time before the earliest eligible selected interval, time after
   the latest eligible end, or complete wallet history.
 - No acquisition cost basis from pagination evidence alone.
-- No PnL, realized/unrealized, fee-linkage, clustering, or ownership-proof
-  change.
+- No realized/unrealized PnL or cost-basis calculation from native message
+  values. Readiness integration reports missing trade, price, fee, asset, and
+  history evidence instead.
 - No synthetic migration evidence for legacy runs.
 
 ## Verification gates
@@ -673,12 +681,13 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.23.9
+## Roadmap beyond v0.24.0
 
 1. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
    coordinate as a substitute.
 2. Keep interval continuity, native activity merge, and cross-run
    deduplication as separate explicit evidence contracts.
-3. Integrate the deduplicated evidence into a fail-closed multi-run cost-basis
-   and PnL readiness contract without inventing missing trade or price facts.
+3. Add locally verified jetton trade semantics, historical valuation, and fee
+   allocation before any future multi-run cost-basis or PnL calculation can
+   pass the v0.24.0 readiness gate.

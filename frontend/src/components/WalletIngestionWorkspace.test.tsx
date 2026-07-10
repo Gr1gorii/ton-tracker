@@ -23,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
   previewWalletIngestion: vi.fn(),
   runWalletIngestion: vi.fn(),
   inspectWalletHistoryReadiness: vi.fn(),
+  inspectWalletNativePnlReadiness: vi.fn(),
   getWalletRunSignals: vi.fn(),
   getWalletRunPnlPreview: vi.fn(),
   compareWalletRuns: vi.fn(),

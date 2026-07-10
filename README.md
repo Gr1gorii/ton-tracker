@@ -1,999 +1,270 @@
-# TON Wallet Intelligence Dashboard — v0.23.0 TRACE EVIDENCE PREVIEW
+# TON Tracker
 
-A local crypto intelligence dashboard for TON wallets, provider previews, and
-mock-aware wallet analytics. On top of the guarded live wallet activity path
-(native TON balance, account jetton balance snapshots, transaction-history
-timeline, TON/jetton transfers, and DEX swaps behind explicit real-mode flags),
-run-scoped intelligence covers probabilistic multi-wallet cluster comparison,
-a rule-based evidence signal layer, and an estimated PnL preview
-(TON-denominated realized swap flows with Real PnL locked behind explicit
-evidence requirements) — each with hedged language and JSON/CSV export where
-applicable. A historical price preview (provider-reported TonAPI rate points) powers an
-optional USD valuation of TON-side swap legs, recorded transaction fees are
-netted into after-fee figures, and an in-window average-cost pass computes
-realized PnL per token. Real PnL unlocks per run only when all five evidence
-requirements are met, covers in-window realized swaps only, and partial
-calculations are never labeled Real PnL. An optional spot snapshot uses a
-deterministic fixture in mock mode or current provider-reported prices in real
-mode, values remaining in-window holdings separately from realized figures,
-and names the price source. Deterministic mock data remains the default
-executable ingestion path.
+TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
+bounded wallet activity, preserves provider and local-verification evidence,
+and keeps unsupported conclusions visibly unavailable.
 
-> **v0.23.0 TRACE EVIDENCE PREVIEW status — `GET /api/wallets/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence` performs one explicit, read-only TonAPI `GET /v2/traces/{transaction_hash}` call for one eligible transaction already stored in a real run. Nothing is fetched automatically. The run must match the current guarded live TonAPI network, and the stored provider, source, network, canonical account, unsigned-64-bit LT, lowercase 32-byte hash, raw provenance, and persisted `ton_account_tx_v1` identity must revalidate before the provider is contacted. The provider trace must contain that exact stored hash + LT + account anchor. Iterative validation is capped at 256 transaction nodes, depth 32, and 2,048 outgoing messages; interfaces are validated as bounded strings but omitted from the response. The endpoint returns only the strict `tonapi_transaction_trace_preview_v1` allowlist, uses `no-store`, performs no database mutation or persistence, and reports missing resources as 404, ineligible state as 409, and sanitized provider/protocol/anchor failures as 502. `finalized` means the accepted non-emulated provider trace has no remaining internal outgoing messages; `pending` means at least one remains. Neither state proves transaction success, chain state, semantic activity, ownership, cost basis, or PnL eligibility. Backend `VERSION=0.2.1`, Alembic head `20260710_0005`, `wallet_history_readiness_v0.22.7`, and `wallet_multi_run_interval_coverage_v1` are unchanged.**
-> - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
-> - Provider previews are available for TonAPI account jettons, TonAPI
->   jettons-only wallet intelligence, and STON.fi pools.
-> - Wallet activity ingestion now has a dashboard workspace for coverage
->   preview, persisted source-labeled runs, run refresh, evidence, warnings, and
->   normalized activity tables.
-> - A dedicated **Load stored run** control validates a canonical positive
->   JavaScript safe integer before issuing the existing read request. Successful
->   readback restores the run's wallet, window, exact custom bounds, and
->   requested surfaces as one state transition. A rejected or failed read keeps
->   the previously displayed run and its run-scoped diagnostics intact.
->   Custom bounds retain their canonical UTC strings for signatures and any
->   immediate preview/run action until the corresponding field is edited, so
->   DST folds and
->   sub-millisecond precision are not silently changed by `datetime-local`.
-> - A separate recent-run catalog requests the newest eight persisted runs and
->   initially shows three. It can expand to all eight, refresh independently,
->   retry after failure, and retains the last successful list while a refresh
->   fails. Selecting a safe row delegates to the existing full stored-run GET;
->   signed-64-bit ids outside the browser safe-integer range remain visible as
->   exact decimal strings but cannot be opened from that browser control.
-> - A separate **Transaction trace evidence** card appears for a persisted run.
->   It selects only coherent live TonAPI transaction identities and remains
->   network-silent until the user presses **Inspect trace evidence**. Mock runs,
->   empty runs, and runs without an eligible stored anchor stay disabled. The
->   card distinguishes explicit-ready, inspecting, refreshing, unavailable,
->   last-result-preserved, finalized, and pending states; changing the anchor or
->   run aborts stale requests and resets only trace-scoped state. A failed retry
->   keeps the last successful result visible.
-> - Wallet activity preview/run orchestration now goes through
->   `backend/adapters/wallet_activity.py`.
-> - `WALLET_ACTIVITY_PROVIDER=mock` remains the default. Explicit
->   `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
->   `WALLET_ACTIVITY_LIVE_ENABLED=true` enable the only live wallet activity
->   path in this release: TonAPI native TON balance snapshots, account jetton
->   balance snapshots, an ordered account transaction-history timeline,
->   TON/jetton transfer history, and DEX swaps from account events. Persisted
->   transactions and swaps feed the run-scoped PnL preview; Real PnL remains
->   evidence-gated and in-window only.
-> - Persisted ingestion runs can be compared pairwise (2-25 runs) as a
->   probabilistic behavioral-similarity signal with JSON/CSV export — never
->   proof of common ownership.
-> - Multi-run history readiness accepts an explicit target run and 2-50
->   distinct run ids for the same network-scoped canonical run-wallet identity
->   and data mode. When canonical identity is unavailable, only an exact
->   submitted-address match is accepted as a legacy diagnostic fallback. Under
->   `wallet_history_readiness_v0.22.7`, identity groups remain diagnostic and
->   `bounded_interval_coverage` separately measures only strictly revalidated
->   low-level transaction intervals and TonAPI provider-display event intervals.
->   Each selected run is `included`, `excluded`, or `not_requested` per layer;
->   no evidence crosses between layers. The report also exposes observed
->   timestamp bounds, asset-address and fee hash-match coverage, and blockers.
->   Every report remains diagnostic (`is_cost_basis: false`,
->   `eligible_for_cost_basis: false`, `used_by_pnl: false`) and is never passed
->   into PnL.
-> - The wallet identity contract applies only to the wallet associated with an
->   ingestion run. For valid inputs the response exposes the persisted
->   canonical identity and contract metadata; invalid or legacy placeholder
->   values never receive an inferred identity. Low-level real/live account
->   transactions use the separate contract below. Transfer and swap rows can
->   carry the narrower provider observation identity described below;
->   authoritative transfer/swap, jetton-asset, and counterparty identity remain
->   outside this release.
-> - The transaction identity contract is narrower: only low-level real/live
->   TonAPI account-transaction rows with a coherent network, canonical run
->   account, LT, 32-byte hash, and matching provider provenance receive an
->   exact tuple. The original provider fields are preserved. The tuple can
->   support future deduplication, but this release does not deduplicate rows,
->   locally verify blockchain proof, prove ownership, or feed identity into
->   PnL.
-> - Versioned Alembic revisions now provide a reviewable upgrade path for the
->   existing SQLAlchemy schema. Startup creates fresh databases from the
->   baseline, adopts only an exact frozen v0.22.0 legacy schema, and fails
->   closed on partial, drifted, corrupt, or unknown revisions. Retry-safe
->   revision 0003 adds and verifies transaction identity columns and indexes,
->   backfills coherent legacy live provenance, leaves mock/malformed rows
->   explicitly unavailable, and preserves
->   history-completeness, cost-basis, and PnL semantics.
->   Revision 0004 adds retry-safe `wallet_acquisition_streams` and
->   `wallet_acquisition_pages` evidence tables with cascading foreign keys and
->   unique stream/page identities. Existing runs receive zero fabricated
->   acquisition rows.
->   Revision 0005 adds retry-safe provider event/action observation fields and
->   indexes to transfers and swaps. v0.22.5 rows lack the original action index,
->   so they remain explicitly unavailable instead of receiving a guessed key.
->   v0.22.7, v0.22.8, v0.22.9, and v0.23.0 add no database migration; Alembic head
->   remains `20260710_0005`. Interval coverage, persisted-run readback, and the
->   recent-run catalog remain read-only over existing evidence.
-> - Each persisted run exposes rule-based evidence signals with confidence
->   levels and explicit insufficient-evidence records, rendered in a workspace
->   card and exportable as JSON/CSV. Signals are heuristic observations, not a
->   risk score.
-> - Each persisted run exposes an estimated PnL preview (`pnl_mode`:
->   `imported_pnl` / `estimated_onchain_pnl` / `real_pnl_locked` /
->   `insufficient_data` / `real_pnl`, confidence
->   `high`/`medium`/`low`/`unavailable`):
->   TON-denominated realized swap flows only, never labeled Real PnL. Real
->   PnL stays locked until transaction history, swap evidence, historical
->   prices, cost basis, and fee handling are all available; missing evidence
->   is listed explicitly.
-> - Historical rate points can be previewed per token (`"ton"` or a jetton
->   master address) from the guarded TonAPI rates chart, with a deterministic
->   mock default and no hidden fallback on provider failure. The standalone
->   preview does not mutate a run (`is_cost_basis_source: false`); the PnL
->   endpoint requests the same source separately when historical enrichment
->   is explicitly enabled.
-> - The PnL preview accepts `include_historical=true` to value TON-side swap
->   legs in USD at the nearest historical TON/USD point (6h tolerance). The
->   `historical_prices` requirement becomes available only when every leg
->   matches a point; unmatched legs and provider failures stay visible with
->   no hidden fallback.
-> - Recorded transaction fees (`fee_ton`) are matched to used swap rows by
->   transaction hash and netted into per-token and total after-fee figures.
->   The `fee_handling` requirement becomes available only when every used
->   swap row has a recorded fee; partial coverage stays visible as a warning.
-> - With historical valuation enabled, an in-window average-cost pass
->   computes realized PnL per token (fees valued in USD at the matched
->   points). The `cost_basis` requirement becomes available only when every
->   leg carries a positive token quantity and every sell is fully covered by
->   earlier in-window buys; oversold tokens stay visible as unavailable with
->   the exact reason.
-> - When all five evidence requirements are met for a run, the PnL preview
->   switches to `pnl_mode: real_pnl` (in-window realized only; unrealized
->   holdings and activity outside the window are excluded). Otherwise Real
->   PnL stays locked and partial calculations are never labeled Real PnL.
-> - PnL preview JSON/CSV exports accept `include_historical=true` for
->   USD/realized rows and `include_unrealized=true` for spot rows. CSV keeps
->   unavailable records separate, reports coverage counts, and emits a priced
->   subtotal only when at least one record is computed; the default export
->   stays offline and unchanged. Empty `0/0` coverage proves only that no
->   candidates were derived, not that the wallet has no holdings.
-> - `include_unrealized=true` implies historical enrichment, derives remaining
->   in-window holdings from the cost-basis pass, and values them with a
->   deterministic mock fixture or real provider-reported spot prices. Derived
->   candidates name `priced_by`; candidates missing an address or usable price
->   stay visible as unavailable. If prerequisite enrichment yields no
->   candidates, the response can be empty and the UI does not claim that no
->   holdings exist. Unrealized figures never change realized PnL or the
->   five-item Real-PnL evidence checklist.
-> - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
->   remain scaffold/limited coverage paths. They do not fetch or persist live
->   wallet activity rows.
-> - Provider preview panels use shared workspace inputs and show fresh/stale,
->   ready/running/error, and scoped-data states.
-> - Legacy buyers, PnL, exports, clustering, and interesting-wallet reports
->   remain mock-aware and separate from provider previews.
-> - Bitquery TON coverage remains limited/unavailable in the current schema;
->   Bitquery and import tools are marked as experimental/provider-limited.
-> - Every provider-limited surface avoids hidden fallback claims. Missing data
->   stays visible instead of being inferred.
-> - Provider/source badges distinguish loading, error, mock/offline, live, and
->   unknown status states.
-> - Provider status shows endpoint coverage and online/degraded/offline counts,
->   including the wallet activity adapter selection row, without probing
->   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.23.0 TRACE EVIDENCE PREVIEW` product label
->   and avoids stale product version references.
-> - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
-> - Real wallet ingestion phases remain captured in
->   `REAL_WALLET_INGESTION_PLAN.md`.
-> - Wallet activity preview/run/read endpoints persist deterministic
->   mock-normalized transfers, transactions, swaps, balances, warnings, and
->   provider evidence.
-> - The frontend uses Vite 8 and Vitest 4 for its build/test toolchain; the
->   checked-in dependency graph reports zero `npm audit` vulnerabilities.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.23.0 TRACE EVIDENCE
->   PREVIEW` is the product release label.
-> - Wallet clustering is probabilistic: similarity signals only, not proof of
->   common ownership.
+Current product release: **v0.24.0 — Native Activity PnL Readiness**<br>
+Stable backend API version: **0.2.1**
 
----
+## What v0.24.0 adds
 
-## Tech stack
+The multi-run native activity pipeline is now connected to an explicit PnL
+evidence gate:
 
-| Layer    | Stack                                   |
-| -------- | --------------------------------------- |
-| Backend  | FastAPI (Python), SQLite, SQLAlchemy, Alembic |
-| Frontend | React + Vite 8 + TypeScript; Vitest 4 tests |
-| Money    | `decimal.Decimal` for PnL math          |
+1. A finalized TonAPI trace is captured as immutable relational evidence.
+2. Transaction BOCs are deserialized and checked locally against that graph.
+3. Verified native TON messages become content-addressed activity rows.
+4. Compatible run ledgers are merged in deterministic chronological order.
+5. Repeated activity identities are resolved to one canonical occurrence while
+   every suppressed source remains visible.
+6. The selected native activity is reconciled into incoming, outgoing, self,
+   and net TON flow.
+7. Cost basis and PnL remain locked until complete history, verified trade
+   semantics, jetton identity, historical prices, and fee allocation exist.
 
-The code is intentionally modular: all network-specific logic lives behind
-adapters in `backend/adapters/`, so real data sources can be added later
-without touching the analysis / PnL / clustering services.
+Native message value is never presented as a swap, acquisition lot, sale,
+profit, ownership proof, or complete wallet history.
 
----
+## Main capabilities
 
-## Project structure
+- Dark, responsive wallet evidence workspace.
+- Mock mode for deterministic local development.
+- Guarded live TonAPI wallet ingestion for transactions, provider-derived
+  transfers/swaps, jetton balances, and native TON balance snapshots.
+- Frozen half-open acquisition windows with explicit pagination evidence.
+- Network-scoped wallet and transaction identities.
+- Persisted run catalog and provider-free stored-run loading.
+- Selected-run interval continuity diagnostics.
+- Explicit transaction trace preview and immutable trace capture.
+- Local transaction/message BOC verification with bounded parsing.
+- Body-safe message evidence, native TON flow observations, native asset
+  identity, and counterparty observation identity.
+- Immutable native activity ledgers, multi-run merge, and cross-run dedup.
+- v0.24.0 native TON flow reconciliation and fail-closed PnL readiness.
+- Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
+- TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
+  and CSV/JSON trade import tools.
 
-```
+## Data-honesty rules
+
+The application deliberately separates these concepts:
+
+- a provider observation is not locally verified chain evidence;
+- a locally verified BOC is not a blockchain inclusion proof;
+- a message endpoint is not an identified actor or owner;
+- a native TON movement is not necessarily a trade;
+- adjacent selected windows are not complete wallet history;
+- net wallet flow is not PnL;
+- cost basis is unavailable until acquisition lots, prices, and fees are
+  sufficiently established.
+
+Unavailable and incomplete evidence is returned in the API and rendered in the
+interface instead of being silently substituted.
+
+## Architecture
+
+```text
+frontend/                    React 18, TypeScript, Vite
 backend/
-  main.py              FastAPI app + endpoints
-  config.py            Settings (DATA_MODE + providers) + ProviderResult
-  .env.example         Provider configuration template
-  alembic.ini          Alembic configuration
-  requirements.txt
-  models.py            SQLAlchemy models (AnalysisRun + wallet activity tables)
-  schemas.py           Pydantic request/response schemas
-  database.py          SQLAlchemy engine + session + migration startup
-  conftest.py          Test path setup
-  migrations/
-    env.py             Metadata, URL, and shared-connection wiring
-    legacy_baseline.py Frozen v0.22.0 schema compatibility manifest
-    versions/
-      20260710_0001_baseline.py
-                       Frozen v0.22.0-compatible schema baseline
-      20260710_0002_wallet_identity.py
-                       Additive run-wallet identity fields + backfill
-      20260710_0003_transaction_identity.py
-                       Retry-safe low-level transaction identity fields + indexes
-      20260710_0004_acquisition_evidence.py
-                       Durable acquisition stream/page evidence foundation
-      20260710_0005_event_action_identity.py
-                       Provider-scoped event/action observation identity
-  routers/
-    tonapi.py          TonAPI account jettons + wallet intelligence previews
-    stonfi.py          STON.fi pools preview
-    bitquery.py        Bitquery token trades preview/analysis
-    import_trades.py   CSV/JSON trade import preview/analysis
-    wallet_activity.py Adapter-backed wallet activity and run intelligence endpoints
-    prices.py          Standalone historical price inspection endpoint
-  services/
-    analysis.py        Orchestration + data_quality + provider status
-    database_migrations.py
-                       Fail-closed fresh/legacy migration runner
-    ton_address_identity.py
-                       Strict TON address parsing + canonical run-wallet identity
-    ton_transaction_identity.py
-                       Strict low-level TON account-transaction tuple
-    ton_event_action_identity.py
-                       Strict TonAPI event/action observation coordinate
-    wallet_acquisition_bounds.py
-                       Immutable half-open UTC interval resolution
-    pnl.py             Decimal-based PnL calculations
-    clustering.py      Probabilistic wallet similarity / grouping
-    mock_data.py       Hand-crafted mock token/pool/wallet fixtures
-    export.py          CSV / JSON serialization
-    import_parser.py   CSV/JSON trade parsing
-    import_analysis.py Imported-trade wallet analysis
-    tonapi_wallet_intelligence.py
-                         Jettons-only wallet intelligence preview builder
-    wallet_activity_ingestion.py
-                         Adapter-backed wallet activity ingestion persistence
-    wallet_trace_evidence.py
-                         Read-only stored-transaction TonAPI trace preview
-    wallet_activity_clustering.py
-                         Pairwise run comparison (probabilistic similarity)
-    wallet_interval_coverage.py
-                         Exact selected-run half-open interval sweep
-    wallet_history_readiness.py
-                         Read-only multi-run overlap and coverage diagnostics
-    wallet_activity_signals.py
-                         Rule-based evidence signals with confidence levels
-    pnl_preview.py       Evidence-gated run-scoped PnL preview
-    pnl_usd_valuation.py USD valuation of swap legs via historical prices
-    pnl_unrealized.py    Optional spot valuation of remaining in-window holdings
-    historical_pricing.py
-                         Historical rate source for preview and PnL enrichment
-  adapters/
-    geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
-    wallet_activity.py Wallet activity contract + mock/scaffold adapters
-    tonapi.py          TonAPI account jettons preview adapter
-    stonfi.py          STON.fi pools preview adapter
-    bitquery.py        DEX trades — mock/provider-limited Bitquery
-    ton_provider.py    Legacy TON provider status/scaffold
-  tests/               pytest suite (parser, config, data_quality, migrations,
-                       PnL, wallet activity, readiness, evidence signals)
-
-frontend/
-  package.json
-  vite.config.ts
-  index.html
-  public/
-    favicon.svg       Browser favicon for clean console signoff
-  src/
-    main.tsx
-    App.tsx
-    api.ts             API client + export URLs
-    types.ts           Types mirroring the backend payload
-    format.ts          Display formatting helpers
-    useWalletRunCatalog.ts
-                       Abortable newest-run catalog state and refresh lifecycle
-    walletRunCatalog.ts
-                       Strict six-field catalog response validation
-    components/
-      PoolUrlInput.tsx
-      TimeWindowPicker.tsx
-      ProviderStatus.tsx
-      PreviewReadinessStrip.tsx
-      PreviewFreshnessStrip.tsx
-      WalletIngestionWorkspace.tsx
-      WalletRunCatalog.tsx
-                       Collapsed privacy-bounded recent-run selector
-      TonapiWalletIntelligencePreviewPanel.tsx
-      TonapiAccountJettonsPreviewPanel.tsx
-      StonfiPoolsPreviewPanel.tsx
-      BitqueryTokenTradesPanel.tsx
-      ImportPreviewPanel.tsx
-      TokenOverview.tsx
-      BuyersTable.tsx
-      WalletGroups.tsx
-      CommonHoldings.tsx
-      InterestingWallets.tsx
-      ExportButtons.tsx
-
-README.md
-RELEASE_NOTES.md
-RELEASE_PROMOTION.md
-PUBLIC_RELEASE.md
-REAL_WALLET_INGESTION_PLAN.md
+  adapters/                  Provider-specific network clients
+  routers/                   FastAPI routes
+  services/                  Source-independent evidence and analysis logic
+  migrations/versions/       Forward-only Alembic revisions
+  tests/                     Backend contract, migration, and service tests
+  ton_check.db               Local SQLite database, ignored by Git
 ```
 
----
+Backend: FastAPI, SQLAlchemy, SQLite, Pydantic, Alembic.<br>
+Frontend: React, TypeScript, Vite, Vitest.
 
-## Setup
+The current schema head is `20260710_0008`. The application applies migrations
+on backend startup.
+
+## Requirements
+
+- Python 3.10 or newer
+- Node.js `^20.19.0` or `>=22.12.0`
+- npm 10 or newer
+
+## Quick start in mock mode
 
 ### Backend
 
 ```bash
 cd backend
-python -m venv .venv
-
-# Activate the virtualenv:
-#   macOS / Linux:
-source .venv/bin/activate
-#   Windows (PowerShell):
-.\.venv\Scripts\Activate.ps1
-#   Windows (cmd):
-.\.venv\Scripts\activate.bat
-
-pip install -r requirements.txt
-uvicorn main:app --reload
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env
+.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
 ```
-
-The API serves on `http://localhost:8000`. Interactive docs: `http://localhost:8000/docs`.
-Startup automatically runs the checked-in migration path. A fresh database is
-built from the baseline. An unversioned database is adopted only when its full
-domain schema exactly matches the frozen v0.22.0 manifest and SQLite integrity
-checks pass; otherwise startup stops without guessing or calling
-`create_all()`. Existing application rows are preserved.
-
-Manual verification from `backend/`:
-
-```bash
-python -m services.database_migrations
-alembic -c alembic.ini current
-```
-
-The Python command uses the same safe fresh/legacy state machine as startup.
-Use raw Alembic commands only after the database has a revision marker; they
-do not perform frozen legacy-schema adoption on their own.
-
-Baseline downgrade is intentionally blocked because it would destroy persisted
-data. Restore a verified database backup instead of downgrading the baseline.
 
 ### Frontend
 
-Vite 8 and its React plugin require Node.js `^20.19.0 || >=22.12.0`; the
-checked-in package also requires npm 10 or newer. `frontend/package.json`
-declares the same engine contract so unsupported Node releases fail visibly.
+In a second terminal:
 
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run dev -- --host 127.0.0.1
 ```
 
-The dashboard serves on `http://localhost:5173` and calls the backend at
-`http://localhost:8000` by default. Override the API base by setting
-`VITE_API_BASE` (e.g. in `frontend/.env`):
+Open [http://127.0.0.1:5173/](http://127.0.0.1:5173/). API health and generated
+OpenAPI documentation are available at
+[http://127.0.0.1:8000/api/health](http://127.0.0.1:8000/api/health) and
+[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
-```
-VITE_API_BASE=http://localhost:8000
-```
+## Guarded live TonAPI mode
 
----
+Keep credentials only in `backend/.env`, which is ignored by Git:
 
-## Data modes & providers (v0.23.0 TRACE EVIDENCE PREVIEW)
-
-Configure providers via environment variables (copy `backend/.env.example` to
-`backend/.env`):
-
-| Variable                 | Purpose                                            |
-| ------------------------ | -------------------------------------------------- |
-| `DATA_MODE`              | `mock` (default) or `real`                         |
-| `TON_CHECK_DB_URL`       | Optional SQLite SQLAlchemy URL; defaults locally  |
-| `TON_NETWORK`            | `mainnet` (default) or `testnet`; scopes raw run-wallet and low-level transaction identities plus the guarded live path |
-| `GECKOTERMINAL_BASE_URL` | GeckoTerminal v2 API base (public, no key)         |
-| `TON_API_BASE_URL`       | TON indexer base URL (real TON data)               |
-| `TON_API_KEY`            | TON indexer API key                                |
-| `BITQUERY_API_URL`       | Bitquery endpoint (real DEX trades)                |
-| `BITQUERY_API_KEY`       | Bitquery API key                                   |
-| `STONFI_BASE_URL`        | STON.fi API base for pool previews                 |
-| `TONAPI_BASE_URL`        | Optional TonAPI base; empty selects the official host for `TON_NETWORK`, and explicit official hosts must match it |
-| `TONAPI_API_KEY`         | Optional TonAPI API key                            |
-| `WALLET_ACTIVITY_PROVIDER` | `mock`, `tonapi`, `ton_provider`, `stonfi`, or `bitquery` |
-| `WALLET_ACTIVITY_LIVE_ENABLED` | `false` by default; enables the guarded TonAPI live path only when `DATA_MODE=real` and `WALLET_ACTIVITY_PROVIDER=tonapi` |
-| `WALLET_ACTIVITY_LIVE_JETTON_LIMIT` | TonAPI live jetton snapshot limit, clamped to `1..500` |
-| `WALLET_ACTIVITY_LIVE_TX_LIMIT` | TonAPI live transaction-history page size, clamped to `1..1000` |
-| `WALLET_ACTIVITY_LIVE_TX_MAX_PAGES` | Maximum bounded transaction pages per ingest run, clamped to `1..100`; reaching it remains incomplete |
-| `WALLET_ACTIVITY_LIVE_EVENT_LIMIT` | Shared TonAPI account-event page size for derived transfers/swaps, clamped to `1..100` |
-| `WALLET_ACTIVITY_LIVE_EVENT_MAX_PAGES` | Maximum shared bounded account-event pages per ingest run, clamped to `1..100`; reaching it remains incomplete |
-
-When `TONAPI_BASE_URL` is empty, the backend selects `https://tonapi.io` for
-mainnet or `https://testnet.tonapi.io` for testnet. A configured official host
-that conflicts with `TON_NETWORK` is rejected before any live provider call.
-When `TONAPI_API_KEY` is present, the base URL must use HTTPS and the
-authorization header is marked non-forwardable so redirects cannot carry it to
-another request origin.
-
-What is real, preview-only, mock-aware, planned, and scaffolded in this
-milestone:
-
-| Surface                                      | mock mode       | real mode / provider mode                         |
-| -------------------------------------------- | --------------- | ------------------------------------------------- |
-| Pool / token info for legacy analysis        | mock            | GeckoTerminal when available, with fallback notes |
-| TonAPI account jettons preview               | mock/offline    | TonAPI/public API when available                  |
-| TonAPI wallet intelligence preview           | jettons-only    | jettons-only; not full wallet intelligence        |
-| STON.fi pools preview                        | mock/offline    | STON.fi pools only                                |
-| Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
-| Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
-| Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Wallet transfers/history/swaps/balances | mock-normalized | mock by default; the explicit TonAPI live guard paginates bounded low-level transactions plus one shared account-event display stream, and coherent derived transfer/swap rows preserve provider-scoped event/action coordinates; balances remain snapshots, derived actions remain semantically incomplete, and the observation identity is not consumed by PnL |
-| Stored-transaction trace evidence | unavailable; no provider call | one explicit guarded TonAPI trace call for an eligible persisted transaction; sanitized structural summary only, never persisted or consumed by PnL |
-
-Each `/api/analyze` response includes a `data_quality` block
-(`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
-**Data mode / Provider status** panel reflecting `GET /api/providers/status`,
-plus release-readiness and evidence cards that state current limitations.
-Missing provider coverage is displayed as unavailable/provider-limited instead
-of being silently inferred.
-
----
-
-## API
-
-### `GET /api/health`
-Returns service status, backend API version, and current `data_mode`.
-
-Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.23.0 TRACE EVIDENCE PREVIEW` is the current
-user-facing product release label.
-
-### `GET /api/providers/status`
-Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
-provider, Bitquery, STON.fi, TonAPI, and the selected wallet activity adapter.
-
-### `POST /api/analyze`
-Request body:
-
-```json
-{
-  "pool_url": "https://www.geckoterminal.com/ton/pools/<pool_address>",
-  "time_window": "24h",            // "24h" | "3d" | "7d" | "custom"
-  "custom_start": "2026-05-01T00:00:00Z",  // required only when "custom"
-  "custom_end": "2026-05-08T00:00:00Z"     // required only when "custom"
-}
+```dotenv
+TONAPI_API_KEY=your_key_here
 ```
 
-Returns token info, pool info, the analyzed window, per-wallet PnL + flags,
-candidate clusters, common holdings, interesting wallets, a summary, the
-`data_quality` block, and the `providers` status.
-
-### `GET /api/export/csv` and `GET /api/export/json`
-Download placeholders. They run a fresh mock analysis and stream it back as a
-downloadable CSV (wallet table) or JSON (full payload). Optional query params:
-`pool_url`, `time_window`.
-
-### `GET /api/tonapi/account-jettons/preview`
-Returns a scoped TonAPI account jettons preview for `account_address` and
-`limit`. This is account jetton data only.
-
-### `GET /api/tonapi/wallet-intelligence/preview`
-Builds a jettons-only wallet intelligence preview from TonAPI account jetton
-data. It does not include full transaction history, PnL, DEX swaps, current TON
-balance, or full on-chain behavior.
-
-### `GET /api/stonfi/pools/preview`
-Returns a scoped STON.fi pools preview for `limit`. It covers STON.fi DEX pools
-only, not all TON DeFi.
-
-### `POST /api/wallets/ingest/preview`
-Returns provider coverage for a wallet activity ingestion request. The default
-mock path is deterministic. Since v0.12.0 the explicit TonAPI live guard can
-call TonAPI for native TON balance, account jetton balance, account
-transaction-history, TON/jetton transfer, and DEX swap coverage. This coverage
-preview does not calculate PnL. Every request resolves one immutable
-half-open UTC interval `[start, end)`. A live transaction or shared account-event
-preview fetches exactly one page and reports `completion_state: preview_only`;
-it does not follow the cursor or persist a run and cannot verify interval
-completeness.
-
-### `POST /api/wallets/ingest`
-Persists one adapter-backed wallet activity run and returns run id, status,
-provider evidence, normalized rows, unavailable surfaces, and warnings. The
-default path persists deterministic mock-normalized rows. The TonAPI
-live guard persists native TON balance snapshots, account jetton balance
-snapshots, ordered transaction-history rows, TON/jetton transfer rows, and DEX
-swap rows only. The submitted `wallet_address` remains unchanged for audit,
-and `wallet_identity` exposes the persisted identity status, contract version,
-TON network, canonical raw address, workchain, account id, submitted format,
-and friendly-address flags. Identity metadata describes address syntax and
-network scope only; `is_account_existence_proof` and `is_ownership_proof`
-remain `false`. Eligible low-level real/live TonAPI transaction rows also expose
-`transaction_identity`: a persisted `ton_account_tx_v1` tuple of network,
-canonical run account, canonical LT, and canonical 32-byte hash. The original
-`tx_hash` and `logical_time` fields remain unchanged.
-
-Low-level `transactions` pages use `WALLET_ACTIVITY_LIVE_TX_LIMIT` and
-`WALLET_ACTIVITY_LIVE_TX_MAX_PAGES`. Derived `transfers` and `swaps` now share
-one account-event chain using `WALLET_ACTIVITY_LIVE_EVENT_LIMIT` and
-`WALLET_ACTIVITY_LIVE_EVENT_MAX_PAGES`; requesting both surfaces does not make
-two provider traversals. Every page and aggregate stream record is persisted
-through migration 0004, including request/response cursors, counts, LT/time
-extrema, response digest, bounds, termination reason, and sanitized failure
-evidence. A bounded stream becomes `complete` only after a terminal empty page
-or an ordered, verified crossing below the requested start. Page-cap exhaustion,
-provider failure, malformed protocol data, a stalled/non-descending cursor, or
-an in-progress event remains `incomplete` or `error`.
-
-`account_events` uses `scope_kind: provider_display_events`. Its completion
-means only that the recorded TonAPI page chain terminated for the bounded
-query. TonAPI event actions can change, so derived transfer and swap surfaces
-remain in `incomplete_surfaces` and the run remains partial/limited. The event
-chain does not establish authoritative transfer history, full DEX history,
-ownership, cost basis, or PnL. Jettons and balances remain snapshot surfaces.
-
-For coherent guarded real/live actions, each transfer or swap also exposes
-`event_action_identity` under contract `tonapi_event_action_obs_v1`. Its key is
-the provider + TON network + canonical run account + canonical event id +
-canonical event LT + original zero-based action index from the full provider
-action array. Surface and action type are not key fields, so retyping one
-coordinate is a conflict instead of a second identity. This is provider
-observation identity only: `is_blockchain_proof_verified`,
-`is_authoritative_activity_identity`, `is_ownership_proof`,
-`eligible_for_cost_basis`, `deduplication_applied`, and `used_by_pnl` remain
-false. Mock or incoherent rows expose `unavailable`.
-
-TonAPI response handling is bounded to 16 MiB, JSON depth 64, 200,000 parsed
-nodes, and 128 characters per numeric token. Oversized, excessively nested,
-malformed, non-finite, or invalidly encoded JSON is reported as sanitized
-provider protocol evidence rather than an uncaught parser/resource failure.
-
-### `GET /api/wallets/ingest?limit=8`
-
-Returns a bounded catalog of the newest persisted wallet-ingestion runs. The
-default limit is `8`; an explicit `limit` must be one canonical ASCII decimal
-integer from `1` through `50`. Leading zeros, signs, whitespace, decimals,
-booleans, empty values, duplicates, unknown query parameters, and values above
-`50` return 422.
-
-The response contains only `runs`, the validated `limit`, and `truncated`.
-Each run summary has exactly these six fields:
-
-- `run_id`: canonical positive signed-64-bit decimal string;
-- `wallet_hint`: at most 11 characters, formed from the first six and last four
-  submitted-address characters with one ellipsis between them; legacy values
-  shorter than 16 characters use the non-reconstructing `stored…run` sentinel;
-- `time_window`;
-- `created_at`;
-- `status`;
-- `data_mode`.
-
-The full submitted address, canonical account identity, custom bounds,
-requested surfaces, provider evidence, activity rows and counts, messages, and
-warnings are not catalog fields. Newest means fixed descending persisted run
-id. The endpoint has no offset, cursor, client-selected sort, filter, or total
-count: it projects only the six summary values from `wallet_ingestion_runs`,
-reads at most `limit + 1` rows in one SELECT, and sets `truncated: true` when an
-older run exists. It never loads child activity tables, settings, or an
-ingestion provider, and performs no database mutation. The response and browser
-request both use `no-store`.
-
-The wallet input is bounded to 128 characters in both backend validation and
-the browser control. The UI requests eight entries, shows the newest three
-while collapsed, and can expand to all eight. Its catalog request has an
-independent abort controller and sequence guard, so a stale refresh cannot
-replace a newer result or interfere with ingestion and full-run loading. A
-refresh failure preserves the last successful catalog and exposes retry; a
-successful ingestion refreshes the catalog. Selecting a row still loads the
-complete run through `GET /api/wallets/ingest/{run_id}`. Decimal ids outside
-the JavaScript safe-integer range remain displayable but their open action is
-disabled rather than rounded.
-
-### `GET /api/wallets/ingest/{run_id}`
-Returns one persisted wallet activity run by id, including provider evidence,
-unavailable surfaces, normalized rows, warnings, the original submitted
-`wallet_address`, and its persisted `wallet_identity`. Valid bounceable and
-non-bounceable friendly forms can share one network-scoped canonical identity;
-mainnet and testnet identities remain distinct. Invalid or legacy placeholder
-values return explicit unavailable identity metadata instead of an inferred
-address. Each transaction includes its persisted `transaction_identity`.
-`is_deduplication_identity` becomes true only when the stored tuple and source
-provenance remain coherent; `is_blockchain_proof_verified`,
-`is_ownership_proof`, `deduplication_applied`, and `used_by_pnl` always remain
-false. Pre-v0.22.3 live rows are backfilled only when their stored provenance
-passes the same strict contract; mock, malformed, or inconsistent transaction
-rows stay explicitly `unavailable`.
-
-Each transfer and swap includes its persisted `event_action_identity`. Rows
-written before migration 0005 do not contain the original action index, so
-readback leaves them `unavailable`; it never derives an index from row order,
-payload, timestamp, or type. Persisted identity fields are validated against the
-run and raw provider observation before the public validity flag can be true.
-
-The run response also returns persisted `acquisition_streams` and per-page
-evidence for low-level transaction pagination and the shared account-
-event display stream. Runs created before migration 0004 have no synthesized
-stream or page records; their pagination state remains unavailable rather than
-inferred.
-
-This is the existing persisted-run read endpoint introduced into the workspace
-by v0.22.8 and still used by v0.22.9 catalog selection; loading does not create
-a second full-run endpoint or a new run. The URL id must be a
-canonical positive decimal string matching `[1-9][0-9]*` and fit the positive
-signed-64-bit range (`1..9223372036854775807`). A stored run returns 200, a
-canonical but absent id returns 404, and malformed, noncanonical, zero,
-negative, or out-of-range input returns 422. Readback performs no provider or
-ingestion-adapter call and no database write, commit, or mutation.
-
-The response includes the exact persisted `custom_start`, `custom_end`, and
-`created_at` timestamps. Non-custom runs return null custom bounds; custom runs
-return both exact bounds, allowing the workspace to restore the original
-request controls without deriving them from observed activity. The UI accepts
-only positive JavaScript safe integers before calling the endpoint, validates
-that the returned run matches the requested id, and applies wallet, time
-window, custom bounds, surfaces, snapshot, and displayed run atomically. A
-failed or incoherent load leaves the prior run selected. Selecting another run
-changes the keyed run id, so run-scoped evidence, PnL, signal, and interval
-cards remount instead of leaking state from the previous run. Canonical UTC
-datetime signatures prevent restored custom bounds from being marked stale
-solely because the form uses a local datetime representation.
-
-### `GET /api/wallets/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence`
-
-Returns one explicit, sanitized provider-indexed trace summary for one eligible
-low-level transaction already stored in the selected run. `run_id` must be a
-canonical positive signed-64-bit decimal. `transaction_hash` must be exactly 64
-lowercase hexadecimal characters; uppercase, `0x`-prefixed, short, long, or
-non-hex aliases return 422 and cannot reach the provider.
-
-Before any network call, the backend requires all of the following:
-
-- `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
-  `WALLET_ACTIVITY_LIVE_ENABLED=true`;
-- a configured, network-matching TonAPI adapter;
-- one existing real run on the current `ton-mainnet` or `ton-testnet` network;
-- exactly one stored transaction with coherent live TonAPI provenance;
-- a fully re-derived, persisted `ton_account_tx_v1` identity whose canonical
-  hash equals the path hash.
-
-An eligible explicit request performs exactly one provider GET to TonAPI's
-official `GET /v2/traces/{trace_id}` operation, using the stored transaction
-hash as `trace_id`; it sends no request body and follows no account-trace list.
-TonAPI can resolve that official operation from a trace id or a transaction
-hash, but this product contract deliberately accepts only a hash already bound
-to the selected stored run. See the
-[TonAPI traces documentation](https://docs.tonconsole.com/tonapi/rest-api/traces).
-The browser never sends this request automatically: the user must select an
-eligible anchor and press **Inspect trace evidence**.
-
-The provider tree is traversed iteratively and fails closed above 256
-transaction nodes, depth 32, or 2,048 outgoing messages. Every node requires a
-non-emulated state, a bounded list of non-empty interfaces, a canonical
-transaction hash, unsigned-64-bit LT, canonical raw account, integer timestamp,
-boolean success/aborted state, typed outgoing messages, and list-shaped
-children. Transaction hashes cannot repeat; one canonical account + LT
-coordinate cannot change hash; and the requested transaction must occur in the
-tree. Interfaces are accepted only as bounded strings (at most 128 per node and
-128 characters each) and are not returned.
-
-The exact `tonapi_transaction_trace_preview_v1` response allowlist contains:
-
-- `contract_version`, decimal-string `run_id`, `provider: tonapi`,
-  `source_status: live`, `trace_state`, and one bounded `message`;
-- `anchor`: exact canonical transaction hash, LT, account, and
-  `matches_stored_transaction: true`;
-- `summary`: root transaction hash, transaction count, maximum depth, outgoing
-  and pending-internal message counts, successful/failed/aborted transaction
-  counts, and unique-account count;
-- `is_provider_indexed_low_level_trace: true`;
-- `is_blockchain_proof_verified`, `is_authoritative_activity_identity`,
-  `semantic_reconstruction_applied`, `activity_merge_applied`,
-  `deduplication_applied`, `eligible_for_cost_basis`, `used_by_pnl`, and
-  `is_ownership_proof`, all permanently `false`.
-
-Raw messages, BOCs, decoded bodies, interfaces, actions, display metadata, and
-the provider's recursive tree are omitted. `finalized` means that the accepted
-non-emulated provider response has no remaining internal outgoing messages;
-`pending` means at least one remains. Finalization is not the same as success:
-failed and aborted transaction counts remain visible, and neither state is
-locally verified blockchain proof or authoritative transfer/trade semantics.
-
-A missing run or transaction returns 404. An ambiguous/tampered stored identity,
-disabled guard, or network/configuration mismatch returns 409 before a provider
-call. Provider transport/protocol failure, a malformed trace, a missing requested
-hash, or a provider anchor that differs from the stored hash + LT + account
-returns a credential-sanitized 502. Success and error responses use
-`Cache-Control: no-store`; the browser also requests `no-store`. Repeated
-inspection performs a new explicit provider read, never inserts, updates,
-deletes, commits, persists trace evidence, changes the stored run, or feeds PnL.
-
-### `GET /api/wallets/ingest/{run_id}/export.json` and `.../export.csv`
-Download one persisted run as JSON, or as flattened one-row-per-activity CSV.
-Transaction exports preserve original hash/LT fields and include the persisted
-identity status, version, canonical tuple fields, and identity key. Export does
-not apply deduplication or change PnL. Transfer and swap exports likewise carry
-the provider event/action coordinate and all non-authoritative proof/use flags;
-exporting the key does not make it a cost-basis or PnL input.
-
-### `GET /api/wallets/ingest/{run_id}/signals`
-Returns rule-based evidence signals for one persisted run: signal codes,
-confidence levels, observations, per-signal evidence, and explicit
-insufficient-evidence records. Heuristic observations only — not a risk score
-or a verdict.
-
-### `GET /api/wallets/ingest/{run_id}/signals/export.json` and `.../export.csv`
-Download the evidence signals for one persisted run as JSON, or as flattened
-CSV with one row per signal or insufficient-evidence record.
-
-### `GET /api/wallets/ingest/{run_id}/pnl-preview`
-Returns an estimated PnL preview for one persisted run: `pnl_mode`,
-confidence, TON-denominated realized swap flows per token, swap rows
-used/excluded, the Real-PnL evidence requirement checklist, missing-evidence
-reasons, and warnings. Estimate only — never Real PnL; Real PnL stays locked
-until transaction history, swap evidence, historical prices, cost basis, and
-fee handling are all available. Imported-trade analysis responses are tagged
-`pnl_mode: imported_pnl` with their own confidence and note.
-
-Token flows carry `fee_ton` and `net_ton_flow_after_fees` (plus
-`total_fees_ton` and a total after-fee figure): recorded transaction fees
-matched to used swap rows by transaction hash. The `fee_handling`
-requirement becomes available only at full fee coverage of used swap rows.
-
-With `include_historical=true` the response additionally values TON-side
-swap legs in USD at the nearest historical TON/USD point (6h tolerance):
-`usd_flows`, USD totals, and a `historical_pricing` evidence block
-(source status, points fetched, matched/unmatched legs). The
-`historical_prices` requirement becomes available only at full match
-coverage; unmatched legs stay visible and no fallback data is substituted.
-The default (parameter omitted) response is unchanged and stays offline.
-
-The same enriched response carries `realized_pnl`: per-token in-window
-average-cost results (proceeds, cost basis, realized PnL, remaining
-quantity, or an explicit unavailable status with the reason) plus
-`total_realized_pnl_usd`. When every evidence requirement is available the
-response switches to `pnl_mode: real_pnl` with `is_real_pnl: true` —
-in-window realized only; otherwise Real PnL stays locked.
-
-With `include_unrealized=true` the endpoint also derives remaining in-window
-holdings and values them with a deterministic mock fixture or current
-provider-reported spot prices in real mode (`include_historical` is implied).
-Each derived `unrealized` record reports its status, remaining quantity and
-cost, spot price, `priced_by`, market value, and unrealized PnL, or an explicit
-reason why that candidate is unavailable. If prerequisite enrichment produces
-no candidates, the array can be empty. `total_unrealized_pnl_usd` is a subtotal
-of computed records only; unavailable records are excluded. Spot figures are
-informational and never affect realized results, `pnl_mode`, confidence, or the
-Real-PnL evidence checklist.
-
-### `GET /api/wallets/ingest/{run_id}/pnl-preview/export.json` and `.../export.csv`
-Download the PnL preview as JSON, or as flattened CSV with one row per token
-flow, USD flow, realized cost-basis record, spot-based unrealized record, or
-Real-PnL requirement (tagged by `record_type`). Both accept
-`include_historical=true` for USD/realized enrichment and
-`include_unrealized=true` for unrealized rows (`include_historical` implied).
-CSV preserves unavailable records, adds a coverage row, and emits a numeric
-`unrealized_subtotal` row only when at least one record is computed; that
-subtotal excludes unavailable records. An empty `0/0` coverage row means no
-candidates were derived and does not prove that the wallet has no holdings.
-The default export stays offline.
-Whether figures amount to Real PnL is decided solely by requirement rows.
-
-### `POST /api/wallets/history/readiness`
-
-Inspects an explicit set of 2-50 persisted runs for one network-scoped
-canonical run-wallet identity and data mode against a target run. Runs with
-different submitted bounceable/non-bounceable representations can be grouped
-when their persisted canonical identity and TON network match. If any run lacks
-complete canonical identity, all runs must use the exact same submitted
-`wallet_address`; that fallback stays visible as a legacy diagnostic blocker.
-The target must be one of the 2-50 distinct positive `run_ids`; it selects the
-report focus but does not receive stronger coverage eligibility. The wallet
-workspace exposes the same flow in a selected-run card: the current run is the
-explicit target and the user supplies the remaining selected ids.
-
-Under `analysis_version: wallet_history_readiness_v0.22.7`, the response keeps
-the existing identity coverage, groups, conflicts, asset-address coverage, fee
-hash-match candidates, per-run bounds, and blockers. It also exposes
-`bounded_interval_coverage` under
-`wallet_multi_run_interval_coverage_v1`.
-
-Interval admission is fail-closed. Recorded bounds alone are insufficient:
-history readiness first revalidates every selected run's complete persisted
-stream and page evidence, including provider, stream contract and scope, query
-filters, sort order, frozen bounds, page sequence, cursors, counts, response
-digests, completion reason, error state, and run scope. The
-`low_level_transactions` layer accepts only a coherent bounded `transactions`
-stream in validated `complete` state. The `provider_display_events` layer
-accepts only a coherent bounded `account_events` stream in validated
-`provider_stream_complete` state. Each selected run is reported per layer as
-`included`, `excluded`, or `not_requested`; missing, ambiguous, malformed,
-preview-only, incomplete, error, and legacy evidence is never repaired or
-inferred into coverage.
-
-The two layers are never mixed: `cross_stream_union_applied` is `false`. A
-transaction interval cannot fill an event-layer gap, and provider events cannot
-fill a transaction-layer gap. TonAPI account events and their actions remain
-mutable, display-only provider interpretations; even contiguous provider-event
-coverage is not authoritative transfer, swap, semantic activity, or complete
-wallet history.
-
-Within each layer, accepted UTC intervals use exact half-open `[start, end)`
-semantics. A deterministic boundary sweep reports accepted intervals, their
-union, adjacent continuity, overlap segments and depth, and internal gaps with
-the eligible run ids on each side. Span, covered, gap, and overlap durations use
-integer microseconds, serialized as canonical decimal strings so even values
-beyond the browser safe-integer range remain exact. A one-microsecond gap is
-never rounded away. Gaps are
-measured only between the earliest eligible start and latest eligible end;
-coverage before that start and at or after that end is always `unknown`.
-
-Diagnostic only: interval adjacency or union does not merge activity rows,
-apply cross-run deduplication, prove complete pre-run/global wallet history,
-establish cost basis, or change any PnL result. `history_complete`,
-`full_pre_run_history_established`, `complete_wallet_history_established`,
-`is_global_history_coverage`, `is_authoritative_activity_coverage`,
-`activity_rows_merged`, `deduplication_applied`, `is_cost_basis`,
-`eligible_for_cost_basis`, and `used_by_pnl` remain `false`.
-
-### `GET /api/prices/historical/preview`
-Returns provider-reported historical rate points for one `token` (`"ton"` or
-a jetton master address) between `start` and `end` (ISO datetimes, window
-capped at 90 days). Mock mode returns deterministic points without querying
-TonAPI; real mode queries the TonAPI rates chart. Provider failures are
-reported as `source_status: unavailable` with no hidden fallback. Preview
-only — `is_cost_basis_source` stays `false` because this standalone request
-does not alter a run. The PnL endpoint performs its own explicitly requested
-historical enrichment against the same source.
-
-### `POST /api/wallets/cluster/compare`
-Compares 2-25 persisted runs pairwise and returns a probabilistic
-behavioral-similarity signal (scores, bands, shared tokens) — never proof of
-common ownership.
-
-### `GET /api/wallets/cluster/compare/export.json` and `.../export.csv`
-Download a cluster comparison for the given `run_ids` as JSON or flattened
-pair CSV.
-
-### `POST /api/bitquery/token-trades/preview`
-Returns a Bitquery token-trades preview when provider coverage is available.
-Current TON coverage may be unavailable/provider-limited.
-
-### `POST /api/bitquery/token-trades/analyze`
-Runs imported-trade-style wallet analysis from fetched Bitquery DEX trades.
-It does not fetch wallet balances, current holdings, or full on-chain history.
-
-### `POST /api/import/trades/preview`
-Parses local CSV/JSON trade input and returns validation summary plus preview
-rows.
-
-### `POST /api/import/trades/analyze`
-Parses local CSV/JSON trade input and returns a simple per-wallet imported
-trade analysis.
-
----
-
-## How the analysis works
-
-### PnL (`services/pnl.py`)
-Average-cost basis, computed with `Decimal`. From the normalized inputs
-`total_bought_qty/usd`, `total_sold_qty/usd`, `current_holding` and
-`current_price_usd` it derives:
-
-- `avg_buy_price_usd`, `avg_sell_price_usd`
-- `realised_pnl_usd` / `%` — sale proceeds minus cost basis of sold quantity
-- `unrealised_pnl_usd` / `%` — market value minus cost basis of remaining holding
-- `total_pnl_usd` / `%`
-- `status`: `holder` | `partial_seller` | `full_exit` | `unknown`
-
-A wallet is a **partial seller** when `total_sold_qty > 0`,
-`current_holding > 0`, and `total_sold_qty < total_bought_qty`.
-
-### Clustering (`services/clustering.py`)
-Pairwise behavioral similarity (0–100) across: buy time, entry price, held
-tokens, partial-sell behavior, TON balance, and portfolio value. Score bands:
-
-| Score   | Meaning                                   |
-| ------- | ----------------------------------------- |
-| 0–25    | weak / no signal                          |
-| 26–50   | weak similarity                           |
-| 51–70   | possible cluster                          |
-| 71–85   | likely related behavior                   |
-| 86–100  | very high similarity, **still not proof** |
-
-Every group includes a name, type, wallet list, shared tokens, average
-connected score, a reason summary, and a Russian conclusion (**Вывод**). The
-wording is deliberately hedged: these are *similarity signals*, never claims of
-common ownership.
-
-### Mock data (`services/mock_data.py`)
-14 wallets covering holders, partial sellers, full exits, whales (TON > 500),
-ИНТЕРЕСНО wallets (a position worth > $5,000), three candidate clusters, shared
-holdings, a negative realised-PnL wallet, and a large unrealised-PnL wallet.
-
----
-
-## Live guard checklist
-
-The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
-
-- the frontend builds with `npm run build`;
-- final browser QA confirms `RELEASE v0.12.0 SWAPS` on desktop and mobile
-  without console errors or horizontal page overflow;
-- release promotion gates and commands are documented in
-  `RELEASE_PROMOTION.md`;
-- wallet activity schema tests and ingestion endpoint tests pass;
-- backend `VERSION=0.2.1` is treated as the API-version field, not as the
-  user-facing product release label;
-- `POST /api/wallets/ingest/preview`, `POST /api/wallets/ingest`, and
-  `GET /api/wallets/ingest/{run_id}` return data-honest mock-normalized
-  responses;
-- wallet activity adapter contract tests pass and prove preview/run behavior
-  behind `backend/adapters/wallet_activity.py`;
-- explicit `WALLET_ACTIVITY_PROVIDER` scaffold tests prove TON provider,
-  STON.fi, Bitquery, and unguarded TonAPI selections return limited/unavailable
-  coverage without real provider calls;
-- live guard tests prove `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`,
-  and `WALLET_ACTIVITY_LIVE_ENABLED=true` can fetch and persist TonAPI native
-  TON balance snapshots, account jetton balance snapshots, ordered
-  transaction-history rows, TON/jetton transfer rows, and DEX swap rows only;
-  PnL and clustering were not yet available at that milestone;
-- the Wallet Activity Ingestion Workspace can preview coverage, run mock
-  ingestion, refresh a stored run, and render transfers, transactions, swaps,
-  balances, warnings, and provider evidence;
-- provider status, TonAPI previews, STON.fi preview, Bitquery/import tools, and
-  legacy mock-aware analysis render without layout overflow on desktop/mobile;
-- provider preview panels show ready/running/error/fresh/stale states honestly;
-- unavailable provider data stays visible and is not inferred;
-- provider/source badges clearly distinguish loading, error, mock/offline,
-  live, and unknown states;
-- provider status endpoint coverage displays all six expected provider
-  surfaces when available: GeckoTerminal, STON.fi, TonAPI, wallet activity,
-  Bitquery, and TON provider;
-- user-facing UI copy does not show stale product-version labels;
-- accessibility pass remains intact for navigation, segmented controls, status
-  strips, loading states, and dashboard sections;
-- README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
-  `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
-  product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.23.0 TRACE EVIDENCE PREVIEW`).
-
-## Roadmap beyond v0.23.0 TRACE EVIDENCE PREVIEW
-
-- Persist a separately versioned, locally revalidated low-level message/trace
-  evidence contract before attempting authoritative transfer or trade
-  reconstruction. The v0.23.0 on-demand summary is intentionally not that
-  ledger, and the TonAPI event chain and v0.22.6 action coordinates remain
-  provider observation evidence.
-- Define appropriate temporal evidence contracts for jetton-balance and native-
-  balance snapshots without mislabeling point-in-time state as history.
-- Add authoritative semantic transfer/trade reconstruction plus jetton-asset
-  and counterparty identity contracts, then a separately designed activity-row
-  merge and cross-run deduplication contract. The provider observation
-  coordinate and interval adjacency are not substitutes for semantic identity.
-  A contiguous selected interval span cannot make multi-run data complete
-  wallet history or a cost-basis source; time outside the eligible span remains
-  unknown.
-- Wire the live activity surfaces (balances, transactions, transfers, swaps)
-  into Real PnL instead of mock-aware legacy analysis, once historical prices
-  exist and ingestion quality is measurable.
-- Keep backend `VERSION` as an API-version field until the backend API contract
-  changes.
-- Connect real wallet activity to buyers and stored-run reports instead of
-  re-running mock analysis.
-- Expand Bitquery or alternate DEX coverage for TON trade history.
-- Broaden the evidence-signal rule set and calibrate cluster-comparison
-  confidence with richer features and clearer uncertainty bands.
+Start live ingestion with the guards set explicitly for that process:
+
+```bash
+cd backend
+DATA_MODE=real \
+WALLET_ACTIVITY_PROVIDER=tonapi \
+WALLET_ACTIVITY_LIVE_ENABLED=true \
+TON_NETWORK=mainnet \
+.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+```
+
+Use `TON_NETWORK=testnet` only with testnet addresses and the matching official
+TonAPI host. Keyed requests require HTTPS, do not follow authorization through
+redirects, and return sanitized provider errors.
+
+Never place provider keys in frontend variables, URLs, fixtures, logs, commits,
+screenshots, or issue text. Rotate any key that has been exposed outside the
+local ignored environment file.
+
+## Wallet workflow
+
+1. Open **Wallet Activity Ingestion Workspace**.
+2. Enter a TON address, select a bounded window and requested surfaces.
+3. Preview first, then persist the run when the evidence scope is acceptable.
+4. Reopen stored runs from the recent-run catalog without contacting a provider.
+5. For a real low-level transaction, explicitly inspect the trace, capture the
+   finalized trace, and perform local BOC verification.
+6. Build the immutable native activity ledger for verified captures.
+7. In **Native activity PnL readiness**, enter one or more other compatible run
+   IDs. The target run is included automatically.
+8. Review canonical activity count, suppressed repeats, native TON flow, and
+   every available or blocked PnL requirement.
+
+The v0.24.0 readiness request is provider-free. It revalidates persisted
+ledgers, merge and dedup evidence on every call and performs no hidden price or
+provider lookup.
+
+## Core wallet API
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/wallets/ingest/preview` | Preview one bounded ingestion request |
+| `POST` | `/api/wallets/ingest` | Persist one accepted ingestion run |
+| `GET` | `/api/wallets/ingest?limit=8` | Read the bounded newest-run catalog |
+| `GET` | `/api/wallets/ingest/{run_id}` | Load one persisted run provider-free |
+| `POST` | `/api/wallets/history/readiness` | Inspect selected-run evidence and interval continuity |
+| `GET` | `/api/wallets/ingest/{run_id}/transactions/{hash}/trace-evidence` | Explicit provider trace preview |
+| `POST` | `/api/wallets/ingest/{run_id}/transactions/{hash}/trace-evidence/persisted` | Persist finalized trace evidence |
+| `POST` | `/api/wallets/ingest/{run_id}/transactions/{hash}/trace-evidence/boc-verification` | Persist locally verified BOCs |
+| `GET` | `.../boc-verification/messages` | Read body-safe verified message evidence |
+| `GET` | `.../boc-verification/native-ton-flows` | Read account-relative native TON observations |
+| `GET` | `.../boc-verification/native-ton-asset` | Read canonical native asset binding |
+| `GET` | `.../boc-verification/counterparties` | Read counterparty observation groups |
+| `POST` | `.../native-activity-ledger` | Build an immutable verified native ledger |
+| `POST` | `/api/wallets/ingest/{target_run_id}/native-activity-merge` | Merge 2–50 compatible ledgers |
+| `POST` | `/api/wallets/ingest/{target_run_id}/native-activity-dedup` | Resolve repeated native activity identities |
+| `POST` | `/api/wallets/ingest/{target_run_id}/native-activity-pnl-readiness` | Reconcile native flow and evaluate PnL prerequisites |
+| `GET` | `/api/wallets/ingest/{run_id}/pnl-preview` | Read the separate run-scoped estimated PnL preview |
+| `GET` | `/api/wallets/ingest/{run_id}/signals` | Read rule-based evidence signals |
+
+The `...` paths continue from
+`/api/wallets/ingest/{run_id}/transactions/{hash}/trace-evidence`.
+
+## v0.24.0 PnL-readiness contract
+
+Request:
+
+```http
+POST /api/wallets/ingest/33/native-activity-pnl-readiness
+Content-Type: application/json
+
+{"run_ids":[32,33]}
+```
+
+Important response fields:
+
+- `contract_version`: `ton_native_activity_pnl_readiness_v1`
+- `source_dedup_digest_sha256` and `analysis_digest_sha256`
+- `flow_summary`: exact native counts and nanoton/TON totals
+- `requirements`: seven explicit evidence gates
+- `blocked_requirement_codes`: every unavailable prerequisite
+- `native_activity_used_by_pnl_readiness: true`
+- `native_activity_used_by_pnl_calculation: false`
+- `eligible_for_cost_basis: false`
+- `is_real_pnl: false`
+- `real_pnl_locked: true`
+
+The endpoint returns `409` when selected runs, wallet/network identity, ledger
+evidence, or duplicate semantics are incompatible. Storage failures return a
+sanitized `503`.
+
+## Testing
+
+Backend:
+
+```bash
+cd backend
+.venv/bin/python -m pytest -q
+.venv/bin/python -m compileall -q main.py config.py database.py models.py schemas.py adapters services routers tests
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm test -- --run
+npm run build
+npm audit --audit-level=moderate
+```
+
+Release gates also include migration parity, credential/prohibited-brand scans,
+live local contract checks, and responsive browser QA.
+
+The v0.24.0 release candidate passed 966 backend tests, 99 frontend tests, the
+production build, Python compilation, and the dependency audit with zero
+reported vulnerabilities. The live local two-run check reconciled two canonical
+outgoing activities totaling 3.34 TON, kept PnL locked, and the desktop browser
+check reported no horizontal overflow or error/warning log entries.
+
+## Current limitations
+
+- Complete wallet history is not established outside explicitly verified
+  selected intervals and captures.
+- TonAPI event actions remain presentation-oriented provider evidence, not
+  authoritative protocol semantics.
+- Local BOC verification checks internal consistency with captured evidence; it
+  is not a chain inclusion or ownership proof.
+- The immutable semantic ledger currently covers native TON message transfers,
+  not locally verified jetton trade actions.
+- v0.24.0 reconciles native wallet flow but intentionally does not calculate
+  cost basis, realized PnL, or unrealized PnL from that flow.
+- The older run-scoped PnL preview is a separate estimate path and may unlock
+  only when all of its own transaction, swap, price, basis, and fee requirements
+  are satisfied.
+
+## Documentation
+
+- [Real wallet ingestion plan](REAL_WALLET_INGESTION_PLAN.md)
+- [Release notes](RELEASE_NOTES.md)
+- [Release promotion checklist](RELEASE_PROMOTION.md)
+- [Public release history](PUBLIC_RELEASE.md)
+
+## License
+
+No license file is currently included. Treat the repository as all rights
+reserved until a license is added.

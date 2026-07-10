@@ -1,3 +1,18 @@
+# TON Wallet Intelligence Dashboard — v0.24.0 NATIVE ACTIVITY PNL READINESS
+
+v0.24.0 adds provider-free POST
+`/api/wallets/ingest/{target_run_id}/native-activity-pnl-readiness`. It consumes
+the v0.23.9 canonical dedup result, reconciles exact incoming, outgoing, self,
+and net native TON flows, and digest-binds a seven-item PnL evidence checklist.
+Verified native value is not promoted to a trade, acquisition lot, price, fee,
+cost basis, or profit. The workspace exposes selected-run reconciliation,
+suppressed-repeat counts, flow totals, and every blocking prerequisite. On the
+two real stored runs used for release verification, the contract reconciles two
+canonical outgoing activities totaling 3.34 TON and correctly keeps Real PnL
+locked.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.9 CROSS-RUN NATIVE ACTIVITY DEDUP
 
 v0.23.9 adds explicit POST

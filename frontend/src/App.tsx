@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.9 CROSS-RUN NATIVE ACTIVITY DEDUP";
+const RELEASE_LABEL = "v0.24.0 NATIVE ACTIVITY PNL READINESS";
 
 const navItems = [
   "DASHBOARD",
@@ -942,19 +942,24 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Canonical cross-run native activity deduplication</strong>
+            <strong>Native activity PnL readiness, without invented profit</strong>
             <p>
-              Repeated content-addressed activities are collapsed after the
-              deterministic multi-run merge. The canonical winner and every
-              suppressed source remain visible as resolution evidence.
+              Selected immutable ledgers now produce a reconciled native TON
+              cash-flow and an explicit cost-basis evidence gate. Missing
+              trade, price, fee, and history facts remain visibly blocked.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="scoped"
+            label="Native activity PnL readiness"
+            text="The workspace merges and deduplicates selected verified native ledgers, shows exact incoming, outgoing, self, and net TON flow, and lists every unmet cost-basis prerequisite. Native message value is never mislabeled as a trade or profit."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
             label="Cross-run native activity dedup"
-            text="The first deterministic merge occurrence becomes canonical and every suppressed occurrence remains source-addressable. Conflicting semantics for one activity identity fail closed; bounded history, cost basis, and PnL stay locked."
+            text="The first deterministic merge occurrence becomes canonical and every suppressed occurrence remains source-addressable. Conflicting semantics for one activity identity fail closed before PnL readiness is evaluated."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -964,7 +969,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="Immutable native activity ledger"
-            text="Migration 0008 persists capture-bound native TON semantic rows. POST builds locally from verified BOCs; GET re-derives every source row and digest provider-free. The ledger remains scoped, non-authoritative, unmerged, and unused by PnL."
+            text="Migration 0008 persists capture-bound native TON semantic rows. POST builds locally from verified BOCs; GET re-derives every source row and digest provider-free. The ledger remains scoped and non-authoritative; only the explicit multi-run chain uses it for readiness, never as PnL by itself."
           />
           <ReleaseReadinessItem
             tone="scoped"
@@ -1099,7 +1104,7 @@ function EvidenceColumn({
         <EvidenceItem
           tone="warning"
           title="No canonical full-history cost basis"
-          text="No gaps inside a validated selected span does not prove coverage before or after that span. Runs are not merged or deduplicated, and interval diagnostics never supply full-history acquisition cost basis."
+          text="No gaps inside a validated selected span does not prove coverage before or after that span. Interval diagnostics never merge or deduplicate rows; the separate native activity contracts do so only for explicitly selected verified captures and still cannot supply full-history acquisition cost basis."
         />
         <EvidenceItem
           tone="warning"
