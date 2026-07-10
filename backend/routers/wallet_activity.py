@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from database import get_session
 from schemas import WalletClusterCompareRequest, WalletClusterCompareResponse
+from schemas import WalletHistoryReadinessRequest, WalletHistoryReadinessResponse
 from schemas import WalletIngestionPreviewRequest, WalletIngestionPreviewResponse
 from schemas import WalletIngestionRunResponse, WalletRunSignalsResponse
 from schemas import WalletRunPnlPreviewResponse
@@ -18,6 +19,7 @@ from services.pnl_preview import derive_run_pnl_preview
 from services.pnl_unrealized import derive_run_pnl_preview_with_unrealized
 from services.pnl_usd_valuation import derive_run_pnl_preview_with_historical
 from services.wallet_activity_clustering import compare_wallet_activity
+from services.wallet_history_readiness import build_wallet_history_readiness
 from services.wallet_activity_signals import derive_run_signals
 from services.wallet_activity_ingestion import (
     build_wallet_ingestion_preview,
@@ -300,6 +302,27 @@ def export_wallet_ingestion_run(
             )
         },
     )
+
+
+@router.post(
+    "/history/readiness",
+    response_model=WalletHistoryReadinessResponse,
+)
+def inspect_wallet_history_readiness(
+    payload: WalletHistoryReadinessRequest,
+    session: Session = Depends(get_session),
+) -> dict:
+    """Inspect multi-run history evidence without merging rows or changing PnL."""
+    try:
+        return build_wallet_history_readiness(
+            payload.run_ids,
+            payload.target_run_id,
+            session,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post(

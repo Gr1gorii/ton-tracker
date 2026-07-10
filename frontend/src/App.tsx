@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.21.3 UNREALIZED EXPORTS";
+const RELEASE_LABEL = "v0.22.0 HISTORY READINESS";
 
 const navItems = [
   "DASHBOARD",
@@ -942,13 +942,12 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Wallet ingestion live-provider guards</strong>
+            <strong>Multi-run history readiness — diagnostic only</strong>
             <p>
-              Guarded TonAPI live mode can fetch native TON balance snapshots,
-              account jetton balance snapshots, an ordered transaction-history
-              timeline, TON/jetton transfer history, and DEX swaps from events
-              when explicit real-mode flags are enabled. Mock remains the
-              default.
+              Stored runs for the same wallet and data mode can be inspected
+              for overlap, identity strength, observed bounds, coverage,
+              conflicts, and blockers. The report does not merge history,
+              establish cost basis, or change PnL.
             </p>
           </div>
         </div>
@@ -982,6 +981,11 @@ function EvidenceColumn({
             tone="scoped"
             label="Data contract"
             text="Ownership proof remains unavailable; cluster comparison stays probabilistic; unlocked Real PnL covers in-window realized swaps only, while spot-based unrealized valuation remains separate and informational."
+          />
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="History readiness"
+            text="Explicit stored-run sets can be inspected against a target run. Results stay diagnostic: is_cost_basis and eligible_for_cost_basis remain false and no readiness output enters PnL."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1030,8 +1034,8 @@ function EvidenceColumn({
         <div className="evidence-group-label">Cannot show yet</div>
         <EvidenceItem
           tone="warning"
-          title="No full-history cost basis"
-          text="Real PnL is in-window realized only; acquisitions before the run can remain unavailable."
+          title="No canonical full-history cost basis"
+          text="History readiness exposes overlap and coverage blockers only. It does not merge runs, prove complete history, or supply acquisition cost basis."
         />
         <EvidenceItem
           tone="warning"
