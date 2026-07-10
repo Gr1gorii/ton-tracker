@@ -41,6 +41,7 @@ import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
 import PreviewReadinessStrip, {
   type PreviewReadinessTone,
 } from "./PreviewReadinessStrip";
+import WalletHistoryIntervalCoverageCard from "./WalletHistoryIntervalCoverageCard";
 import {
   type ProviderPreviewRunUpdate,
   displayPreviewValue,
@@ -90,6 +91,7 @@ const CAN_SHOW = [
   "Network-scoped transaction identity",
   "Provider-scoped event-action observation identity",
   "Transaction acquisition bounds and page evidence",
+  "Selected-run interval gaps (diagnostic)",
   "Swaps",
   "Balances",
   "Provider evidence",
@@ -697,6 +699,12 @@ export default function WalletIngestionWorkspace({
             requestedSurfaces={visibleRequestedSurfaces}
             contractPresent={visibleAcquisitionContractPresent}
           />
+          {runResult?.run_id != null && (
+            <WalletHistoryIntervalCoverageCard
+              key={runResult.run_id}
+              targetRunId={runResult.run_id}
+            />
+          )}
           <WalletIngestionWarnings warnings={visibleWarnings} />
 
           {runResult?.activity_summary && (

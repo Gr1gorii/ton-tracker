@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.6 ACTION IDENTITY";
+const RELEASE_LABEL = "v0.22.7 INTERVAL COVERAGE";
 
 const navItems = [
   "DASHBOARD",
@@ -942,13 +942,13 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Bounded transaction acquisition evidence</strong>
+            <strong>Selected-run bounded interval coverage</strong>
             <p>
-              Guarded real/live TonAPI ingestion freezes one UTC interval,
-              follows low-level transaction cursors within a page cap, and
-              stores stream and page evidence. A terminal page or verified
-              start-bound crossing can complete that transaction stream;
-              reaching the cap stays explicitly incomplete. PnL is unchanged.
+              Validated low-level transaction intervals and provider-display
+              event intervals now expose separate server-computed unions, gaps,
+              and overlaps across selected runs. Coverage is limited to the
+              validated selected span; time outside it remains unknown and PnL
+              is unchanged.
             </p>
           </div>
         </div>
@@ -991,7 +991,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="History readiness"
-            text="v0.22.6 can compare provider-scoped event-action coordinates and surface changed payloads as conflicts. It still does not make derived transfers or swaps authoritative, so full wallet history and cost basis remain blocked."
+            text="v0.22.7 reports selected-run interval unions, internal gaps, overlaps, and excluded evidence separately for low-level transactions and provider-display events. It does not merge rows, prove global history, establish cost basis, or feed PnL."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1035,7 +1035,7 @@ function EvidenceColumn({
         <EvidenceItem
           tone="info"
           title="Can show stored-run intelligence"
-          text="Activity rows, evidence signals, run-scoped PnL, probabilistic cluster comparison, provider previews, and explicit limitations."
+          text="Activity rows, selected-run interval diagnostics, evidence signals, run-scoped PnL, probabilistic cluster comparison, provider previews, and explicit limitations."
         />
         <EvidenceItem
           tone="info"
@@ -1046,7 +1046,7 @@ function EvidenceColumn({
         <EvidenceItem
           tone="warning"
           title="No canonical full-history cost basis"
-          text="A complete bounded transaction stream does not complete transfers, swaps, balances, or jettons; it does not merge runs or supply full-history acquisition cost basis."
+          text="No gaps inside a validated selected span does not prove coverage before or after that span. Runs are not merged or deduplicated, and interval diagnostics never supply full-history acquisition cost basis."
         />
         <EvidenceItem
           tone="warning"

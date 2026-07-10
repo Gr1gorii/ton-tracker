@@ -26,6 +26,7 @@ from services.ton_event_action_identity import (
     derive_ton_event_action_identity,
     unavailable_ton_event_action_identity,
 )
+from services.wallet_interval_coverage import build_wallet_interval_coverage
 from services.wallet_activity_ingestion import wallet_ingestion_run_to_response
 
 _SWAP_ORDINAL_KEYS = ("action_id", "action_index", "action_ordinal")
@@ -40,6 +41,9 @@ _LOGICAL_TIME_RE = re.compile(r"^(?:0|[1-9][0-9]*)$")
 _MAX_LOGICAL_TIME = 2**64 - 1
 _MAX_EVENT_DATE = 2_114_380_800
 _MAX_IDENTITY_GROUPS = 200
+_WALLET_INGESTION_SURFACES = frozenset(
+    {"transfers", "transactions", "swaps", "balances", "jettons"}
+)
 _UNAVAILABLE_WALLET_IDENTITY = {
     "status": "unavailable",
     "version": "unavailable",
@@ -76,6 +80,46 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _validated_requested_surfaces(run: dict[str, Any]) -> list[str] | None:
+    """Return the exact persisted surface list or fail closed on corruption."""
+    value = run.get("requested_surfaces")
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(type(surface) is not str for surface in value)
+        or any(surface not in _WALLET_INGESTION_SURFACES for surface in value)
+        or len(set(value)) != len(value)
+    ):
+        return None
+    return list(value)
+
+
+def _validated_surface_status(value: Any) -> list[str] | None:
+    """Validate an unavailable/incomplete surface list; empty is meaningful."""
+    if (
+        not isinstance(value, list)
+        or any(type(surface) is not str for surface in value)
+        or any(surface not in _WALLET_INGESTION_SURFACES for surface in value)
+        or len(set(value)) != len(value)
+    ):
+        return None
+    return list(value)
+
+
+def _safe_surface_list(value: Any) -> list[str]:
+    """Normalize a surface field for display without iterating scalars/maps."""
+    if not isinstance(value, list):
+        return []
+    return list(
+        dict.fromkeys(
+            surface
+            for surface in value
+            if type(surface) is str
+            and surface in _WALLET_INGESTION_SURFACES
+        )
+    )
 
 
 def _stable_json(value: Any) -> str:
@@ -448,17 +492,27 @@ def _run_scope(run: dict[str, Any], target_run_id: int) -> dict[str, Any]:
         "timestamped_activity_count": len(timestamps),
         "untimestamped_activity_count": activity_count - len(timestamps),
         "outside_requested_bounds_count": outside_requested_bounds,
-        "requested_surfaces": list(run.get("requested_surfaces") or []),
-        "unavailable_surfaces": list(run.get("unavailable_surfaces") or []),
+        "requested_surfaces": _safe_surface_list(run.get("requested_surfaces")),
+        "unavailable_surfaces": _safe_surface_list(run.get("unavailable_surfaces")),
     }
 
 
 def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     """Validate the narrow persisted transaction-stream completion contract."""
     run_id = run["run_id"]
-    requested_surfaces = list(run.get("requested_surfaces") or [])
+    requested_surfaces = _validated_requested_surfaces(run)
+    if requested_surfaces is None:
+        return {
+            "run_id": run_id,
+            "state": "incomplete",
+            "reason_codes": ["requested_surfaces_invalid"],
+        }
     if "transactions" not in requested_surfaces:
-        return {"run_id": run_id, "state": "not_requested"}
+        return {
+            "run_id": run_id,
+            "state": "not_requested",
+            "reason_codes": ["surface_not_requested"],
+        }
 
     streams = run.get("acquisition_streams")
     if not isinstance(streams, list):
@@ -472,6 +526,9 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
         return {
             "run_id": run_id,
             "state": "missing" if not candidates else "ambiguous",
+            "reason_codes": [
+                "stream_missing" if not candidates else "stream_ambiguous"
+            ],
         }
 
     stream = candidates[0]
@@ -485,6 +542,11 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     }
     start = _parse_timestamp(stream.get("requested_start"))
     end = _parse_timestamp(stream.get("requested_end"))
+    if start is not None:
+        base["interval_start"] = _isoformat(start)
+    if end is not None:
+        base["interval_end"] = _isoformat(end)
+    query_filters = stream.get("query_filters")
     pages = stream.get("pages")
     if not isinstance(pages, list):
         pages = []
@@ -493,11 +555,19 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     pages_are_records = all(isinstance(page, dict) for page in pages)
     page_size = stream.get("page_size")
     page_cap = stream.get("page_cap")
+    valid_query_filters = query_filters == {
+        "endpoint": "account_transactions",
+        "cursor": "before_lt",
+        "limit": page_size,
+        "interval": "[resolved_start,resolved_end)",
+        "bounds_available": True,
+    }
     valid_stream_contract = (
         stream.get("provider") == "tonapi"
         and stream.get("contract_version") == _TRANSACTION_ACQUISITION_VERSION
         and stream.get("scope_kind") == "bounded_interval"
         and stream.get("sort_order") == "logical_time_desc"
+        and valid_query_filters
         and isinstance(page_size, int)
         and not isinstance(page_size, bool)
         and 1 <= page_size <= 1000
@@ -523,6 +593,11 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     valid_page_rows = valid_stream_contract and valid_page_envelope and all(
         page.get("requested_limit") == page_size
         and page.get("error_code") is None
+        and page.get("error_message") is None
+        and isinstance(page.get("attempt_count"), int)
+        and not isinstance(page.get("attempt_count"), bool)
+        and page["attempt_count"] >= 1
+        and _parse_timestamp(page.get("fetched_at")) is not None
         and isinstance(page.get("raw_count"), int)
         and not isinstance(page.get("raw_count"), bool)
         and 0 <= page["raw_count"] <= page_size
@@ -532,6 +607,8 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
         and isinstance(page.get("duplicate_count"), int)
         and not isinstance(page.get("duplicate_count"), bool)
         and 0 <= page["duplicate_count"] <= page["raw_count"]
+        and page["normalized_count"] + page["duplicate_count"]
+        <= page["raw_count"]
         and isinstance(page.get("response_digest"), str)
         and _TRANSACTION_HASH_RE.fullmatch(page["response_digest"])
         is not None
@@ -551,6 +628,8 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
             == sum(page["normalized_count"] for page in pages)
             and stream["duplicate_count"]
             == sum(page["duplicate_count"] for page in pages)
+            and stream["normalized_count"] + stream["duplicate_count"]
+            <= stream["raw_count"]
         )
 
     valid_cursor_chain = valid_page_rows and pages[0].get("request_cursor") is None
@@ -674,26 +753,62 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
             start is not None
             and end is not None
             and end - start == expected_rolling_windows[time_window]
+            and run.get("_custom_start") is None
+            and run.get("_custom_end") is None
         )
     else:
         valid_window_bounds = False
     created_at = _parse_timestamp(run.get("_created_at"))
-    if created_at is not None:
-        valid_window_bounds = (
-            valid_window_bounds and end is not None and end <= created_at
+    valid_window_bounds = (
+        valid_window_bounds
+        and created_at is not None
+        and end is not None
+        and end <= created_at
+    )
+    started_at = _parse_timestamp(stream.get("started_at"))
+    finished_at = _parse_timestamp(stream.get("finished_at"))
+    fetched_at_values = [
+        _parse_timestamp(page.get("fetched_at")) for page in pages
+    ]
+    valid_capture_times = (
+        start is not None
+        and end is not None
+        and created_at is not None
+        and started_at is not None
+        and finished_at is not None
+        and end <= started_at <= finished_at <= created_at
+        and all(
+            fetched_at is not None
+            and started_at <= fetched_at <= finished_at
+            for fetched_at in fetched_at_values
         )
-    unavailable_surfaces = run.get("unavailable_surfaces")
-    incomplete_surfaces = run.get("incomplete_surfaces")
+        and all(
+            previous is not None
+            and current is not None
+            and previous <= current
+            for previous, current in zip(
+                fetched_at_values, fetched_at_values[1:]
+            )
+        )
+    )
+    unavailable_surfaces = _validated_surface_status(
+        run.get("unavailable_surfaces")
+    )
+    incomplete_surfaces = _validated_surface_status(
+        run.get("incomplete_surfaces")
+    )
     valid_run_scope = (
         run.get("data_mode") == "real"
-        and isinstance(unavailable_surfaces, list)
+        and run.get("status") in {"success", "partial"}
+        and unavailable_surfaces is not None
         and "transactions" not in unavailable_surfaces
-        and isinstance(incomplete_surfaces, list)
+        and incomplete_surfaces is not None
         and "transactions" not in incomplete_surfaces
         and valid_transaction_rows
         and valid_aggregate_counts
         and len(transaction_rows) == stream.get("normalized_count")
         and valid_window_bounds
+        and valid_capture_times
     )
     if (
         stream.get("completion_state") == "complete"
@@ -705,9 +820,35 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
         and valid_pages
         and valid_run_scope
         and stream.get("error_code") is None
+        and stream.get("error_message") is None
     ):
-        return {**base, "state": "complete"}
-    return base
+        return {
+            **base,
+            "state": "complete",
+            "interval_start": _isoformat(start),
+            "interval_end": _isoformat(end),
+            "reason_codes": [],
+        }
+    reason_codes: list[str] = []
+    if stream.get("completion_state") != "complete":
+        reason_codes.append("completion_not_complete")
+    if stream.get("bounds_verified") is not True:
+        reason_codes.append("bounds_not_verified")
+    if not valid_stream_contract:
+        reason_codes.append("provider_contract_invalid")
+    if not valid_query_filters:
+        reason_codes.append("query_filters_invalid")
+    if not valid_pages:
+        reason_codes.append("page_evidence_invalid")
+    if not valid_window_bounds:
+        reason_codes.append("recorded_bounds_invalid")
+    if not valid_capture_times:
+        reason_codes.append("capture_times_invalid")
+    if not valid_run_scope:
+        reason_codes.append("run_scope_invalid")
+    if stream.get("error_code") is not None or stream.get("error_message") is not None:
+        reason_codes.append("stream_error_present")
+    return {**base, "reason_codes": reason_codes}
 
 
 def _event_action_row_identity(
@@ -749,14 +890,26 @@ def _event_action_row_identity(
 def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     """Validate bounded TonAPI event evidence without promoting its actions."""
     run_id = run["run_id"]
-    requested_surfaces = list(run.get("requested_surfaces") or [])
+    requested_surfaces = _validated_requested_surfaces(run)
+    if requested_surfaces is None:
+        return {
+            "run_id": run_id,
+            "state": "incomplete",
+            "requested_surfaces": [],
+            "provider_semantics": "display_only_actions",
+            "reason_codes": ["requested_surfaces_invalid"],
+        }
     requested_event_surfaces = [
         surface
         for surface in ("transfers", "swaps")
         if surface in requested_surfaces
     ]
     if not requested_event_surfaces:
-        return {"run_id": run_id, "state": "not_requested"}
+        return {
+            "run_id": run_id,
+            "state": "not_requested",
+            "reason_codes": ["surface_not_requested"],
+        }
 
     streams = run.get("acquisition_streams")
     if not isinstance(streams, list):
@@ -773,6 +926,9 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
             "state": "missing" if not candidates else "ambiguous",
             "requested_surfaces": requested_event_surfaces,
             "provider_semantics": "display_only_actions",
+            "reason_codes": [
+                "stream_missing" if not candidates else "stream_ambiguous"
+            ],
         }
 
     stream = candidates[0]
@@ -788,6 +944,10 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     }
     start = _parse_timestamp(stream.get("requested_start"))
     end = _parse_timestamp(stream.get("requested_end"))
+    if start is not None:
+        base["interval_start"] = _isoformat(start)
+    if end is not None:
+        base["interval_end"] = _isoformat(end)
     pages = stream.get("pages")
     if not isinstance(pages, list):
         pages = []
@@ -802,6 +962,15 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     expected_query_end = math.ceil(end.timestamp()) if end is not None else None
     valid_query_filters = (
         isinstance(query_filters, dict)
+        and set(query_filters) == {
+            "endpoint",
+            "cursor",
+            "limit",
+            "start_date",
+            "end_date",
+            "sort_order",
+            "provider_semantics",
+        }
         and query_filters.get("endpoint") == "account_events"
         and query_filters.get("cursor") == "before_lt"
         and query_filters.get("limit") == page_size
@@ -850,6 +1019,7 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     valid_page_rows = valid_stream_contract and valid_page_envelope and all(
         page.get("requested_limit") == page_size
         and page.get("error_code") is None
+        and page.get("error_message") is None
         and isinstance(page.get("attempt_count"), int)
         and not isinstance(page.get("attempt_count"), bool)
         and page["attempt_count"] >= 1
@@ -884,6 +1054,8 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
             == sum(page["normalized_count"] for page in pages)
             and stream["duplicate_count"]
             == sum(page["duplicate_count"] for page in pages)
+            and stream["normalized_count"] + stream["duplicate_count"]
+            <= stream["raw_count"]
         )
 
     valid_cursor_chain = (
@@ -993,14 +1165,18 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
             start is not None
             and end is not None
             and end - start == expected_rolling_windows[time_window]
+            and run.get("_custom_start") is None
+            and run.get("_custom_end") is None
         )
     else:
         valid_window_bounds = False
     created_at = _parse_timestamp(run.get("_created_at"))
-    if created_at is not None:
-        valid_window_bounds = (
-            valid_window_bounds and end is not None and end <= created_at
-        )
+    valid_window_bounds = (
+        valid_window_bounds
+        and created_at is not None
+        and end is not None
+        and end <= created_at
+    )
 
     valid_action_rows = start is not None and end is not None
     action_event_identities: set[tuple[str, str]] = set()
@@ -1029,16 +1205,21 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
             len(action_event_identities) <= stream["normalized_count"]
         )
 
-    unavailable_surfaces = run.get("unavailable_surfaces")
-    incomplete_surfaces = run.get("incomplete_surfaces")
+    unavailable_surfaces = _validated_surface_status(
+        run.get("unavailable_surfaces")
+    )
+    incomplete_surfaces = _validated_surface_status(
+        run.get("incomplete_surfaces")
+    )
     valid_run_scope = (
         run.get("data_mode") == "real"
-        and isinstance(unavailable_surfaces, list)
+        and run.get("status") in {"success", "partial"}
+        and unavailable_surfaces is not None
         and all(
             surface not in unavailable_surfaces
             for surface in requested_event_surfaces
         )
-        and isinstance(incomplete_surfaces, list)
+        and incomplete_surfaces is not None
         and all(
             surface in incomplete_surfaces
             for surface in requested_event_surfaces
@@ -1048,10 +1229,29 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     )
     started_at = _parse_timestamp(stream.get("started_at"))
     finished_at = _parse_timestamp(stream.get("finished_at"))
+    fetched_at_values = [
+        _parse_timestamp(page.get("fetched_at")) for page in pages
+    ]
     valid_capture_times = (
-        started_at is not None
+        start is not None
+        and end is not None
+        and created_at is not None
+        and started_at is not None
         and finished_at is not None
-        and started_at <= finished_at
+        and end <= started_at <= finished_at <= created_at
+        and all(
+            fetched_at is not None
+            and started_at <= fetched_at <= finished_at
+            for fetched_at in fetched_at_values
+        )
+        and all(
+            previous is not None
+            and current is not None
+            and previous <= current
+            for previous, current in zip(
+                fetched_at_values, fetched_at_values[1:]
+            )
+        )
     )
     if (
         stream.get("completion_state") == "complete"
@@ -1067,8 +1267,38 @@ def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
         and stream.get("error_code") is None
         and stream.get("error_message") is None
     ):
-        return {**base, "state": "provider_stream_complete"}
-    return base
+        return {
+            **base,
+            "state": "provider_stream_complete",
+            "interval_start": _isoformat(start),
+            "interval_end": _isoformat(end),
+            "reason_codes": [],
+        }
+    reason_codes: list[str] = []
+    if stream.get("completion_state") != "complete":
+        reason_codes.append("completion_not_complete")
+    if stream.get("bounds_verified") is not True:
+        reason_codes.append("bounds_not_verified")
+    if not valid_stream_contract:
+        reason_codes.append("provider_contract_invalid")
+    if not valid_query_filters:
+        reason_codes.append("query_filters_invalid")
+    if (
+        not valid_page_rows
+        or not valid_aggregate_counts
+        or not valid_cursor_chain
+        or not valid_termination
+    ):
+        reason_codes.append("page_evidence_invalid")
+    if not valid_window_bounds:
+        reason_codes.append("recorded_bounds_invalid")
+    if not valid_capture_times:
+        reason_codes.append("capture_times_invalid")
+    if not valid_run_scope:
+        reason_codes.append("run_scope_invalid")
+    if stream.get("error_code") is not None or stream.get("error_message") is not None:
+        reason_codes.append("stream_error_present")
+    return {**base, "reason_codes": reason_codes}
 
 
 def _identity_groups(
@@ -1497,12 +1727,11 @@ def _build_blockers(
     swap_groups: list[dict[str, Any]],
     event_action_groups: list[dict[str, Any]],
     coverage: dict[str, Any],
+    transaction_pagination: list[dict[str, Any]],
+    event_pagination: list[dict[str, Any]],
+    bounded_interval_coverage: dict[str, Any],
 ) -> list[dict[str, Any]]:
     run_ids = [run["run_id"] for run in runs]
-    transaction_pagination = [
-        _transaction_pagination_evidence(run) for run in runs
-    ]
-    event_pagination = [_event_pagination_evidence(run) for run in runs]
     requested_transaction_pagination = [
         item
         for item in transaction_pagination
@@ -1612,6 +1841,78 @@ def _build_blockers(
             )
         )
 
+    transaction_intervals = bounded_interval_coverage[
+        "low_level_transactions"
+    ]
+    provider_event_intervals = bounded_interval_coverage[
+        "provider_display_events"
+    ]
+    if transaction_intervals["excluded_run_ids"]:
+        blockers.append(
+            _blocker(
+                "bounded_transaction_interval_scope_rejected",
+                "Some selected runs cannot contribute a validated low-level transaction interval to the bounded union.",
+                run_ids=transaction_intervals["excluded_run_ids"],
+                evidence={
+                    "run_evidence": [
+                        item
+                        for item in transaction_intervals["run_evidence"]
+                        if item["classification"] == "excluded"
+                    ]
+                },
+            )
+        )
+    if transaction_intervals["gap_intervals"]:
+        blockers.append(
+            _blocker(
+                "bounded_transaction_interval_gaps",
+                "Validated low-level transaction intervals contain internal gaps inside their selected span; time outside the span remains unknown.",
+                run_ids=transaction_intervals["included_run_ids"],
+                evidence={
+                    "gap_intervals": transaction_intervals["gap_intervals"]
+                },
+            )
+        )
+    if transaction_intervals["overlap_intervals"]:
+        blockers.append(
+            _blocker(
+                "bounded_transaction_interval_overlaps",
+                "Validated low-level transaction intervals overlap, but activity rows have not been merged or deduplicated.",
+                run_ids=transaction_intervals["included_run_ids"],
+                evidence={
+                    "overlap_intervals": transaction_intervals[
+                        "overlap_intervals"
+                    ]
+                },
+            )
+        )
+    if provider_event_intervals["excluded_run_ids"]:
+        blockers.append(
+            _blocker(
+                "provider_display_interval_scope_rejected",
+                "Some selected runs cannot contribute a validated provider-display event interval.",
+                run_ids=provider_event_intervals["excluded_run_ids"],
+                evidence={
+                    "run_evidence": [
+                        item
+                        for item in provider_event_intervals["run_evidence"]
+                        if item["classification"] == "excluded"
+                    ]
+                },
+            )
+        )
+    if provider_event_intervals["gap_intervals"]:
+        blockers.append(
+            _blocker(
+                "provider_display_interval_gaps",
+                "Validated TonAPI provider-display event intervals contain internal gaps; this remains non-authoritative display coverage.",
+                run_ids=provider_event_intervals["included_run_ids"],
+                evidence={
+                    "gap_intervals": provider_event_intervals["gap_intervals"]
+                },
+            )
+        )
+
     if runs[0]["data_mode"] == "mock":
         blockers.append(
             _blocker(
@@ -1646,9 +1947,9 @@ def _build_blockers(
         )
 
     unavailable = {
-        str(run["run_id"]): list(run.get("unavailable_surfaces") or [])
+        str(run["run_id"]): surfaces
         for run in runs
-        if run.get("unavailable_surfaces")
+        if (surfaces := _safe_surface_list(run.get("unavailable_surfaces")))
     }
     if unavailable:
         blockers.append(
@@ -1922,8 +2223,10 @@ def assess_wallet_history_readiness(
         raise ValueError("At most 50 run_ids can be inspected at once.")
 
     run_ids = [run.get("run_id") for run in run_responses]
-    if any(not isinstance(run_id, int) for run_id in run_ids):
-        raise ValueError("Every run must have a persisted integer run_id.")
+    if any(type(run_id) is not int or run_id < 1 for run_id in run_ids):
+        raise ValueError("Every run must have a persisted positive integer run_id.")
+    if type(target_run_id) is not int or target_run_id < 1:
+        raise ValueError("target_run_id must be a positive integer.")
     if len(set(run_ids)) != len(run_ids):
         raise ValueError("run_ids must contain 2-50 distinct ids.")
     if target_run_id not in run_ids:
@@ -1962,13 +2265,24 @@ def assess_wallet_history_readiness(
         swap_groups,
         event_action_groups,
     )
+    transaction_pagination = [
+        _transaction_pagination_evidence(run) for run in run_responses
+    ]
+    event_pagination = [
+        _event_pagination_evidence(run) for run in run_responses
+    ]
+    bounded_interval_coverage = build_wallet_interval_coverage(
+        selected_run_ids=run_ids,
+        transaction_evidence=transaction_pagination,
+        event_evidence=event_pagination,
+    )
     scopes = [_run_scope(run, target_run_id) for run in run_responses]
     all_timestamps = [
         timestamp for run in run_responses for timestamp in _activity_timestamps(run)
     ]
 
     return {
-        "analysis_version": "wallet_history_readiness_v0.22.6",
+        "analysis_version": "wallet_history_readiness_v0.22.7",
         "target_run_id": target_run_id,
         "run_ids": run_ids,
         "wallet_address": target_run["wallet_address"],
@@ -1994,12 +2308,16 @@ def assess_wallet_history_readiness(
             or len(event_action_groups) > _MAX_IDENTITY_GROUPS
         ),
         "coverage": coverage,
+        "bounded_interval_coverage": bounded_interval_coverage,
         "blockers": _build_blockers(
             run_responses,
             transaction_groups,
             swap_groups,
             event_action_groups,
             coverage,
+            transaction_pagination,
+            event_pagination,
+            bounded_interval_coverage,
         ),
         "history_complete": False,
         "deduplication_applied": False,
@@ -2020,6 +2338,10 @@ def build_wallet_history_readiness(
     session: Session,
 ) -> dict[str, Any]:
     """Load explicit runs and delegate to the pure readiness assessment."""
+    if any(type(run_id) is not int or run_id < 1 for run_id in run_ids):
+        raise ValueError("Every run_id must be a positive integer.")
+    if type(target_run_id) is not int or target_run_id < 1:
+        raise ValueError("target_run_id must be a positive integer.")
     if len(run_ids) < 2:
         raise ValueError("At least 2 distinct run_ids are required.")
     if len(run_ids) > 50:
