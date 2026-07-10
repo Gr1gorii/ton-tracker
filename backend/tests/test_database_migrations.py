@@ -38,7 +38,8 @@ ACQUISITION_EVIDENCE_REVISION = "20260710_0004"
 EVENT_ACTION_IDENTITY_REVISION = "20260710_0005"
 TRACE_EVIDENCE_REVISION = "20260710_0006"
 TRACE_BOC_VERIFICATION_REVISION = "20260710_0007"
-CURRENT_REVISION = TRACE_BOC_VERIFICATION_REVISION
+NATIVE_ACTIVITY_LEDGER_REVISION = "20260710_0008"
+CURRENT_REVISION = NATIVE_ACTIVITY_LEDGER_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -1254,6 +1255,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
@@ -1292,6 +1294,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1332,6 +1335,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1465,6 +1469,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1606,6 +1611,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1751,6 +1757,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2177,6 +2184,7 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2263,6 +2271,7 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2456,6 +2465,7 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
     assert report.applied_revisions == (
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -2699,11 +2709,56 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
 
     assert report.action == "upgraded"
     assert report.revision_before == TRACE_EVIDENCE_REVISION
-    assert report.revision_after == TRACE_BOC_VERIFICATION_REVISION
-    assert report.applied_revisions == (TRACE_BOC_VERIFICATION_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
+    )
     assert _trace_boc_verification_counts(engine) == (0, 0)
-    _assert_schema_matches_models(engine)
     _assert_trace_boc_verification_schema(engine)
+    engine.dispose()
+
+
+def test_native_activity_ledger_upgrade_from_0007_reaches_model_parity(tmp_path):
+    engine = _engine(tmp_path / "native-activity-ledger-upgrade.db")
+    _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == TRACE_BOC_VERIFICATION_REVISION
+    assert report.revision_after == NATIVE_ACTIVITY_LEDGER_REVISION
+    assert report.applied_revisions == (NATIVE_ACTIVITY_LEDGER_REVISION,)
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_native_activity_ledger_rejects_partial_fragments(tmp_path):
+    engine = _engine(tmp_path / "partial-native-activity-ledger.db")
+    _upgrade_to_revision(engine, TRACE_BOC_VERIFICATION_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            "wallet_native_activity_ledgers",
+        )
+
+    with pytest.raises(RuntimeError, match="refuses pre-existing"):
+        _upgrade_to_revision(engine, NATIVE_ACTIVITY_LEDGER_REVISION)
+    assert "wallet_native_activity_rows" not in inspect(engine).get_table_names()
+    engine.dispose()
+
+
+def test_native_activity_ledger_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "native-activity-ledger-forward-only.db")
+    _upgrade_to_revision(engine, NATIVE_ACTIVITY_LEDGER_REVISION)
+
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                TRACE_BOC_VERIFICATION_REVISION,
+            )
+
+    _assert_schema_matches_models(engine)
     engine.dispose()
 
 
@@ -2882,7 +2937,6 @@ def test_trace_boc_verification_migration_is_forward_only(tmp_path):
                 TRACE_EVIDENCE_REVISION,
             )
 
-    _assert_schema_matches_models(engine)
     _assert_trace_boc_verification_schema(engine)
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
@@ -3088,6 +3142,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         EVENT_ACTION_IDENTITY_REVISION,
         TRACE_EVIDENCE_REVISION,
         TRACE_BOC_VERIFICATION_REVISION,
+        NATIVE_ACTIVITY_LEDGER_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

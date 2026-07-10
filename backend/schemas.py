@@ -902,6 +902,76 @@ class WalletCounterpartyObservationBindingResponse(BaseModel):
         return self
 
 
+class WalletNativeActivityRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ordinal: Annotated[int, Field(strict=True, ge=0, le=2303)]
+    activity_identity_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_flow_observation_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+    transaction_hash: CanonicalTraceTransactionHash
+    message_hash: CanonicalTraceTransactionHash
+    direction: Literal["incoming", "outgoing", "self"]
+    activity_kind: Literal["native_ton_message_transfer"]
+    asset_identity_key: str = Field(pattern=r"^ton_native_asset_v1\|ton-(?:mainnet|testnet)$")
+    counterparty_identity_key: str = Field(min_length=70, max_length=180)
+    counterparty_account_canonical: str = Field(min_length=66, max_length=76)
+    amount_base_units: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    created_logical_time: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    unix_time: Annotated[int, Field(strict=True, ge=0, le=2**63 - 1)]
+    body_hash: CanonicalTraceTransactionHash
+    opcode_hex: str | None = Field(default=None, pattern=r"^0x[0-9a-f]{8}$")
+    bounce: bool
+    bounced: bool
+
+
+class WalletNativeActivityLedgerResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_native_activity_ledger_v1"]
+    identity_version: Literal["ton_native_activity_v1"]
+    ledger_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    anchor: WalletTransactionTraceAnchorRecord
+    source_message_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    built_at: datetime
+    activity_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    incoming_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    outgoing_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    self_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    activities: list[WalletNativeActivityRecord]
+    semantic_reconstruction_applied: Literal[True]
+    native_ton_only: Literal[True]
+    immutable_record: Literal[True]
+    is_authoritative_activity_ledger: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    cross_run_deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _activity_totals_must_match_rows(self):
+        if len(self.activities) != self.activity_count:
+            raise ValueError("activities must match activity_count")
+        if [row.ordinal for row in self.activities] != list(range(len(self.activities))):
+            raise ValueError("activity ordinals are not canonical")
+        totals = {"incoming": 0, "outgoing": 0, "self": 0}
+        for row in self.activities:
+            totals[row.direction] += int(row.amount_base_units, 10)
+        if tuple(str(totals[key]) for key in ("incoming", "outgoing", "self")) != (
+            self.incoming_nanoton,
+            self.outgoing_nanoton,
+            self.self_nanoton,
+        ):
+            raise ValueError("activity totals do not match rows")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

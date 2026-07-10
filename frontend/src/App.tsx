@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.6 COUNTERPARTY OBSERVATION IDENTITY";
+const RELEASE_LABEL = "v0.23.7 IMMUTABLE NATIVE ACTIVITY LEDGER";
 
 const navItems = [
   "DASHBOARD",
@@ -942,15 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Network-scoped counterparty observations</strong>
+            <strong>Immutable native TON activity ledger</strong>
             <p>
-              Group verified header endpoints under stable network/account keys.
-              These keys identify evidence rows only — never an actor, owner,
-              beneficiary, intent, cost-basis identity, or PnL counterparty.
+              Materialize verified native flows as capture-bound semantic rows
+              with canonical asset and counterparty observation keys. Every read
+              re-derives the source and digest; the ledger is still scoped and
+              non-authoritative, with merge, cost basis, and PnL disabled.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Immutable native activity ledger"
+            text="Migration 0008 persists capture-bound native TON semantic rows. POST builds locally from verified BOCs; GET re-derives every source row and digest provider-free. The ledger remains scoped, non-authoritative, unmerged, and unused by PnL."
+          />
           <ReleaseReadinessItem
             tone="scoped"
             label="Counterparty observation identity"
@@ -1034,7 +1040,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Retry-safe migration 0007 adds capture-bound BOC verification and transaction rows on top of the immutable 0006 trace graph. Both revisions are forward-only and reject drift or pre-revision data."
+            text="Forward-only migration 0008 adds capture-bound native activity ledgers and rows on top of the immutable 0006 trace graph and 0007 BOC verification. Fresh and sequential upgrades retain model parity and reject partial pre-existing ledger fragments."
           />
           <ReleaseReadinessItem
             tone="ready"

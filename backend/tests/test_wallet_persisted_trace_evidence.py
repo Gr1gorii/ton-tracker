@@ -21,6 +21,8 @@ from models import (
     WalletIngestionRun,
     WalletTraceBocTransaction,
     WalletTraceBocVerification,
+    WalletNativeActivityLedger,
+    WalletNativeActivityRow,
     WalletTraceEvidenceCapture,
     WalletTraceEvidenceMessage,
     WalletTraceEvidenceNode,
@@ -31,11 +33,13 @@ from schemas import (
     WalletNativeTonFlowObservationsResponse,
     WalletNativeTonAssetBindingResponse,
     WalletCounterpartyObservationBindingResponse,
+    WalletNativeActivityLedgerResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
 )
 import services.wallet_trace_boc_verification as boc_service
 import services.wallet_native_ton_flow_observations as native_flow_service
+import services.wallet_native_activity_ledger as activity_ledger_service
 from services.wallet_trace_boc_verification import (
     WalletTraceBocVerificationConflict,
 )
@@ -812,6 +816,13 @@ def _counterparty_url(run_id: int | str, transaction_hash: str = ROOT_HASH) -> s
     return f"{_boc_url(run_id, transaction_hash)}/counterparties"
 
 
+def _activity_ledger_url(run_id: int | str, transaction_hash: str = ROOT_HASH) -> str:
+    return (
+        f"/api/wallets/ingest/{run_id}/transactions/{transaction_hash}"
+        "/native-activity-ledger"
+    )
+
+
 def _fake_boc_derived(_capture, raw_rows):
     hashes = (ROOT_HASH, CHILD_HASH)
     owned_counts = (2, 1)
@@ -1229,6 +1240,75 @@ def test_counterparty_binding_is_network_scoped_but_not_actor_identity(
     assert payload["network_scoped_account_observation_identity"] is True
     assert payload["is_authoritative_actor_identity"] is False
     assert payload["is_ownership_proof"] is False
+
+
+def test_native_activity_ledger_is_atomic_idempotent_and_revalidated(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, testing_session, run_id = persisted_trace_client
+    _capture_then_verify_bocs(client, run_id, monkeypatch)
+    assert client.post(_boc_url(run_id)).status_code == 201
+    source = {
+        "network": "ton-mainnet",
+        "wallet_account_canonical": ROOT_ACCOUNT,
+        "anchor": {
+            "transaction_hash": ROOT_HASH,
+            "logical_time": ROOT_LT,
+            "account_canonical": ROOT_ACCOUNT,
+            "matches_stored_transaction": True,
+        },
+        "message_evidence_digest_sha256": "ab" * 32,
+        "incoming_nanoton": "0",
+        "outgoing_nanoton": "2500000000",
+        "self_nanoton": "0",
+        "flows": [
+            {
+                "observation_identity": "cd" * 32,
+                "transaction_hash": ROOT_HASH,
+                "message_hash": ROOT_OUT_HASH,
+                "direction": "outgoing",
+                "counterparty_account_observed": CHILD_ACCOUNT,
+                "amount_nanoton": "2500000000",
+                "created_logical_time": ROOT_LT,
+                "unix_time": 1_717_236_000,
+                "body_hash": "98" * 32,
+                "opcode_hex": None,
+                "bounce": True,
+                "bounced": False,
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        activity_ledger_service,
+        "get_wallet_native_ton_flow_observations",
+        lambda *args, **kwargs: source,
+    )
+
+    created = client.post(_activity_ledger_url(run_id))
+    assert created.status_code == 201
+    payload = created.json()
+    WalletNativeActivityLedgerResponse.model_validate(payload)
+    assert payload["activity_count"] == 1
+    assert payload["semantic_reconstruction_applied"] is True
+    assert payload["is_authoritative_activity_ledger"] is False
+    repeated = client.post(_activity_ledger_url(run_id))
+    assert repeated.status_code == 200
+    assert repeated.json() == payload
+    assert client.get(_activity_ledger_url(run_id)).json() == payload
+    with testing_session() as session:
+        assert session.scalar(
+            select(func.count()).select_from(WalletNativeActivityLedger)
+        ) == 1
+        assert session.scalar(
+            select(func.count()).select_from(WalletNativeActivityRow)
+        ) == 1
+        row = session.scalar(select(WalletNativeActivityRow))
+        row.amount_base_units = "1"
+        session.commit()
+    corrupt = client.get(_activity_ledger_url(run_id))
+    assert corrupt.status_code == 409
+    assert "failed local revalidation" in corrupt.json()["detail"]
 
 
 def _storage_transaction_boc() -> tuple[str, str]:

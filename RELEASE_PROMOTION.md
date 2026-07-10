@@ -1,15 +1,15 @@
-# TON Wallet Intelligence Dashboard — v0.23.6 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.23.7 Promotion Checklist
 
-Operational gates for network-scoped counterparty observation identity.
+Operational gates for the immutable native TON activity ledger.
 
 ## Version and migration
 
-- Product label is `v0.23.6 COUNTERPARTY OBSERVATION IDENTITY`; backend API version stays
+- Product label is `v0.23.7 IMMUTABLE NATIVE ACTIVITY LEDGER`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is `ton_counterparty_observation_binding_v1`; all prior
-  evidence, flow, and asset contracts remain unchanged.
-- Alembic head is `20260710_0007`, adding only
-  `wallet_trace_boc_verifications` and `wallet_trace_boc_transactions`.
+- New public contract is `ton_native_activity_ledger_v1`; all prior evidence,
+  flow, asset, and counterparty contracts remain unchanged.
+- Alembic head is `20260710_0008`, adding native activity ledgers and rows on
+  top of the unchanged 0007 BOC tables.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
   have model parity. Drift, orphan fragments, unexpected rows/indexes/FKs,
   offline SQL, and downgrade fail closed.
@@ -42,6 +42,10 @@ Operational gates for network-scoped counterparty observation identity.
 
 ## Endpoint and UI
 
+- GET/POST `.../native-activity-ledger` are provider-free. First POST creates
+  one immutable capture-bound ledger; repeated POST and GET perform no writes.
+- Every read re-derives source flows, asset/counterparty keys, rows, totals, and
+  digest. Relational or source drift returns 409.
 - `GET .../boc-verification/counterparties` groups only verified flow endpoints
   by canonical network/account and recomputes directional totals.
 - Keys explicitly identify observations, never actors, owners, beneficiaries,
@@ -75,15 +79,15 @@ Operational gates for network-scoped counterparty observation identity.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Live run 32 groups one observed counterparty and its 3 TON outgoing evidence
-  provider-free while every actor/ownership/PnL flag remains false.
+- Live run 32 materializes one outgoing 3 TON semantic row, then provider-free
+  readback returns the same digest and relational counts.
 - Credential/prohibited-brand scans are clean and README has no diff.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.23.6` on the merge commit.
+  a ready PR, then create annotated tag `v0.23.7` on the merge commit.
 
 ## Rollback
 
 - Before merge, patch the release branch and rerun every gate.
 - After merge, use a follow-up revert commit; never rewrite published history.
-- Revision 0007 is forward-only. Restore the verified pre-0007 backup when a
+- Revisions 0007-0008 are forward-only. Restore the verified pre-upgrade backup when a
   schema rollback is required.
