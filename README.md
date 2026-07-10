@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.9 RECENT RUN CATALOG
+# TON Wallet Intelligence Dashboard — v0.23.0 TRACE EVIDENCE PREVIEW
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.9 RECENT RUN CATALOG status — `GET /api/wallets/ingest?limit=8` returns one privacy-bounded newest-first catalog of persisted runs. `limit` is an optional canonical positive decimal from `1` through `50`; duplicate, unknown, malformed, noncanonical, or out-of-range query input returns 422. Every item contains exactly six fields: canonical signed-64-bit `run_id` as a decimal string, bounded masked `wallet_hint`, `time_window`, `created_at`, `status`, and `data_mode`. The fixed ID-descending query projects only those values from `wallet_ingestion_runs`, fetches at most `limit + 1`, and reports `truncated` instead of exposing an offset, cursor, total count, activity rows, provider evidence, full address, or custom bounds. Both server and browser use `no-store`. Catalog discovery and `GET /api/wallets/ingest/{run_id}` readback perform no ingestion, provider call, or database mutation. The workspace shows three of the eight requested entries until expanded, keeps the last successful catalog on refresh failure, rejects stale or malformed responses, and opens only JavaScript-safe IDs through the full stored-run endpoint. The `wallet_history_readiness_v0.22.7` analysis and `wallet_multi_run_interval_coverage_v1` contract remain unchanged; no activity merge, deduplication, global history, cost basis, or PnL claim is introduced.**
+> **v0.23.0 TRACE EVIDENCE PREVIEW status — `GET /api/wallets/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence` performs one explicit, read-only TonAPI `GET /v2/traces/{transaction_hash}` call for one eligible transaction already stored in a real run. Nothing is fetched automatically. The run must match the current guarded live TonAPI network, and the stored provider, source, network, canonical account, unsigned-64-bit LT, lowercase 32-byte hash, raw provenance, and persisted `ton_account_tx_v1` identity must revalidate before the provider is contacted. The provider trace must contain that exact stored hash + LT + account anchor. Iterative validation is capped at 256 transaction nodes, depth 32, and 2,048 outgoing messages; interfaces are validated as bounded strings but omitted from the response. The endpoint returns only the strict `tonapi_transaction_trace_preview_v1` allowlist, uses `no-store`, performs no database mutation or persistence, and reports missing resources as 404, ineligible state as 409, and sanitized provider/protocol/anchor failures as 502. `finalized` means the accepted non-emulated provider trace has no remaining internal outgoing messages; `pending` means at least one remains. Neither state proves transaction success, chain state, semantic activity, ownership, cost basis, or PnL eligibility. Backend `VERSION=0.2.1`, Alembic head `20260710_0005`, `wallet_history_readiness_v0.22.7`, and `wallet_multi_run_interval_coverage_v1` are unchanged.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -41,6 +41,14 @@ executable ingestion path.
 >   fails. Selecting a safe row delegates to the existing full stored-run GET;
 >   signed-64-bit ids outside the browser safe-integer range remain visible as
 >   exact decimal strings but cannot be opened from that browser control.
+> - A separate **Transaction trace evidence** card appears for a persisted run.
+>   It selects only coherent live TonAPI transaction identities and remains
+>   network-silent until the user presses **Inspect trace evidence**. Mock runs,
+>   empty runs, and runs without an eligible stored anchor stay disabled. The
+>   card distinguishes explicit-ready, inspecting, refreshing, unavailable,
+>   last-result-preserved, finalized, and pending states; changing the anchor or
+>   run aborts stale requests and resets only trace-scoped state. A failed retry
+>   keeps the last successful result visible.
 > - Wallet activity preview/run orchestration now goes through
 >   `backend/adapters/wallet_activity.py`.
 > - `WALLET_ACTIVITY_PROVIDER=mock` remains the default. Explicit
@@ -97,7 +105,7 @@ executable ingestion path.
 >   Revision 0005 adds retry-safe provider event/action observation fields and
 >   indexes to transfers and swaps. v0.22.5 rows lack the original action index,
 >   so they remain explicitly unavailable instead of receiving a guessed key.
->   v0.22.7, v0.22.8, and v0.22.9 add no database migration; Alembic head
+>   v0.22.7, v0.22.8, v0.22.9, and v0.23.0 add no database migration; Alembic head
 >   remains `20260710_0005`. Interval coverage, persisted-run readback, and the
 >   recent-run catalog remain read-only over existing evidence.
 > - Each persisted run exposes rule-based evidence signals with confidence
@@ -167,7 +175,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.9 RECENT RUN CATALOG` product label
+> - User-facing UI copy uses the `v0.23.0 TRACE EVIDENCE PREVIEW` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -177,8 +185,8 @@ executable ingestion path.
 >   provider evidence.
 > - The frontend uses Vite 8 and Vitest 4 for its build/test toolchain; the
 >   checked-in dependency graph reports zero `npm audit` vulnerabilities.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.9 RECENT RUN
->   CATALOG` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.23.0 TRACE EVIDENCE
+>   PREVIEW` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -254,6 +262,8 @@ backend/
                          Jettons-only wallet intelligence preview builder
     wallet_activity_ingestion.py
                          Adapter-backed wallet activity ingestion persistence
+    wallet_trace_evidence.py
+                         Read-only stored-transaction TonAPI trace preview
     wallet_activity_clustering.py
                          Pairwise run comparison (probabilistic similarity)
     wallet_interval_coverage.py
@@ -386,7 +396,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.9 RECENT RUN CATALOG)
+## Data modes & providers (v0.23.0 TRACE EVIDENCE PREVIEW)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -432,6 +442,7 @@ milestone:
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
 | Wallet transfers/history/swaps/balances | mock-normalized | mock by default; the explicit TonAPI live guard paginates bounded low-level transactions plus one shared account-event display stream, and coherent derived transfer/swap rows preserve provider-scoped event/action coordinates; balances remain snapshots, derived actions remain semantically incomplete, and the observation identity is not consumed by PnL |
+| Stored-transaction trace evidence | unavailable; no provider call | one explicit guarded TonAPI trace call for an eligible persisted transaction; sanitized structural summary only, never persisted or consumed by PnL |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -448,7 +459,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.9 RECENT RUN CATALOG` is the current
+API-version field, while `v0.23.0 TRACE EVIDENCE PREVIEW` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -640,6 +651,75 @@ changes the keyed run id, so run-scoped evidence, PnL, signal, and interval
 cards remount instead of leaking state from the previous run. Canonical UTC
 datetime signatures prevent restored custom bounds from being marked stale
 solely because the form uses a local datetime representation.
+
+### `GET /api/wallets/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence`
+
+Returns one explicit, sanitized provider-indexed trace summary for one eligible
+low-level transaction already stored in the selected run. `run_id` must be a
+canonical positive signed-64-bit decimal. `transaction_hash` must be exactly 64
+lowercase hexadecimal characters; uppercase, `0x`-prefixed, short, long, or
+non-hex aliases return 422 and cannot reach the provider.
+
+Before any network call, the backend requires all of the following:
+
+- `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
+  `WALLET_ACTIVITY_LIVE_ENABLED=true`;
+- a configured, network-matching TonAPI adapter;
+- one existing real run on the current `ton-mainnet` or `ton-testnet` network;
+- exactly one stored transaction with coherent live TonAPI provenance;
+- a fully re-derived, persisted `ton_account_tx_v1` identity whose canonical
+  hash equals the path hash.
+
+An eligible explicit request performs exactly one provider GET to TonAPI's
+official `GET /v2/traces/{trace_id}` operation, using the stored transaction
+hash as `trace_id`; it sends no request body and follows no account-trace list.
+TonAPI can resolve that official operation from a trace id or a transaction
+hash, but this product contract deliberately accepts only a hash already bound
+to the selected stored run. See the
+[TonAPI traces documentation](https://docs.tonconsole.com/tonapi/rest-api/traces).
+The browser never sends this request automatically: the user must select an
+eligible anchor and press **Inspect trace evidence**.
+
+The provider tree is traversed iteratively and fails closed above 256
+transaction nodes, depth 32, or 2,048 outgoing messages. Every node requires a
+non-emulated state, a bounded list of non-empty interfaces, a canonical
+transaction hash, unsigned-64-bit LT, canonical raw account, integer timestamp,
+boolean success/aborted state, typed outgoing messages, and list-shaped
+children. Transaction hashes cannot repeat; one canonical account + LT
+coordinate cannot change hash; and the requested transaction must occur in the
+tree. Interfaces are accepted only as bounded strings (at most 128 per node and
+128 characters each) and are not returned.
+
+The exact `tonapi_transaction_trace_preview_v1` response allowlist contains:
+
+- `contract_version`, decimal-string `run_id`, `provider: tonapi`,
+  `source_status: live`, `trace_state`, and one bounded `message`;
+- `anchor`: exact canonical transaction hash, LT, account, and
+  `matches_stored_transaction: true`;
+- `summary`: root transaction hash, transaction count, maximum depth, outgoing
+  and pending-internal message counts, successful/failed/aborted transaction
+  counts, and unique-account count;
+- `is_provider_indexed_low_level_trace: true`;
+- `is_blockchain_proof_verified`, `is_authoritative_activity_identity`,
+  `semantic_reconstruction_applied`, `activity_merge_applied`,
+  `deduplication_applied`, `eligible_for_cost_basis`, `used_by_pnl`, and
+  `is_ownership_proof`, all permanently `false`.
+
+Raw messages, BOCs, decoded bodies, interfaces, actions, display metadata, and
+the provider's recursive tree are omitted. `finalized` means that the accepted
+non-emulated provider response has no remaining internal outgoing messages;
+`pending` means at least one remains. Finalization is not the same as success:
+failed and aborted transaction counts remain visible, and neither state is
+locally verified blockchain proof or authoritative transfer/trade semantics.
+
+A missing run or transaction returns 404. An ambiguous/tampered stored identity,
+disabled guard, or network/configuration mismatch returns 409 before a provider
+call. Provider transport/protocol failure, a malformed trace, a missing requested
+hash, or a provider anchor that differs from the stored hash + LT + account
+returns a credential-sanitized 502. Success and error responses use
+`Cache-Control: no-store`; the browser also requests `no-store`. Repeated
+inspection performs a new explicit provider read, never inserts, updates,
+deletes, commits, persists trace evidence, changes the stored run, or feeds PnL.
 
 ### `GET /api/wallets/ingest/{run_id}/export.json` and `.../export.csv`
 Download one persisted run as JSON, or as flattened one-row-per-activity CSV.
@@ -889,14 +969,15 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.9 RECENT RUN CATALOG`).
+  tracks the current release (`v0.23.0 TRACE EVIDENCE PREVIEW`).
 
-## Roadmap beyond v0.22.9 RECENT RUN CATALOG
+## Roadmap beyond v0.23.0 TRACE EVIDENCE PREVIEW
 
-- Add authoritative low-level transfer/trade acquisition or trace-backed
-  reconstruction before treating derived transfer or swap actions as complete.
-  The TonAPI event chain and v0.22.6 action coordinates remain provider
-  observation evidence.
+- Persist a separately versioned, locally revalidated low-level message/trace
+  evidence contract before attempting authoritative transfer or trade
+  reconstruction. The v0.23.0 on-demand summary is intentionally not that
+  ledger, and the TonAPI event chain and v0.22.6 action coordinates remain
+  provider observation evidence.
 - Define appropriate temporal evidence contracts for jetton-balance and native-
   balance snapshots without mislabeling point-in-time state as history.
 - Add authoritative semantic transfer/trade reconstruction plus jetton-asset

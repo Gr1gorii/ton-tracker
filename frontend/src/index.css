@@ -4925,6 +4925,273 @@ input {
   }
 }
 
+/* Explicit transaction trace evidence preview v0.23.0 ---------------- */
+.trace-evidence-card {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid rgba(33, 74, 49, 0.78);
+  border-radius: 9px;
+  background:
+    linear-gradient(135deg, rgba(91, 141, 239, 0.055), transparent 48%),
+    rgba(2, 6, 4, 0.4);
+}
+
+.trace-evidence-toolbar {
+  align-items: flex-start;
+}
+
+.trace-evidence-safety {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid rgba(230, 180, 80, 0.34);
+  border-radius: 7px;
+  background: rgba(230, 180, 80, 0.065);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.trace-evidence-safety strong {
+  color: #f2cc73;
+}
+
+.trace-evidence-form {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) max-content;
+  align-items: end;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid rgba(33, 74, 49, 0.62);
+  border-radius: 7px;
+  background: rgba(2, 6, 4, 0.34);
+}
+
+.trace-evidence-form .field {
+  min-width: 0;
+}
+
+.trace-evidence-form .btn {
+  min-height: 40px;
+}
+
+.trace-evidence-help,
+.trace-evidence-selected-hash {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.trace-evidence-selected-hash {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.trace-evidence-error {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid rgba(255, 92, 92, 0.38);
+  border-radius: 7px;
+  background: rgba(255, 92, 92, 0.075);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.trace-evidence-error strong {
+  color: #ff9898;
+}
+
+.trace-evidence-error small {
+  color: var(--muted);
+}
+
+.trace-evidence-results {
+  display: grid;
+  gap: 11px;
+  min-width: 0;
+}
+
+.trace-evidence-contract-strip,
+.trace-evidence-metrics {
+  display: grid;
+  gap: 7px;
+}
+
+.trace-evidence-contract-strip {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.trace-evidence-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.trace-evidence-contract-strip > div,
+.trace-evidence-metrics > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(33, 74, 49, 0.54);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.trace-evidence-contract-strip span,
+.trace-evidence-metrics span {
+  display: block;
+  color: var(--primary-green);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.65px;
+  text-transform: uppercase;
+}
+
+.trace-evidence-contract-strip strong,
+.trace-evidence-metrics strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.trace-evidence-contract-strip strong .source-badge {
+  display: inline-flex;
+  margin-top: 0;
+}
+
+.trace-evidence-message {
+  margin: 0;
+  padding: 9px 10px;
+  border-left: 2px solid rgba(45, 212, 191, 0.5);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.trace-evidence-details {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid rgba(33, 74, 49, 0.62);
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(2, 6, 4, 0.34);
+}
+
+.trace-evidence-details summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.trace-evidence-details summary:hover {
+  background: rgba(0, 230, 118, 0.045);
+}
+
+.trace-evidence-details summary > span:first-child {
+  margin-right: auto;
+}
+
+.trace-evidence-details summary > span:last-child {
+  color: var(--primary-green);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+}
+
+.trace-evidence-table-wrap,
+.trace-invariant-table-wrap {
+  max-width: 100%;
+  overscroll-behavior-inline: contain;
+}
+
+.trace-evidence-table,
+.trace-invariant-table {
+  min-width: 680px;
+  table-layout: auto;
+}
+
+.trace-evidence-table caption,
+.trace-invariant-table caption {
+  padding: 8px 10px;
+  background: rgba(8, 17, 11, 0.84);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.trace-evidence-table th,
+.trace-evidence-table td,
+.trace-invariant-table th,
+.trace-invariant-table td {
+  height: auto;
+  padding: 9px 10px;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.trace-evidence-table tbody th,
+.trace-invariant-table tbody th {
+  color: var(--text);
+  font-size: 10.5px;
+  text-align: left;
+}
+
+.trace-evidence-table td,
+.trace-invariant-table td {
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.trace-evidence-table .mono,
+.trace-invariant-table code {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .trace-evidence-contract-strip,
+  .trace-evidence-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .trace-evidence-card {
+    padding: 10px;
+  }
+
+  .trace-evidence-safety,
+  .trace-evidence-form,
+  .trace-evidence-contract-strip,
+  .trace-evidence-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .trace-evidence-form .btn {
+    width: 100%;
+  }
+
+  .trace-evidence-table,
+  .trace-invariant-table {
+    min-width: 620px;
+  }
+}
+
 /* Wallet acquisition evidence v0.22.5 ------------------------------ */
 .acquisition-evidence-card {
   width: 100%;

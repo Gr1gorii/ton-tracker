@@ -275,6 +275,29 @@ export async function getWalletIngestionRunCatalog(
   return await res.json();
 }
 
+export async function getWalletTransactionTraceEvidence(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence`,
+    {
+      cache: "no-store",
+      signal,
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Transaction trace evidence preview failed"),
+    );
+  }
+
+  return await res.json();
+}
+
 export async function getWalletRunSignals(
   runId: number,
 ): Promise<WalletRunSignalsResponse> {

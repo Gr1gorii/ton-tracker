@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 WalletIngestionSurface = Literal[
     "transfers",
@@ -279,6 +279,118 @@ class WalletTransactionRecord(BaseModel):
     source_status: WalletSourceStatus
     transaction_identity: WalletTransactionIdentityRecord
     raw: dict[str, Any] | None = None
+
+
+CanonicalTraceTransactionHash = Annotated[
+    str,
+    Field(
+        pattern=r"^[0-9a-f]{64}$",
+        min_length=64,
+        max_length=64,
+    ),
+]
+CanonicalTraceLogicalTime = Annotated[
+    str,
+    Field(pattern=r"^[1-9][0-9]{0,19}$", max_length=20),
+]
+StrictTraceCount = Annotated[int, Field(strict=True, ge=0)]
+
+
+class WalletTransactionTraceAnchorRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_hash: CanonicalTraceTransactionHash
+    logical_time: CanonicalTraceLogicalTime
+    account_canonical: str = Field(
+        pattern=r"^(?:0|[1-9][0-9]*|-[1-9][0-9]*):[0-9a-f]{64}$",
+        min_length=66,
+        max_length=76,
+    )
+    matches_stored_transaction: Literal[True]
+
+    @field_validator("logical_time")
+    @classmethod
+    def _trace_logical_time_must_fit_uint64(cls, value: str) -> str:
+        if int(value, 10) > 2**64 - 1:
+            raise ValueError("trace logical_time exceeds unsigned 64-bit range")
+        return value
+
+
+class WalletTransactionTraceSummaryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root_transaction_hash: CanonicalTraceTransactionHash
+    transaction_count: Annotated[int, Field(strict=True, ge=1, le=256)]
+    max_depth: Annotated[int, Field(strict=True, ge=0, le=32)]
+    out_message_count: Annotated[int, Field(strict=True, ge=0, le=2048)]
+    pending_internal_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=2048),
+    ]
+    successful_transaction_count: StrictTraceCount
+    failed_transaction_count: StrictTraceCount
+    aborted_transaction_count: StrictTraceCount
+    unique_account_count: Annotated[int, Field(strict=True, ge=1, le=256)]
+
+    @model_validator(mode="after")
+    def _trace_counts_must_be_coherent(self):
+        if (
+            self.successful_transaction_count
+            + self.failed_transaction_count
+            != self.transaction_count
+        ):
+            raise ValueError(
+                "trace success and failure counts must cover every transaction"
+            )
+        if self.aborted_transaction_count > self.transaction_count:
+            raise ValueError("trace aborted count exceeds transaction count")
+        if self.unique_account_count > self.transaction_count:
+            raise ValueError("trace account count exceeds transaction count")
+        if self.pending_internal_message_count > self.out_message_count:
+            raise ValueError(
+                "trace pending internal messages exceed outgoing messages"
+            )
+        if self.transaction_count > 1 and self.max_depth == 0:
+            raise ValueError("multi-transaction trace must have positive depth")
+        return self
+
+
+class WalletTransactionTraceEvidenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["tonapi_transaction_trace_preview_v1"]
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    provider: Literal["tonapi"]
+    source_status: Literal["live"]
+    trace_state: Literal["finalized", "pending"]
+    anchor: WalletTransactionTraceAnchorRecord
+    summary: WalletTransactionTraceSummaryRecord
+    is_provider_indexed_low_level_trace: Literal[True]
+    is_blockchain_proof_verified: Literal[False] = False
+    is_authoritative_activity_identity: Literal[False] = False
+    semantic_reconstruction_applied: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @field_validator("run_id")
+    @classmethod
+    def _trace_run_id_must_fit_sqlite(cls, value: str) -> str:
+        if int(value, 10) > 2**63 - 1:
+            raise ValueError("trace run_id exceeds signed 64-bit range")
+        return value
+
+    @model_validator(mode="after")
+    def _trace_state_must_match_pending_messages(self):
+        pending = self.summary.pending_internal_message_count
+        if self.trace_state == "finalized" and pending != 0:
+            raise ValueError("finalized trace cannot contain pending messages")
+        if self.trace_state == "pending" and pending == 0:
+            raise ValueError("pending trace requires an internal outgoing message")
+        return self
 
 
 class WalletSwapRecord(BaseModel):

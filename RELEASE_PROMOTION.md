@@ -1,32 +1,115 @@
-# TON Wallet Intelligence Dashboard — v0.22.9 RECENT RUN CATALOG Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.23.0 TRACE EVIDENCE PREVIEW Promotion Checklist
 
-Operational gates for promoting privacy-bounded recent-run discovery and
-read-only persisted-run loading while preserving strict acquisition evidence,
-deterministic selected-run interval coverage, and non-authoritative provider
-semantics.
+Operational gates for promoting one explicit, bounded, sanitized
+stored-transaction trace preview while preserving strict acquisition evidence,
+privacy-bounded run discovery, deterministic selected-run interval coverage,
+and non-authoritative provider semantics.
 
 ## Version contract
 
-- Product label is `v0.22.9 RECENT RUN CATALOG`.
+- Product label is `v0.23.0 TRACE EVIDENCE PREVIEW`.
 - Backend `VERSION=0.2.1` remains the independent API-version field.
 - `wallet_history_readiness_v0.22.7` is the diagnostic analysis contract.
 - `wallet_multi_run_interval_coverage_v1` is the bounded multi-run coverage
   contract.
 - `tonapi_event_action_obs_v1`, `ton_account_tx_v1`, and the v0.22.5
   acquisition page contracts remain unchanged.
+- `tonapi_transaction_trace_preview_v1` is a new read-only provider-evidence
+  response contract; it is not an acquisition, identity, readiness, interval,
+  cost-basis, or PnL contract.
 
 ## Schema and migration gates
 
-- v0.22.9 adds no database migration.
+- v0.23.0 adds no database migration, model, table, column, index, or backfill.
 - Alembic head remains `20260710_0005`.
 - Fresh, exact legacy, and versioned databases follow the existing baseline
   through revisions 0002-0005 without `create_all()` repair.
 - Existing run, activity, identity, acquisition-stream, and acquisition-page
-  rows are not rewritten for interval coverage.
+  rows are not rewritten for trace preview or interval coverage.
 - No synthetic interval, cursor, page, or completion evidence is persisted for
   legacy runs.
 - Existing uniqueness, foreign-key cascade, retry, integrity, and unsupported-
   downgrade behavior remains intact.
+
+## Transaction trace endpoint gates
+
+- The exact endpoint is
+  `GET /api/wallets/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence`.
+- `run_id` matches `[1-9][0-9]*` and fits
+  `1..9223372036854775807`. The transaction hash matches exactly
+  `[0-9a-f]{64}`. Malformed, noncanonical, uppercase, prefixed, short, long, or
+  non-hex values return 422 before provider access.
+- Missing runs and missing transactions return 404 with `no-store`.
+- Ambiguous or incoherent persisted identity, mock/disabled live configuration,
+  provider-selection mismatch, and network/run mismatch return 409 before the
+  provider method is called.
+- Provider HTTP/network/protocol failure, malformed trace structure, missing
+  requested hash, or mismatch against the stored hash + LT + account anchor
+  returns a credential-sanitized 502 with `no-store`.
+- Success returns 200 with `Cache-Control: no-store`; the browser request also
+  sets `cache: no-store`.
+- After eligibility succeeds, exactly one provider request is issued:
+  `GET /v2/traces/{transaction_hash}` with no query or request body. No account-
+  trace list, pagination, background poll, automatic retry, or fallback occurs.
+- Repeated explicit reads may call the provider again but never perform database
+  DML/DDL, commit, run refresh, ingestion, trace persistence, or activity/PnL
+  mutation.
+
+## Trace eligibility and anchor gates
+
+- Current settings must be guarded live TonAPI on the same mainnet/testnet as
+  the persisted real run, with a valid configured base URL.
+- The service must resolve exactly one stored transaction under the requested
+  run/hash before provider access.
+- Provider, source status, raw provenance, network, canonical run account, LT,
+  hash, and the complete persisted `ton_account_tx_v1` tuple are re-derived and
+  must exactly match their stored values.
+- The requested lowercase hash must equal the re-derived canonical hash.
+- The provider trace must contain the requested transaction hash exactly once.
+  Its canonical hash, unsigned-64-bit LT, and canonical raw account must exactly
+  match the stored anchor; `matches_stored_transaction` is therefore literal
+  true or the request fails.
+- Duplicate transaction hashes and one account + LT coordinate changing hash
+  are protocol failures, not additional evidence.
+
+## Trace bounds and allowlist gates
+
+- Traversal is iterative and fails closed above 256 transaction nodes, tree
+  depth 32, or 2,048 outgoing messages across the trace.
+- Every node has a non-emulated boolean state, a bounded list of interfaces, a
+  transaction object, and list-shaped children. Interfaces are limited to 128
+  non-empty trimmed strings per node and 128 characters per value.
+- Required transaction fields include canonical 32-byte hash, canonical raw
+  account, uint64 LT, nonnegative signed-64-bit timestamp, boolean success and
+  aborted states, and a list of outgoing messages with known message types.
+- The strict response contains only contract/run/provider metadata,
+  `trace_state`, exact anchor, structural summary, permanent safety flags, and a
+  bounded message. Extra top-level, anchor, or summary fields are rejected by
+  both server and browser schemas.
+- The summary allowlist is root transaction hash, transaction count, maximum
+  depth, outgoing-message count, pending-internal-message count,
+  successful/failed/aborted transaction counts, and unique-account count.
+- Raw messages, recursive nodes, BOCs, decoded bodies, interfaces, actions,
+  provider display metadata, and semantic rows are absent from the response.
+- `is_provider_indexed_low_level_trace` is literal true. These fields are all
+  literal false: `is_blockchain_proof_verified`,
+  `is_authoritative_activity_identity`, `semantic_reconstruction_applied`,
+  `activity_merge_applied`, `deduplication_applied`,
+  `eligible_for_cost_basis`, `used_by_pnl`, and `is_ownership_proof`.
+
+## Trace lifecycle gates
+
+- Emulated nodes are rejected.
+- `finalized` requires zero remaining internal outgoing messages anywhere in the
+  accepted provider tree.
+- `pending` requires at least one remaining internal outgoing message.
+- Successful + failed counts equal the transaction count; aborted and unique-
+  account counts cannot exceed it; pending-internal cannot exceed outgoing.
+- Finalized does not imply all transactions succeeded. Failed and aborted counts
+  remain visible and do not alter the permanent false flags.
+- Pending/finalized is an on-demand provider lifecycle observation only. It is
+  not persisted, automatically refreshed, or promoted to chain proof,
+  authoritative activity, complete history, ownership, cost basis, or PnL.
 
 ## Recent-run catalog gates
 
@@ -203,6 +286,23 @@ git status --short
 Do not insert a test total into release documents. Record the actual command
 results in promotion evidence at execution time.
 
+## Focused trace evidence verification
+
+- Canonical success performs one exact TonAPI trace GET, returns the exact
+  sanitized contract and matching stored anchor, sets `no-store`, and leaves all
+  wallet table counts unchanged.
+- Missing resources return 404; ineligible guard/network/identity state returns
+  409 before provider access; sanitized provider/protocol/anchor failures return
+  502; noncanonical paths return 422.
+- Exact node/depth/message/interface boundaries pass and one-over inputs fail.
+  Duplicate hashes, conflicting coordinates, missing anchors, emulated nodes,
+  malformed required types, incoherent counts/states, extra response fields, or
+  any true safety flag fail closed.
+- The UI sends no call on mount or for mock/empty/ineligible runs. Explicit
+  inspect, pending/finalized rendering, refresh, first failure, retry with last-
+  success preservation, anchor change, stale-response suppression, and run
+  remount are verified.
+
 ## Focused recent-run catalog verification
 
 - An empty database returns 200 with `runs: []`, `limit: 8`,
@@ -286,7 +386,12 @@ and verify:
 
 ## UI and documentation gates
 
-- Dashboard label reads `v0.22.9 RECENT RUN CATALOG` on desktop and mobile.
+- Dashboard label reads `v0.23.0 TRACE EVIDENCE PREVIEW` on desktop and mobile.
+- The trace card exposes real-run-required, no-eligible-anchor, explicit-request-
+  required, inspecting, refreshing, unavailable, last-result-preserved,
+  finalized, and pending states without an automatic provider call.
+- Anchor changes and run remounts abort stale requests; failed retries keep the
+  last success visible; the false-invariant table remains visible in every state.
 - The recent-run catalog exposes only bounded hints and five other summary
   fields, initially renders three of eight rows, expands to all eight, and has
   accessible loading, empty, truncated, current, opening, refresh, retry,
@@ -321,17 +426,17 @@ After every gate passes:
 release_branch="$(git branch --show-current)"
 git checkout main
 git merge --no-ff "$release_branch"
-git tag -a v0.22.9 -m "v0.22.9 RECENT RUN CATALOG"
+git tag -a v0.23.0 -m "v0.23.0 TRACE EVIDENCE PREVIEW"
 git push origin main
-git push origin v0.22.9
+git push origin v0.23.0
 ```
 
 ## Rollback
 
 - Before push, patch the release branch and rerun all gates.
 - After push, use a follow-up revert commit; do not rewrite published history.
-- v0.22.9 has no schema migration. Reverting its code removes the recent-run
-  catalog without a database downgrade or data rewrite; the existing full-run
-  loader, persisted runs, and interval diagnostics remain intact.
+- v0.23.0 has no schema migration. Reverting its code removes the on-demand
+  trace preview without a database downgrade or data rewrite; persisted runs,
+  the recent-run catalog, full-run loader, and interval diagnostics remain intact.
 - The existing revision 0005 backup/restore policy remains applicable only to
   older schema changes.
