@@ -24,6 +24,7 @@ from schemas import (
     WalletNativeActivityLedgerResponse,
     WalletNativeActivityMergeRequest,
     WalletNativeActivityMergeResponse,
+    WalletNativeActivityDedupResponse,
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
@@ -76,6 +77,10 @@ from services.wallet_native_activity_ledger import (
 from services.wallet_native_activity_merge import (
     WalletNativeActivityMergeConflict,
     merge_wallet_native_activity_ledgers,
+)
+from services.wallet_native_activity_dedup import (
+    WalletNativeActivityDedupConflict,
+    deduplicate_wallet_native_activity,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -793,6 +798,34 @@ def merge_wallet_native_activity_ledgers_route(
         raise HTTPException(
             status_code=503,
             detail="Native activity merge storage is unavailable.",
+        ) from exc
+
+
+@router.post(
+    "/ingest/{target_run_id}/native-activity-dedup",
+    response_model=WalletNativeActivityDedupResponse,
+)
+def deduplicate_wallet_native_activity_route(
+    payload: WalletNativeActivityMergeRequest,
+    response: Response,
+    target_run_id: str = Path(..., pattern=r"^[1-9][0-9]*$", max_length=19),
+    session: Session = Depends(get_session),
+) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    target = _canonical_positive_integer(
+        target_run_id,
+        field_name="target_run_id",
+        maximum=_MAX_SQLITE_RUN_ID,
+    )
+    try:
+        return deduplicate_wallet_native_activity(target, payload.run_ids, session)
+    except (WalletNativeActivityMergeConflict, WalletNativeActivityDedupConflict) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Native activity deduplication storage is unavailable.",
         ) from exc
 
 
