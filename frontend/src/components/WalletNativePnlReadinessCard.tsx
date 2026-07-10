@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from "react";
-import { inspectWalletNativePnlReadiness } from "../api";
+import { inspectWalletMultiAssetPnlReadiness } from "../api";
 import type {
-  WalletNativeActivityPnlReadinessResponse,
-  WalletNativeActivityPnlRequirementCode,
+  WalletMultiAssetPnlReadinessResponse,
+  WalletMultiAssetPnlRequirementCode,
 } from "../types";
 import PreviewReadinessStrip, {
   type PreviewReadinessTone,
@@ -13,14 +13,16 @@ interface WalletNativePnlReadinessCardProps {
   targetRunId: number;
 }
 
-const requirementLabels: Record<WalletNativeActivityPnlRequirementCode, string> = {
+const requirementLabels: Record<WalletMultiAssetPnlRequirementCode, string> = {
   deduplicated_native_activity: "Deduplicated native activity",
+  verified_jetton_payload_semantics: "Verified jetton payload semantics",
+  provider_scoped_jetton_asset_evidence: "Provider-scoped jetton asset evidence",
+  exact_transaction_fee_evidence: "Exact transaction fee evidence",
   complete_wallet_history: "Complete wallet history",
   authoritative_trade_semantics: "Authoritative trade semantics",
-  jetton_asset_identity: "Jetton asset identity",
   historical_trade_prices: "Historical trade prices",
-  transaction_fee_linkage: "Transaction fee linkage",
-  acquisition_cost_basis: "Acquisition cost basis",
+  transaction_fee_allocation: "Transaction fee allocation",
+  acquisition_lots_and_cost_basis: "Acquisition lots and cost basis",
 };
 
 export default function WalletNativePnlReadinessCard({
@@ -30,7 +32,7 @@ export default function WalletNativePnlReadinessCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] =
-    useState<WalletNativeActivityPnlReadinessResponse | null>(null);
+    useState<WalletMultiAssetPnlReadinessResponse | null>(null);
   const inputId = `native-pnl-runs-${targetRunId}`;
   const readiness = pnlReadiness({ loading, error, result });
 
@@ -47,13 +49,13 @@ export default function WalletNativePnlReadinessCard({
     setResult(null);
     try {
       setResult(
-        await inspectWalletNativePnlReadiness(targetRunId, parsed.runIds),
+        await inspectWalletMultiAssetPnlReadiness(targetRunId, parsed.runIds),
       );
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
-          : "Native activity PnL readiness failed.",
+          : "Multi-asset PnL readiness failed.",
       );
     } finally {
       setLoading(false);
@@ -69,11 +71,11 @@ export default function WalletNativePnlReadinessCard({
         <div className="table-toolbar-main">
           <span className="section-eyebrow">Multi-run evidence gate</span>
           <h2 id={`native-pnl-title-${targetRunId}`}>
-            Native activity PnL readiness
+            Multi-asset PnL readiness
           </h2>
           <p>
-            Merge and deduplicate verified native TON activities, reconcile the
-            selected cash flow, and show exactly what still blocks cost basis.
+            Revalidate native TON activity and verified TEP-74 observations,
+            then reconcile provider snapshot asset matches and exact fees.
           </p>
         </div>
         <div className="table-meta" aria-label="PnL readiness limitations">
@@ -88,7 +90,7 @@ export default function WalletNativePnlReadinessCard({
       >
         <div className="field">
           <label className="field-label" htmlFor={inputId}>
-            Other run IDs for native flow reconciliation
+            Other run IDs for evidence reconciliation
           </label>
           <input
             id={inputId}
@@ -114,7 +116,7 @@ export default function WalletNativePnlReadinessCard({
           type="submit"
           disabled={loading || otherRunIds.trim() === ""}
         >
-          {loading ? "Reconciling activity" : "Check PnL readiness"}
+          {loading ? "Reconciling evidence" : "Check multi-asset readiness"}
         </button>
       </form>
 
@@ -125,20 +127,25 @@ export default function WalletNativePnlReadinessCard({
         items={[
           { label: "Target", value: `Run #${targetRunId}` },
           {
-            label: "Canonical activities",
+            label: "Canonical native",
             value: result
-              ? String(result.deduplicated_activity_count)
+              ? String(result.native_flow_summary.activity_count)
               : "Awaiting selection",
           },
           {
-            label: "Suppressed repeats",
+            label: "Verified jetton",
             value: result
-              ? String(result.suppressed_occurrence_count)
+              ? String(
+                  result.jetton_evidence_summary
+                    .deduplicated_payload_observation_count,
+                )
               : "Awaiting selection",
           },
           {
             label: "Net native flow",
-            value: result ? `${result.flow_summary.net_ton} TON` : "Unavailable",
+            value: result
+              ? `${result.native_flow_summary.net_ton} TON`
+              : "Unavailable",
           },
         ]}
       />
@@ -148,23 +155,53 @@ export default function WalletNativePnlReadinessCard({
           <div className="native-pnl-flow-grid">
             <FlowMetric
               label="Incoming"
-              value={`${result.flow_summary.incoming_ton} TON`}
-              detail={`${result.flow_summary.incoming_activity_count} canonical activities`}
+              value={`${result.native_flow_summary.incoming_ton} TON`}
+              detail={`${result.native_flow_summary.incoming_activity_count} canonical activities`}
             />
             <FlowMetric
               label="Outgoing"
-              value={`${result.flow_summary.outgoing_ton} TON`}
-              detail={`${result.flow_summary.outgoing_activity_count} canonical activities`}
+              value={`${result.native_flow_summary.outgoing_ton} TON`}
+              detail={`${result.native_flow_summary.outgoing_activity_count} canonical activities`}
             />
             <FlowMetric
               label="Self"
-              value={`${result.flow_summary.self_ton} TON`}
-              detail={`${result.flow_summary.self_activity_count} canonical activities`}
+              value={`${result.native_flow_summary.self_ton} TON`}
+              detail={`${result.native_flow_summary.self_activity_count} canonical activities`}
             />
             <FlowMetric
               label="Net observed flow"
-              value={`${result.flow_summary.net_ton} TON`}
+              value={`${result.native_flow_summary.net_ton} TON`}
               detail="Incoming minus outgoing; not profit"
+            />
+          </div>
+
+          <div className="native-pnl-flow-grid multi-asset-evidence-grid">
+            <FlowMetric
+              label="Recognized payloads"
+              value={String(
+                result.jetton_evidence_summary
+                  .deduplicated_payload_observation_count,
+              )}
+              detail={`${result.jetton_evidence_summary.suppressed_payload_occurrence_count} repeated occurrences suppressed`}
+            />
+            <FlowMetric
+              label="Asset matches"
+              value={String(
+                result.jetton_evidence_summary.asset_matched_observation_count,
+              )}
+              detail="Provider snapshot evidence; not local master proof"
+            />
+            <FlowMetric
+              label="Fee matches"
+              value={String(
+                result.jetton_evidence_summary.fee_linked_observation_count,
+              )}
+              detail="Exact transaction hash matches"
+            />
+            <FlowMetric
+              label="Linked fees"
+              value={`${result.jetton_evidence_summary.linked_fee_ton} TON`}
+              detail="Evidence only; not allocated to lots"
             />
           </div>
 
@@ -192,6 +229,44 @@ export default function WalletNativePnlReadinessCard({
               </li>
             ))}
           </ul>
+
+          {result.evidence.length > 0 && (
+            <div className="table-wrap multi-asset-evidence-table-wrap">
+              <table className="data-table multi-asset-evidence-table">
+                <caption>
+                  Deduplicated verified jetton observations with bounded asset
+                  and fee evidence. No row is a trade or cost-basis lot.
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Operation</th>
+                    <th scope="col">Occurrences</th>
+                    <th scope="col">Asset evidence</th>
+                    <th scope="col">Fee evidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.evidence.map((row) => (
+                    <tr key={row.payload_observation_identity}>
+                      <th scope="row">{row.operation.replace(/_/g, " ")}</th>
+                      <td>{row.occurrence_count}</td>
+                      <td>
+                        {row.asset_binding_status === "provider_snapshot_match"
+                          ? `${row.asset_symbol ?? "master matched"} · provider snapshot`
+                          : "unavailable"}
+                      </td>
+                      <td>
+                        {row.transaction_fee_evidence_status ===
+                        "exact_transaction_match"
+                          ? `${row.transaction_fee_ton} TON · unallocated`
+                          : "unavailable"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <p className="muted small native-pnl-digest">
             Contract {result.contract_version} · analysis digest {" "}
@@ -228,13 +303,13 @@ function pnlReadiness({
 }: {
   loading: boolean;
   error: string | null;
-  result: WalletNativeActivityPnlReadinessResponse | null;
+  result: WalletMultiAssetPnlReadinessResponse | null;
 }): { tone: PreviewReadinessTone; label: string; message: string } {
   if (loading) {
     return {
       tone: "running",
-      label: "RECONCILING NATIVE ACTIVITY",
-      message: "Revalidating ledgers, merging rows, and resolving repeats.",
+      label: "RECONCILING MULTI-ASSET EVIDENCE",
+      message: "Revalidating native ledgers, BOCs, asset snapshots, and fees.",
     };
   }
   if (error) {
@@ -243,7 +318,7 @@ function pnlReadiness({
   if (result) {
     return {
       tone: "warning",
-      label: "NATIVE FLOW READY · PNL LOCKED",
+      label: "EVIDENCE RECONCILED · PNL LOCKED",
       message: `${result.selected_run_ids.length} runs reconciled. ${result.blocked_requirement_codes.length} evidence requirements remain blocked.`,
     };
   }

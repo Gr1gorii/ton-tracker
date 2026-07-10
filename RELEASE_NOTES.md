@@ -1,3 +1,23 @@
+# TON Wallet Intelligence Dashboard — v0.26.0 MULTI-ASSET PNL READINESS
+
+v0.26.0 adds provider-free POST
+`/api/wallets/ingest/{target_run_id}/multi-asset-pnl-readiness`. The
+`ton_multi_asset_pnl_readiness_v1` contract revalidates the unchanged native
+dedup chain and every selected verified BOC capture, content-deduplicates
+recognized TEP-74 observations, matches only canonical observed contracts to
+persisted live TonAPI jetton snapshots, and links exact stored transaction fees
+by canonical hash. Counts and source run provenance remain digest-bound.
+
+TonAPI nested jetton-wallet records are now normalized to the canonical address
+instead of a stringified object. Legacy malformed snapshot addresses remain
+invalid and are never guessed. Provider snapshot matches are not local
+jetton-master proofs, transaction fees are not allocated to lots, and complete
+history, trade semantics, historical prices, cost basis, and Real PnL remain
+explicitly blocked. The workspace renders native flow, jetton dedup, asset and
+fee matches, all requirement reasons, and the calculation lock.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.25.0 VERIFIED JETTON PAYLOADS
 
 v0.25.0 adds provider-free GET

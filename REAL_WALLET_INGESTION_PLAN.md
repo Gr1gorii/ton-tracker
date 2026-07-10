@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.25.0 VERIFIED JETTON PAYLOADS
+# TON Wallet Intelligence Dashboard — v0.26.0 MULTI-ASSET PNL READINESS
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -48,6 +48,12 @@ counts unknown opcodes, and fails closed on malformed recognized payloads.
 Message bodies stay hidden. Contract roles remain observations, while master
 and asset identity, authoritative transfer history, ownership, cost basis, and
 PnL remain false.
+v0.26.0 adds `ton_multi_asset_pnl_readiness_v1`. It revalidates the selected
+native dedup and BOC evidence, content-deduplicates payload observations,
+matches observed jetton-wallet/master roles only to canonical persisted TonAPI
+snapshot addresses, and links exact transaction fees. Snapshot identity stays
+provider-scoped, fee allocation stays false, and all missing history, trade,
+price, lot, cost-basis, and PnL requirements remain explicit.
 
 ## Objective
 
@@ -510,7 +516,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.25.0
+## Surface status in v0.26.0
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -531,6 +537,7 @@ intervals are contiguous.
 | Cross-run native dedup | Explicit selected-run merge followed by content-addressed canonical resolution | One canonical row per identity plus complete suppression provenance; conflicting semantics fail closed, no history/cost-basis/PnL promotion |
 | Native activity PnL readiness | Provider-free selected-run dedup consumption and exact native TON flow reconciliation | Digest-bound prerequisite checklist; native evidence is used by readiness, never by a cost-basis/PnL calculation without missing trade facts |
 | Verified jetton payloads | Explicit provider-free TEP-74 decode over fully revalidated BOC bodies | Recognized bounded layout fields and hashes only; bodies hidden, roles observational, master/asset identity and PnL false |
+| Multi-asset PnL readiness | Provider-free selected native dedup plus full selected BOC, snapshot, and fee revalidation | Content-deduplicated jetton observations, provider-scoped contract/master snapshot matches, exact unallocated transaction fees, and a fail-closed nine-requirement PnL gate |
 | Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
@@ -688,13 +695,13 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.25.0
+## Roadmap beyond v0.26.0
 
 1. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
    coordinate as a substitute.
 2. Keep interval continuity, native activity merge, and cross-run
    deduplication as separate explicit evidence contracts.
-3. Bind verified jetton-wallet role observations to canonical master/asset
-   evidence, then integrate the result with selected-run fee and PnL readiness
-   without treating payload shape as proof of successful economic execution.
+3. Replace provider-scoped jetton asset observations with local master/wallet
+   contract verification, then reconstruct authoritative trade legs and fee
+   allocation before any cost-basis or PnL calculation can unlock.

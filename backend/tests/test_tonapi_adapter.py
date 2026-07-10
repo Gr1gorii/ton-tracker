@@ -359,6 +359,23 @@ def test_fetch_json_public_mode_omits_authorization_header(monkeypatch):
     assert captured["authorization"] is None
 
 
+def test_nested_jetton_wallet_address_is_normalized_as_address_only():
+    result = TonapiAdapter.normalize_jetton_balance(
+        {
+            "jetton": {"address": "0:" + "11" * 32},
+            "wallet_address": {
+                "address": "0:" + "22" * 32,
+                "is_scam": False,
+                "is_wallet": False,
+            },
+            "balance": "7",
+        },
+        "EQwallet",
+    )
+
+    assert result["wallet_contract_address"] == "0:" + "22" * 32
+
+
 def test_get_account_jettons_preview_http_error_returns_provider_error(
     monkeypatch,
 ):

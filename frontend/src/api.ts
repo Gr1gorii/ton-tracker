@@ -20,6 +20,7 @@ import type {
   WalletIngestionRunResponse,
   WalletJettonPayloadObservationsResponse,
   WalletNativeActivityPnlReadinessResponse,
+  WalletMultiAssetPnlReadinessResponse,
   WalletRunPnlPreviewResponse,
   WalletRunSignalsResponse,
 } from "./types";
@@ -594,6 +595,25 @@ export async function inspectWalletNativePnlReadiness(
     );
   }
   return (await res.json()) as WalletNativeActivityPnlReadinessResponse;
+}
+
+export async function inspectWalletMultiAssetPnlReadiness(
+  targetRunId: number,
+  runIds: number[],
+): Promise<WalletMultiAssetPnlReadinessResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${targetRunId}/multi-asset-pnl-readiness`,
+    {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_ids: runIds }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(await responseError(res, "Multi-asset PnL readiness failed"));
+  }
+  return (await res.json()) as WalletMultiAssetPnlReadinessResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {
