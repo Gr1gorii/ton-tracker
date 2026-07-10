@@ -129,6 +129,11 @@ class WalletIngestionRun(Base):
         back_populates="run",
         cascade="all, delete-orphan",
     )
+    jetton_contract_verifications = relationship(
+        "WalletJettonContractVerification",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
 
 
 class WalletAcquisitionStream(Base):
@@ -949,6 +954,87 @@ class WalletBalanceSnapshot(Base):
     raw_json = Column(Text, nullable=True)
 
     run = relationship("WalletIngestionRun", back_populates="balance_snapshots")
+    jetton_contract_verifications = relationship(
+        "WalletJettonContractVerification",
+        back_populates="balance_snapshot",
+    )
+
+
+class WalletJettonContractVerification(Base):
+    """Proof-checked account state plus locally executed jetton getters."""
+
+    __tablename__ = "wallet_jetton_contract_verifications"
+    __table_args__ = (
+        Index(
+            "uq_wallet_jetton_contract_verification_relation",
+            "run_id",
+            "jetton_wallet_account_canonical",
+            "jetton_master_account_canonical",
+            "contract_version",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_jetton_contract_verification_identity",
+            "asset_identity_key",
+        ),
+        Index(
+            "ix_wallet_jetton_contract_verification_digest",
+            "evidence_digest_sha256",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(
+        Integer,
+        ForeignKey("wallet_ingestion_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    balance_snapshot_id = Column(
+        Integer,
+        ForeignKey("wallet_balance_snapshots.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    contract_version = Column(String(56), nullable=False)
+    verifier_name = Column(String(32), nullable=False)
+    verifier_version = Column(String(48), nullable=False)
+    network = Column(String(16), nullable=False)
+    trust_level = Column(Integer, nullable=False)
+    anchor_workchain = Column(Integer, nullable=False)
+    anchor_shard = Column(String(24), nullable=False)
+    anchor_seqno = Column(Integer, nullable=False)
+    anchor_root_hash = Column(String(64), nullable=False)
+    anchor_file_hash = Column(String(64), nullable=False)
+    owner_account_canonical = Column(String(76), nullable=False)
+    jetton_wallet_account_canonical = Column(String(76), nullable=False)
+    jetton_master_account_canonical = Column(String(76), nullable=False)
+    asset_identity_key = Column(String(128), nullable=False)
+    wallet_balance_base_units = Column(String(80), nullable=False)
+    total_supply_base_units = Column(String(80), nullable=False)
+    mintable = Column(Boolean, nullable=False)
+    wallet_code_boc_hex = Column(Text, nullable=False)
+    wallet_data_boc_hex = Column(Text, nullable=False)
+    master_code_boc_hex = Column(Text, nullable=False)
+    master_data_boc_hex = Column(Text, nullable=False)
+    wallet_code_hash = Column(String(64), nullable=False)
+    wallet_data_hash = Column(String(64), nullable=False)
+    master_code_hash = Column(String(64), nullable=False)
+    master_data_hash = Column(String(64), nullable=False)
+    jetton_content_hash = Column(String(64), nullable=False)
+    evidence_digest_sha256 = Column(String(64), nullable=False)
+    verified_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    run = relationship(
+        "WalletIngestionRun",
+        back_populates="jetton_contract_verifications",
+    )
+    balance_snapshot = relationship(
+        "WalletBalanceSnapshot",
+        back_populates="jetton_contract_verifications",
+    )
 
 
 class WalletIngestionWarning(Base):

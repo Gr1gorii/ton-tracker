@@ -31,6 +31,9 @@ from schemas import (
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
     WalletJettonPayloadObservationsResponse,
+    WalletJettonContractVerificationRequest,
+    WalletJettonContractVerificationResponse,
+    WalletJettonContractVerificationCatalogResponse,
     WalletTransactionTraceEvidenceResponse,
 )
 from schemas import WalletRunPnlPreviewResponse
@@ -95,6 +98,13 @@ from services.wallet_native_activity_pnl_readiness import (
 from services.wallet_multi_asset_pnl_readiness import (
     WalletMultiAssetPnlReadinessConflict,
     build_multi_asset_pnl_readiness,
+)
+from services.wallet_jetton_contract_verification import (
+    WalletJettonContractVerificationConflict,
+    WalletJettonContractVerificationFailure,
+    WalletJettonContractVerificationNotFound,
+    list_wallet_jetton_contract_verifications,
+    verify_wallet_jetton_contract_relationship,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -979,6 +989,75 @@ def inspect_multi_asset_pnl_readiness_route(
         raise HTTPException(
             status_code=503,
             detail="Multi-asset PnL readiness storage is unavailable.",
+        ) from exc
+
+
+@router.post(
+    "/ingest/{run_id}/jetton-contract-verifications",
+    response_model=WalletJettonContractVerificationResponse,
+)
+def verify_jetton_contract_relationship_route(
+    payload: WalletJettonContractVerificationRequest,
+    response: Response,
+    run_id: str = Path(..., pattern=r"^[1-9][0-9]*$", max_length=19),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Proof-check account state and execute standard jetton getters locally."""
+    response.headers["Cache-Control"] = "no-store"
+    canonical_run_id = _canonical_positive_integer(
+        run_id,
+        field_name="run_id",
+        maximum=_MAX_SQLITE_RUN_ID,
+    )
+    try:
+        return verify_wallet_jetton_contract_relationship(
+            canonical_run_id,
+            payload.jetton_wallet_account_canonical,
+            payload.jetton_master_account_canonical,
+            session,
+        )
+    except WalletJettonContractVerificationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletJettonContractVerificationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (WalletJettonContractVerificationFailure, SQLAlchemyError) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Jetton contract proof verification is unavailable.",
+        ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/jetton-contract-verifications",
+    response_model=WalletJettonContractVerificationCatalogResponse,
+)
+def list_jetton_contract_verifications_route(
+    response: Response,
+    run_id: str = Path(..., pattern=r"^[1-9][0-9]*$", max_length=19),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read and fully revalidate stored jetton contract proof evidence."""
+    response.headers["Cache-Control"] = "no-store"
+    canonical_run_id = _canonical_positive_integer(
+        run_id,
+        field_name="run_id",
+        maximum=_MAX_SQLITE_RUN_ID,
+    )
+    try:
+        return list_wallet_jetton_contract_verifications(
+            canonical_run_id,
+            session,
+        )
+    except WalletJettonContractVerificationNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except WalletJettonContractVerificationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Jetton contract proof storage is unavailable.",
         ) from exc
 
 

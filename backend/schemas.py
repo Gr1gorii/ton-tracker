@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+import re
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -867,6 +868,124 @@ class WalletJettonPayloadObservationsResponse(BaseModel):
             for operation in counts
         ):
             raise ValueError("jetton payload operation grouping changed")
+        return self
+
+
+class WalletJettonContractVerificationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    jetton_wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    jetton_master_account_canonical: str = Field(min_length=66, max_length=76)
+
+
+class WalletJettonContractVerificationAnchorRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workchain: Annotated[int, Field(strict=True, ge=-1, le=0)]
+    shard: str = Field(pattern=r"^-?[0-9]{1,20}$")
+    seqno: Annotated[int, Field(strict=True, ge=1)]
+    root_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    file_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class WalletJettonContractVerificationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_jetton_contract_verification_v1"]
+    verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    balance_snapshot_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    verifier_name: Literal["pytoniq-pytvm"]
+    verifier_version: str = Field(min_length=1, max_length=48)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    trust_level: Annotated[int, Field(strict=True, ge=0, le=1)]
+    anchor: WalletJettonContractVerificationAnchorRecord
+    owner_account_canonical: str = Field(min_length=66, max_length=76)
+    jetton_wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    jetton_master_account_canonical: str = Field(min_length=66, max_length=76)
+    asset_identity_key: str = Field(min_length=1, max_length=128)
+    wallet_balance_base_units: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    total_supply_base_units: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    mintable: bool
+    wallet_code_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    wallet_data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    master_code_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    master_data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    jetton_content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    account_state_boc_hashes: dict[str, str]
+    evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verified_at: str
+    account_state_proof_verified: Literal[True]
+    masterchain_checkpoint_chain_verified: bool
+    local_tvm_execution_applied: Literal[True]
+    wallet_owner_master_verified: Literal[True]
+    master_wallet_address_verified: Literal[True]
+    wallet_code_consistency_verified: Literal[True]
+    jetton_asset_identity_applied: Literal[True]
+    raw_account_state_bocs_persisted: Literal[True]
+    raw_account_state_bocs_returned: Literal[False] = False
+    is_blockchain_inclusion_proof_verified: bool
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=600)
+
+    @model_validator(mode="after")
+    def _jetton_contract_relationship_must_be_coherent(self):
+        expected_key = (
+            f"ton_jetton_asset_v1|{self.network}|"
+            f"{self.jetton_master_account_canonical}"
+        )
+        if self.asset_identity_key != expected_key:
+            raise ValueError("jetton asset identity key changed")
+        if self.jetton_wallet_account_canonical == self.jetton_master_account_canonical:
+            raise ValueError("jetton wallet and master addresses must differ")
+        checkpoint_verified = self.trust_level == 0
+        if (
+            self.masterchain_checkpoint_chain_verified != checkpoint_verified
+            or self.is_blockchain_inclusion_proof_verified != checkpoint_verified
+        ):
+            raise ValueError("jetton proof trust boundary changed")
+        expected_boc_fields = {
+            "wallet_code_boc_hex",
+            "wallet_data_boc_hex",
+            "master_code_boc_hex",
+            "master_data_boc_hex",
+        }
+        if set(self.account_state_boc_hashes) != expected_boc_fields or any(
+            re.fullmatch(r"[0-9a-f]{64}", value) is None
+            for value in self.account_state_boc_hashes.values()
+        ):
+            raise ValueError("jetton account-state BOC hashes changed")
+        return self
+
+
+class WalletJettonContractVerificationCatalogResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_jetton_contract_verification_v1"]
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    verification_count: Annotated[int, Field(strict=True, ge=0, le=500)]
+    verification_digests: list[str] = Field(max_length=500)
+    verifications: list[WalletJettonContractVerificationResponse] = Field(
+        max_length=500
+    )
+    catalog_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    provider_requests_performed: Literal[False] = False
+    raw_account_state_bocs_returned: Literal[False] = False
+    message: str = Field(min_length=1, max_length=400)
+
+    @model_validator(mode="after")
+    def _verification_catalog_must_be_coherent(self):
+        if self.verification_count != len(self.verifications):
+            raise ValueError("jetton verification catalog count changed")
+        if self.verification_digests != [
+            row.evidence_digest_sha256 for row in self.verifications
+        ]:
+            raise ValueError("jetton verification catalog digests changed")
+        if any(row.run_id != self.run_id for row in self.verifications):
+            raise ValueError("jetton verification catalog run changed")
         return self
 
 

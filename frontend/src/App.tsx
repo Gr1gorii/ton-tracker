@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.26.0 MULTI-ASSET PNL READINESS";
+const RELEASE_LABEL = "v0.27.0 VERIFIED JETTON CONTRACTS";
 
 const navItems = [
   "DASHBOARD",
@@ -942,15 +942,20 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Verified multi-asset evidence reconciliation</strong>
+            <strong>Proof-checked jetton contract identity</strong>
             <p>
-              Selected runs now combine native dedup, verified TEP-74
-              observations, provider snapshot asset matches, and exact
-              transaction fees. Cost basis and PnL remain locked.
+              Selected live jetton relations can now be checked against
+              liteserver account-state proofs and locally executed
+              wallet/master getters. Activity, cost basis, and PnL remain locked.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Verified jetton contract identity"
+            text="An explicit action proof-checks current wallet and master account state, executes standard jetton getters locally, and persists immutable owner, master, derived-wallet, and code evidence. Readback reparses every BOC provider-free; this establishes asset identity, not ownership, full history, cost basis, or PnL."
+          />
           <ReleaseReadinessItem
             tone="scoped"
             label="Multi-asset PnL readiness"
@@ -1064,7 +1069,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Forward-only migration 0008 adds capture-bound native activity ledgers and rows on top of the immutable 0006 trace graph and 0007 BOC verification. Fresh and sequential upgrades retain model parity and reject partial pre-existing ledger fragments."
+            text="Forward-only migration 0009 adds immutable jetton wallet/master relationship proofs on top of the 0008 native ledger. Fresh and sequential upgrades retain model parity, reject partial fragments, and preserve every earlier evidence table."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1119,12 +1124,12 @@ function EvidenceColumn({
         <EvidenceItem
           tone="warning"
           title="No authoritative high-level action identity"
-          text="A provider-scoped event coordinate or jetton snapshot match can identify an observation and expose conflicts. Neither is authoritative transfer, trade, or locally verified jetton-master identity."
+          text="A provider-scoped event coordinate remains an observation, while a separately verified jetton master now establishes network-scoped asset identity. Neither alone is an authoritative transfer, trade, complete activity history, cost basis, or PnL record."
         />
         <EvidenceItem
           tone="warning"
-          title="No ownership or blockchain proof"
-          text="The transaction tuple is deduplication evidence only. It is not locally blockchain-proof verified and never proves account ownership or actor intent."
+          title="No ownership proof"
+          text="Jetton account-state proofs establish contract state at a recorded masterchain anchor, while transaction tuples remain deduplication evidence. Neither proves wallet ownership, actor identity, intent, or a complete transaction history."
         />
         <EvidenceItem
           tone="warning"

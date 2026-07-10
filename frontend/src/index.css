@@ -32,6 +32,134 @@
   font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
+/* Verified jetton contract identity v0.27 ------------------------------- */
+.jetton-contract-panel {
+  display: grid;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 92% 0%, rgba(46, 205, 178, 0.1), transparent 32%),
+    var(--surface);
+}
+
+.jetton-contract-heading,
+.jetton-verification-card-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.jetton-contract-heading h2,
+.jetton-verification-card h3 {
+  margin: 0.2rem 0 0.4rem;
+}
+
+.jetton-contract-heading p {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--muted);
+}
+
+.jetton-contract-controls {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr) auto;
+  align-items: end;
+  gap: 0.8rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised, rgba(255, 255, 255, 0.025));
+}
+
+.jetton-contract-controls label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.jetton-contract-controls select {
+  min-width: 0;
+  padding: 0.72rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  text-transform: none;
+}
+
+.jetton-contract-addresses {
+  display: grid;
+  gap: 0.35rem;
+  padding-bottom: 0.15rem;
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+}
+
+.jetton-verification-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.8rem;
+}
+
+.jetton-verification-card {
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid rgba(46, 205, 178, 0.32);
+  border-radius: 14px;
+  background: rgba(46, 205, 178, 0.045);
+}
+
+.jetton-verification-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin: 0.9rem 0;
+}
+
+.jetton-verification-card dl div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.jetton-verification-card dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.jetton-verification-card dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.jetton-verification-card code {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .jetton-contract-controls {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .jetton-contract-heading {
+    flex-direction: column;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

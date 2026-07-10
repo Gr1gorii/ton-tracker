@@ -74,6 +74,8 @@ class Settings:
     wallet_activity_live_event_limit: int = 100
     wallet_activity_live_event_max_pages: int = 10
     ton_network: str = "mainnet"
+    ton_liteclient_trust_level: int = 1
+    ton_liteclient_timeout_seconds: int = 20
 
     @property
     def is_mock(self) -> bool:
@@ -179,6 +181,12 @@ def get_settings() -> Settings:
             maximum=100,
         ),
         ton_network=ton_network,
+        ton_liteclient_trust_level=_env_int(
+            "TON_LITECLIENT_TRUST_LEVEL", 1, 0, 1
+        ),
+        ton_liteclient_timeout_seconds=_env_int(
+            "TON_LITECLIENT_TIMEOUT_SECONDS", 20, 5, 60
+        ),
     )
 
 
