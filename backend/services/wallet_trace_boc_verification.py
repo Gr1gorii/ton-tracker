@@ -47,6 +47,7 @@ from services.wallet_trace_evidence import (
 
 
 BOC_VERIFICATION_CONTRACT_VERSION = "ton_boc_trace_verification_v1"
+BOC_MESSAGE_EVIDENCE_CONTRACT_VERSION = "ton_boc_message_evidence_v1"
 BOC_VERIFIER_NAME = "pytoniq-core"
 BOC_VERIFIER_VERSION = "0.1.46"
 MAX_TRANSACTION_BOC_BYTES = 1024 * 1024
@@ -90,6 +91,94 @@ def get_wallet_transaction_trace_boc_verification(
         run,
         transaction,
     )
+
+
+def get_wallet_transaction_boc_message_evidence(
+    run_id: int,
+    transaction_hash: str,
+    session: Session,
+) -> dict[str, Any] | None:
+    """Reparse stored BOCs and return body-safe per-message evidence."""
+    run, transaction = resolve_wallet_transaction_trace_anchor(
+        run_id,
+        transaction_hash,
+        session,
+    )
+    _require_eligible_stored_identity(run, transaction, transaction_hash)
+    capture = _find_capture_for_transaction(run_id, transaction_hash, session)
+    if capture is None:
+        return None
+    persisted = _revalidate_capture(capture, run, transaction, session)
+    verification = _find_verification(capture.id, session)
+    if verification is None:
+        return None
+    verified = _revalidate_verification(
+        verification,
+        capture,
+        persisted,
+        run,
+        transaction,
+    )
+    raw_rows = [
+        {
+            "preorder_index": row.preorder_index,
+            "transaction_hash": row.transaction_hash,
+            "transaction_boc_hex": row.transaction_boc_hex,
+            "transaction_boc_bytes": row.transaction_boc_bytes,
+        }
+        for row in sorted(
+            verification.transactions,
+            key=lambda item: item.preorder_index,
+        )
+    ]
+    derived = _derive_boc_evidence(capture, raw_rows)
+    messages = [
+        {
+            "transaction_preorder_index": item["preorder_index"],
+            "transaction_hash": item["transaction_hash"],
+            **message,
+        }
+        for item in derived["canonical_transactions"]
+        for message in item["messages"]
+    ]
+    document = {
+        "contract_version": BOC_MESSAGE_EVIDENCE_CONTRACT_VERSION,
+        "verification_evidence_digest_sha256": verified[
+            "evidence_digest_sha256"
+        ],
+        "messages": messages,
+    }
+    return {
+        "contract_version": BOC_MESSAGE_EVIDENCE_CONTRACT_VERSION,
+        "verification_id": verified["verification_id"],
+        "capture_id": verified["capture_id"],
+        "run_id": verified["run_id"],
+        "provider": "tonapi",
+        "source_status": "live",
+        "network": verified["network"],
+        "anchor": verified["anchor"],
+        "verification_evidence_digest_sha256": verified[
+            "evidence_digest_sha256"
+        ],
+        "message_evidence_digest_sha256": _digest_json(document),
+        "message_count": len(messages),
+        "messages": messages,
+        "derived_from_locally_deserialized_bocs": True,
+        "message_headers_verified": True,
+        "message_body_hashes_derived": True,
+        "message_bodies_returned": False,
+        "semantic_reconstruction_applied": False,
+        "is_authoritative_activity_identity": False,
+        "eligible_for_cost_basis": False,
+        "used_by_pnl": False,
+        "is_ownership_proof": False,
+        "message": (
+            "Message headers, hash conventions, body hashes, bit/ref counts, "
+            "and available 32-bit opcode prefixes were re-derived from stored "
+            "transaction BOCs. Message bodies and semantic interpretations "
+            "are not returned."
+        ),
+    }
 
 
 def verify_wallet_transaction_trace_bocs(
@@ -904,9 +993,11 @@ def _require_pinned_verifier() -> None:
 
 
 __all__ = [
+    "BOC_MESSAGE_EVIDENCE_CONTRACT_VERSION",
     "BOC_VERIFICATION_CONTRACT_VERSION",
     "WalletTraceBocVerificationConflict",
     "WalletTraceBocVerificationFailure",
     "get_wallet_transaction_trace_boc_verification",
+    "get_wallet_transaction_boc_message_evidence",
     "verify_wallet_transaction_trace_bocs",
 ]

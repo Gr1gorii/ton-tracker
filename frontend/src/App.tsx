@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.2 LOCAL BOC VERIFICATION";
+const RELEASE_LABEL = "v0.23.3 MESSAGE BODY EVIDENCE";
 
 const navItems = [
   "DASHBOARD",
@@ -942,16 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Locally reparsed transaction BOC evidence</strong>
+            <strong>Body-safe per-message evidence</strong>
             <p>
-              Reopen the persisted trace and its locally verified BOC record
-              without a provider call, or explicitly run the one-call BOC
-              verification. Local deserialization never becomes chain inclusion
-              proof, semantic activity, ownership evidence, or PnL input.
+              Reparse the stored transaction BOCs without a provider call and
+              inspect each verified message header, body hash, bit/ref count,
+              and available 32-bit opcode prefix. Bodies and semantic meanings
+              stay hidden and no activity or PnL identity is created.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Message body evidence"
+            text="The provider-free message endpoint re-derives unique owned message headers, direct or normalized hashes, body hashes, bit/ref counts, and available 32-bit opcode prefixes from the stored BOCs. Raw BOCs and message bodies are never returned."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Local BOC verification"

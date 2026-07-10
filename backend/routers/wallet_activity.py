@@ -19,6 +19,7 @@ from schemas import (
     WalletIngestionRunResponse,
     WalletPersistedTraceEvidenceResponse,
     WalletRunSignalsResponse,
+    WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
     WalletTransactionTraceEvidenceResponse,
 )
@@ -51,6 +52,7 @@ from services.wallet_persisted_trace_evidence import (
 from services.wallet_trace_boc_verification import (
     WalletTraceBocVerificationConflict,
     WalletTraceBocVerificationFailure,
+    get_wallet_transaction_boc_message_evidence,
     get_wallet_transaction_trace_boc_verification,
     verify_wallet_transaction_trace_bocs,
 )
@@ -436,6 +438,71 @@ def read_wallet_transaction_trace_boc_verification(
         raise HTTPException(
             status_code=503,
             detail="Local transaction BOC verification storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/boc-verification/messages",
+    response_model=WalletTraceBocMessageEvidenceResponse,
+)
+def read_wallet_transaction_boc_message_evidence(
+    response: Response,
+    run_id: str = Path(..., description="Canonical positive persisted run id."),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Return provider-free body-safe evidence re-derived from stored BOCs."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result = get_wallet_transaction_boc_message_evidence(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Locally derived message BOC evidence not found",
+                headers=no_store_headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletTraceBocVerificationConflict,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletPersistedTraceEvidenceFailure,
+        WalletTraceBocVerificationFailure,
+        SQLAlchemyError,
+    ) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Local message BOC evidence storage is unavailable.",
             headers=no_store_headers,
         ) from exc
 

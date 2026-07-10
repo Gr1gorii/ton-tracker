@@ -1,3 +1,17 @@
+# TON Wallet Intelligence Dashboard — v0.23.3 MESSAGE BODY EVIDENCE
+
+v0.23.3 adds provider-free
+`GET .../trace-evidence/boc-verification/messages`. It reparses the immutable
+v0.23.2 BOCs and returns one body-safe row per unique persisted message:
+transaction preorder/hash, trace role/ordinal, provider and raw cell hashes,
+hash convention, verified header fields, body hash, bit/ref count, and an
+optional 32-bit opcode prefix. The response is digest-bound to the complete
+v0.23.2 verification, uses `Cache-Control: no-store`, and never returns the raw
+BOC or message body. Semantic reconstruction, authoritative identity, ownership,
+cost basis, and PnL remain explicitly false.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.2 LOCAL BOC VERIFICATION
 
 v0.23.2 adds a separate `ton_boc_trace_verification_v1` record on top of an

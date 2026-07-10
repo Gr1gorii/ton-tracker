@@ -28,6 +28,7 @@ from models import (
 )
 from schemas import (
     WalletPersistedTraceEvidenceResponse,
+    WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
 )
 import services.wallet_trace_boc_verification as boc_service
@@ -782,22 +783,66 @@ def _boc_url(run_id: int | str, transaction_hash: str = ROOT_HASH) -> str:
     )
 
 
+def _boc_messages_url(
+    run_id: int | str,
+    transaction_hash: str = ROOT_HASH,
+) -> str:
+    return f"{_boc_url(run_id, transaction_hash)}/messages"
+
+
 def _fake_boc_derived(_capture, raw_rows):
     hashes = (ROOT_HASH, CHILD_HASH)
     owned_counts = (2, 1)
     canonical = []
     for index, row in enumerate(raw_rows):
-        messages = [
-            {
-                "hash_kind": (
-                    "normalized_external_in"
-                    if index == 0 and position == 0
-                    else "cell_hash"
-                ),
-                "opcode_hex": "0x00000001" if position == 0 else None,
-            }
-            for position in range(owned_counts[index])
-        ]
+        messages = []
+        for position in range(owned_counts[index]):
+            external_in = index == 0 and position == 0
+            external_out = index == 0 and position == 1
+            messages.append(
+                {
+                    "role": (
+                        "root_inbound"
+                        if external_in
+                        else "remaining_outbound"
+                        if external_out
+                        else "child_inbound"
+                    ),
+                    "ordinal": 0,
+                    "message_hash": f"{index * 2 + position + 1:064x}",
+                    "raw_message_cell_hash": f"{index * 2 + position + 5:064x}",
+                    "hash_kind": (
+                        "normalized_external_in" if external_in else "cell_hash"
+                    ),
+                    "message_type": (
+                        "ext_in_msg"
+                        if external_in
+                        else "ext_out_msg"
+                        if external_out
+                        else "int_msg"
+                    ),
+                    "source_account_canonical": (
+                        None if external_in else ROOT_ACCOUNT
+                    ),
+                    "destination_account_canonical": (
+                        None if external_out else ROOT_ACCOUNT
+                    ),
+                    "created_logical_time": "0" if external_in else ROOT_LT,
+                    "unix_time": 0 if external_in else 1_717_236_000,
+                    "value_nanoton": "0" if not external_out else "1",
+                    "forward_fee_nanoton": "0",
+                    "ihr_fee_nanoton": "0",
+                    "import_fee_nanoton": "0",
+                    "ihr_disabled": not external_in,
+                    "bounce": False,
+                    "bounced": False,
+                    "extra_currency_count": 0,
+                    "body_hash": f"{index * 2 + position + 9:064x}",
+                    "body_bit_length": 32 if position == 0 else 0,
+                    "body_ref_count": 0,
+                    "opcode_hex": "0x00000001" if position == 0 else None,
+                }
+            )
         canonical.append(
             {
                 "preorder_index": index,
@@ -957,6 +1002,40 @@ def test_boc_verification_readback_rejects_relational_tampering(
     assert response.status_code == 409
     assert response.headers["cache-control"] == "no-store"
     assert "row failed local revalidation" in response.json()["detail"]
+
+
+def test_boc_message_evidence_is_provider_free_body_safe_and_digest_bound(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, _testing_session, run_id = persisted_trace_client
+    _capture_then_verify_bocs(client, run_id, monkeypatch)
+    verified = client.post(_boc_url(run_id))
+    assert verified.status_code == 201
+    monkeypatch.setattr(
+        TonapiAdapter,
+        "get_transaction_trace_boc_verification_candidate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("message evidence readback must be provider-free")
+        ),
+    )
+
+    response = client.get(_boc_messages_url(run_id))
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    WalletTraceBocMessageEvidenceResponse.model_validate(payload)
+    assert payload["contract_version"] == "ton_boc_message_evidence_v1"
+    assert payload["verification_evidence_digest_sha256"] == (
+        verified.json()["evidence_digest_sha256"]
+    )
+    assert payload["message_count"] == 3
+    assert payload["messages"][0]["body_hash"]
+    assert "body" not in payload["messages"][0]
+    assert "transaction_boc_hex" not in json.dumps(payload)
+    assert payload["message_bodies_returned"] is False
+    assert payload["semantic_reconstruction_applied"] is False
 
 
 def _storage_transaction_boc() -> tuple[str, str]:

@@ -642,6 +642,68 @@ class WalletTraceBocVerificationResponse(BaseModel):
         return self
 
 
+class WalletTraceBocMessageEvidenceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_preorder_index: Annotated[int, Field(strict=True, ge=0, le=255)]
+    transaction_hash: CanonicalTraceTransactionHash
+    role: Literal["root_inbound", "child_inbound", "remaining_outbound"]
+    ordinal: Annotated[int, Field(strict=True, ge=0, le=2047)]
+    message_hash: CanonicalTraceTransactionHash
+    raw_message_cell_hash: CanonicalTraceTransactionHash
+    hash_kind: Literal["cell_hash", "normalized_external_in"]
+    message_type: Literal["int_msg", "ext_in_msg", "ext_out_msg"]
+    source_account_canonical: str | None = Field(default=None, max_length=76)
+    destination_account_canonical: str | None = Field(default=None, max_length=76)
+    created_logical_time: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    unix_time: Annotated[int, Field(strict=True, ge=0, le=2**63 - 1)]
+    value_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    forward_fee_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    ihr_fee_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    import_fee_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    ihr_disabled: bool
+    bounce: bool
+    bounced: bool
+    extra_currency_count: Annotated[int, Field(strict=True, ge=0)]
+    body_hash: CanonicalTraceTransactionHash
+    body_bit_length: Annotated[int, Field(strict=True, ge=0, le=1023)]
+    body_ref_count: Annotated[int, Field(strict=True, ge=0, le=4)]
+    opcode_hex: str | None = Field(default=None, pattern=r"^0x[0-9a-f]{8}$")
+
+
+class WalletTraceBocMessageEvidenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_boc_message_evidence_v1"]
+    verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    provider: Literal["tonapi"]
+    source_status: Literal["live"]
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$", max_length=16)
+    anchor: WalletTransactionTraceAnchorRecord
+    verification_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    message_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    message_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    messages: list[WalletTraceBocMessageEvidenceRecord]
+    derived_from_locally_deserialized_bocs: Literal[True]
+    message_headers_verified: Literal[True]
+    message_body_hashes_derived: Literal[True]
+    message_bodies_returned: Literal[False] = False
+    semantic_reconstruction_applied: Literal[False] = False
+    is_authoritative_activity_identity: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _message_rows_must_match_count(self):
+        if len(self.messages) != self.message_count:
+            raise ValueError("message evidence rows must match message_count")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None
