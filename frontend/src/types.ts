@@ -760,6 +760,88 @@ export interface WalletTraceBocVerificationResponse {
   message: string;
 }
 
+export type WalletJettonPayloadOperation =
+  | "transfer"
+  | "transfer_notification"
+  | "excesses"
+  | "burn"
+  | "internal_transfer"
+  | "burn_notification";
+
+export interface WalletJettonPayloadOperationCountRecord {
+  operation: WalletJettonPayloadOperation;
+  count: number;
+}
+
+export interface WalletJettonPayloadObservationRecord {
+  ordinal: number;
+  payload_observation_identity: string;
+  transaction_preorder_index: number;
+  transaction_hash: string;
+  message_role: "root_inbound" | "child_inbound" | "remaining_outbound";
+  message_ordinal: number;
+  message_hash: string;
+  message_source_account_canonical?: string | null;
+  message_destination_account_canonical?: string | null;
+  message_native_value_nanoton: string;
+  body_hash: string;
+  opcode_hex: string;
+  operation: WalletJettonPayloadOperation;
+  standard_status: "active" | "suggested";
+  query_id: string;
+  amount_base_units?: string | null;
+  destination_account_canonical?: string | null;
+  response_destination_account_canonical?: string | null;
+  sender_account_canonical?: string | null;
+  from_account_canonical?: string | null;
+  forward_ton_amount_nanoton?: string | null;
+  custom_payload_present: boolean;
+  custom_payload_hash?: string | null;
+  forward_payload_in_ref?: boolean | null;
+  forward_payload_hash?: string | null;
+  forward_payload_bit_length?: number | null;
+  forward_payload_ref_count?: number | null;
+  contract_account_role:
+    | "destination_jetton_wallet_observed"
+    | "source_jetton_wallet_observed"
+    | "destination_jetton_master_observed"
+    | "unresolved_contract_role";
+}
+
+export interface WalletJettonPayloadObservationsResponse {
+  contract_version: "ton_jetton_payload_observations_v1";
+  identity_version: "ton_jetton_payload_obs_v1";
+  verification_id: string;
+  capture_id: string;
+  run_id: string;
+  provider: "tonapi";
+  source_status: "live";
+  network: "ton-mainnet" | "ton-testnet";
+  anchor: WalletTransactionTraceEvidenceAnchor;
+  verification_evidence_digest_sha256: string;
+  message_evidence_digest_sha256: string;
+  payload_observations_digest_sha256: string;
+  source_message_count: number;
+  recognized_message_count: number;
+  unrecognized_message_count: number;
+  operations: WalletJettonPayloadOperationCountRecord[];
+  observations: WalletJettonPayloadObservationRecord[];
+  tep74_decoder_applied: true;
+  recognized_payload_semantics_applied: boolean;
+  query_id_is_correlation_only: true;
+  message_bodies_returned: false;
+  jetton_wallet_contract_role_is_observation_only: true;
+  jetton_master_identity_applied: false;
+  jetton_asset_identity_applied: false;
+  is_authoritative_jetton_transfer_ledger: false;
+  activity_merge_applied: false;
+  deduplication_applied: false;
+  eligible_for_cost_basis: false;
+  used_by_pnl: false;
+  is_ownership_proof: false;
+  message: string;
+}
+
 export interface WalletSwapRecord {
   tx_hash?: string | null;
   timestamp?: string | null;

@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.24.0 NATIVE ACTIVITY PNL READINESS";
+const RELEASE_LABEL = "v0.25.0 VERIFIED JETTON PAYLOADS";
 
 const navItems = [
   "DASHBOARD",
@@ -942,17 +942,22 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Native activity PnL readiness, without invented profit</strong>
+            <strong>Locally decoded TEP-74 payload observations</strong>
             <p>
-              Selected immutable ledgers now produce a reconciled native TON
-              cash-flow and an explicit cost-basis evidence gate. Missing
-              trade, price, fee, and history facts remain visibly blocked.
+              Recognized jetton message layouts are decoded from fully
+              revalidated BOCs without returning body contents. Contract roles
+              remain observations; master and asset identity stay unresolved.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="scoped"
+            label="Verified jetton payload observations"
+            text="An explicit provider-free action decodes active TEP-74 transfer, notification, burn, and excess layouts plus separately marked suggested internal layouts. Unknown opcodes remain counted; malformed recognized bodies fail closed."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
             label="Native activity PnL readiness"
             text="The workspace merges and deduplicates selected verified native ledgers, shows exact incoming, outgoing, self, and net TON flow, and lists every unmet cost-basis prerequisite. Native message value is never mislabeled as a trade or profit."
           />

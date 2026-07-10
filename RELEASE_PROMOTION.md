@@ -1,20 +1,19 @@
-# TON Wallet Intelligence Dashboard — v0.24.0 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.25.0 Promotion Checklist
 
-Operational gates for native activity PnL readiness.
+Operational gates for verified jetton payload observations.
 
 ## Version and migration
 
-- Product label is `v0.24.0 NATIVE ACTIVITY PNL READINESS`; backend API version stays
+- Product label is `v0.25.0 VERIFIED JETTON PAYLOADS`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is `ton_native_activity_pnl_readiness_v1`; the dedup,
-  merge, persisted ledger, and all lower evidence contracts remain unchanged.
+- New public contract is `ton_jetton_payload_observations_v1`; BOC verification,
+  native readiness, dedup, merge, and all persisted contracts remain unchanged.
 - Alembic head is `20260710_0008`, adding native activity ledgers and rows on
   top of the unchanged 0007 BOC tables.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
   have model parity. Drift, orphan fragments, unexpected rows/indexes/FKs,
   offline SQL, and downgrade fail closed.
-- README is rewritten only after the v0.24.0 implementation and live contract
-  have passed their release checks.
+- README and release operations describe the exact v0.25.0 payload scope.
 
 ## Verification contract
 
@@ -43,6 +42,18 @@ Operational gates for native activity PnL readiness.
 
 ## Endpoint and UI
 
+- GET `.../boc-verification/jetton-payloads` is provider-free and first performs
+  full BOC/message revalidation before a separate local body reparse.
+- Active TEP-74 transfer, notification, burn, and excess layouts are decoded;
+  suggested internal-transfer and burn-notification layouts are marked
+  separately. Unknown opcodes remain counted.
+- Recognized malformed bodies, ambiguous message coordinates, changed body
+  hashes/opcodes, trailing fixed-layout data, and non-canonical addresses fail
+  closed with 409.
+- The trace card exposes one explicit decode/revalidate action, recognized and
+  unknown counts, bounded operation fields, observation roles, and the digest.
+  Raw bodies, forward/custom payload contents, master identity, and token
+  metadata are absent.
 - POST `.../{target_run_id}/native-activity-pnl-readiness` consumes the
   canonical dedup result provider-free and reconciles incoming, outgoing, self,
   and net native TON flow.
@@ -91,7 +102,8 @@ Operational gates for native activity PnL readiness.
   failure is 502; local verifier/storage unavailability is 503.
 - The trace card automatically performs only database readback. Live preview,
   finalized capture, and local BOC verification are distinct explicit actions.
-- Scope changes abort all four request classes and reject stale responses.
+- Scope changes and component unmount abort payload requests and reject stale
+  responses.
 - The visible record shows verifier/version, counts, digests, and
   `RAW BOC HIDDEN`; it never renders raw BOC hex or message bodies.
 - Desktop and narrow layouts must have no horizontal overflow, console error,
@@ -101,13 +113,15 @@ Operational gates for native activity PnL readiness.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Deterministic fixtures prove flow reconciliation, stable analysis digest,
+- Deterministic fixtures cover every supported opcode, inline/reference
+  payload boundaries, malformed recognized bodies, unknown opcodes, response
+  validation and stable digests, plus flow reconciliation and stable analysis digest,
   response validation, ordering, duplicate grouping, canonical
   winner selection, complete suppression provenance, semantic-conflict
   rejection, response validation, and incompatible-wallet rejection.
-- Credential/prohibited-brand scans are clean and README has no diff.
+- Credential/prohibited-brand scans are clean and README matches the release.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.24.0` on the merge commit.
+  a ready PR, then create annotated tag `v0.25.0` on the merge commit.
 
 ## Rollback
 

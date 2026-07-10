@@ -1,3 +1,19 @@
+# TON Wallet Intelligence Dashboard — v0.25.0 VERIFIED JETTON PAYLOADS
+
+v0.25.0 adds provider-free GET
+`.../boc-verification/jetton-payloads` and an explicit trace-card action. The
+`ton_jetton_payload_observations_v1` contract reparses the already verified
+transaction BOCs, strictly decodes recognized TEP-74 transfer, notification,
+burn, excess, internal-transfer, and burn-notification layouts, and binds every
+observation to transaction, message, body hash, opcode, query id, and a digest.
+Raw bodies and payload contents are never returned. Unknown opcodes remain
+counted, malformed recognized payloads fail closed, and jetton-wallet role,
+master, asset, ownership, cost-basis, and PnL claims remain explicitly limited.
+The decoder follows the active TEP-74 contract:
+https://github.com/ton-blockchain/TEPs/blob/master/text/0074-jettons-standard.md
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.24.0 NATIVE ACTIVITY PNL READINESS
 
 v0.24.0 adds provider-free POST

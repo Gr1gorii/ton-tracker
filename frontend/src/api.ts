@@ -18,6 +18,7 @@ import type {
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
+  WalletJettonPayloadObservationsResponse,
   WalletNativeActivityPnlReadinessResponse,
   WalletRunPnlPreviewResponse,
   WalletRunSignalsResponse,
@@ -408,6 +409,24 @@ export async function verifyWalletTransactionTraceBocs(
     );
   }
   return await res.json();
+}
+
+export async function getWalletTransactionJettonPayloadObservations(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<WalletJettonPayloadObservationsResponse> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence/boc-verification/jetton-payloads`,
+    { cache: "no-store", signal },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Jetton payload observation read failed"),
+    );
+  }
+  return (await res.json()) as WalletJettonPayloadObservationsResponse;
 }
 
 export async function getWalletRunSignals(

@@ -14,6 +14,7 @@ import type {
 const apiMocks = vi.hoisted(() => ({
   getPersistedWalletTransactionTraceEvidence: vi.fn(),
   getWalletTransactionTraceBocVerification: vi.fn(),
+  getWalletTransactionJettonPayloadObservations: vi.fn(),
   getWalletTransactionTraceEvidence: vi.fn(),
   persistWalletTransactionTraceEvidence: vi.fn(),
   verifyWalletTransactionTraceBocs: vi.fn(),

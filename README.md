@@ -4,10 +4,27 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.24.0 — Native Activity PnL Readiness**<br>
+Current product release: **v0.25.0 — Verified Jetton Payloads**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.24.0 adds
+## What v0.25.0 adds
+
+An explicit provider-free trace-card action now decodes recognized TEP-74
+jetton message layouts from the already verified transaction BOCs. It returns
+only bounded semantic fields and hashes; raw message bodies, custom payloads,
+forward payload contents, and token metadata remain hidden.
+
+- Active layouts: transfer, transfer notification, burn, and excesses.
+- Suggested layouts are separately labeled: internal transfer and burn
+  notification.
+- Unknown opcodes remain counted without inferred semantics.
+- Malformed recognized layouts and changed BOC/message coordinates fail closed.
+- Jetton-wallet/master contract roles remain observations, not asset identity.
+
+The decoder follows the active
+[TEP-74 Jetton standard](https://github.com/ton-blockchain/TEPs/blob/master/text/0074-jettons-standard.md).
+
+## v0.24.0 native PnL-readiness foundation
 
 The multi-run native activity pipeline is now connected to an explicit PnL
 evidence gate:
@@ -42,6 +59,7 @@ profit, ownership proof, or complete wallet history.
   identity, and counterparty observation identity.
 - Immutable native activity ledgers, multi-run merge, and cross-run dedup.
 - v0.24.0 native TON flow reconciliation and fail-closed PnL readiness.
+- v0.25.0 provider-free verified TEP-74 payload observations.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.
@@ -150,9 +168,11 @@ local ignored environment file.
 5. For a real low-level transaction, explicitly inspect the trace, capture the
    finalized trace, and perform local BOC verification.
 6. Build the immutable native activity ledger for verified captures.
-7. In **Native activity PnL readiness**, enter one or more other compatible run
+7. Use **Decode TEP-74 payloads** to inspect recognized jetton layouts without
+   returning body contents or assigning an asset identity.
+8. In **Native activity PnL readiness**, enter one or more other compatible run
    IDs. The target run is included automatically.
-8. Review canonical activity count, suppressed repeats, native TON flow, and
+9. Review canonical activity count, suppressed repeats, native TON flow, and
    every available or blocked PnL requirement.
 
 The v0.24.0 readiness request is provider-free. It revalidates persisted
@@ -172,6 +192,7 @@ provider lookup.
 | `POST` | `/api/wallets/ingest/{run_id}/transactions/{hash}/trace-evidence/persisted` | Persist finalized trace evidence |
 | `POST` | `/api/wallets/ingest/{run_id}/transactions/{hash}/trace-evidence/boc-verification` | Persist locally verified BOCs |
 | `GET` | `.../boc-verification/messages` | Read body-safe verified message evidence |
+| `GET` | `.../boc-verification/jetton-payloads` | Decode recognized TEP-74 layouts provider-free |
 | `GET` | `.../boc-verification/native-ton-flows` | Read account-relative native TON observations |
 | `GET` | `.../boc-verification/native-ton-asset` | Read canonical native asset binding |
 | `GET` | `.../boc-verification/counterparties` | Read counterparty observation groups |
@@ -235,11 +256,10 @@ npm audit --audit-level=moderate
 Release gates also include migration parity, credential/prohibited-brand scans,
 live local contract checks, and responsive browser QA.
 
-The v0.24.0 release candidate passed 966 backend tests, 99 frontend tests, the
-production build, Python compilation, and the dependency audit with zero
-reported vulnerabilities. The live local two-run check reconciled two canonical
-outgoing activities totaling 3.34 TON, kept PnL locked, and the desktop browser
-check reported no horizontal overflow or error/warning log entries.
+The v0.24.0 baseline passed 966 backend tests, 99 frontend tests, the production
+build, Python compilation, and the dependency audit with zero reported
+vulnerabilities. v0.25.0 adds strict per-opcode backend fixtures and explicit
+frontend interaction/contract tests on top of that baseline.
 
 ## Current limitations
 
@@ -250,7 +270,10 @@ check reported no horizontal overflow or error/warning log entries.
 - Local BOC verification checks internal consistency with captured evidence; it
   is not a chain inclusion or ownership proof.
 - The immutable semantic ledger currently covers native TON message transfers,
-  not locally verified jetton trade actions.
+  while v0.25.0 exposes verified jetton payload observations separately. A
+  recognized payload does not prove successful economic execution.
+- Jetton master and cross-wallet asset identity are not derived from payload
+  layout alone.
 - v0.24.0 reconciles native wallet flow but intentionally does not calculate
   cost basis, realized PnL, or unrealized PnL from that flow.
 - The older run-scoped PnL preview is a separate estimate path and may unlock
