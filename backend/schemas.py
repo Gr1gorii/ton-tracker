@@ -774,6 +774,71 @@ class WalletNativeTonFlowObservationsResponse(BaseModel):
         return self
 
 
+class WalletNativeTonAssetIdentityRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    identity_version: Literal["ton_native_asset_v1"]
+    identity_key: str = Field(pattern=r"^ton_native_asset_v1\|ton-(?:mainnet|testnet)$")
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    kind: Literal["native"]
+    symbol: Literal["TON"]
+    name: Literal["Toncoin"]
+    decimals: Literal[9]
+    base_unit: Literal["nanoton"]
+    master_address: None = None
+
+
+class WalletNativeTonAssetBindingRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    flow_observation_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+    transaction_hash: CanonicalTraceTransactionHash
+    message_hash: CanonicalTraceTransactionHash
+    direction: Literal["incoming", "outgoing", "self"]
+    amount_base_units: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    asset_identity_key: str = Field(
+        pattern=r"^ton_native_asset_v1\|ton-(?:mainnet|testnet)$"
+    )
+
+
+class WalletNativeTonAssetBindingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_native_asset_binding_v1"]
+    verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    wallet_account_canonical: str = Field(min_length=66, max_length=76)
+    anchor: WalletTransactionTraceAnchorRecord
+    flow_message_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    asset: WalletNativeTonAssetIdentityRecord
+    binding_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    bindings: list[WalletNativeTonAssetBindingRecord]
+    asset_binding_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    canonical_native_asset_identity: Literal[True]
+    jetton_asset_identity_applied: Literal[False] = False
+    counterparty_identity_applied: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def _native_asset_bindings_must_be_coherent(self):
+        if len(self.bindings) != self.binding_count:
+            raise ValueError("native asset bindings must match binding_count")
+        if self.asset.network != self.network:
+            raise ValueError("native asset network changed")
+        if any(
+            binding.asset_identity_key != self.asset.identity_key
+            for binding in self.bindings
+        ):
+            raise ValueError("native asset binding identity changed")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

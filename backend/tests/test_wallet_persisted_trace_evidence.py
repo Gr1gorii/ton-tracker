@@ -29,6 +29,7 @@ from models import (
 from schemas import (
     WalletPersistedTraceEvidenceResponse,
     WalletNativeTonFlowObservationsResponse,
+    WalletNativeTonAssetBindingResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
 )
@@ -799,6 +800,13 @@ def _native_flow_url(
     return f"{_boc_url(run_id, transaction_hash)}/native-ton-flows"
 
 
+def _native_asset_url(
+    run_id: int | str,
+    transaction_hash: str = ROOT_HASH,
+) -> str:
+    return f"{_boc_url(run_id, transaction_hash)}/native-ton-asset"
+
+
 def _fake_boc_derived(_capture, raw_rows):
     hashes = (ROOT_HASH, CHILD_HASH)
     owned_counts = (2, 1)
@@ -1109,6 +1117,62 @@ def test_native_ton_flows_are_account_scoped_provider_free_observations(
     assert payload["counterparty_is_header_observation"] is True
     assert payload["is_authoritative_transfer_ledger"] is False
     assert payload["eligible_for_cost_basis"] is False
+
+
+def test_native_ton_asset_binding_is_network_scoped_and_digest_bound(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, _testing_session, run_id = persisted_trace_client
+    flows = {
+        "verification_id": "1",
+        "capture_id": "2",
+        "run_id": str(run_id),
+        "network": "ton-mainnet",
+        "wallet_account_canonical": ROOT_ACCOUNT,
+        "anchor": {
+            "transaction_hash": ROOT_HASH,
+            "logical_time": ROOT_LT,
+            "account_canonical": ROOT_ACCOUNT,
+            "matches_stored_transaction": True,
+        },
+        "message_evidence_digest_sha256": "ab" * 32,
+        "flows": [
+            {
+                "observation_identity": "cd" * 32,
+                "transaction_hash": ROOT_HASH,
+                "message_hash": ROOT_OUT_HASH,
+                "direction": "outgoing",
+                "amount_nanoton": "2500000000",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        native_flow_service,
+        "get_wallet_native_ton_flow_observations",
+        lambda *args, **kwargs: flows,
+    )
+
+    response = client.get(_native_asset_url(run_id))
+
+    assert response.status_code == 200
+    payload = response.json()
+    WalletNativeTonAssetBindingResponse.model_validate(payload)
+    assert payload["asset"] == {
+        "identity_version": "ton_native_asset_v1",
+        "identity_key": "ton_native_asset_v1|ton-mainnet",
+        "network": "ton-mainnet",
+        "kind": "native",
+        "symbol": "TON",
+        "name": "Toncoin",
+        "decimals": 9,
+        "base_unit": "nanoton",
+        "master_address": None,
+    }
+    assert payload["binding_count"] == 1
+    assert payload["bindings"][0]["amount_base_units"] == "2500000000"
+    assert payload["jetton_asset_identity_applied"] is False
+    assert payload["counterparty_identity_applied"] is False
 
 
 def _storage_transaction_boc() -> tuple[str, str]:

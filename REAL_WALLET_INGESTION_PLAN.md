@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.23.4 NATIVE TON FLOW OBSERVATIONS
+# TON Wallet Intelligence Dashboard — v0.23.5 NATIVE TON ASSET IDENTITY
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -22,6 +22,8 @@ v0.23.3 exposes the locally derived message/header/body-hash evidence as a
 provider-free, body-safe read contract. It does not decode or name an activity.
 v0.23.4 adds an account perspective over verified internal-message native TON
 value while keeping every counterparty and movement explicitly observational.
+v0.23.5 binds those observations to one canonical network-scoped Toncoin asset
+identity with fixed nanoton base-unit semantics.
 
 ## Objective
 
@@ -484,7 +486,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.23.4
+## Surface status in v0.23.5
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -498,6 +500,7 @@ intervals are contiguous.
 | Local BOC verification | One explicit TonAPI trace fetch followed by pinned local TLB deserialization; provider-free readback reparses every stored BOC | Transaction/message cell and bounded header consistency with the persisted graph; no inclusion proof, semantic activity, merge, cost basis, ownership, or PnL |
 | Message BOC evidence | Provider-free reparse of the verified BOC record | Verified message headers, body hashes, bit/ref counts, and optional 32-bit opcode prefixes only; bodies and semantics stay hidden |
 | Native TON flow observations | Account-relative classification of verified internal-message value | Incoming/outgoing/self nanotons and observed header counterparty only; not an authoritative transfer ledger or PnL source |
+| Native TON asset binding | Digest-bound `ton_native_asset_v1` identity on every verified native flow | Network-scoped Toncoin with nine decimals and nanoton units; no jetton/counterparty identity, merge, cost basis, or PnL |
 | Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
@@ -653,7 +656,7 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.23.4
+## Roadmap beyond v0.23.5
 
 1. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
