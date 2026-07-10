@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.0 HISTORY READINESS";
+const RELEASE_LABEL = "v0.22.1 MIGRATION FOUNDATION";
 
 const navItems = [
   "DASHBOARD",
@@ -942,12 +942,11 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Multi-run history readiness — diagnostic only</strong>
+            <strong>Versioned database migrations</strong>
             <p>
-              Stored runs for the same wallet and data mode can be inspected
-              for overlap, identity strength, observed bounds, coverage,
-              conflicts, and blockers. The report does not merge history,
-              establish cost basis, or change PnL.
+              Backend schema evolution now has a checked-in migration path.
+              This infrastructure release does not add canonical identity,
+              broader history, cost basis, or new PnL behavior.
             </p>
           </div>
         </div>
@@ -986,6 +985,11 @@ function EvidenceColumn({
             tone="scoped"
             label="History readiness"
             text="Explicit stored-run sets can be inspected against a target run. Results stay diagnostic: is_cost_basis and eligible_for_cost_basis remain false and no readiness output enters PnL."
+          />
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Schema migrations"
+            text="Versioned revisions make database upgrades explicit and testable; application API and analytics contracts are unchanged in this release."
           />
           <ReleaseReadinessItem
             tone="ready"

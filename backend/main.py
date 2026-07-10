@@ -1,12 +1,14 @@
-"""FastAPI application entry point for the TON Wallet Intelligence Dashboard.
+"""FastAPI application entry point for the TON wallet intelligence API.
 
-v0.2.1 — data provenance labels for mixed real/mock mode. Pool/token data may
-be real in DATA_MODE=real through GeckoTerminal, but wallet-level analysis
-remains mock. Mock mode is the default and stays fully functional.
+The stable API-version field remains ``0.2.1``. Provider previews, guarded
+live wallet ingestion, and stored-run intelligence keep explicit source and
+limitation labels; deterministic mock mode remains the default.
 """
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 import json
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -37,14 +39,23 @@ from services.analysis import analyze, get_providers_status
 
 VERSION = "0.2.1"
 
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Apply schema migrations before the API begins serving requests."""
+    init_db()
+    yield
+
+
 app = FastAPI(
     title="TON Wallet Intelligence Dashboard API",
     version=VERSION,
     description=(
-        "v0.2.1 — data provenance labels for mixed real/mock mode. "
-        "Pool/token data may be real in DATA_MODE=real through GeckoTerminal, "
-        "but wallet-level analysis remains mock."
+        "Source-aware TON provider previews, guarded wallet ingestion, and "
+        "stored-run diagnostics. Backend version 0.2.1 is the stable API "
+        "contract; product release labels are managed separately."
     ),
+    lifespan=_lifespan,
 )
 
 # Allow the local Vite dev server (and common alternates) to call the API.
@@ -66,12 +77,6 @@ app.include_router(prices_router)
 app.include_router(stonfi_router)
 app.include_router(tonapi_router)
 app.include_router(wallet_activity_router)
-
-
-@app.on_event("startup")
-def _on_startup() -> None:
-    init_db()
-
 
 @app.get("/api/health", response_model=HealthResponse)
 def health() -> HealthResponse:
