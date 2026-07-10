@@ -3959,6 +3959,90 @@ body {
   margin-bottom: 16px;
 }
 
+.wallet-run-loader {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(190px, 240px) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.wallet-run-loader-copy {
+  align-self: center;
+  min-width: 0;
+}
+
+.wallet-run-loader-copy strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.wallet-run-loader-copy p {
+  max-width: 760px;
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.wallet-run-loader-field {
+  min-width: 0;
+}
+
+.wallet-run-loader .field-help {
+  display: block;
+  min-height: 16px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.wallet-run-loader .field-help-error {
+  color: var(--error);
+}
+
+.wallet-run-loader-status,
+.wallet-run-loader-error {
+  grid-column: 1 / -1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.wallet-run-loader-status {
+  color: var(--text-secondary);
+}
+
+.wallet-run-loader-error {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 92, 92, 0.42);
+  border-radius: 6px;
+  background: rgba(255, 92, 92, 0.08);
+  color: var(--error);
+}
+
+.wallet-run-loader-error strong {
+  color: var(--error);
+}
+
+.wallet-stored-run-scope {
+  overflow-wrap: anywhere;
+}
+
+.wallet-stored-run-scope strong {
+  color: var(--text);
+}
+
+.tonapi-wallet-result-head:focus-visible {
+  outline: 2px solid rgba(0, 230, 118, 0.72);
+  outline-offset: 4px;
+}
+
 .wallet-ingestion-form {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) minmax(140px, 180px);
@@ -3975,6 +4059,14 @@ body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.wallet-preserved-bounds-note {
+  grid-column: 1 / -1;
+  margin: -2px 0 0;
+  color: var(--primary-green);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 .wallet-ingestion-surfaces {
@@ -4081,6 +4173,7 @@ body {
   .wallet-scope-column ul,
   .wallet-metric-grid,
   .wallet-ingestion-metric-grid,
+  .wallet-run-loader,
   .wallet-ingestion-form,
   .wallet-ingestion-custom-window {
     grid-template-columns: 1fr;
@@ -4104,6 +4197,10 @@ body {
   }
 
   .wallet-ingestion-actions .btn {
+    width: 100%;
+  }
+
+  .wallet-run-loader-button {
     width: 100%;
   }
 }

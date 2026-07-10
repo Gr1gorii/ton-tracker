@@ -37,6 +37,11 @@ import type {
   WalletTransactionRecord,
   WalletTransferRecord,
 } from "../types";
+import {
+  parseStoredRunId,
+  requestSignature,
+  restoreStoredRunControls,
+} from "../walletRunLoader";
 import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
 import PreviewReadinessStrip, {
   type PreviewReadinessTone,
@@ -86,6 +91,7 @@ const DEFAULT_SURFACES = SURFACE_OPTIONS.map((item) => item.value);
 const CAN_SHOW = [
   "Coverage preview",
   "Persisted source-labeled run",
+  "Read-only stored-run resume by ID",
   "Transfers",
   "Transactions",
   "Network-scoped transaction identity",
@@ -114,6 +120,16 @@ interface RequestSnapshot {
   surfaces: WalletIngestionSurface[];
   requestedAt: string;
   signature: string;
+}
+
+type LoadingAction = "preview" | "run" | "load" | "read";
+type RunResultOrigin = "created" | "loaded";
+
+interface PreservedCustomBounds {
+  controlStart: string;
+  controlEnd: string;
+  canonicalStart: string | null;
+  canonicalEnd: string | null;
 }
 
 interface WalletIngestionWorkspaceProps {
@@ -153,25 +169,40 @@ export default function WalletIngestionWorkspace({
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("24h");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [preservedCustomBounds, setPreservedCustomBounds] =
+    useState<PreservedCustomBounds | null>(null);
   const [selectedSurfaces, setSelectedSurfaces] =
     useState<WalletIngestionSurface[]>(DEFAULT_SURFACES);
-  const [loadingAction, setLoadingAction] = useState<
-    "preview" | "run" | "read" | null
-  >(null);
+  const [storedRunId, setStoredRunId] = useState("");
+  const [storedRunError, setStoredRunError] = useState<string | null>(null);
+  const [loadingAction, setLoadingAction] = useState<LoadingAction | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
   const [previewResult, setPreviewResult] =
     useState<WalletIngestionPreviewResponse | null>(null);
   const [runResult, setRunResult] = useState<WalletIngestionRunResponse | null>(
     null,
   );
+  const [runResultOrigin, setRunResultOrigin] =
+    useState<RunResultOrigin | null>(null);
   const [resultSnapshot, setResultSnapshot] = useState<RequestSnapshot | null>(
     null,
   );
   const activeRequestId = useRef(0);
+  const loadedRunHeadingRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setRequestError(null);
-  }, [accountAddress, timeWindow, customStart, customEnd, selectedSurfaces]);
+  }, [
+    accountAddress,
+    timeWindow,
+    customStart,
+    customEnd,
+    selectedSurfaces,
+  ]);
+
+  useEffect(() => {
+    setStoredRunError(null);
+  }, [storedRunId]);
 
   useEffect(() => {
     if (runRequestId <= 0) return;
@@ -179,11 +210,29 @@ export default function WalletIngestionWorkspace({
   }, [runRequestId]);
 
   const currentAccount = accountAddress.trim();
+  const preservedCustomStartIsActive =
+    timeWindow === "custom" &&
+    preservedCustomBounds !== null &&
+    preservedCustomBounds.canonicalStart !== null &&
+    customStart === preservedCustomBounds.controlStart;
+  const preservedCustomEndIsActive =
+    timeWindow === "custom" &&
+    preservedCustomBounds !== null &&
+    preservedCustomBounds.canonicalEnd !== null &&
+    customEnd === preservedCustomBounds.controlEnd;
+  const preservedCustomBoundsAreActive =
+    preservedCustomStartIsActive || preservedCustomEndIsActive;
+  const effectiveCustomStart = preservedCustomStartIsActive
+    ? (preservedCustomBounds?.canonicalStart ?? customStart)
+    : customStart;
+  const effectiveCustomEnd = preservedCustomEndIsActive
+    ? (preservedCustomBounds?.canonicalEnd ?? customEnd)
+    : customEnd;
   const currentSignature = requestSignature(
     currentAccount,
     timeWindow,
-    customStart,
-    customEnd,
+    effectiveCustomStart,
+    effectiveCustomEnd,
     selectedSurfaces,
   );
   const resultIsStale =
@@ -197,6 +246,9 @@ export default function WalletIngestionWorkspace({
     selectedSurfaces,
   );
   const canSubmit = !busy && validationMessage === null;
+  const parsedStoredRunId = parseStoredRunId(storedRunId);
+  const storedRunIdIsInvalid =
+    storedRunId.trim().length > 0 && parsedStoredRunId === null;
   const visibleEvidence =
     runResult?.provider_evidence ?? previewResult?.provider_coverage ?? [];
   const visibleAcquisitionStreams = runResult
@@ -224,10 +276,11 @@ export default function WalletIngestionWorkspace({
   const readiness = buildReadiness({
     busy,
     loadingAction,
-    requestError,
+    requestError: requestError ?? storedRunError,
     validationMessage,
     previewResult,
     runResult,
+    runResultOrigin,
     resultIsStale,
     displayedDataMode,
   });
@@ -249,8 +302,14 @@ export default function WalletIngestionWorkspace({
     };
 
     if (timeWindow === "custom") {
-      payload.custom_start = new Date(customStart).toISOString();
-      payload.custom_end = new Date(customEnd).toISOString();
+      payload.custom_start = preservedCustomStartIsActive
+        ? (preservedCustomBounds?.canonicalStart ??
+          new Date(customStart).toISOString())
+        : new Date(customStart).toISOString();
+      payload.custom_end = preservedCustomEndIsActive
+        ? (preservedCustomBounds?.canonicalEnd ??
+          new Date(customEnd).toISOString())
+        : new Date(customEnd).toISOString();
     }
 
     return { payload };
@@ -274,6 +333,23 @@ export default function WalletIngestionWorkspace({
     };
   }
 
+  function preservePayloadCustomBounds(payload: WalletIngestionRequest) {
+    if (
+      payload.time_window !== "custom" ||
+      !payload.custom_start ||
+      !payload.custom_end
+    ) {
+      setPreservedCustomBounds(null);
+      return;
+    }
+    setPreservedCustomBounds({
+      controlStart: customStart,
+      controlEnd: customEnd,
+      canonicalStart: payload.custom_start,
+      canonicalEnd: payload.custom_end,
+    });
+  }
+
   function toggleSurface(surface: WalletIngestionSurface) {
     setSelectedSurfaces((current) => {
       if (!current.includes(surface)) return [...current, surface];
@@ -284,6 +360,7 @@ export default function WalletIngestionWorkspace({
 
   async function handlePreview() {
     setRequestError(null);
+    setStoredRunError(null);
     const request = makePayload();
     if ("error" in request) {
       setRequestError(request.error);
@@ -312,6 +389,9 @@ export default function WalletIngestionWorkspace({
       const data = await previewWalletIngestion(request.payload);
       if (activeRequestId.current !== requestId) return;
       setPreviewResult(data);
+      setRunResult(null);
+      setRunResultOrigin(null);
+      preservePayloadCustomBounds(request.payload);
       setResultSnapshot(snapshotForPayload(request.payload));
       const previewMode = previewResultDataMode(data);
       onPreviewRunStateChange?.({
@@ -338,6 +418,7 @@ export default function WalletIngestionWorkspace({
 
   async function handleRun() {
     setRequestError(null);
+    setStoredRunError(null);
     const request = makePayload();
     if ("error" in request) {
       setRequestError(request.error);
@@ -358,7 +439,11 @@ export default function WalletIngestionWorkspace({
     try {
       const data = await runWalletIngestion(request.payload);
       if (activeRequestId.current !== requestId) return;
+      setPreviewResult(null);
       setRunResult(data);
+      setRunResultOrigin("created");
+      if (data.run_id != null) setStoredRunId(String(data.run_id));
+      preservePayloadCustomBounds(request.payload);
       setResultSnapshot(snapshotForPayload(request.payload));
       onPreviewRunStateChange?.({
         status: "success",
@@ -382,9 +467,91 @@ export default function WalletIngestionWorkspace({
     }
   }
 
+  async function handleLoadStoredRun() {
+    setRequestError(null);
+    setStoredRunError(null);
+    const runId = parseStoredRunId(storedRunId);
+    if (runId === null) {
+      setStoredRunError("Stored run ID must be a positive safe integer.");
+      return;
+    }
+
+    const requestId = activeRequestId.current + 1;
+    activeRequestId.current = requestId;
+    setLoadingAction("load");
+    onPreviewRunStateChange?.({
+      status: "running",
+      message: `Loading persisted wallet ingestion run #${runId} without creating a new run.`,
+      accountAddress: currentAccount,
+      limit: `Run #${runId}`,
+    });
+
+    try {
+      const data = await getWalletIngestionRun(runId);
+      if (activeRequestId.current !== requestId) return;
+      const restored = restoreStoredRunControls(data, runId);
+
+      onAccountAddressChange(restored.walletAddress);
+      setTimeWindow(restored.timeWindow);
+      setCustomStart(restored.customStart);
+      setCustomEnd(restored.customEnd);
+      setPreservedCustomBounds(
+        restored.timeWindow === "custom"
+          ? {
+              controlStart: restored.customStart,
+              controlEnd: restored.customEnd,
+              canonicalStart: restored.canonicalCustomStart,
+              canonicalEnd: restored.canonicalCustomEnd,
+            }
+          : null,
+      );
+      setSelectedSurfaces(restored.surfaces);
+      setStoredRunId(String(runId));
+      setPreviewResult(null);
+      setRunResult(data);
+      setRunResultOrigin("loaded");
+      setResultSnapshot({
+        walletAddress: restored.walletAddress,
+        timeWindow: restored.timeWindow,
+        customStart: restored.customStart,
+        customEnd: restored.customEnd,
+        surfaces: restored.surfaces,
+        requestedAt: formatPreviewRequestedAt(new Date(data.created_at)),
+        signature: requestSignature(
+          restored.walletAddress,
+          restored.timeWindow,
+          restored.canonicalCustomStart,
+          restored.canonicalCustomEnd,
+          restored.surfaces,
+        ),
+      });
+      onPreviewRunStateChange?.({
+        status: "success",
+        message: `Persisted ${data.data_mode === "real" ? "live" : "mock"} run #${runId} loaded read-only; no ingestion was executed.`,
+        accountAddress: restored.walletAddress,
+        limit: formatSurfaces(restored.surfaces),
+      });
+      window.requestAnimationFrame(() => loadedRunHeadingRef.current?.focus());
+    } catch (e) {
+      if (activeRequestId.current !== requestId) return;
+      const message =
+        e instanceof Error ? e.message : "Unknown stored run read error";
+      setStoredRunError(message);
+      onPreviewRunStateChange?.({
+        status: "error",
+        message,
+        accountAddress: currentAccount,
+        limit: `Run #${runId}`,
+      });
+    } finally {
+      if (activeRequestId.current === requestId) setLoadingAction(null);
+    }
+  }
+
   async function handleRefreshRun() {
     if (!runResult?.run_id) return;
     setRequestError(null);
+    setStoredRunError(null);
     const requestId = activeRequestId.current + 1;
     activeRequestId.current = requestId;
     setLoadingAction("read");
@@ -406,11 +573,15 @@ export default function WalletIngestionWorkspace({
     setTimeWindow("24h");
     setCustomStart("");
     setCustomEnd("");
+    setPreservedCustomBounds(null);
     setSelectedSurfaces(DEFAULT_SURFACES);
     setRequestError(null);
+    setStoredRunError(null);
     setPreviewResult(null);
     setRunResult(null);
+    setRunResultOrigin(null);
     setResultSnapshot(null);
+    setStoredRunId("");
     setLoadingAction(null);
     onPreviewRunStateChange?.({
       status: "idle",
@@ -421,7 +592,10 @@ export default function WalletIngestionWorkspace({
   }
 
   return (
-    <section className="section wallet-ingestion-panel wallet-intelligence-console">
+    <section
+      className="section wallet-ingestion-panel wallet-intelligence-console"
+      aria-busy={busy}
+    >
       <div className="wallet-intelligence-head">
         <div>
           <span className="section-eyebrow">
@@ -433,8 +607,8 @@ export default function WalletIngestionWorkspace({
           </span>
           <h2>Wallet Activity Ingestion Workspace</h2>
           <p>
-            Preview coverage, persist one wallet activity run, and inspect
-            normalized, source-labeled rows.
+            Load an existing run, preview coverage, persist a new wallet activity
+            run, and inspect normalized, source-labeled rows.
           </p>
         </div>
         <div className="wallet-intelligence-badges">
@@ -449,6 +623,9 @@ export default function WalletIngestionWorkspace({
                 : "SOURCE PENDING"}
           </span>
           {runResult && <span className="badge badge-real">RUN #{runResult.run_id}</span>}
+          {runResultOrigin === "loaded" && (
+            <span className="badge badge-provider">READ-ONLY LOAD</span>
+          )}
         </div>
       </div>
 
@@ -467,7 +644,7 @@ export default function WalletIngestionWorkspace({
                 ? "This coverage preview used the guarded live TonAPI path. Returned rows are real account-level provider evidence but are not persisted until you run ingestion."
                 : previewResult
                   ? "This coverage preview used deterministic backend fixtures. Preview rows are not persisted and are not real on-chain data."
-                  : "Preview coverage first to confirm whether the configured path is guarded live TonAPI or deterministic mock data. Every result stays source-labeled."}
+                  : "Load a stored run ID to resume read-only, or preview coverage to confirm whether the configured path is guarded live TonAPI or deterministic mock data. Every result stays source-labeled."}
         </div>
       </div>
 
@@ -490,6 +667,69 @@ export default function WalletIngestionWorkspace({
           },
         ]}
       />
+
+      <form
+        className="wallet-run-loader wallet-query-card"
+        aria-label="Open a persisted wallet ingestion run"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleLoadStoredRun();
+        }}
+      >
+        <div className="wallet-run-loader-copy">
+          <span className="state-kicker">READ_ONLY_RUN_LOADER</span>
+          <strong>Open a persisted run</strong>
+          <p>
+            Restore its wallet, window, surfaces, evidence, interval diagnostics,
+            signals, and PnL preview without executing ingestion or changing the
+            database.
+          </p>
+        </div>
+        <div className="field wallet-run-loader-field">
+          <label className="field-label" htmlFor="wallet-stored-run-id">
+            Stored run ID
+          </label>
+          <input
+            id="wallet-stored-run-id"
+            className="text-input"
+            type="text"
+            inputMode="numeric"
+            autoComplete="off"
+            value={storedRunId}
+            disabled={busy}
+            aria-invalid={storedRunIdIsInvalid}
+            aria-describedby="wallet-stored-run-help"
+            placeholder="e.g. 25"
+            onChange={(event) => setStoredRunId(event.target.value)}
+          />
+          <small
+            id="wallet-stored-run-help"
+            className={storedRunIdIsInvalid ? "field-help field-help-error" : "field-help"}
+          >
+            {storedRunIdIsInvalid
+              ? "Use digits only and a value greater than zero."
+              : "The main run uses GET; related cards may issue additional read-only GETs. No writes."}
+          </small>
+        </div>
+        <button
+          className="btn btn-primary wallet-run-loader-button"
+          type="submit"
+          disabled={busy || parsedStoredRunId === null}
+        >
+          {loadingAction === "load" ? "Loading stored run" : "Load stored run"}
+        </button>
+        <div className="wallet-run-loader-status" role="status" aria-live="polite">
+          {runResultOrigin === "loaded" && runResult?.run_id != null
+            ? `Run #${runResult.run_id} is open read-only.`
+            : "No stored run has been loaded in this session."}
+        </div>
+        {storedRunError && (
+          <div className="wallet-run-loader-error" role="alert">
+            <strong>Stored run could not be loaded.</strong>
+            <span>{storedRunError}</span>
+          </div>
+        )}
+      </form>
 
       <div className="wallet-ingestion-form wallet-query-card">
         <div className="field wallet-ingestion-address-field">
@@ -516,7 +756,10 @@ export default function WalletIngestionWorkspace({
             className="text-input"
             value={timeWindow}
             disabled={busy}
-            onChange={(event) => setTimeWindow(event.target.value as TimeWindow)}
+            onChange={(event) => {
+              setTimeWindow(event.target.value as TimeWindow);
+              setPreservedCustomBounds(null);
+            }}
           >
             <option value="24h">24h</option>
             <option value="3d">3d</option>
@@ -535,9 +778,15 @@ export default function WalletIngestionWorkspace({
                 id="wallet-ingestion-start"
                 className="text-input"
                 type="datetime-local"
+                step="0.001"
                 value={customStart}
                 disabled={busy}
-                onChange={(event) => setCustomStart(event.target.value)}
+                onChange={(event) => {
+                  setCustomStart(event.target.value);
+                  setPreservedCustomBounds((current) =>
+                    current ? { ...current, canonicalStart: null } : null,
+                  );
+                }}
               />
             </div>
             <div className="field">
@@ -548,11 +797,23 @@ export default function WalletIngestionWorkspace({
                 id="wallet-ingestion-end"
                 className="text-input"
                 type="datetime-local"
+                step="0.001"
                 value={customEnd}
                 disabled={busy}
-                onChange={(event) => setCustomEnd(event.target.value)}
+                onChange={(event) => {
+                  setCustomEnd(event.target.value);
+                  setPreservedCustomBounds((current) =>
+                    current ? { ...current, canonicalEnd: null } : null,
+                  );
+                }}
               />
             </div>
+            {preservedCustomBoundsAreActive && (
+              <p className="wallet-preserved-bounds-note">
+                Each exact stored UTC bound is preserved for preview or ingestion
+                until that date field is edited.
+              </p>
+            )}
           </div>
         )}
 
@@ -640,12 +901,19 @@ export default function WalletIngestionWorkspace({
 
       {!busy && !requestError && (previewResult || runResult) && resultSnapshot && (
         <div className="wallet-ingestion-results">
-          <div className="tonapi-wallet-result-head">
+          <div
+            className="tonapi-wallet-result-head"
+            ref={loadedRunHeadingRef}
+            tabIndex={-1}
+          >
             {previewResult && <span className="badge badge-provider">COVERAGE</span>}
             {runResult && (
               <>
                 <span className="badge badge-real">RUN #{runResult.run_id}</span>
                 <span className="badge badge-provider">STATUS {runResult.status}</span>
+                {runResultOrigin === "loaded" && (
+                  <span className="badge badge-provider">LOADED READ-ONLY</span>
+                )}
               </>
             )}
             <span
@@ -687,6 +955,30 @@ export default function WalletIngestionWorkspace({
 
           {runResult && <WalletIdentityEvidence result={runResult} />}
 
+          {runResult && (
+            <div className="scope-strip wallet-stored-run-scope">
+              <strong>Stored request scope:</strong> {runResult.time_window}
+              {runResult.time_window === "custom" &&
+                runResult.custom_start &&
+                runResult.custom_end && (
+                  <>
+                    {" "}
+                    <time dateTime={runResult.custom_start}>
+                      {dateLabel(runResult.custom_start)}
+                    </time>
+                    {" → "}
+                    <time dateTime={runResult.custom_end}>
+                      {dateLabel(runResult.custom_end)}
+                    </time>
+                  </>
+                )}
+              {" · persisted "}
+              <time dateTime={runResult.created_at}>
+                {dateLabel(runResult.created_at)}
+              </time>
+            </div>
+          )}
+
           <div className="scope-strip">
             {runResult?.message ?? previewResult?.message}
           </div>
@@ -712,34 +1004,27 @@ export default function WalletIngestionWorkspace({
           )}
           {runResult && <WalletActivityTables result={runResult} />}
           {runResult?.run_id != null && (
-            <WalletEvidenceSignalsCard runId={runResult.run_id} />
+            <WalletEvidenceSignalsCard
+              key={`signals-${runResult.run_id}`}
+              runId={runResult.run_id}
+            />
           )}
           {runResult?.run_id != null && (
-            <WalletPnlPreviewCard runId={runResult.run_id} />
+            <WalletPnlPreviewCard
+              key={`pnl-${runResult.run_id}`}
+              runId={runResult.run_id}
+            />
           )}
           {runResult?.run_id != null && (
-            <WalletClusterCompareCard runId={runResult.run_id} />
+            <WalletClusterCompareCard
+              key={`cluster-${runResult.run_id}`}
+              runId={runResult.run_id}
+            />
           )}
         </div>
       )}
     </section>
   );
-}
-
-function requestSignature(
-  walletAddress: string,
-  timeWindow: TimeWindow,
-  customStart: string,
-  customEnd: string,
-  surfaces: WalletIngestionSurface[],
-): string {
-  return JSON.stringify({
-    walletAddress,
-    timeWindow,
-    customStart,
-    customEnd,
-    surfaces: [...surfaces].sort(),
-  });
 }
 
 function validateCurrentRequest(
@@ -771,15 +1056,17 @@ function buildReadiness({
   validationMessage,
   previewResult,
   runResult,
+  runResultOrigin,
   resultIsStale,
   displayedDataMode,
 }: {
   busy: boolean;
-  loadingAction: "preview" | "run" | "read" | null;
+  loadingAction: LoadingAction | null;
   requestError: string | null;
   validationMessage: string | null;
   previewResult: WalletIngestionPreviewResponse | null;
   runResult: WalletIngestionRunResponse | null;
+  runResultOrigin: RunResultOrigin | null;
   resultIsStale: boolean;
   displayedDataMode: "mock" | "real" | null;
 }): { tone: PreviewReadinessTone; label: string; message: string } {
@@ -787,13 +1074,18 @@ function buildReadiness({
     const label =
       loadingAction === "run"
         ? "RUNNING INGESTION"
+        : loadingAction === "load"
+          ? "LOADING STORED RUN"
         : loadingAction === "read"
-          ? "READING RUN"
+          ? "REFRESHING RUN"
           : "PREVIEWING COVERAGE";
     return {
       tone: "running",
       label,
-      message: "Wallet activity ingestion request is in progress.",
+      message:
+        loadingAction === "load" || loadingAction === "read"
+          ? "Reading one persisted run without changing stored data."
+          : "Wallet activity ingestion request is in progress.",
     };
   }
   if (requestError) {
@@ -812,8 +1104,11 @@ function buildReadiness({
   if (runResult) {
     return {
       tone: "fresh",
-      label: "RUN STORED",
-      message: `Persisted ${displayedDataMode === "real" ? "live" : "mock-normalized"} wallet activity run matches current inputs.`,
+      label: runResultOrigin === "loaded" ? "RUN LOADED" : "RUN STORED",
+      message:
+        runResultOrigin === "loaded"
+          ? `Persisted ${displayedDataMode === "real" ? "live" : "mock-normalized"} wallet activity run was loaded read-only and matches the restored controls.`
+          : `Persisted ${displayedDataMode === "real" ? "live" : "mock-normalized"} wallet activity run matches current inputs.`,
     };
   }
   if (previewResult) {
@@ -2746,10 +3041,10 @@ function WalletIngestionEmpty() {
   return (
     <div className="state-box empty-box tonapi-wallet-state wallet-intelligence-state">
       <span className="state-kicker">NO_INGESTION_RESULT</span>
-      <strong>Preview coverage or run ingestion.</strong>
+      <strong>Load a stored run, preview coverage, or run ingestion.</strong>
       <p>
-        The workspace will show provider evidence first, then persisted
-        normalized activity tables after a run is stored.
+        Use a persisted run ID to resume diagnostics after a reload, or start a
+        new source-labeled request from the controls above.
       </p>
     </div>
   );
@@ -2758,13 +3053,15 @@ function WalletIngestionEmpty() {
 function WalletIngestionLoading({
   action,
 }: {
-  action: "preview" | "run" | "read" | null;
+  action: LoadingAction | null;
 }) {
   const label =
     action === "run"
       ? "RUNNING_MOCK_INGESTION"
+      : action === "load"
+        ? "LOADING_STORED_RUN"
       : action === "read"
-        ? "READING_STORED_RUN"
+        ? "REFRESHING_STORED_RUN"
         : "PREVIEWING_COVERAGE";
 
   return (
@@ -2772,8 +3069,16 @@ function WalletIngestionLoading({
       <span className="spinner" />
       <div>
         <span className="state-kicker">{label}</span>
-        <strong>Wallet ingestion request in progress.</strong>
-        <p>Results will keep source status and limitations visible.</p>
+        <strong>
+          {action === "load" || action === "read"
+            ? "Persisted run read in progress."
+            : "Wallet ingestion request in progress."}
+        </strong>
+        <p>
+          {action === "load" || action === "read"
+            ? "The read is non-mutating and will keep the stored source evidence intact."
+            : "Results will keep source status and limitations visible."}
+        </p>
       </div>
     </div>
   );
@@ -2783,7 +3088,7 @@ function WalletIngestionError({ message }: { message: string }) {
   return (
     <div className="state-box error-box tonapi-wallet-state wallet-intelligence-state">
       <span className="state-kicker">WALLET_INGESTION_FAILED</span>
-      <strong>Wallet ingestion request failed.</strong>
+      <strong>Wallet workspace request failed.</strong>
       <p>{message}</p>
     </div>
   );

@@ -329,9 +329,12 @@ class WalletIdentityRecord(BaseModel):
 
 
 class WalletIngestionRunResponse(BaseModel):
-    run_id: int | None = None
+    run_id: PositiveStrictRunId
     wallet_address: str
-    time_window: str
+    time_window: Literal["24h", "3d", "7d", "custom"]
+    custom_start: str | None = None
+    custom_end: str | None = None
+    created_at: str
     status: WalletIngestionStatus
     data_mode: Literal["mock", "real"]
     wallet_identity: WalletIdentityRecord
@@ -351,6 +354,19 @@ class WalletIngestionRunResponse(BaseModel):
     warnings: list[WalletIngestionWarningRecord] = Field(default_factory=list)
     message: str
     activity_summary: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _stored_scope_must_match_window(self):
+        if self.time_window == "custom":
+            if not self.custom_start or not self.custom_end:
+                raise ValueError(
+                    "custom_start and custom_end are required for a stored custom run"
+                )
+        elif self.custom_start is not None or self.custom_end is not None:
+            raise ValueError(
+                "stored rolling runs cannot contain custom_start or custom_end"
+            )
+        return self
 
 
 class WalletClusterCompareRequest(BaseModel):

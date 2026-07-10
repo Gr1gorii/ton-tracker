@@ -1,11 +1,14 @@
-# TON Wallet Intelligence Dashboard — v0.22.7 INTERVAL COVERAGE
+# TON Wallet Intelligence Dashboard — v0.22.8 PERSISTED RUN LOADER
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
 retain their bounded evidence contracts, and v0.22.6 provider event/action
-observation identity remains unchanged. v0.22.7 adds deterministic interval
+observation identity remains unchanged. v0.22.7 added deterministic interval
 coverage across 2-50 explicitly selected runs without promoting a selected
 span, provider display events, or derived actions to complete wallet history.
+v0.22.8 adds read-only selection of an existing persisted run in the wallet
+workspace without changing any acquisition, identity, readiness, or interval
+contract.
 
 ## Objective
 
@@ -13,7 +16,8 @@ Make acquisition quality and bounded continuity inspectable before multi-run
 history, cost basis, or PnL can consume it. Provider failures, cursor anomalies,
 caps, excluded runs, not-requested streams, overlaps, internal gaps, and legacy
 evidence limits must remain visible; no missing interval or activity is
-inferred.
+inferred. A user must also be able to reopen one exact stored run without
+creating another run, contacting a provider, or mutating persisted evidence.
 
 ## Frozen interval contract
 
@@ -169,6 +173,42 @@ Runtime ingestion enforces one shared transfer/swap identity namespace in
 addition to the per-table unique indexes. Reinterpreting the same event/action
 coordinate as another surface is a conflict, not a new observation.
 
+## Persisted run loader contract
+
+The wallet workspace reuses `GET /api/wallets/ingest/{run_id}`; v0.22.8 does
+not add a parallel endpoint or run-creation path. URL ids are canonical positive
+signed-64-bit decimal strings: `[1-9][0-9]*`, with maximum
+`9223372036854775807`.
+
+- an existing canonical id returns 200 with the persisted run;
+- a canonical id with no stored run returns 404;
+- malformed, noncanonical, zero, negative, or out-of-range ids return 422;
+- readback uses existing database rows only and makes no provider or ingestion
+  adapter call;
+- readback performs no insert, update, delete, commit, or other database
+  mutation.
+
+The response includes exact persisted `custom_start`, `custom_end`, and
+`created_at` timestamps. Custom runs return both stored bounds; rolling-window
+runs return null custom bounds. The browser deliberately accepts the narrower
+positive JavaScript safe-integer range before issuing the GET, then rejects a
+response whose id or stored request metadata does not match the request.
+
+On success, wallet address, time window, exact custom bounds, requested
+surfaces, request snapshot, and current run are replaced atomically. Preview and
+run results remain mutually exclusive. On 404, 422, network failure, stale
+response, or incoherent payload, the prior run remains selected and visible.
+Run-scoped evidence, PnL, signal, and interval cards use the selected run id as
+their remount boundary, so state from a prior run is not reused. Request
+signatures normalize valid datetime values to canonical UTC before stale-state
+comparison. For a loaded custom run, the exact canonical UTC bounds remain the
+signature and preview/run payload source until the corresponding local date
+control is edited; this preserves DST-fold instants and sub-millisecond precision.
+
+This loader requires no schema change. Alembic head remains
+`20260710_0005` and backend `VERSION=0.2.1` remains the independent API-version
+field.
+
 ## Multi-run interval coverage
 
 `wallet_multi_run_interval_coverage_v1` is a pure diagnostic contract over an
@@ -246,7 +286,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.22.7
+## Surface status in v0.22.8
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -255,6 +295,7 @@ intervals are contiguous.
 | Swaps | Same shared chain, `JettonSwap` interpretation, and shared observation-identity namespace | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
 | Jettons | Account jetton balance snapshot | Point-in-time snapshot, not history |
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
+| Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
 
 TonAPI documents high-level event actions as presentation-oriented structures
@@ -299,8 +340,10 @@ or a PnL/deduplication key. The public flags state those limits explicitly.
 - `POST /api/wallets/ingest` persists accepted transaction rows, derived event
   rows, and both stream/page contracts. Partial or display-only surfaces remain
   visible through `incomplete_surfaces`.
-- `GET /api/wallets/ingest/{run_id}` reads the persisted evidence back without
-  inferring legacy pages or missing action indexes.
+- `GET /api/wallets/ingest/{run_id}` accepts only canonical positive signed-
+  64-bit ids, returns 200/404/422 as defined above, and reads persisted evidence
+  plus exact custom bounds and creation time without provider access, mutation,
+  inferred legacy pages, or inferred action indexes.
 - `POST /api/wallets/history/readiness` accepts one explicit target within 2-50
   distinct selected run ids. Under `wallet_history_readiness_v0.22.7`, it
   reports per-run acquisition validation, identity coverage/groups/conflicts,
@@ -344,6 +387,10 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - Preview remains exactly one page and `preview_only`.
 - Persisted evidence survives run readback with no API key or credential in
   query/error evidence.
+- Stored-run GET tests cover canonical positive signed-64-bit path ids,
+  noncanonical and overflow rejection, exact 200/404/422 behavior, exact
+  `custom_start`/`custom_end`/`created_at` readback, repeatability, no provider
+  construction or call, and no database mutation.
 - Keyed requests require HTTPS and never forward authorization through a
   redirect; lossy terminal cursor types fail closed.
 - Response tests cover the 16 MiB body limit, JSON depth 64, 200,000-node
@@ -359,9 +406,16 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - Schema and endpoint tests keep `cross_stream_union_applied`, global-history,
   authoritative-coverage, activity-merge, deduplication, cost-basis, and PnL
   flags false.
-- Full backend tests and frontend build pass.
+- Frontend Vitest 4 tests cover the positive safe-integer gate, response
+  restoration, preview/run exclusivity, failed-load preservation, run-card
+  remounting, and normalized datetime signatures.
+- Full backend tests, frontend Vitest 4 tests, and the Vite 8 build pass; the
+  checked-in frontend dependency graph reports zero `npm audit`
+  vulnerabilities.
+- The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
+  or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.22.7
+## Roadmap beyond v0.22.8
 
 1. Acquire authoritative low-level transfer/trade evidence or reconstruct it
    from validated traces without treating provider display actions as immutable

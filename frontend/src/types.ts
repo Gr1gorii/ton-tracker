@@ -708,10 +708,13 @@ export interface WalletIdentityRecord {
 }
 
 export interface WalletIngestionRunResponse {
-  run_id?: number | null;
+  run_id: number;
   wallet_address: string;
   wallet_identity: WalletIdentityRecord;
   time_window: string;
+  custom_start: string | null;
+  custom_end: string | null;
+  created_at: string;
   status: WalletIngestionStatus;
   data_mode: "mock" | "real";
   requested_surfaces: WalletIngestionSurface[];

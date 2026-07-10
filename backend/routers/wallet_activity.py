@@ -28,6 +28,7 @@ from services.wallet_activity_ingestion import (
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
+_MAX_SQLITE_RUN_ID = 2**63 - 1
 
 
 def _derive_pnl_preview(
@@ -75,11 +76,22 @@ def run_wallet_ingestion(
     response_model=WalletIngestionRunResponse,
 )
 def read_wallet_ingestion_run(
-    run_id: int = Path(..., ge=1),
+    run_id: str = Path(
+        ...,
+        pattern=r"^[1-9][0-9]*$",
+        max_length=19,
+        description="Canonical positive persisted run id.",
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
     """Read one persisted wallet ingestion run."""
-    result = get_wallet_ingestion_run(run_id, session)
+    canonical_run_id = int(run_id, 10)
+    if canonical_run_id > _MAX_SQLITE_RUN_ID:
+        raise HTTPException(
+            status_code=422,
+            detail="run_id must be a canonical positive signed 64-bit integer",
+        )
+    result = get_wallet_ingestion_run(canonical_run_id, session)
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
     return result
