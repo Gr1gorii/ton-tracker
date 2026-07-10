@@ -4576,7 +4576,7 @@ input {
   }
 }
 
-/* Wallet acquisition evidence v0.22.4 ------------------------------ */
+/* Wallet acquisition evidence v0.22.5 ------------------------------ */
 .acquisition-evidence-card {
   width: 100%;
   max-width: 100%;
@@ -4755,6 +4755,23 @@ input {
   line-height: 1.45;
 }
 
+.acquisition-display-note {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid rgba(230, 180, 80, 0.34);
+  border-radius: 6px;
+  background: rgba(230, 180, 80, 0.065);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.acquisition-display-note strong {
+  color: #f2cc73;
+}
+
 .acquisition-page-details {
   min-width: 0;
   max-width: 100%;
@@ -4927,6 +4944,10 @@ input {
   .acquisition-stream-head {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .acquisition-display-note {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .acquisition-surface-state > div {

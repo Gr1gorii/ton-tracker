@@ -479,7 +479,7 @@ class WalletHistoryBlockerRecord(BaseModel):
 
 
 class WalletHistoryReadinessResponse(BaseModel):
-    analysis_version: Literal["wallet_history_readiness_v0.22.4"]
+    analysis_version: Literal["wallet_history_readiness_v0.22.5"]
     target_run_id: int
     run_ids: list[int]
     wallet_address: str

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
@@ -76,6 +77,7 @@ BALANCE_QUANT = Decimal("0.000000000000000001")
 USD_QUANT = Decimal("0.00000001")
 
 TONAPI_TRANSACTION_ACQUISITION_CONTRACT = "tonapi_account_transactions_v1"
+TONAPI_EVENT_ACQUISITION_CONTRACT = "tonapi_account_events_display_v1"
 
 MOCK_JETTON_SURFACE_WARNING = (
     "Jettons are represented as jetton balance snapshots until a dedicated "
@@ -428,6 +430,30 @@ class _ValidatedTransactionPage:
     min_logical_time: str | None
     max_logical_time: str | None
     timestamps: list[datetime | None]
+    min_timestamp: str | None
+    max_timestamp: str | None
+    response_digest: str
+
+
+@dataclass(frozen=True)
+class _EventAcquisitionOutcome:
+    raw_count: int
+    transfers: list[WalletActivityTransfer]
+    swaps: list[WalletActivitySwap]
+    stream: WalletActivityAcquisitionStreamEvidence
+    warnings: list[str]
+    fatal: bool
+    incomplete: bool
+
+
+@dataclass(frozen=True)
+class _ValidatedEventPage:
+    events: list[dict[str, Any]]
+    raw_count: int
+    response_cursor: str | None
+    min_logical_time: str | None
+    max_logical_time: str | None
+    timestamps: list[datetime]
     min_timestamp: str | None
     max_timestamp: str | None
     response_digest: str
@@ -1017,6 +1043,364 @@ class TonapiWalletActivityLiveAdapter:
             ),
         )
 
+    def _fetch_event_acquisition(
+        self,
+        request: WalletActivityAdapterRequest,
+        mode: Literal["preview", "ingest"],
+        *,
+        include_transfers: bool,
+        include_swaps: bool,
+    ) -> _EventAcquisitionOutcome:
+        started_at = _now_utc_iso()
+        page_size = max(
+            1,
+            min(
+                100,
+                int(
+                    getattr(
+                        self.settings,
+                        "wallet_activity_live_event_limit",
+                        100,
+                    )
+                ),
+            ),
+        )
+        configured_cap = max(
+            1,
+            min(
+                100,
+                int(
+                    getattr(
+                        self.settings,
+                        "wallet_activity_live_event_max_pages",
+                        10,
+                    )
+                ),
+            ),
+        )
+        try:
+            bounds = _resolved_transaction_bounds(request)
+        except ValueError as exc:
+            error_message = _sanitize_provider_message(str(exc), self.settings)
+            finished_at = _now_utc_iso()
+            stream = _event_stream_evidence(
+                page_size=page_size,
+                page_cap=1,
+                completion_state="error",
+                termination_reason="protocol_error",
+                pages=[],
+                raw_count=0,
+                normalized_count=0,
+                duplicate_count=0,
+                terminal_cursor=None,
+                bounds_verified=False,
+                started_at=started_at,
+                finished_at=finished_at,
+                error_code="protocol_error",
+                error_message=error_message,
+                bounds=None,
+            )
+            return _EventAcquisitionOutcome(
+                raw_count=0,
+                transfers=[],
+                swaps=[],
+                stream=stream,
+                warnings=[
+                    f"TonAPI account event acquisition protocol error: {error_message}"
+                ],
+                fatal=True,
+                incomplete=True,
+            )
+
+        bounded = bounds is not None
+        page_cap = 1 if mode == "preview" or not bounded else configured_cap
+        query_start, query_end = _event_query_dates(bounds)
+        pages: list[WalletActivityAcquisitionPageEvidence] = []
+        accepted_events: list[dict[str, Any]] = []
+        transfers: list[WalletActivityTransfer] = []
+        swaps: list[WalletActivitySwap] = []
+        seen: dict[str, tuple[str, datetime, str]] = {}
+        cursor: str | None = None
+        last_lt: int | None = None
+        last_timestamp: datetime | None = None
+        total_raw = 0
+        total_duplicates = 0
+        completion_state = "incomplete"
+        termination_reason = "page_cap_reached"
+        error_code: str | None = None
+        error_message: str | None = None
+        fatal = False
+        saw_in_progress = False
+
+        for page_index in range(1, page_cap + 1):
+            fetched_at = _now_utc_iso()
+            provider_result = self.tonapi.get_account_events_page(
+                request.wallet_address,
+                limit=page_size,
+                before_lt=cursor,
+                start_date=query_start,
+                end_date=query_end,
+            )
+            if not provider_result.ok:
+                is_protocol = provider_result.error == ERROR_PROVIDER_PROTOCOL
+                error_code = (
+                    "protocol_error"
+                    if is_protocol
+                    else provider_result.error or "provider_error"
+                )
+                error_message = _sanitize_provider_message(
+                    provider_result.message or "TonAPI account event request failed.",
+                    self.settings,
+                )
+                pages.append(
+                    _transaction_error_page_evidence(
+                        page_index=page_index,
+                        request_cursor=cursor,
+                        requested_limit=page_size,
+                        response=provider_result.data,
+                        error_code=error_code,
+                        error_message=error_message,
+                        fetched_at=fetched_at,
+                    )
+                )
+                fatal = not accepted_events
+                completion_state = "error" if fatal else "incomplete"
+                termination_reason = (
+                    "protocol_error" if is_protocol else "provider_error"
+                )
+                break
+
+            provider_data = provider_result.data
+            try:
+                validated = _validate_event_page(
+                    provider_data,
+                    request_cursor=cursor,
+                    requested_limit=page_size,
+                )
+                page_seen = dict(seen)
+                page_last_lt = last_lt
+                page_last_timestamp = last_timestamp
+                page_accepted: list[dict[str, Any]] = []
+                page_duplicates = 0
+                page_in_progress = False
+                crossed_start = False
+                for event, timestamp in zip(
+                    validated.events,
+                    validated.timestamps,
+                ):
+                    logical_time_text = event["lt"]
+                    event_identity = event["event_id"].lower()
+                    event_fingerprint = _stable_page_digest(event)
+                    prior_event = page_seen.get(event_identity)
+                    if prior_event is not None:
+                        if prior_event != (
+                            logical_time_text,
+                            timestamp,
+                            event_fingerprint,
+                        ):
+                            raise ValueError(
+                                "duplicate account event changed logical time, "
+                                "timestamp, or payload"
+                            )
+                        page_duplicates += 1
+                        continue
+                    logical_time = int(logical_time_text, 10)
+                    if page_last_lt is not None and logical_time >= page_last_lt:
+                        raise ValueError(
+                            "account event pages are not globally descending"
+                        )
+                    if (
+                        page_last_timestamp is not None
+                        and timestamp > page_last_timestamp
+                    ):
+                        raise ValueError(
+                            "account event timestamps are not globally ordered"
+                        )
+                    page_seen[event_identity] = (
+                        logical_time_text,
+                        timestamp,
+                        event_fingerprint,
+                    )
+                    page_last_lt = logical_time
+                    page_last_timestamp = timestamp
+                    if bounded:
+                        assert bounds is not None
+                        if timestamp < bounds[0]:
+                            crossed_start = True
+                            continue
+                        if timestamp >= bounds[1]:
+                            continue
+                    if event.get("in_progress") is True:
+                        page_in_progress = True
+                        continue
+                    page_accepted.append(event)
+
+                payload = {"events": page_accepted}
+                transfer_rows = (
+                    self.tonapi.normalize_account_events_response(
+                        payload,
+                        request.wallet_address,
+                    )
+                    if include_transfers
+                    else []
+                )
+                swap_rows = (
+                    self.tonapi.normalize_account_swaps_response(
+                        payload,
+                        request.wallet_address,
+                    )
+                    if include_swaps
+                    else []
+                )
+                page_transfers = (
+                    _tonapi_live_transfers(transfer_rows)
+                    if mode == "ingest"
+                    else []
+                )
+                page_swaps = (
+                    _tonapi_live_swaps(swap_rows)
+                    if mode == "ingest"
+                    else []
+                )
+                page_evidence = WalletActivityAcquisitionPageEvidence(
+                    page_index=page_index,
+                    request_cursor=cursor,
+                    response_cursor=validated.response_cursor,
+                    requested_limit=page_size,
+                    raw_count=validated.raw_count,
+                    normalized_count=len(page_accepted),
+                    duplicate_count=page_duplicates,
+                    min_logical_time=validated.min_logical_time,
+                    max_logical_time=validated.max_logical_time,
+                    min_timestamp=validated.min_timestamp,
+                    max_timestamp=validated.max_timestamp,
+                    response_digest=validated.response_digest,
+                    attempt_count=1,
+                    error_code=None,
+                    error_message=None,
+                    fetched_at=fetched_at,
+                )
+            except (
+                AssertionError,
+                ArithmeticError,
+                KeyError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                error_code = "protocol_error"
+                error_message = _sanitize_provider_message(str(exc), self.settings)
+                pages.append(
+                    _transaction_error_page_evidence(
+                        page_index=page_index,
+                        request_cursor=cursor,
+                        requested_limit=page_size,
+                        response=provider_data,
+                        error_code=error_code,
+                        error_message=error_message,
+                        fetched_at=fetched_at,
+                    )
+                )
+                fatal = not accepted_events
+                completion_state = "error" if fatal else "incomplete"
+                termination_reason = "protocol_error"
+                break
+
+            pages.append(page_evidence)
+            total_raw += validated.raw_count
+            total_duplicates += page_duplicates
+            seen = page_seen
+            last_lt = page_last_lt
+            last_timestamp = page_last_timestamp
+            accepted_events.extend(page_accepted)
+            transfers.extend(page_transfers)
+            swaps.extend(page_swaps)
+            saw_in_progress = saw_in_progress or page_in_progress
+
+            if mode == "preview":
+                completion_state = "preview_only"
+                termination_reason = "preview_page_limit"
+                cursor = validated.response_cursor
+                break
+            if not bounded:
+                completion_state = "incomplete"
+                termination_reason = "legacy_unavailable"
+                cursor = validated.response_cursor
+                break
+            if validated.raw_count == 0 or crossed_start:
+                if saw_in_progress:
+                    completion_state = "incomplete"
+                    termination_reason = "provider_event_in_progress"
+                else:
+                    completion_state = "complete"
+                    termination_reason = (
+                        "provider_terminal"
+                        if validated.raw_count == 0
+                        else "requested_start_crossed"
+                    )
+                cursor = (
+                    None
+                    if validated.raw_count == 0
+                    else validated.response_cursor
+                )
+                break
+            cursor = validated.response_cursor
+        else:
+            completion_state = "incomplete"
+            termination_reason = "page_cap_reached"
+
+        stream = _event_stream_evidence(
+            page_size=page_size,
+            page_cap=page_cap,
+            completion_state=completion_state,
+            termination_reason=termination_reason,
+            pages=pages,
+            raw_count=total_raw,
+            normalized_count=len(accepted_events),
+            duplicate_count=total_duplicates,
+            terminal_cursor=cursor,
+            bounds_verified=bounded and completion_state == "complete",
+            started_at=started_at,
+            finished_at=_now_utc_iso(),
+            error_code=error_code,
+            error_message=error_message,
+            bounds=bounds,
+        )
+        if completion_state == "preview_only":
+            outcome_warnings = [
+                "TonAPI account event preview fetched exactly one page. It "
+                "does not verify pagination or derived action completeness."
+            ]
+        elif completion_state == "complete":
+            outcome_warnings = [
+                "TonAPI account event pagination terminated for the bounded "
+                "provider display stream. Derived actions can change and are "
+                "not authoritative transaction logic."
+            ]
+        elif termination_reason == "provider_event_in_progress":
+            outcome_warnings = [
+                "TonAPI returned an in-progress event inside the requested "
+                "interval. Derived action coverage remains incomplete."
+            ]
+        else:
+            detail = error_message or termination_reason
+            outcome_warnings = [
+                "TonAPI account event pagination is incomplete: "
+                f"{detail}. Derived actions remain display-only evidence."
+            ]
+        return _EventAcquisitionOutcome(
+            raw_count=total_raw,
+            transfers=transfers,
+            swaps=swaps,
+            stream=stream,
+            warnings=outcome_warnings,
+            fatal=fatal,
+            incomplete=completion_state in (
+                "preview_only",
+                "incomplete",
+                "error",
+            ),
+        )
+
     def _fetch_live_activity(
         self,
         request: WalletActivityAdapterRequest,
@@ -1153,91 +1537,43 @@ class TonapiWalletActivityLiveAdapter:
                         "activity."
                     )
 
-        if "transfers" in requested_surfaces:
-            result = self.tonapi.get_account_events_preview(
-                request.wallet_address,
-                limit=self.settings.wallet_activity_live_transfer_limit,
+        event_surfaces = [
+            surface
+            for surface in ("transfers", "swaps")
+            if surface in requested_surfaces
+        ]
+        if event_surfaces:
+            event_outcome = self._fetch_event_acquisition(
+                request,
+                mode,
+                include_transfers="transfers" in event_surfaces,
+                include_swaps="swaps" in event_surfaces,
             )
-            if not result.ok:
-                message = (
-                    result.message
-                    or "TonAPI live transfer-history request failed."
-                )
-                warnings.append(f"TonAPI transfer-history warning: {message}")
-                unavailable_surfaces.append("transfers")
-                failed_supported_surfaces.append("transfers")
-            else:
-                data = result.data if isinstance(result.data, dict) else {}
-                transfer_rows = (
-                    data.get("transfers")
-                    if isinstance(data.get("transfers"), list)
-                    else []
-                )
-                total_transfers = _safe_int(
-                    data.get("total_transfers"), len(transfer_rows)
-                )
-                total_events = _safe_int(data.get("total_events"), 0)
-                raw_count += total_transfers
-                successful_supported_surfaces.append("transfers")
-                warnings.append(
-                    "TonAPI transfer history is derived from account events: "
-                    "only TON and jetton transfer actions are represented, and "
-                    "direction is best-effort from event addresses. Swaps, NFT, "
-                    "and contract-call actions are not transfers."
-                )
-                if total_events and total_transfers == 0:
-                    warnings.append(
-                        "TonAPI returned events but no TON/jetton transfer "
-                        "actions for this guarded fetch. This is not evidence "
-                        "of no activity."
-                    )
-                if total_events == 0:
-                    warnings.append(
-                        "TonAPI returned zero events for this guarded fetch. "
-                        "This is not evidence that the wallet has no activity."
-                    )
-                if mode == "ingest":
-                    transfers.extend(_tonapi_live_transfers(transfer_rows))
+            raw_count += event_outcome.raw_count
+            transfers.extend(event_outcome.transfers)
+            swaps.extend(event_outcome.swaps)
+            acquisition_streams.append(event_outcome.stream)
+            warnings.extend(event_outcome.warnings)
 
-        if "swaps" in requested_surfaces:
-            result = self.tonapi.get_account_swaps_preview(
-                request.wallet_address,
-                limit=self.settings.wallet_activity_live_swap_limit,
-            )
-            if not result.ok:
-                message = (
-                    result.message or "TonAPI live DEX swap request failed."
-                )
-                warnings.append(f"TonAPI DEX swap warning: {message}")
-                unavailable_surfaces.append("swaps")
-                failed_supported_surfaces.append("swaps")
+            # TonAPI explicitly defines events/actions as mutable display data.
+            # Even a fully traversed provider page chain cannot make derived
+            # transfer or swap actions authoritative activity evidence.
+            incomplete_surfaces.extend(event_surfaces)
+            if event_outcome.fatal:
+                unavailable_surfaces.extend(event_surfaces)
+                failed_supported_surfaces.extend(event_surfaces)
             else:
-                data = result.data if isinstance(result.data, dict) else {}
-                swap_rows = (
-                    data.get("swaps")
-                    if isinstance(data.get("swaps"), list)
-                    else []
-                )
-                total_swaps = _safe_int(data.get("total_swaps"), len(swap_rows))
-                total_events = _safe_int(data.get("total_events"), 0)
-                raw_count += total_swaps
-                successful_supported_surfaces.append("swaps")
-                warnings.append(
-                    "TonAPI DEX swaps are parsed from account events "
-                    "(JettonSwap actions) and exclude USD valuation. They are "
-                    "not PnL, ownership proof, or full DEX trade history."
-                )
-                if total_events and total_swaps == 0:
+                successful_supported_surfaces.extend(event_surfaces)
+                if event_outcome.raw_count == 0:
                     warnings.append(
-                        "TonAPI returned events but no JettonSwap actions for "
-                        "this guarded fetch. This is not evidence of no "
-                        "activity."
+                        "TonAPI returned zero account events for this guarded "
+                        "fetch. This is not evidence that the wallet has no "
+                        "transfer or swap activity."
                     )
-                if mode == "ingest":
-                    swaps.extend(_tonapi_live_swaps(swap_rows))
 
         unavailable_surfaces = list(dict.fromkeys(unavailable_surfaces))
         incomplete_surfaces = list(dict.fromkeys(incomplete_surfaces))
+        display_event_surfaces_requested = bool(event_surfaces)
         limiting_incomplete = any(
             stream.completion_state in ("incomplete", "error")
             and stream.termination_reason != "legacy_unavailable"
@@ -1254,20 +1590,25 @@ class TonapiWalletActivityLiveAdapter:
         else:
             status = (
                 "partial"
-                if unavailable_surfaces or limiting_incomplete
+                if unavailable_surfaces
+                or display_event_surfaces_requested
+                or limiting_incomplete
                 else "success"
             )
             source_status = (
                 "limited"
-                if failed_supported_surfaces or limiting_incomplete
+                if failed_supported_surfaces
+                or display_event_surfaces_requested
+                or limiting_incomplete
                 else "live"
             )
             message = (
                 "Guarded TonAPI live activity fetched. Scope is native TON "
                 "balance, account jetton balances, account transaction "
-                "history, TON/jetton transfer history, and DEX swaps from "
-                "events only. Persisted rows can feed run-scoped signals, "
-                "evidence-gated PnL, and probabilistic clustering."
+                "history, plus display-only TON/jetton transfer and DEX swap "
+                "actions derived from one bounded account-event stream. "
+                "Provider event actions remain non-authoritative and cannot "
+                "establish ownership, complete trade history, or PnL."
             )
 
         return self._live_result(
@@ -1462,9 +1803,10 @@ def get_wallet_activity_provider_status(settings=None) -> dict[str, Any]:
             "message": (
                 "Real mode: guarded live TonAPI wallet activity is enabled. "
                 "Native TON balance, account jetton balance snapshots, account "
-                "transaction history, TON/jetton transfers, and DEX swaps from "
-                "events can be fetched. Persisted rows can feed run-scoped "
-                "signals, evidence-gated PnL, and probabilistic clustering."
+                "transaction history, and one bounded account-event stream can "
+                "be fetched. Derived transfers and DEX swaps are mutable "
+                "provider display data; they remain incomplete and cannot "
+                "establish ownership, cost basis, or PnL."
             ),
         }
 
@@ -1517,6 +1859,14 @@ def _resolved_transaction_bounds(
     if start >= end:
         raise ValueError("resolved_start must be earlier than resolved_end.")
     return start, end
+
+
+def _event_query_dates(
+    bounds: tuple[datetime, datetime] | None,
+) -> tuple[int | None, int | None]:
+    if bounds is None:
+        return None, None
+    return math.floor(bounds[0].timestamp()), math.ceil(bounds[1].timestamp())
 
 
 def _utc_iso(value: datetime) -> str:
@@ -1738,6 +2088,128 @@ def _validate_transaction_page(
     )
 
 
+def _validate_event_page(
+    value: Any,
+    *,
+    request_cursor: str | None,
+    requested_limit: int,
+) -> _ValidatedEventPage:
+    if not isinstance(value, dict):
+        raise ValueError("account event page must be an object")
+    if value.get("requested_limit") != requested_limit:
+        raise ValueError("account event page requested_limit does not match request")
+    if value.get("request_before_lt") != request_cursor:
+        raise ValueError("account event page request cursor does not match request")
+    events = value.get("events")
+    if not isinstance(events, list):
+        raise ValueError("account event page events must be a list")
+    raw_count = value.get("raw_count")
+    if isinstance(raw_count, bool) or raw_count != len(events):
+        raise ValueError("account event page raw_count does not match events")
+    if raw_count > requested_limit:
+        raise ValueError("account event page returned more rows than requested")
+
+    logical_times: list[str] = []
+    timestamps: list[datetime] = []
+    prior_lt: int | None = None
+    prior_timestamp: datetime | None = None
+    for index, event in enumerate(events):
+        if not isinstance(event, dict):
+            raise ValueError(f"account event page row {index} must be an object")
+        event_id = event.get("event_id")
+        if not _canonical_hex_256(event_id):
+            raise ValueError(
+                f"account event page row {index} has invalid event_id"
+            )
+        logical_time = _strict_logical_time(event.get("lt"))
+        if logical_time is None:
+            raise ValueError(
+                f"account event page row {index} has invalid logical time"
+            )
+        logical_time_value = int(logical_time, 10)
+        if prior_lt is not None and logical_time_value >= prior_lt:
+            raise ValueError(
+                "account event page logical times must be strictly descending"
+            )
+        timestamp = _transaction_timestamp(event.get("timestamp"))
+        if timestamp is None:
+            raise ValueError(
+                f"account event page row {index} has invalid timestamp"
+            )
+        if prior_timestamp is not None and timestamp > prior_timestamp:
+            raise ValueError(
+                "account event page timestamps must follow logical-time order"
+            )
+        actions = event.get("actions")
+        if not isinstance(actions, list) or any(
+            not isinstance(action, dict)
+            or not isinstance(action.get("type"), str)
+            or not action["type"].strip()
+            for action in actions
+        ):
+            raise ValueError(
+                f"account event page row {index} has invalid actions"
+            )
+        if not isinstance(event.get("in_progress"), bool):
+            raise ValueError(
+                f"account event page row {index} has invalid in_progress state"
+            )
+        prior_lt = logical_time_value
+        prior_timestamp = timestamp
+        logical_times.append(logical_time)
+        timestamps.append(timestamp)
+
+    minimum_lt = (
+        str(min(int(item, 10) for item in logical_times))
+        if logical_times
+        else None
+    )
+    maximum_lt = (
+        str(max(int(item, 10) for item in logical_times))
+        if logical_times
+        else None
+    )
+    if value.get("min_logical_time") != minimum_lt:
+        raise ValueError("account event page minimum logical time is inconsistent")
+    if value.get("max_logical_time") != maximum_lt:
+        raise ValueError("account event page maximum logical time is inconsistent")
+    response_cursor = value.get("next_before_lt")
+    if not events:
+        if response_cursor is not None:
+            raise ValueError("empty account event page must terminate its cursor")
+    else:
+        response_cursor = _strict_logical_time(response_cursor)
+        if response_cursor != minimum_lt:
+            raise ValueError(
+                "account event page response cursor must equal minimum logical time"
+            )
+        if (
+            request_cursor is not None
+            and int(maximum_lt, 10) >= int(request_cursor, 10)
+        ):
+            raise ValueError("account event page cursor did not advance")
+    return _ValidatedEventPage(
+        events=events,
+        raw_count=raw_count,
+        response_cursor=response_cursor,
+        min_logical_time=minimum_lt,
+        max_logical_time=maximum_lt,
+        timestamps=timestamps,
+        min_timestamp=(_utc_iso(min(timestamps)) if timestamps else None),
+        max_timestamp=(_utc_iso(max(timestamps)) if timestamps else None),
+        response_digest=_stable_page_digest(value),
+    )
+
+
+def _canonical_hex_256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and value == value.strip()
+        and all(character in "0123456789abcdefABCDEF" for character in value)
+    )
+
+
 def _sanitize_provider_message(value: Any, settings: Settings) -> str:
     message = str(value or "Provider error.").strip() or "Provider error."
     api_key = getattr(settings, "tonapi_api_key", "")
@@ -1846,6 +2318,65 @@ def _transaction_stream_evidence(
     )
 
 
+def _event_stream_evidence(
+    *,
+    page_size: int,
+    page_cap: int,
+    completion_state: str,
+    termination_reason: str,
+    pages: list[WalletActivityAcquisitionPageEvidence],
+    raw_count: int,
+    normalized_count: int,
+    duplicate_count: int,
+    terminal_cursor: str | None,
+    bounds_verified: bool,
+    started_at: str,
+    finished_at: str,
+    error_code: str | None,
+    error_message: str | None,
+    bounds: tuple[datetime, datetime] | None,
+) -> WalletActivityAcquisitionStreamEvidence:
+    query_start, query_end = _event_query_dates(bounds)
+    return WalletActivityAcquisitionStreamEvidence(
+        provider="tonapi",
+        stream_key="account_events",
+        contract_version=TONAPI_EVENT_ACQUISITION_CONTRACT,
+        scope_kind=(
+            "provider_display_events"
+            if bounds is not None
+            else "legacy_unavailable"
+        ),
+        requested_start=_utc_iso(bounds[0]) if bounds is not None else "",
+        requested_end=_utc_iso(bounds[1]) if bounds is not None else "",
+        query_filters={
+            "endpoint": "account_events",
+            "cursor": "before_lt",
+            "limit": page_size,
+            "start_date": query_start,
+            "end_date": query_end,
+            "sort_order": "logical_time_desc",
+            "provider_semantics": "display_only_actions",
+        },
+        sort_order="logical_time_desc",
+        page_size=page_size,
+        page_cap=page_cap,
+        completion_state=completion_state,
+        termination_reason=termination_reason,
+        page_count=len(pages),
+        raw_count=raw_count,
+        normalized_count=normalized_count,
+        duplicate_count=duplicate_count,
+        first_cursor=pages[0].request_cursor if pages else None,
+        terminal_cursor=terminal_cursor,
+        bounds_verified=bounds_verified,
+        started_at=started_at,
+        finished_at=finished_at,
+        error_code=error_code,
+        error_message=error_message,
+        pages=pages,
+    )
+
+
 def _tonapi_live_warnings(
     unavailable_surfaces: list[WalletIngestionSurface],
 ) -> list[str]:
@@ -1853,12 +2384,14 @@ def _tonapi_live_warnings(
         (
             "Guarded live TonAPI wallet activity is enabled for native TON "
             "balance, account jetton balance snapshots, account transaction "
-            "history, TON/jetton transfers, and DEX swaps from events only."
+            "history, and a shared bounded account-event stream for derived "
+            "TON/jetton transfer and DEX swap display actions."
         ),
         (
-            "Live TonAPI data is account-level evidence. Transfer direction is "
-            "best-effort from event addresses, swaps exclude USD valuation, and "
-            "it is not PnL, clustering input, or ownership proof."
+            "TonAPI event actions are mutable display-oriented interpretations. "
+            "Transfer direction is best-effort, swaps exclude USD valuation, "
+            "and derived actions are not authoritative history, PnL, clustering "
+            "input, or ownership proof."
         ),
     ]
     if unavailable_surfaces:

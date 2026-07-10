@@ -1,87 +1,86 @@
-# TON Wallet Intelligence Dashboard — v0.22.4 PAGINATION EVIDENCE
+# TON Wallet Intelligence Dashboard — v0.22.5 EVENT PAGINATION
 
-This release adds bounded, evidence-backed pagination for the low-level TonAPI
-account-transaction surface. It does not claim complete wallet history and does
-not change cost basis or PnL.
+This release adds one strict, bounded TonAPI account-event page chain shared by
+the transfer and swap surfaces. It records provider acquisition evidence while
+preserving TonAPI's display-only event semantics: derived actions remain
+non-authoritative, incomplete activity evidence and do not change cost basis or
+PnL.
 
 ## Release scope
 
-- Every wallet ingestion request freezes one immutable half-open UTC interval:
+- Every wallet request still freezes one immutable half-open UTC interval:
   `[resolved_start, resolved_end)`.
-- Rolling `24h`, `3d`, and `7d` windows resolve once at request time. Custom
-  windows are normalized to UTC and cannot end after acquisition time.
-- Only guarded real/live TonAPI `transactions` ingestion follows multiple
-  pages. Transfers, swaps, jettons, and balances retain their existing
-  one-request or snapshot behavior.
-- The existing v0.22.3 transaction identity remains unchanged: eligible
-  real/live low-level rows use network + canonical run account + canonical LT +
-  canonical 32-byte hash. Original provider values remain visible.
+- Guarded real/live `transfers` and `swaps` now share one account-events request
+  chain, including when both surfaces are requested together.
+- Provider date filters safely widen fractional interval edges; normalization
+  applies the exact local `[start, end)` test before materializing rows.
+- Low-level transaction pagination and the v0.22.3 transaction identity remain
+  unchanged.
+- Jetton and native TON balances remain point-in-time snapshots.
 
-## Transaction pagination contract
+## Account-event acquisition contract
 
-- Page size is `WALLET_ACTIVITY_LIVE_TX_LIMIT` (`1..1000`).
-- Page cap is `WALLET_ACTIVITY_LIVE_TX_MAX_PAGES` (`1..100`, default `10`).
-- Pages must form one globally strict descending logical-time chain. Each next
-  request uses the prior page's minimum LT as `before_lt`.
-- A provider page may not exceed its requested limit. Transaction hashes must
-  be canonical 32-byte hex strings; bounded timestamps and optional fee values
-  must be non-lossy integers. Booleans, floats, non-finite/oversized numbers,
-  and malformed hashes terminate as protocol evidence, never completeness.
-- Duplicate LT/hash observations inside one acquisition are counted and
-  suppressed only within that run. This is not cross-run deduplication.
-- Rows are accepted only inside the frozen `[start, end)` interval.
-- A bounded stream is `complete` only when TonAPI returns a terminal empty page
-  or ordered rows verifiably cross below the requested start.
-- Page-cap exhaustion, provider failure, malformed response data, changed
-  duplicate timestamps, missing required timestamps, or a stalled/non-descending
-  cursor leaves the stream `incomplete` or `error`.
-- Preview fetches exactly one page and reports `preview_only`; it never proves
-  pagination termination or persists a run.
+- Page size is `WALLET_ACTIVITY_LIVE_EVENT_LIMIT` (`1..100`, default `100`).
+- Page cap is `WALLET_ACTIVITY_LIVE_EVENT_MAX_PAGES` (`1..100`, default `10`).
+- Pages form one globally strict descending LT and non-increasing timestamp
+  chain. Each next request uses the prior page's minimum LT as `before_lt`.
+- The provider envelope is validated before use: canonical 32-byte hex event
+  id, canonical uint64 LT, bounded integer timestamp, boolean `in_progress`,
+  action objects with non-empty types, exact cursor advancement, and no
+  oversized response page.
+- Keyed TonAPI requests require HTTPS, and authorization is never copied into a
+  redirect request. Boolean or floating-point zero cursors cannot masquerade as
+  the provider's integer terminal cursor.
+- Event ids must remain unique across the page chain. An exact repeated
+  observation can be counted and suppressed inside one acquisition; reuse with
+  a changed LT, timestamp, or payload is a protocol error. This is not cross-run
+  deduplication.
+- In-progress events are not materialized and prevent a completion claim for
+  the event stream.
+- A bounded provider page chain is `complete` only after an empty terminal page
+  or an ordered crossing below the requested start. A cap, provider failure,
+  malformed protocol data, stalled cursor, or in-progress event remains
+  `incomplete` or `error`.
+- Preview fetches exactly one page, reports `preview_only`, and persists no
+  rows.
 
-## Persisted evidence
+## Display-only semantics
 
-Alembic revision `20260710_0004` adds:
+TonAPI account events and actions are provider-derived presentation data that
+can change. Therefore:
 
-- `wallet_acquisition_streams`: provider/stream contract, frozen bounds, query
-  scope, page limits, aggregate counts, completion state, termination reason,
-  first/terminal cursors, bounds verification, timestamps, and sanitized
-  diagnostics.
-- `wallet_acquisition_pages`: page index, request/response cursor, requested
-  limit, raw/normalized/duplicate counts, LT and timestamp extrema, response
-  digest, attempt count, fetch status, timestamp, and sanitized diagnostics.
+- `account_events` completion verifies only the recorded provider page chain;
+- derived transfers and swaps always remain in `incomplete_surfaces`;
+- a successful event acquisition returns limited/partial coverage rather than
+  authoritative live history;
+- event actions cannot establish complete transfer history, complete DEX trade
+  history, ownership, acquisition cost basis, or PnL.
 
-The migration is forward-only, validates interrupted SQLite DDL before repair,
-and creates only missing correct tables or indexes. Stream identity is unique by
-run/provider/key; page identity is unique by stream/page index; run deletion
-cascades through stream and page evidence. Runtime SQLite connections enable
-foreign-key enforcement before use. Existing runs receive zero fabricated
-acquisition records.
+## Persisted and diagnostic evidence
 
-Persisted runs expose `acquisition_streams`, `incomplete_surfaces`, and page
-evidence through the ingestion response. History readiness uses
-`analysis_version: wallet_history_readiness_v0.22.4` to report validated per-run
-transaction pagination or its blocker state, while all global history and PnL
-flags remain false.
+The existing Alembic revision `20260710_0004` already supports multiple stream
+keys. v0.22.5 persists `account_events` aggregate/page evidence alongside
+`transactions` without a schema change: sanitized query scope, cursors, counts,
+LT/time extrema, response digests, termination, errors, and exact requested
+bounds.
+
+History readiness uses
+`analysis_version: wallet_history_readiness_v0.22.5`. It validates the persisted
+event chain separately and may report `provider_stream_complete`; that state is
+deliberately not authoritative activity completeness. All global history,
+deduplication, cost-basis, and PnL flags remain false.
 
 ## Explicitly unchanged
 
-- TonAPI transfers and swaps are still derived from high-level account-event
-  actions. Those provider interpretations can change and are not authoritative
-  transaction logic or proof of full DEX history.
-- Jettons and native TON balances remain point-in-time snapshots without an
-  equivalent pagination-completeness contract.
-- No cross-run merge or deduplication is applied.
-- No interval-continuity proof exists across multiple runs.
-- No complete pre-run acquisition history or cost basis is established.
-- `history_complete`, `is_cost_basis`, `eligible_for_cost_basis`, and
-  `used_by_pnl` remain false for history readiness.
+- No canonical transfer, swap-action, jetton-asset, or counterparty identity is
+  introduced.
+- No cross-run merge, interval stitching, or deduplication is applied.
+- No complete pre-run acquisition history is established.
 - Existing realized/unrealized calculations and Real-PnL gates are unchanged.
-- Backend `VERSION=0.2.1` remains the API-version field; `v0.22.4 PAGINATION
-  EVIDENCE` is the product label.
+- Backend `VERSION=0.2.1` remains the API-version field; `v0.22.5 EVENT
+  PAGINATION` is the product label.
 
 ## Verification
-
-Before promotion:
 
 ```bash
 cd backend
@@ -91,7 +90,8 @@ cd ../frontend
 npm run build
 ```
 
-Also verify a guarded live run with a deliberately small transaction page size:
-cursor values must descend, evidence must persist after readback, completion
-must follow only the two allowed terminal conditions, and no credential may
-appear in warnings, query evidence, errors, exports, or logs.
+For guarded live verification, use a deliberately small event page size and
+cap. Confirm one chain serves both derived surfaces, cursor values descend,
+evidence survives readback, an empty bounded interval terminates safely,
+partial semantics remain visible even for a complete provider chain, and no
+credential appears in logs, warnings, query evidence, errors, or exports.

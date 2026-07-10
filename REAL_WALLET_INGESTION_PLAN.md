@@ -1,9 +1,10 @@
-# TON Wallet Intelligence Dashboard — v0.22.4 PAGINATION EVIDENCE
+# TON Wallet Intelligence Dashboard — v0.22.5 EVENT PAGINATION
 
-Planning and rollout contract for bounded real-wallet acquisition. The current
-milestone makes one narrow improvement: guarded low-level TonAPI transaction
-ingestion can follow and persist a verifiable page chain inside one frozen UTC
-interval. It does not promote the other wallet surfaces to complete history.
+Planning and rollout contract for bounded real-wallet acquisition. Guarded
+low-level TonAPI transactions retain their verifiable page chain, while v0.22.5
+adds one shared bounded account-event chain for transfer and swap display rows.
+It records provider acquisition without promoting mutable event actions to
+authoritative or complete wallet history.
 
 ## Objective
 
@@ -66,6 +67,30 @@ The following are never completion:
 Preview deliberately fetches one page, returns `preview_only`, and does not
 persist a run. It is coverage inspection, not a dry run of full pagination.
 
+## Shared account-event pagination
+
+When guarded-live `transfers`, `swaps`, or both are requested, ingestion follows
+one TonAPI `/events` chain:
+
+- `WALLET_ACTIVITY_LIVE_EVENT_LIMIT` controls page size (`1..100`);
+- `WALLET_ACTIVITY_LIVE_EVENT_MAX_PAGES` controls the attempt cap (`1..100`,
+  default `10`);
+- `start_date` and `end_date` safely widen fractional provider filters, then
+  exact local `[start, end)` filtering decides which events are materialized;
+- each page requires canonical event id, uint64 LT, integer timestamp, boolean
+  `in_progress`, typed actions, strict LT descent, non-increasing timestamps,
+  and exact `before_lt` advancement;
+- event ids remain unique across the chain; conflicting LT, timestamp, or
+  payload reuse is protocol evidence rather than a second derived row;
+- accepted events are normalized into requested transfer and/or swap rows only
+  once, so requesting both surfaces never duplicates provider traversal;
+- in-progress events are excluded and keep the provider stream incomplete.
+
+The same empty-terminal and requested-start-crossed conditions can complete the
+bounded provider page chain. That completion means only that TonAPI's recorded
+display stream terminated for the query. Derived actions remain mutable,
+non-authoritative, and listed in `incomplete_surfaces`.
+
 ## Persistence contract
 
 Alembic revision `20260710_0004` adds two evidence tables:
@@ -102,13 +127,13 @@ key options, indexes, or unexpected rows fail closed. Downgrade is unsupported.
 Existing runs are not backfilled with guessed cursors or synthetic pages. Zero
 evidence rows accurately means that pagination evidence is unavailable.
 
-## Surface status in v0.22.4
+## Surface status in v0.22.5
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
 | Low-level transactions | Strict descending TonAPI LT pagination within frozen bounds | Bounded transaction stream only |
-| Transfers | One account-events request, provider-derived actions | Pagination incomplete; not authoritative logic |
-| Swaps | One account-events request, `JettonSwap` interpretation | Pagination incomplete; not full DEX history |
+| Transfers | Shared strict account-events pagination, provider-derived actions | Provider chain can terminate; derived actions remain incomplete and non-authoritative |
+| Swaps | Same shared chain, `JettonSwap` interpretation | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
 | Jettons | Account jetton balance snapshot | Point-in-time snapshot, not history |
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
 
@@ -128,14 +153,16 @@ deduplication. Original provider hash and LT values remain available for audit.
 
 ## API behavior
 
-- `POST /api/wallets/ingest/preview` returns one-page transaction acquisition
-  evidence with `preview_only`; it persists nothing.
-- `POST /api/wallets/ingest` persists accepted transaction rows plus stream/page
-  evidence. Partial pages remain visible through `incomplete_surfaces`.
+- `POST /api/wallets/ingest/preview` returns one page per requested paginated
+  stream with `preview_only`; it persists nothing.
+- `POST /api/wallets/ingest` persists accepted transaction rows, derived event
+  rows, and both stream/page contracts. Partial or display-only surfaces remain
+  visible through `incomplete_surfaces`.
 - `GET /api/wallets/ingest/{run_id}` reads the persisted evidence back without
   recomputing or inferring legacy pages.
-- `POST /api/wallets/history/readiness` reports per-run bounded transaction
-  pagination under `wallet_history_readiness_v0.22.4`, but remains diagnostic.
+- `POST /api/wallets/history/readiness` reports per-run bounded transaction and
+  provider-event acquisition under `wallet_history_readiness_v0.22.5`, but
+  remains diagnostic.
 
 One failing transaction page after earlier successful pages preserves the
 accepted rows and evidence while marking the stream incomplete. A failure before
@@ -144,7 +171,8 @@ surfaces do not convert an incomplete transaction stream into complete history.
 
 ## Non-goals
 
-- No transfer, swap, jetton, or native-balance pagination completion.
+- No authoritative transfer/swap completion from provider event actions.
+- No jetton or native-balance history completion from snapshots.
 - No authoritative logic built from TonAPI high-level event actions.
 - No cross-run merge, interval stitching, or deduplication.
 - No proof of all wallet history before the selected interval.
@@ -167,12 +195,15 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - Preview remains exactly one page and `preview_only`.
 - Persisted evidence survives run readback with no API key or credential in
   query/error evidence.
+- Keyed requests require HTTPS and never forward authorization through a
+  redirect; lossy terminal cursor types fail closed.
 - Full backend tests and frontend build pass.
 
-## Roadmap beyond v0.22.4
+## Roadmap beyond v0.22.5
 
-1. Define safe pagination and completeness contracts for the remaining
-   surfaces without treating provider event actions as immutable chain logic.
+1. Acquire authoritative low-level transfer/trade evidence or reconstruct it
+   from validated traces without treating provider display actions as immutable
+   chain logic.
 2. Add canonical transfer, swap-action, jetton-asset, and counterparty
    identities.
 3. Prove interval continuity and gaps across selected runs, then implement

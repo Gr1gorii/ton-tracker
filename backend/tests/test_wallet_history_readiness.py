@@ -278,6 +278,108 @@ def _transaction_acquisition_stream(
     }
 
 
+def _event_acquisition_stream(
+    *,
+    with_activity: bool = False,
+    completion_state: str = "complete",
+    bounds_verified: bool = True,
+    digest: str = "de" * 32,
+) -> dict[str, Any]:
+    first_page = {
+        "page_index": 1,
+        "request_cursor": None,
+        "response_cursor": (
+            "46000000000002" if with_activity else "46000000000000"
+        ),
+        "requested_limit": 100,
+        "raw_count": 1,
+        "normalized_count": 1 if with_activity else 0,
+        "duplicate_count": 0,
+        "min_logical_time": (
+            "46000000000002" if with_activity else "46000000000000"
+        ),
+        "max_logical_time": (
+            "46000000000002" if with_activity else "46000000000000"
+        ),
+        "min_timestamp": (
+            "2026-06-01T12:00:00Z"
+            if with_activity
+            else "2026-05-31T23:59:00Z"
+        ),
+        "max_timestamp": (
+            "2026-06-01T12:00:00Z"
+            if with_activity
+            else "2026-05-31T23:59:00Z"
+        ),
+        "response_digest": digest,
+        "attempt_count": 1,
+        "error_code": None,
+        "error_message": None,
+        "fetched_at": "2026-06-02T00:00:00Z",
+    }
+    pages = [first_page]
+    termination_reason = "requested_start_crossed"
+    terminal_cursor: str | None = first_page["response_cursor"]
+    if with_activity:
+        pages.append(
+            {
+                "page_index": 2,
+                "request_cursor": first_page["response_cursor"],
+                "response_cursor": None,
+                "requested_limit": 100,
+                "raw_count": 0,
+                "normalized_count": 0,
+                "duplicate_count": 0,
+                "min_logical_time": None,
+                "max_logical_time": None,
+                "min_timestamp": None,
+                "max_timestamp": None,
+                "response_digest": "ef" * 32,
+                "attempt_count": 1,
+                "error_code": None,
+                "error_message": None,
+                "fetched_at": "2026-06-02T00:00:01Z",
+            }
+        )
+        termination_reason = "provider_terminal"
+        terminal_cursor = None
+    return {
+        "provider": "tonapi",
+        "stream_key": "account_events",
+        "contract_version": "tonapi_account_events_display_v1",
+        "scope_kind": "provider_display_events",
+        "requested_start": "2026-06-01T00:00:00Z",
+        "requested_end": "2026-06-02T00:00:00Z",
+        "query_filters": {
+            "endpoint": "account_events",
+            "cursor": "before_lt",
+            "limit": 100,
+            "start_date": 1780272000,
+            "end_date": 1780358400,
+            "sort_order": "logical_time_desc",
+            "provider_semantics": "display_only_actions",
+        },
+        "sort_order": "logical_time_desc",
+        "page_size": 100,
+        "page_cap": 10,
+        "completion_state": completion_state,
+        "termination_reason": termination_reason,
+        "page_count": len(pages),
+        "pages_succeeded": len(pages),
+        "raw_count": 1,
+        "normalized_count": 1 if with_activity else 0,
+        "duplicate_count": 0,
+        "first_cursor": None,
+        "terminal_cursor": terminal_cursor,
+        "bounds_verified": bounds_verified,
+        "started_at": "2026-06-02T00:00:00Z",
+        "finished_at": "2026-06-02T00:00:01Z",
+        "error_code": None,
+        "error_message": None,
+        "pages": pages,
+    }
+
+
 def _parse_datetime(value: str | None) -> datetime | None:
     if value is None:
         return None
@@ -832,8 +934,16 @@ def test_empty_swap_coverage_is_not_reported_as_complete():
 def test_complete_transaction_stream_evidence_is_reported_but_not_global_history():
     stream = _transaction_acquisition_stream()
     runs = [
-        _run(1, acquisition_streams=[stream]),
-        _run(2, acquisition_streams=[stream]),
+        _run(
+            1,
+            requested_surfaces=["transactions"],
+            acquisition_streams=[stream],
+        ),
+        _run(
+            2,
+            requested_surfaces=["transactions"],
+            acquisition_streams=[stream],
+        ),
     ]
 
     result = assess_wallet_history_readiness(runs, target_run_id=2)
@@ -845,6 +955,14 @@ def test_complete_transaction_stream_evidence_is_reported_but_not_global_history
         "transaction_streams_by_run"
     ]
     assert [item["state"] for item in states] == ["complete", "complete"]
+    event_states = blockers["pagination_completeness_unverified"]["evidence"][
+        "event_streams_by_run"
+    ]
+    assert [item["state"] for item in event_states] == [
+        "not_requested",
+        "not_requested",
+    ]
+    assert "provider_event_pagination_evidence_incomplete" not in blockers
     assert result["requested_bounds_verified"] is False
     assert result["history_complete"] is False
     assert result["eligible_for_cost_basis"] is False
@@ -950,6 +1068,220 @@ def test_transaction_pagination_validation_fails_closed_on_tampered_scope():
         assert result["used_by_pnl"] is False
 
 
+def test_complete_event_stream_is_observed_without_promoting_display_actions():
+    # Provider event ids are 256-bit hex and may be submitted in upper case.
+    event_id = "FA" * 32
+    logical_time = "46000000000002"
+    transfer = {
+        "tx_hash": event_id,
+        "logical_time": logical_time,
+        "timestamp": "2026-06-01T12:00:00Z",
+        "provider": "tonapi",
+        "source_status": "live",
+        "raw": {
+            "provider": "tonapi",
+            "surface": "transfers",
+            "event_id": event_id,
+            "lt": logical_time,
+        },
+    }
+    swap = _swap(
+        event_id,
+        timestamp="2026-06-01T12:00:00Z",
+        raw={
+            "provider": "tonapi",
+            "surface": "swaps",
+            "event_id": event_id,
+            "lt": logical_time,
+        },
+    )
+    runs = [
+        _run(
+            1,
+            status="partial",
+            requested_surfaces=["transfers", "swaps"],
+            incomplete_surfaces=["transfers", "swaps"],
+            acquisition_streams=[_event_acquisition_stream()],
+        ),
+        _run(
+            2,
+            status="partial",
+            requested_surfaces=["transfers", "swaps"],
+            incomplete_surfaces=["transfers", "swaps"],
+            transfers=[transfer],
+            swaps=[swap],
+            acquisition_streams=[
+                _event_acquisition_stream(with_activity=True)
+            ],
+        ),
+    ]
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+
+    blockers = {item["code"]: item for item in result["blockers"]}
+    states = blockers["pagination_completeness_unverified"]["evidence"][
+        "event_streams_by_run"
+    ]
+    assert [item["state"] for item in states] == [
+        "provider_stream_complete",
+        "provider_stream_complete",
+    ]
+    assert all(
+        item["provider_semantics"] == "display_only_actions"
+        for item in states
+    )
+    assert "provider_event_pagination_evidence_incomplete" not in blockers
+    assert "pagination_completeness_unverified" in blockers
+    assert "canonical_activity_identity_unavailable" in blockers
+    assert result["requested_bounds_verified"] is False
+    assert result["history_complete"] is False
+    assert result["eligible_for_cost_basis"] is False
+    assert result["used_by_pnl"] is False
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "provider",
+        "scope",
+        "page_size",
+        "page_envelope",
+        "aggregate_count",
+        "digest",
+        "cursor_chain",
+        "time_order",
+        "query_bounds",
+        "termination",
+    ],
+)
+def test_event_pagination_validation_fails_closed_on_tampering(tamper):
+    stream = copy.deepcopy(_event_acquisition_stream(with_activity=True))
+    if tamper == "provider":
+        stream["provider"] = "other"
+    elif tamper == "scope":
+        stream["scope_kind"] = "bounded_interval"
+    elif tamper == "page_size":
+        stream["page_size"] = 101
+        stream["query_filters"]["limit"] = 101
+        for page in stream["pages"]:
+            page["requested_limit"] = 101
+    elif tamper == "page_envelope":
+        stream["page_count"] = 3
+    elif tamper == "aggregate_count":
+        stream["raw_count"] = 2
+    elif tamper == "digest":
+        stream["pages"][0]["response_digest"] = "not-a-digest"
+    elif tamper == "cursor_chain":
+        stream["pages"][1]["request_cursor"] = "46000000000001"
+    elif tamper == "time_order":
+        stream["pages"][0]["min_timestamp"] = "2026-06-01T13:00:00Z"
+    elif tamper == "query_bounds":
+        stream["query_filters"]["start_date"] += 1
+    elif tamper == "termination":
+        stream["termination_reason"] = "requested_start_crossed"
+
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                status="partial",
+                requested_surfaces=["transfers", "swaps"],
+                incomplete_surfaces=["transfers", "swaps"],
+                acquisition_streams=[_event_acquisition_stream()],
+            ),
+            _run(
+                2,
+                status="partial",
+                requested_surfaces=["transfers", "swaps"],
+                incomplete_surfaces=["transfers", "swaps"],
+                acquisition_streams=[stream],
+            ),
+        ],
+        target_run_id=2,
+    )
+
+    blocker = next(
+        item
+        for item in result["blockers"]
+        if item["code"] == "provider_event_pagination_evidence_incomplete"
+    )
+    assert blocker["run_ids"] == [2]
+    evidence = blocker["evidence"]["event_streams_by_run"]
+    assert [item["state"] for item in evidence] == [
+        "provider_stream_complete",
+        "incomplete",
+    ]
+
+
+def test_event_stream_requires_display_actions_to_remain_incomplete_at_run_level():
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                status="partial",
+                requested_surfaces=["transfers", "swaps"],
+                incomplete_surfaces=["transfers", "swaps"],
+                acquisition_streams=[_event_acquisition_stream()],
+            ),
+            _run(
+                2,
+                requested_surfaces=["transfers", "swaps"],
+                incomplete_surfaces=["transfers"],
+                acquisition_streams=[_event_acquisition_stream()],
+            ),
+        ],
+        target_run_id=2,
+    )
+
+    blocker = next(
+        item
+        for item in result["blockers"]
+        if item["code"] == "provider_event_pagination_evidence_incomplete"
+    )
+    assert blocker["run_ids"] == [2]
+    assert blocker["evidence"]["event_streams_by_run"][1]["state"] == "incomplete"
+
+
+def test_missing_event_stream_is_blocking_only_when_event_surfaces_were_requested():
+    event_requested = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                requested_surfaces=["transfers"],
+                incomplete_surfaces=["transfers"],
+            ),
+            _run(
+                2,
+                requested_surfaces=["transfers"],
+                incomplete_surfaces=["transfers"],
+            ),
+        ],
+        target_run_id=2,
+    )
+    transaction_only = assess_wallet_history_readiness(
+        [
+            _run(1, requested_surfaces=["transactions"]),
+            _run(2, requested_surfaces=["transactions"]),
+        ],
+        target_run_id=2,
+    )
+
+    event_blocker = next(
+        item
+        for item in event_requested["blockers"]
+        if item["code"] == "provider_event_pagination_evidence_incomplete"
+    )
+    assert event_blocker["run_ids"] == [1, 2]
+    assert [
+        item["state"]
+        for item in event_blocker["evidence"]["event_streams_by_run"]
+    ] == ["missing", "missing"]
+    assert (
+        "provider_event_pagination_evidence_incomplete"
+        not in _blocker_codes(transaction_only)
+    )
+
+
 def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
     client, session_factory = db_client
     transaction = _transaction("shared", fee_ton="0.01")
@@ -986,7 +1318,7 @@ def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["analysis_version"] == "wallet_history_readiness_v0.22.4"
+    assert body["analysis_version"] == "wallet_history_readiness_v0.22.5"
     assert body["run_ids"] == [first_id, target_id]
     assert body["target_run_id"] == target_id
     assert next(scope for scope in body["runs"] if scope["is_target"])[

@@ -33,6 +33,8 @@ from config import (
 
 _HTTP_TIMEOUT = 10
 _MAX_TRANSACTION_PAGE_LIMIT = 1000
+_MAX_EVENT_PAGE_LIMIT = 100
+_MAX_EVENT_DATE = 2114380800
 _MAX_LOGICAL_TIME = 2**64 - 1
 _LOGICAL_TIME_RE = re.compile(r"^[1-9][0-9]{0,19}$")
 _TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
@@ -58,6 +60,8 @@ class TonapiAdapter:
         if not base_url or parsed.scheme not in ("http", "https"):
             return None
         if not parsed.netloc:
+            return None
+        if self.settings.tonapi_api_key and parsed.scheme != "https":
             return None
         provider_network = tonapi_base_url_network(base_url)
         if (
@@ -169,8 +173,6 @@ class TonapiAdapter:
             "Accept": "application/json",
             "User-Agent": "ton-check/0.7.0",
         }
-        if self.settings.tonapi_api_key:
-            headers["Authorization"] = f"Bearer {self.settings.tonapi_api_key}"
         if body is not None:
             data = json.dumps(body).encode("utf-8")
             headers["Content-Type"] = "application/json"
@@ -181,6 +183,13 @@ class TonapiAdapter:
             headers=headers,
             method=method.upper(),
         )
+        if self.settings.tonapi_api_key:
+            # Unredirected headers are sent to the configured origin but are
+            # deliberately omitted when urllib constructs a redirect request.
+            request.add_unredirected_header(
+                "Authorization",
+                f"Bearer {self.settings.tonapi_api_key}",
+            )
 
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -478,6 +487,167 @@ class TonapiAdapter:
             message=message,
         )
 
+    # -- Account event pages and derived previews -----------------------
+
+    def get_account_events_page(
+        self,
+        account_address: str,
+        limit: int = 20,
+        before_lt: Optional[int | str] = None,
+        start_date: Optional[int] = None,
+        end_date: Optional[int] = None,
+    ) -> ProviderResult:
+        """Fetch one strict page of display-oriented account events.
+
+        Events and actions are provider-derived UI abstractions. Page evidence
+        can describe TonAPI acquisition only; it is never authoritative
+        protocol logic, ownership proof, cost basis, or PnL.
+        """
+        account = self._optional_string(account_address)
+        if account is None:
+            return self._provider_error("TonAPI account address is required.")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _MAX_EVENT_PAGE_LIMIT
+        ):
+            return self._provider_error(
+                "TonAPI account event page limit must be between 1 and 100."
+            )
+
+        request_before_lt = None
+        if before_lt is not None:
+            request_before_lt = self._strict_logical_time(before_lt)
+            if request_before_lt is None:
+                return self._provider_error(
+                    "TonAPI account event before_lt must be a canonical "
+                    "decimal logical time from 1 through 2^64-1."
+                )
+        request_start = self._strict_event_date(start_date)
+        request_end = self._strict_event_date(end_date)
+        if start_date is not None and request_start is None:
+            return self._provider_error(
+                "TonAPI account event start_date is outside the supported range."
+            )
+        if end_date is not None and request_end is None:
+            return self._provider_error(
+                "TonAPI account event end_date is outside the supported range."
+            )
+        if (
+            request_start is not None
+            and request_end is not None
+            and request_start > request_end
+        ):
+            return self._provider_error(
+                "TonAPI account event start_date must not exceed end_date."
+            )
+
+        if self.settings.is_mock:
+            return ProviderResult.success(
+                {
+                    "wallet_address": account,
+                    "requested_limit": limit,
+                    "request_before_lt": request_before_lt,
+                    "request_start_date": request_start,
+                    "request_end_date": request_end,
+                    "raw_count": 0,
+                    "min_logical_time": None,
+                    "max_logical_time": None,
+                    "next_before_lt": None,
+                    "events": [],
+                },
+                source="mock",
+                message="Mock mode: TonAPI is not actively queried.",
+            )
+
+        encoded_account = urllib.parse.quote(account, safe="")
+        result = self.fetch_json(
+            f"/v2/accounts/{encoded_account}/events",
+            query={
+                "limit": limit,
+                "before_lt": request_before_lt,
+                "start_date": request_start,
+                "end_date": request_end,
+                "sort_order": "desc",
+            },
+        )
+        if not result.ok:
+            return result
+
+        try:
+            page = self.normalize_account_events_page_response(result.data)
+            events = page["events"]
+            if len(events) > limit:
+                raise ValueError("event page returned more rows than requested")
+            logical_times = [int(event["lt"], 10) for event in events]
+            timestamps = [event["timestamp"] for event in events]
+            if any(
+                previous <= current
+                for previous, current in zip(logical_times, logical_times[1:])
+            ):
+                raise ValueError(
+                    "event logical times must be strictly descending"
+                )
+            if any(
+                previous < current
+                for previous, current in zip(timestamps, timestamps[1:])
+            ):
+                raise ValueError(
+                    "event timestamps must follow logical-time order"
+                )
+            if (
+                request_before_lt is not None
+                and logical_times
+                and max(logical_times) >= int(request_before_lt, 10)
+            ):
+                raise ValueError(
+                    "event page did not advance below its before_lt cursor"
+                )
+            min_logical_time = (
+                str(min(logical_times)) if logical_times else None
+            )
+            max_logical_time = (
+                str(max(logical_times)) if logical_times else None
+            )
+            next_before_lt = page["next_before_lt"]
+            if events and next_before_lt != min_logical_time:
+                raise ValueError(
+                    "event page next_from must equal minimum logical time"
+                )
+            if not events and next_before_lt is not None:
+                raise ValueError("empty event page must terminate its cursor")
+        except (KeyError, TypeError, ValueError) as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_PROTOCOL,
+                self._sanitize_diagnostic(
+                    "TonAPI response had an unexpected structure for account "
+                    f"event page: {exc}."
+                )
+                or "TonAPI account event page protocol error.",
+                source="real",
+            )
+
+        return ProviderResult.success(
+            {
+                "wallet_address": account,
+                "requested_limit": limit,
+                "request_before_lt": request_before_lt,
+                "request_start_date": request_start,
+                "request_end_date": request_end,
+                "raw_count": len(events),
+                "min_logical_time": min_logical_time,
+                "max_logical_time": max_logical_time,
+                "next_before_lt": next_before_lt,
+                "events": events,
+            },
+            source="real",
+            message=(
+                "TonAPI account event page fetched for display-oriented "
+                "provider evidence only. Event actions can change and must "
+                "not be used as authoritative protocol logic."
+            ),
+        )
+
     # -- Transfers preview (events) -------------------------------------
 
     def get_account_events_preview(
@@ -491,47 +661,40 @@ class TonapiAdapter:
         transfers. Other action types (swaps, NFT, contract calls) are not
         transfers. Transfer direction is best-effort from the event addresses.
         """
-        account = self._optional_string(account_address)
-        if account is None:
-            return self._provider_error("TonAPI account address is required.")
-        if limit < 1:
-            return self._provider_error(
-                "TonAPI events preview limit must be at least 1."
-            )
-
-        if self.settings.is_mock:
-            return ProviderResult.success(
-                {
-                    "wallet_address": account,
-                    "transfers": [],
-                    "preview_count": 0,
-                    "total_transfers": 0,
-                    "total_events": 0,
-                },
-                source="mock",
-                message="Mock mode: TonAPI is not actively queried.",
-            )
-
-        encoded_account = urllib.parse.quote(account, safe="")
-        result = self.fetch_json(
-            f"/v2/accounts/{encoded_account}/events",
-            query={"limit": limit},
+        page = self.get_account_events_page(
+            account_address,
+            limit=limit,
         )
-        if not result.ok:
-            return result
-
+        if not page.ok:
+            return page
+        data = page.data if isinstance(page.data, dict) else {}
+        account = data.get("wallet_address")
+        events = data.get("events") if isinstance(data.get("events"), list) else []
         try:
             transfers = self.normalize_account_events_response(
-                result.data,
-                account,
+                {"events": events},
+                account or "",
             )
         except ValueError as exc:
-            return self._provider_error(
-                f"TonAPI response had an unexpected structure: {exc}."
+            return ProviderResult.failure(
+                ERROR_PROVIDER_PROTOCOL,
+                self._sanitize_diagnostic(
+                    f"TonAPI event action normalization failed: {exc}."
+                )
+                or "TonAPI event action protocol error.",
+                source=page.source,
             )
-
-        events = result.data.get("events") if isinstance(result.data, dict) else None
-        total_events = len(events) if isinstance(events, list) else len(transfers)
+        total_events = data.get("raw_count", len(events))
+        message = (
+            "Mock mode: TonAPI is not actively queried."
+            if page.source == "mock"
+            else (
+                "TonAPI account transfer history fetched from events. Only "
+                "TON and jetton transfer actions are represented and "
+                "direction is best-effort; this is not DEX swap "
+                "reconstruction, PnL, or ownership proof."
+            )
+        )
         return ProviderResult.success(
             {
                 "wallet_address": account,
@@ -540,13 +703,8 @@ class TonapiAdapter:
                 "total_transfers": len(transfers),
                 "total_events": total_events,
             },
-            source="real",
-            message=(
-                "TonAPI account transfer history fetched from events. Only TON "
-                "and jetton transfer actions are represented and direction is "
-                "best-effort; this is not DEX swap reconstruction, PnL, or "
-                "ownership proof."
-            ),
+            source=page.source,
+            message=message,
         )
 
     # -- Swaps preview (events) -----------------------------------------
@@ -561,44 +719,39 @@ class TonapiAdapter:
         Only ``JettonSwap`` actions are represented as swaps. USD valuation is
         not computed. This is not PnL or ownership proof.
         """
-        account = self._optional_string(account_address)
-        if account is None:
-            return self._provider_error("TonAPI account address is required.")
-        if limit < 1:
-            return self._provider_error(
-                "TonAPI swaps preview limit must be at least 1."
-            )
-
-        if self.settings.is_mock:
-            return ProviderResult.success(
-                {
-                    "wallet_address": account,
-                    "swaps": [],
-                    "preview_count": 0,
-                    "total_swaps": 0,
-                    "total_events": 0,
-                },
-                source="mock",
-                message="Mock mode: TonAPI is not actively queried.",
-            )
-
-        encoded_account = urllib.parse.quote(account, safe="")
-        result = self.fetch_json(
-            f"/v2/accounts/{encoded_account}/events",
-            query={"limit": limit},
+        page = self.get_account_events_page(
+            account_address,
+            limit=limit,
         )
-        if not result.ok:
-            return result
-
+        if not page.ok:
+            return page
+        data = page.data if isinstance(page.data, dict) else {}
+        account = data.get("wallet_address")
+        events = data.get("events") if isinstance(data.get("events"), list) else []
         try:
-            swaps = self.normalize_account_swaps_response(result.data, account)
-        except ValueError as exc:
-            return self._provider_error(
-                f"TonAPI response had an unexpected structure: {exc}."
+            swaps = self.normalize_account_swaps_response(
+                {"events": events},
+                account or "",
             )
-
-        events = result.data.get("events") if isinstance(result.data, dict) else None
-        total_events = len(events) if isinstance(events, list) else len(swaps)
+        except ValueError as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_PROTOCOL,
+                self._sanitize_diagnostic(
+                    f"TonAPI event action normalization failed: {exc}."
+                )
+                or "TonAPI event action protocol error.",
+                source=page.source,
+            )
+        total_events = data.get("raw_count", len(events))
+        message = (
+            "Mock mode: TonAPI is not actively queried."
+            if page.source == "mock"
+            else (
+                "TonAPI account DEX swaps fetched from events. Only "
+                "JettonSwap actions are represented and USD valuation is not "
+                "computed; this is not PnL or ownership proof."
+            )
+        )
         return ProviderResult.success(
             {
                 "wallet_address": account,
@@ -607,12 +760,8 @@ class TonapiAdapter:
                 "total_swaps": len(swaps),
                 "total_events": total_events,
             },
-            source="real",
-            message=(
-                "TonAPI account DEX swaps fetched from events. Only JettonSwap "
-                "actions are represented and USD valuation is not computed; "
-                "this is not PnL or ownership proof."
-            ),
+            source=page.source,
+            message=message,
         )
 
     # -- Rates (prices) preview -----------------------------------------
@@ -903,6 +1052,78 @@ class TonapiAdapter:
         return transfers
 
     @classmethod
+    def normalize_account_events_page_response(cls, payload: Any) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("response must be an object")
+        events = payload.get("events")
+        if not isinstance(events, list):
+            raise ValueError("events must be a list")
+        if "next_from" not in payload:
+            raise ValueError("event page is missing next_from")
+
+        normalized_events: list[dict] = []
+        seen_event_ids: set[str] = set()
+        for index, event in enumerate(events):
+            if not isinstance(event, dict):
+                raise ValueError(f"event {index} must be an object")
+            event_id = event.get("event_id")
+            if (
+                not isinstance(event_id, str)
+                or event_id != event_id.strip()
+                or _TRANSACTION_HASH_RE.fullmatch(event_id) is None
+            ):
+                raise ValueError(
+                    f"event {index} has invalid canonical event_id"
+                )
+            canonical_event_id = event_id.lower()
+            if canonical_event_id in seen_event_ids:
+                raise ValueError(
+                    f"event {index} reuses an event_id inside one page"
+                )
+            seen_event_ids.add(canonical_event_id)
+            logical_time = cls._strict_logical_time(event.get("lt"))
+            if logical_time is None:
+                raise ValueError(f"event {index} has invalid logical time")
+            timestamp = cls._strict_event_date(event.get("timestamp"))
+            if timestamp is None:
+                raise ValueError(f"event {index} has invalid timestamp")
+            actions = event.get("actions")
+            if not isinstance(actions, list) or any(
+                not isinstance(action, dict)
+                or not isinstance(action.get("type"), str)
+                or not action["type"].strip()
+                for action in actions
+            ):
+                raise ValueError(f"event {index} has invalid actions")
+            in_progress = event.get("in_progress")
+            if not isinstance(in_progress, bool):
+                raise ValueError(f"event {index} has invalid in_progress state")
+            normalized = dict(event)
+            normalized["event_id"] = event_id
+            normalized["lt"] = logical_time
+            normalized["timestamp"] = timestamp
+            normalized["actions"] = actions
+            normalized["in_progress"] = in_progress
+            normalized_events.append(normalized)
+
+        raw_next = payload.get("next_from")
+        terminal_zero = (
+            raw_next is None
+            or (type(raw_next) is int and raw_next == 0)
+            or (type(raw_next) is str and raw_next == "0")
+        )
+        if not normalized_events and terminal_zero:
+            next_before_lt = None
+        else:
+            next_before_lt = cls._strict_logical_time(raw_next)
+            if next_before_lt is None:
+                raise ValueError("event page has invalid next_from")
+        return {
+            "events": normalized_events,
+            "next_before_lt": next_before_lt,
+        }
+
+    @classmethod
     def normalize_event_transfer(
         cls,
         detail: dict,
@@ -1172,6 +1393,24 @@ class TonapiAdapter:
         if int(value, 10) > _MAX_LOGICAL_TIME:
             return None
         return value
+
+    @staticmethod
+    def _strict_event_date(value: Any) -> int | None:
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            parsed = value
+        elif (
+            isinstance(value, str)
+            and value.isascii()
+            and (value == "0" or (value.isdigit() and value[0] != "0"))
+        ):
+            parsed = int(value, 10)
+        else:
+            return None
+        if not 0 <= parsed <= _MAX_EVENT_DATE:
+            return None
+        return parsed
 
     def _sanitize_diagnostic(self, value: Any) -> str | None:
         text = self._optional_string(value)

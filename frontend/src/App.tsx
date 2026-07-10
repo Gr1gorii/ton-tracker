@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.4 PAGINATION EVIDENCE";
+const RELEASE_LABEL = "v0.22.5 EVENT PAGINATION";
 
 const navItems = [
   "DASHBOARD",
@@ -991,7 +991,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="History readiness"
-            text="v0.22.4 can prove completion only for an individual bounded low-level transaction stream. Transfers, swaps, balances, and jettons still lack equivalent complete acquisition evidence, so full wallet history and cost basis remain blocked."
+            text="v0.22.5 records bounded pagination for low-level transactions and the shared TonAPI account-event display stream. A complete event page chain does not make derived transfers or swaps authoritative, so full wallet history and cost basis remain blocked."
           />
           <ReleaseReadinessItem
             tone="ready"

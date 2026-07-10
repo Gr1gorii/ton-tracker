@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from adapters.wallet_activity import (
     BitqueryWalletActivityScaffoldAdapter,
     MockWalletActivityAdapter,
@@ -45,15 +47,54 @@ def _settings(
 def _request(
     surfaces=None,
     environment_data_mode: str = "mock",
+    *,
+    bounded: bool = False,
 ) -> WalletActivityAdapterRequest:
+    resolved_start = (
+        datetime(2024, 6, 1, tzinfo=timezone.utc) if bounded else None
+    )
+    resolved_end = (
+        datetime(2024, 6, 2, tzinfo=timezone.utc) if bounded else None
+    )
     return WalletActivityAdapterRequest(
         wallet_address="EQwallet",
-        time_window="24h",
-        custom_start=None,
-        custom_end=None,
+        time_window="custom" if bounded else "24h",
+        custom_start="2024-06-01T00:00:00Z" if bounded else None,
+        custom_end="2024-06-02T00:00:00Z" if bounded else None,
         surfaces=surfaces
         or ["transfers", "transactions", "swaps", "balances", "jettons"],
         environment_data_mode=environment_data_mode,
+        resolved_start=resolved_start,
+        resolved_end=resolved_end,
+    )
+
+
+def _event_page(
+    account_address: str,
+    limit: int,
+    before_lt: str | None,
+    start_date: int | None,
+    end_date: int | None,
+    events: list[dict],
+) -> ProviderResult:
+    logical_times = [int(event["lt"], 10) for event in events]
+    minimum = str(min(logical_times)) if logical_times else None
+    maximum = str(max(logical_times)) if logical_times else None
+    return ProviderResult.success(
+        {
+            "wallet_address": account_address,
+            "requested_limit": limit,
+            "request_before_lt": before_lt,
+            "request_start_date": start_date,
+            "request_end_date": end_date,
+            "raw_count": len(events),
+            "min_logical_time": minimum,
+            "max_logical_time": maximum,
+            "next_before_lt": minimum,
+            "events": events,
+        },
+        source="real",
+        message="TonAPI account event page fetched for display evidence.",
     )
 
 
@@ -199,7 +240,7 @@ def test_guarded_tonapi_live_adapter_ingests_jetton_snapshots(monkeypatch):
     assert result.balances[0].source_status == "live"
     assert result.transfers == []
     assert any(
-        "DEX swaps from events only" in warning.message
+        "shared bounded account-event stream" in warning.message
         for warning in result.warnings
     )
 
@@ -361,7 +402,7 @@ def test_guarded_tonapi_live_adapter_ingests_transaction_history(monkeypatch):
     assert result.transactions[0].raw["surface"] == "transactions"
     assert result.transactions[1].success == "failed"
     assert any(
-        "account-level evidence" in warning.message
+        "mutable display-oriented interpretations" in warning.message
         for warning in result.warnings
     )
 
@@ -396,71 +437,85 @@ def test_guarded_tonapi_live_adapter_transactions_error_returns_no_rows(monkeypa
 
 
 def test_guarded_tonapi_live_adapter_ingests_transfer_history(monkeypatch):
-    def fake_get_account_events_preview(self, account_address, limit):
-        return ProviderResult.success(
+    calls: list[str | None] = []
+    event = {
+        "event_id": "11" * 32,
+        "timestamp": 1717236000,
+        "lt": "46000000000001",
+        "in_progress": False,
+        "actions": [
             {
-                "wallet_address": account_address,
-                "transfers": [
-                    {
-                        "event_id": "evt1",
-                        "utime": 1717236000,
-                        "lt": "46000000000001",
-                        "action_type": "TonTransfer",
-                        "asset": "TON",
-                        "raw_amount": "2500000000",
-                        "decimals": 9,
-                        "direction": "out",
-                        "counterparty": "EQdest",
-                        "sender": "EQwallet",
-                        "recipient": "EQdest",
-                        "jetton_address": None,
-                        "jetton_symbol": None,
-                        "status": "ok",
-                        "source": "tonapi",
-                    },
-                    {
-                        "event_id": "evt1",
-                        "utime": 1717236000,
-                        "lt": "46000000000001",
-                        "action_type": "JettonTransfer",
-                        "asset": "EJT",
-                        "raw_amount": "123450000",
-                        "decimals": 6,
-                        "direction": "in",
-                        "counterparty": "EQsource",
-                        "sender": "EQsource",
-                        "recipient": "EQwallet",
-                        "jetton_address": "EQjetton",
-                        "jetton_symbol": "EJT",
-                        "status": "ok",
-                        "source": "tonapi",
-                    },
-                ],
-                "preview_count": 2,
-                "total_transfers": 2,
-                "total_events": 1,
+                "type": "TonTransfer",
+                "status": "ok",
+                "TonTransfer": {
+                    "amount": "2500000000",
+                    "sender": {"address": "EQwallet"},
+                    "recipient": {"address": "EQdest"},
+                },
             },
-            source="real",
-            message="TonAPI account transfer history fetched from events.",
+            {
+                "type": "JettonTransfer",
+                "status": "ok",
+                "JettonTransfer": {
+                    "amount": "123450000",
+                    "sender": {"address": "EQsource"},
+                    "recipient": {"address": "EQwallet"},
+                    "jetton": {
+                        "address": "EQjetton",
+                        "symbol": "EJT",
+                        "decimals": 6,
+                    },
+                },
+            },
+        ],
+    }
+
+    def fake_get_account_events_page(
+        self,
+        account_address,
+        limit,
+        before_lt=None,
+        start_date=None,
+        end_date=None,
+    ):
+        calls.append(before_lt)
+        assert (start_date, end_date) == (1717200000, 1717286400)
+        rows = [event] if before_lt is None else []
+        return _event_page(
+            account_address,
+            limit,
+            before_lt,
+            start_date,
+            end_date,
+            rows,
         )
 
     monkeypatch.setattr(
-        "adapters.tonapi.TonapiAdapter.get_account_events_preview",
-        fake_get_account_events_preview,
+        "adapters.tonapi.TonapiAdapter.get_account_events_page",
+        fake_get_account_events_page,
     )
     adapter = build_wallet_activity_adapter(
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["transfers"], "real"))
+    result = adapter.ingest(_request(["transfers"], "real", bounded=True))
 
-    assert result.status == "success"
+    assert calls == [None, "46000000000001"]
+    assert result.status == "partial"
     assert result.data_mode == "real"
     assert result.unavailable_surfaces == []
+    assert result.incomplete_surfaces == ["transfers"]
     assert result.provider_evidence[0].provider == "tonapi_wallet_activity_live"
-    assert result.provider_evidence[0].source_status == "live"
-    assert result.provider_evidence[0].raw_count == 2
+    assert result.provider_evidence[0].source_status == "limited"
+    assert result.provider_evidence[0].raw_count == 1
     assert result.provider_evidence[0].normalized_count == 2
+    assert len(result.acquisition_streams) == 1
+    stream = result.acquisition_streams[0]
+    assert stream.stream_key == "account_events"
+    assert stream.completion_state == "complete"
+    assert stream.termination_reason == "provider_terminal"
+    assert stream.bounds_verified is True
+    assert len(stream.pages) == 2
     assert result.balances == []
     assert [t.asset for t in result.transfers] == ["TON", "EJT"]
     assert result.transfers[0].direction == "out"
@@ -473,13 +528,20 @@ def test_guarded_tonapi_live_adapter_ingests_transfer_history(monkeypatch):
     assert result.transfers[1].asset == "EJT"
     assert result.transfers[1].amount == "123.450000000000000000"
     assert any(
-        "derived from account events" in warning.message
+        "display stream" in warning.message
         for warning in result.warnings
     )
 
 
 def test_guarded_tonapi_live_adapter_transfers_error_returns_no_rows(monkeypatch):
-    def fake_get_account_events_preview(self, account_address, limit):
+    def fake_get_account_events_page(
+        self,
+        account_address,
+        limit,
+        before_lt=None,
+        start_date=None,
+        end_date=None,
+    ):
         return ProviderResult.failure(
             "provider_error",
             "TonAPI network error: timeout.",
@@ -487,72 +549,101 @@ def test_guarded_tonapi_live_adapter_transfers_error_returns_no_rows(monkeypatch
         )
 
     monkeypatch.setattr(
-        "adapters.tonapi.TonapiAdapter.get_account_events_preview",
-        fake_get_account_events_preview,
+        "adapters.tonapi.TonapiAdapter.get_account_events_page",
+        fake_get_account_events_page,
     )
     adapter = build_wallet_activity_adapter(
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["transfers"], "real"))
+    result = adapter.ingest(_request(["transfers"], "real", bounded=True))
 
     assert result.status == "error"
     assert result.provider_evidence[0].source_status == "error"
     assert result.provider_evidence[0].normalized_count == 0
     assert result.transfers == []
     assert result.unavailable_surfaces == ["transfers"]
+    assert result.incomplete_surfaces == ["transfers"]
+    assert len(result.acquisition_streams) == 1
+    assert result.acquisition_streams[0].stream_key == "account_events"
+    assert result.acquisition_streams[0].completion_state == "error"
     assert any(
-        "TonAPI transfer-history warning" in warning.message
+        "account event pagination is incomplete" in warning.message
         for warning in result.warnings
     )
 
 
 def test_guarded_tonapi_live_adapter_ingests_dex_swaps(monkeypatch):
-    def fake_get_account_swaps_preview(self, account_address, limit):
-        return ProviderResult.success(
+    calls: list[str | None] = []
+    event = {
+        "event_id": "22" * 32,
+        "timestamp": 1717236000,
+        "lt": "46000000000002",
+        "in_progress": False,
+        "actions": [
             {
-                "wallet_address": account_address,
-                "swaps": [
-                    {
-                        "event_id": "evtswap",
-                        "utime": 1717236000,
-                        "lt": "46000000000002",
-                        "dex": "stonfi",
-                        "token_in": "TON",
-                        "raw_amount_in": "5000000000",
-                        "decimals_in": 9,
-                        "token_out": "EJT",
-                        "raw_amount_out": "123450000",
-                        "decimals_out": 6,
-                        "router": "EQrouter",
-                        "status": "ok",
-                        "source": "tonapi",
-                    }
-                ],
-                "preview_count": 1,
-                "total_swaps": 1,
-                "total_events": 1,
-            },
-            source="real",
-            message="TonAPI account DEX swaps fetched from events.",
+                "type": "JettonSwap",
+                "status": "ok",
+                "JettonSwap": {
+                    "dex": "stonfi",
+                    "ton_in": "5000000000",
+                    "amount_out": "123450000",
+                    "jetton_master_out": {
+                        "address": "EQjetton",
+                        "symbol": "EJT",
+                        "decimals": 6,
+                    },
+                    "router": {"address": "EQrouter"},
+                },
+            }
+        ],
+    }
+
+    def fake_get_account_events_page(
+        self,
+        account_address,
+        limit,
+        before_lt=None,
+        start_date=None,
+        end_date=None,
+    ):
+        calls.append(before_lt)
+        assert (start_date, end_date) == (1717200000, 1717286400)
+        rows = [event] if before_lt is None else []
+        return _event_page(
+            account_address,
+            limit,
+            before_lt,
+            start_date,
+            end_date,
+            rows,
         )
 
     monkeypatch.setattr(
-        "adapters.tonapi.TonapiAdapter.get_account_swaps_preview",
-        fake_get_account_swaps_preview,
+        "adapters.tonapi.TonapiAdapter.get_account_events_page",
+        fake_get_account_events_page,
     )
     adapter = build_wallet_activity_adapter(
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["swaps"], "real"))
+    result = adapter.ingest(_request(["swaps"], "real", bounded=True))
 
-    assert result.status == "success"
+    assert calls == [None, "46000000000002"]
+    assert result.status == "partial"
     assert result.data_mode == "real"
     assert result.unavailable_surfaces == []
-    assert result.provider_evidence[0].source_status == "live"
+    assert result.incomplete_surfaces == ["swaps"]
+    assert result.provider_evidence[0].source_status == "limited"
     assert result.provider_evidence[0].raw_count == 1
     assert result.provider_evidence[0].normalized_count == 1
+    assert len(result.acquisition_streams) == 1
+    stream = result.acquisition_streams[0]
+    assert stream.stream_key == "account_events"
+    assert stream.completion_state == "complete"
+    assert stream.termination_reason == "provider_terminal"
+    assert stream.bounds_verified is True
+    assert len(stream.pages) == 2
     assert len(result.swaps) == 1
     swap = result.swaps[0]
     assert swap.dex == "stonfi"
@@ -565,13 +656,20 @@ def test_guarded_tonapi_live_adapter_ingests_dex_swaps(monkeypatch):
     assert swap.source_status == "live"
     assert swap.raw["surface"] == "swaps"
     assert any(
-        "DEX swaps are parsed from account events" in warning.message
+        "display stream" in warning.message
         for warning in result.warnings
     )
 
 
 def test_guarded_tonapi_live_adapter_swaps_error_returns_no_rows(monkeypatch):
-    def fake_get_account_swaps_preview(self, account_address, limit):
+    def fake_get_account_events_page(
+        self,
+        account_address,
+        limit,
+        before_lt=None,
+        start_date=None,
+        end_date=None,
+    ):
         return ProviderResult.failure(
             "provider_error",
             "TonAPI network error: timeout.",
@@ -579,22 +677,26 @@ def test_guarded_tonapi_live_adapter_swaps_error_returns_no_rows(monkeypatch):
         )
 
     monkeypatch.setattr(
-        "adapters.tonapi.TonapiAdapter.get_account_swaps_preview",
-        fake_get_account_swaps_preview,
+        "adapters.tonapi.TonapiAdapter.get_account_events_page",
+        fake_get_account_events_page,
     )
     adapter = build_wallet_activity_adapter(
         _settings("real", "tonapi", wallet_activity_live_enabled=True)
     )
 
-    result = adapter.ingest(_request(["swaps"], "real"))
+    result = adapter.ingest(_request(["swaps"], "real", bounded=True))
 
     assert result.status == "error"
     assert result.provider_evidence[0].source_status == "error"
     assert result.provider_evidence[0].normalized_count == 0
     assert result.swaps == []
     assert result.unavailable_surfaces == ["swaps"]
+    assert result.incomplete_surfaces == ["swaps"]
+    assert len(result.acquisition_streams) == 1
+    assert result.acquisition_streams[0].stream_key == "account_events"
+    assert result.acquisition_streams[0].completion_state == "error"
     assert any(
-        "TonAPI DEX swap warning" in warning.message
+        "account event pagination is incomplete" in warning.message
         for warning in result.warnings
     )
 
