@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.20.1 SWAP ADDRESSES";
+const RELEASE_LABEL = "v0.21.2 UNREALIZED";
 
 const navItems = [
   "DASHBOARD",
@@ -402,7 +402,9 @@ export default function App() {
               {providerBadge.label}
             </span>
             <span className="badge badge-real">RELEASE {RELEASE_LABEL}</span>
-            <span className="badge badge-provider">ENV MAINNET</span>
+            <span className="badge badge-provider">
+              ENV {dataMode === "real" ? "PROVIDER MODE" : "LOCAL MOCK"}
+            </span>
             <span className={sourceBadgeClass}>SOURCE {sourceLabel}</span>
           </div>
         </header>
@@ -642,9 +644,9 @@ export default function App() {
 
             <DashboardSection
               id="historical-prices"
-              eyebrow="Preview only — not cost basis"
+              eyebrow="Standalone price inspection"
               title="Historical prices"
-              description="Provider-reported historical rate points for one token. Preview and export scope only: points are not wired into cost-basis or PnL math, so Real PnL stays locked."
+              description="Inspect provider-reported historical rate points without mutating a run. PnL requests the same source only when historical enrichment is explicitly enabled."
             >
               <HistoricalPricesPreviewPanel />
             </DashboardSection>
@@ -974,12 +976,12 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Legacy analytics"
-            text="Buyers and PnL are not wired to ingestion runs yet; run exports, probabilistic cluster comparison, and evidence signals operate on stored runs only."
+            text="Legacy buyers and the top-level report remain separate from ingestion runs; run-scoped PnL, exports, probabilistic cluster comparison, and evidence signals operate on stored runs."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Ownership proof remains unavailable; cluster comparison stays probabilistic; unlocked Real PnL covers in-window realized swaps only and excludes unrealized valuation."
+            text="Ownership proof remains unavailable; cluster comparison stays probabilistic; unlocked Real PnL covers in-window realized swaps only, while spot-based unrealized valuation remains separate and informational."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -989,7 +991,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="PnL preview"
-            text="Stored runs expose a TON-denominated estimated PnL preview with after-fee figures and optional in-window cost-basis realized PnL; Real PnL unlocks per run only when all five evidence requirements are met, and partial calculations are never labeled Real PnL."
+            text="Stored runs expose after-fee flows, optional in-window realized PnL, and a separate spot-based unrealized snapshot; Real PnL unlocks per run only when all five evidence requirements are met."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1009,16 +1011,16 @@ function EvidenceColumn({
           <h2>Evidence & limitations</h2>
           <span className="badge badge-provider">VISIBLE SCOPE</span>
         </div>
-        <div className="evidence-group-label">Current data scope</div>
+        <div className="evidence-group-label">Current workspace scope</div>
         <EvidenceItem
           tone="warning"
-          title="Based only on account jetton data"
-          text="Uses jetton wallet states for this account."
+          title="Each result stays source-scoped"
+          text="Wallet ingestion uses stored activity rows; TonAPI preview cards remain jetton-only; STON.fi remains pool-only."
         />
         <EvidenceItem
           tone="info"
-          title="Can show provider preview rows"
-          text="Provider status, TonAPI jettons, lightweight jetton signals, and STON.fi pool previews."
+          title="Can show stored-run intelligence"
+          text="Activity rows, evidence signals, run-scoped PnL, probabilistic cluster comparison, provider previews, and explicit limitations."
         />
         <EvidenceItem
           tone="info"
@@ -1028,13 +1030,13 @@ function EvidenceColumn({
         <div className="evidence-group-label">Cannot show yet</div>
         <EvidenceItem
           tone="warning"
-          title="Not full wallet intelligence"
-          text="Does not include full wallet activities or behavior."
+          title="No full-history cost basis"
+          text="Real PnL is in-window realized only; acquisitions before the run can remain unavailable."
         />
         <EvidenceItem
           tone="warning"
-          title="No transaction history, PnL, or swaps"
-          text="No transfers, swaps, or PnL calculations."
+          title="No ownership or intent proof"
+          text="Signals and cluster similarity are probabilistic evidence, never identity, intent, or ownership facts."
         />
         <EvidenceItem
           tone="warning"

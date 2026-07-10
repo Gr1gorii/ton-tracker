@@ -563,8 +563,8 @@ class TonapiAdapter:
         """Fetch provider-reported historical rate points from TonAPI.
 
         ``token`` accepts ``"ton"`` or a jetton master address. Points are
-        provider-reported chart samples for preview only; they are not wired
-        into cost-basis or PnL math.
+        provider-reported chart samples used by standalone inspection and by
+        explicitly requested run-scoped PnL enrichment.
         """
         cleaned = self._optional_string(token)
         if not cleaned:
@@ -599,7 +599,7 @@ class TonapiAdapter:
             source="real",
             message=(
                 "TonAPI historical rate points fetched. Provider-reported "
-                "chart samples only; not wired into cost-basis or PnL math."
+                "chart samples; coverage may be sparse or stale."
             ),
         )
 
