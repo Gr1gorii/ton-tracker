@@ -23,6 +23,7 @@ import type {
   WalletBalanceSnapshotRecord,
   WalletClusterCompareResponse,
   WalletEvidenceSignalRecord,
+  WalletEventActionIdentityRecord,
   WalletIdentityRecord,
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
@@ -87,6 +88,7 @@ const CAN_SHOW = [
   "Transfers",
   "Transactions",
   "Network-scoped transaction identity",
+  "Provider-scoped event-action observation identity",
   "Transaction acquisition bounds and page evidence",
   "Swaps",
   "Balances",
@@ -97,7 +99,7 @@ const CAN_SHOW = [
 
 const CANNOT_SHOW = [
   "Full-history acquisition cost basis",
-  "Canonical transfer, swap-action, asset, and counterparty identity",
+  "Authoritative transfer, swap-action, asset, and counterparty identity",
   "Legacy buyers/report wiring",
   "Ownership proof",
 ];
@@ -2433,11 +2435,36 @@ function EmptyTable({ message }: { message: string }) {
   );
 }
 
+function EventActionIdentityCell({
+  identity,
+}: {
+  identity: WalletEventActionIdentityRecord | undefined;
+}) {
+  const scoped =
+    identity?.status === "provider_scoped" &&
+    identity.is_provider_observation_identity;
+  const actionLabel = scoped
+    ? `${identity?.action_type ?? "ACTION"} #${identity?.action_index ?? "?"}`
+    : "ID UNAVAILABLE";
+  return (
+    <td title={identity?.key ?? "No provider event-action observation identity"}>
+      <span
+        className={`source-badge ${scoped ? "source-real" : "source-unknown"}`}
+      >
+        {actionLabel}
+      </span>
+      <div className="muted small">
+        {identity?.network ?? "ton-unknown"} · provider observation only
+      </div>
+    </td>
+  );
+}
+
 function TransfersTable({ transfers }: { transfers: WalletTransferRecord[] }) {
   return (
     <TableBlock
       title="Transfers"
-      description="Incoming and outgoing TON or jetton movements from the ingestion run."
+      description="TonAPI rows can expose a provider-scoped event/LT/action-index coordinate. It identifies the stored observation, not an authoritative transfer or blockchain proof."
       count={transfers.length}
     >
       {transfers.length === 0 ? (
@@ -2447,7 +2474,8 @@ function TransfersTable({ transfers }: { transfers: WalletTransferRecord[] }) {
           <table className="data-table intelligence-table wallet-ingestion-table">
             <thead>
               <tr>
-                <th>Tx</th>
+                <th>Event ref</th>
+                <th>Identity</th>
                 <th>Time</th>
                 <th>Direction</th>
                 <th>Asset</th>
@@ -2458,8 +2486,16 @@ function TransfersTable({ transfers }: { transfers: WalletTransferRecord[] }) {
             </thead>
             <tbody>
               {transfers.map((item, index) => (
-                <tr key={`${item.tx_hash}:${index}`}>
+                <tr
+                  key={
+                    item.event_action_identity?.key ??
+                    `${item.tx_hash}:${index}`
+                  }
+                >
                   <td className="mono">{displayPreviewValue(item.tx_hash)}</td>
+                  <EventActionIdentityCell
+                    identity={item.event_action_identity}
+                  />
                   <td>{dateLabel(item.timestamp)}</td>
                   <td>
                     <span className="source-badge source-unknown">
@@ -2556,7 +2592,7 @@ function SwapsTable({ swaps }: { swaps: WalletSwapRecord[] }) {
   return (
     <TableBlock
       title="DEX swaps"
-      description="Swap rows are source-labeled and kept separate from legacy PnL."
+      description="Provider action coordinates can identify stored TonAPI observations. Actions remain mutable display interpretations and the identity is not authoritative trade history or a PnL key."
       count={swaps.length}
     >
       {swaps.length === 0 ? (
@@ -2566,7 +2602,8 @@ function SwapsTable({ swaps }: { swaps: WalletSwapRecord[] }) {
           <table className="data-table intelligence-table wallet-ingestion-table">
             <thead>
               <tr>
-                <th>Tx</th>
+                <th>Event ref</th>
+                <th>Identity</th>
                 <th>DEX</th>
                 <th className="num">In</th>
                 <th className="num">Out</th>
@@ -2576,8 +2613,16 @@ function SwapsTable({ swaps }: { swaps: WalletSwapRecord[] }) {
             </thead>
             <tbody>
               {swaps.map((item, index) => (
-                <tr key={`${item.tx_hash}:${index}`}>
+                <tr
+                  key={
+                    item.event_action_identity?.key ??
+                    `${item.tx_hash}:${index}`
+                  }
+                >
                   <td className="mono">{displayPreviewValue(item.tx_hash)}</td>
+                  <EventActionIdentityCell
+                    identity={item.event_action_identity}
+                  />
                   <td>{displayPreviewValue(item.dex)}</td>
                   <td className="num">
                     {displayPreviewValue(item.amount_in)} {displayPreviewValue(item.token_in)}

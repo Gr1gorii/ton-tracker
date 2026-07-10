@@ -1,10 +1,10 @@
-# TON Wallet Intelligence Dashboard — v0.22.5 EVENT PAGINATION
+# TON Wallet Intelligence Dashboard — v0.22.6 ACTION IDENTITY
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
-low-level TonAPI transactions retain their verifiable page chain, while v0.22.5
-adds one shared bounded account-event chain for transfer and swap display rows.
-It records provider acquisition without promoting mutable event actions to
-authoritative or complete wallet history.
+low-level TonAPI transactions and the v0.22.5 shared account-event page chain
+retain their bounded evidence contracts. v0.22.6 adds an exact provider-scoped
+event/action observation coordinate for derived transfer and swap rows without
+promoting mutable event actions to authoritative or complete wallet history.
 
 ## Objective
 
@@ -91,7 +91,25 @@ bounded provider page chain. That completion means only that TonAPI's recorded
 display stream terminated for the query. Derived actions remain mutable,
 non-authoritative, and listed in `incomplete_surfaces`.
 
-## Persistence contract
+## TonAPI response limits
+
+Every TonAPI JSON response is read and validated within explicit resource
+bounds:
+
+- maximum response body: 16 MiB;
+- maximum parsed JSON depth: 64;
+- maximum parsed JSON nodes: 200,000;
+- maximum JSON numeric token length: 128 characters, with non-finite and
+  non-standard numeric constants rejected.
+
+The structural check is iterative. Malformed JSON, invalid UTF-8, non-byte
+bodies, excessive body or structure size, and recursion/memory failures during
+parsing become sanitized provider protocol errors; transport/read failures keep
+their provider/network classification. None establishes stream completion or
+leaks a credential. Keyed requests still require HTTPS, and authorization is
+not forwarded through redirects.
+
+## Acquisition persistence contract
 
 Alembic revision `20260710_0004` adds two evidence tables:
 
@@ -127,13 +145,34 @@ key options, indexes, or unexpected rows fail closed. Downgrade is unsupported.
 Existing runs are not backfilled with guessed cursors or synthetic pages. Zero
 evidence rows accurately means that pagination evidence is unavailable.
 
-## Surface status in v0.22.5
+## Event-action observation persistence
+
+Alembic revision `20260710_0005` adds the following fields to both
+`wallet_transfers` and `wallet_swaps`:
+
+- identity status and contract version;
+- TON network and canonical run account;
+- canonical event id and event LT;
+- original zero-based action index and observed action type;
+- deterministic provider observation identity key.
+
+The migration verifies exact columns and indexes, rejects same-table or
+cross-table identity conflicts, and fails closed on malformed partial schema.
+It does not guess a missing action index. Consequently, rows created by
+v0.22.5 remain explicitly `unavailable`; their order, payload, type, or
+timestamp is insufficient evidence for a safe backfill.
+
+Runtime ingestion enforces one shared transfer/swap identity namespace in
+addition to the per-table unique indexes. Reinterpreting the same event/action
+coordinate as another surface is a conflict, not a new observation.
+
+## Surface status in v0.22.6
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
 | Low-level transactions | Strict descending TonAPI LT pagination within frozen bounds | Bounded transaction stream only |
-| Transfers | Shared strict account-events pagination, provider-derived actions | Provider chain can terminate; derived actions remain incomplete and non-authoritative |
-| Swaps | Same shared chain, `JettonSwap` interpretation | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
+| Transfers | Shared strict account-events pagination plus provider-scoped event/action observation identity | Provider chain can terminate; derived actions remain incomplete and non-authoritative |
+| Swaps | Same shared chain, `JettonSwap` interpretation, and shared observation-identity namespace | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
 | Jettons | Account jetton balance snapshot | Point-in-time snapshot, not history |
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
 
@@ -151,6 +190,27 @@ weaken or replace it.
 Within-run duplicate suppression during page acquisition is not cross-run
 deduplication. Original provider hash and LT values remain available for audit.
 
+The v0.22.6 `tonapi_event_action_obs_v1` identity is deliberately narrower than
+semantic activity identity. Its key coordinate is:
+
+```text
+tonapi_event_action_obs_v1
+| tonapi
+| network
+| canonical_account
+| canonical_event_id
+| canonical_event_lt
+| original_action_index
+```
+
+The action index is captured from the complete provider action array before
+unsupported actions are filtered. `action_type` and activity surface are not
+part of the key, so changed provider interpretation of one coordinate is
+reported as a conflict. The coordinate proves only that this application
+recorded one coherent TonAPI observation. It is not locally verified blockchain
+proof, authoritative activity identity, ownership proof, cost-basis evidence,
+or a PnL/deduplication key. The public flags state those limits explicitly.
+
 ## API behavior
 
 - `POST /api/wallets/ingest/preview` returns one page per requested paginated
@@ -159,10 +219,11 @@ deduplication. Original provider hash and LT values remain available for audit.
   rows, and both stream/page contracts. Partial or display-only surfaces remain
   visible through `incomplete_surfaces`.
 - `GET /api/wallets/ingest/{run_id}` reads the persisted evidence back without
-  recomputing or inferring legacy pages.
+  inferring legacy pages or missing action indexes.
 - `POST /api/wallets/history/readiness` reports per-run bounded transaction and
-  provider-event acquisition under `wallet_history_readiness_v0.22.5`, but
-  remains diagnostic.
+  provider-event acquisition plus event-action observation identity coverage,
+  groups, and conflicts under `wallet_history_readiness_v0.22.6`, but remains
+  diagnostic.
 
 One failing transaction page after earlier successful pages preserves the
 accepted rows and evidence while marking the stream incomplete. A failure before
@@ -172,6 +233,8 @@ surfaces do not convert an incomplete transaction stream into complete history.
 ## Non-goals
 
 - No authoritative transfer/swap completion from provider event actions.
+- No blockchain-verified or authoritative semantic activity identity from the
+  provider-scoped observation coordinate.
 - No jetton or native-balance history completion from snapshots.
 - No authoritative logic built from TonAPI high-level event actions.
 - No cross-run merge, interval stitching, or deduplication.
@@ -183,7 +246,7 @@ surfaces do not convert an incomplete transaction stream into complete history.
 
 ## Verification gates
 
-- Fresh, exact legacy, and interrupted SQLite migrations reach revision 0004
+- Fresh, exact legacy, and interrupted SQLite migrations reach revision 0005
   without changing pre-existing domain rows.
 - Malformed partial tables, indexes, foreign-key options, or unexpected evidence
   rows fail before further DDL.
@@ -197,15 +260,22 @@ surfaces do not convert an incomplete transaction stream into complete history.
   query/error evidence.
 - Keyed requests require HTTPS and never forward authorization through a
   redirect; lossy terminal cursor types fail closed.
+- Response tests cover the 16 MiB body limit, JSON depth 64, 200,000-node
+  limit, malformed JSON protocol classification, and deeply nested input.
+- Identity tests preserve original action indexes, reject incoherent tuples and
+  same/cross-table conflicts, and keep v0.22.5 rows unavailable.
+- Readiness tests cover provider-scoped identity coverage, groups, changed-
+  payload conflicts, and unchanged false global history/cost/PnL flags.
 - Full backend tests and frontend build pass.
 
-## Roadmap beyond v0.22.5
+## Roadmap beyond v0.22.6
 
 1. Acquire authoritative low-level transfer/trade evidence or reconstruct it
    from validated traces without treating provider display actions as immutable
    chain logic.
-2. Add canonical transfer, swap-action, jetton-asset, and counterparty
-   identities.
+2. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
+   and counterparty identity contracts; do not treat the provider observation
+   coordinate as a substitute.
 3. Prove interval continuity and gaps across selected runs, then implement
    explicit cross-run deduplication.
 4. Only after those gates, evaluate multi-run acquisition cost basis and PnL

@@ -218,6 +218,26 @@ class WalletIngestionPreviewResponse(BaseModel):
     message: str
 
 
+class WalletEventActionIdentityRecord(BaseModel):
+    status: Literal["provider_scoped", "unavailable"]
+    version: str
+    provider: str | None = None
+    network: Literal["ton-mainnet", "ton-testnet", "ton-unknown"]
+    account_canonical: str | None = None
+    event_id_canonical: str | None = None
+    logical_time_canonical: str | None = None
+    action_index: int | None = Field(default=None, ge=0, le=2**31 - 1)
+    action_type: str | None = None
+    key: str | None = None
+    is_provider_observation_identity: bool
+    is_blockchain_proof_verified: Literal[False] = False
+    is_authoritative_activity_identity: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+
+
 class WalletTransferRecord(BaseModel):
     tx_hash: str | None = None
     logical_time: str | None = None
@@ -228,6 +248,7 @@ class WalletTransferRecord(BaseModel):
     counterparty: str | None = None
     provider: str
     source_status: WalletSourceStatus
+    event_action_identity: WalletEventActionIdentityRecord
     raw: dict[str, Any] | None = None
 
 
@@ -271,6 +292,7 @@ class WalletSwapRecord(BaseModel):
     estimated_usd: str | None = None
     provider: str
     source_status: WalletSourceStatus
+    event_action_identity: WalletEventActionIdentityRecord
     raw: dict[str, Any] | None = None
 
 
@@ -430,11 +452,12 @@ class WalletHistoryIdentityGroupRecord(BaseModel):
     identity_type: Literal[
         "account_transaction",
         "transaction_hash",
+        "provider_event_action_observation",
         "event_action",
         "event_reference",
         "swap_fingerprint",
     ]
-    identity_strength: Literal["exact", "weak"]
+    identity_strength: Literal["exact", "provider_scoped", "weak"]
     run_ids: list[int]
     observation_count: int = Field(ge=2)
     distinct_payload_count: int = Field(ge=1)
@@ -455,9 +478,21 @@ class WalletHistoryCoverageRecord(BaseModel):
     ]
     overlapping_transaction_identity_groups: int = Field(ge=0)
     conflicting_transaction_identity_groups: int = Field(ge=0)
+    event_action_observations: int = Field(ge=0)
+    event_action_observations_with_provider_scoped_identity: int = Field(ge=0)
+    event_action_observations_with_unavailable_identity: int = Field(ge=0)
+    event_action_observations_with_invalid_identity_contract: int = Field(ge=0)
+    event_action_identity_coverage_state: Literal[
+        "not_observed", "complete", "incomplete"
+    ]
+    overlapping_provider_scoped_event_action_identity_groups: int = Field(ge=0)
+    conflicting_provider_scoped_event_action_identity_groups: int = Field(ge=0)
     swap_observations: int = Field(ge=0)
     swap_observations_with_exact_identity: int = Field(ge=0)
+    swap_observations_with_provider_scoped_identity: int = Field(ge=0)
+    swap_observations_with_weak_identity: int = Field(ge=0)
     overlapping_exact_swap_identity_groups: int = Field(ge=0)
+    overlapping_provider_scoped_swap_identity_groups: int = Field(ge=0)
     overlapping_weak_swap_identity_groups: int = Field(ge=0)
     conflicting_swap_identity_groups: int = Field(ge=0)
     non_ton_swap_legs: int = Field(ge=0)
@@ -479,7 +514,7 @@ class WalletHistoryBlockerRecord(BaseModel):
 
 
 class WalletHistoryReadinessResponse(BaseModel):
-    analysis_version: Literal["wallet_history_readiness_v0.22.5"]
+    analysis_version: Literal["wallet_history_readiness_v0.22.6"]
     target_run_id: int
     run_ids: list[int]
     wallet_address: str
@@ -495,8 +530,12 @@ class WalletHistoryReadinessResponse(BaseModel):
     swap_identity_groups: list[WalletHistoryIdentityGroupRecord] = Field(
         default_factory=list
     )
+    event_action_identity_groups: list[WalletHistoryIdentityGroupRecord] = Field(
+        default_factory=list
+    )
     transaction_identity_groups_total: int = Field(ge=0)
     swap_identity_groups_total: int = Field(ge=0)
+    event_action_identity_groups_total: int = Field(ge=0)
     evidence_groups_truncated: bool
     coverage: WalletHistoryCoverageRecord
     blockers: list[WalletHistoryBlockerRecord] = Field(default_factory=list)

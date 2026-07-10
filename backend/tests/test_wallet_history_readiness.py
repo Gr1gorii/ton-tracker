@@ -25,6 +25,10 @@ from models import (
     WalletTransfer,
 )
 from services.wallet_history_readiness import assess_wallet_history_readiness
+from services.ton_event_action_identity import (
+    TON_EVENT_ACTION_IDENTITY_VERSION,
+    unavailable_ton_event_action_identity,
+)
 
 
 BOUNCEABLE_WALLET = "EQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPrHF"
@@ -34,6 +38,8 @@ CANONICAL_WALLET = (
 )
 TRANSACTION_HASH = "ab" * 32
 TRANSACTION_LOGICAL_TIME = "46000000000001"
+EVENT_ID = "cd" * 32
+EVENT_LOGICAL_TIME = "46000000000002"
 
 
 def _scoped_wallet_identity(
@@ -82,6 +88,48 @@ def _exact_transaction_identity(
         "hash_canonical": canonical_hash,
         "key": key,
         "is_deduplication_identity": True,
+    }
+
+
+def _provider_event_action_identity(
+    *,
+    event_id: str = EVENT_ID,
+    logical_time: str = EVENT_LOGICAL_TIME,
+    action_index: int = 0,
+    action_type: str = "TonTransfer",
+    network: str = "ton-mainnet",
+    account: str = CANONICAL_WALLET,
+) -> dict[str, Any]:
+    canonical_event_id = event_id.lower()
+    key = "|".join(
+        (
+            TON_EVENT_ACTION_IDENTITY_VERSION,
+            "tonapi",
+            network,
+            account,
+            canonical_event_id,
+            logical_time,
+            str(action_index),
+        )
+    )
+    return {
+        "status": "provider_scoped",
+        "version": TON_EVENT_ACTION_IDENTITY_VERSION,
+        "provider": "tonapi",
+        "network": network,
+        "account_canonical": account,
+        "event_id_canonical": canonical_event_id,
+        "logical_time_canonical": logical_time,
+        "action_index": action_index,
+        "action_type": action_type,
+        "key": key,
+        "is_provider_observation_identity": True,
+        "is_blockchain_proof_verified": False,
+        "is_authoritative_activity_identity": False,
+        "is_ownership_proof": False,
+        "eligible_for_cost_basis": False,
+        "deduplication_applied": False,
+        "used_by_pnl": False,
     }
 
 
@@ -146,6 +194,46 @@ def _transaction(
     return record
 
 
+def _transfer(
+    event_id: str | None,
+    *,
+    logical_time: str | None = EVENT_LOGICAL_TIME,
+    timestamp: str | None = "2026-06-01T10:05:00Z",
+    asset: str = "TON",
+    amount: str | None = "1",
+    direction: str = "out",
+    counterparty: str | None = "EQcounterparty",
+    provider: str = "tonapi",
+    source_status: str = "live",
+    raw: dict[str, Any] | None = None,
+    event_action_identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if event_action_identity is not None:
+        raw = dict(raw or {})
+        raw.setdefault("provider", "tonapi")
+        raw.setdefault("surface", "transfers")
+        raw.setdefault("source", "tonapi")
+        raw.setdefault("event_id", event_id)
+        raw.setdefault("lt", logical_time)
+        raw.setdefault("action_index", event_action_identity.get("action_index"))
+        raw.setdefault("action_type", event_action_identity.get("action_type"))
+    record = {
+        "tx_hash": event_id,
+        "logical_time": logical_time,
+        "timestamp": timestamp,
+        "asset": asset,
+        "amount": amount,
+        "direction": direction,
+        "counterparty": counterparty,
+        "provider": provider,
+        "source_status": source_status,
+        "raw": raw,
+    }
+    if event_action_identity is not None:
+        record["event_action_identity"] = event_action_identity
+    return record
+
+
 def _swap(
     tx_hash: str | None,
     *,
@@ -161,8 +249,19 @@ def _swap(
     provider: str = "tonapi",
     source_status: str = "live",
     raw: dict[str, Any] | None = None,
+    logical_time: str = EVENT_LOGICAL_TIME,
+    event_action_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    if event_action_identity is not None:
+        raw = dict(raw or {})
+        raw.setdefault("provider", "tonapi")
+        raw.setdefault("surface", "swaps")
+        raw.setdefault("source", "tonapi")
+        raw.setdefault("event_id", tx_hash)
+        raw.setdefault("lt", logical_time)
+        raw.setdefault("action_index", event_action_identity.get("action_index"))
+        raw.setdefault("action_type", event_action_identity.get("action_type"))
+    record = {
         "tx_hash": tx_hash,
         "timestamp": timestamp,
         "dex": dex,
@@ -177,6 +276,9 @@ def _swap(
         "source_status": source_status,
         "raw": raw,
     }
+    if event_action_identity is not None:
+        record["event_action_identity"] = event_action_identity
+    return record
 
 
 def _run(
@@ -778,6 +880,343 @@ def test_transaction_identity_coverage_counts_unavailable_rows():
     assert coverage["transaction_identity_coverage_state"] == "incomplete"
 
 
+def test_provider_scoped_event_action_identity_covers_transfers_and_swaps():
+    wallet_identity = _scoped_wallet_identity()
+    transfer_event_id = EVENT_ID.upper()
+    transfer_identity = _provider_event_action_identity(
+        event_id=transfer_event_id,
+        action_index=0,
+        action_type="TonTransfer",
+    )
+    swap_event_id = "ef" * 32
+    swap_logical_time = "46000000000003"
+    swap_identity = _provider_event_action_identity(
+        event_id=swap_event_id,
+        logical_time=swap_logical_time,
+        action_index=1,
+        action_type="JettonSwap",
+    )
+    runs = [
+        _run(
+            run_id,
+            wallet_identity=wallet_identity,
+            transfers=[
+                _transfer(
+                    transfer_event_id,
+                    amount=transfer_amount,
+                    event_action_identity=transfer_identity,
+                )
+            ],
+            swaps=[
+                _swap(
+                    swap_event_id,
+                    logical_time=swap_logical_time,
+                    amount_in=swap_amount,
+                    event_action_identity=swap_identity,
+                )
+            ],
+        )
+        for run_id, transfer_amount, swap_amount in (
+            (1, "1.000000000000000000", "2.000"),
+            (2, "1", "2"),
+        )
+    ]
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+
+    assert result["analysis_version"] == "wallet_history_readiness_v0.22.6"
+    assert result["event_action_identity_groups_total"] == 2
+    assert all(
+        group["identity_type"] == "provider_event_action_observation"
+        and group["identity_strength"] == "provider_scoped"
+        and group["has_conflict"] is False
+        for group in result["event_action_identity_groups"]
+    )
+    coverage = result["coverage"]
+    assert coverage["event_action_observations"] == 4
+    assert coverage[
+        "event_action_observations_with_provider_scoped_identity"
+    ] == 4
+    assert coverage["event_action_observations_with_unavailable_identity"] == 0
+    assert coverage[
+        "event_action_observations_with_invalid_identity_contract"
+    ] == 0
+    assert coverage["event_action_identity_coverage_state"] == "complete"
+    assert coverage[
+        "overlapping_provider_scoped_event_action_identity_groups"
+    ] == 2
+    assert coverage[
+        "conflicting_provider_scoped_event_action_identity_groups"
+    ] == 0
+    assert coverage["swap_observations_with_exact_identity"] == 0
+    assert coverage["swap_observations_with_provider_scoped_identity"] == 2
+    assert coverage["swap_observations_with_weak_identity"] == 0
+    assert coverage["overlapping_provider_scoped_swap_identity_groups"] == 1
+    blockers = _blocker_codes(result)
+    assert "event_action_identity_non_authoritative" in blockers
+    assert "event_action_identity_coverage_incomplete" not in blockers
+    assert "event_action_identity_contract_invalid" not in blockers
+    assert "weak_swap_identity" not in blockers
+    assert "canonical_activity_identity_unavailable" in blockers
+    assert result["history_complete"] is False
+    assert result["eligible_for_cost_basis"] is False
+    assert result["used_by_pnl"] is False
+
+
+def test_provider_action_key_retyped_across_surfaces_is_a_conflict():
+    wallet_identity = _scoped_wallet_identity()
+    transfer_identity = _provider_event_action_identity(
+        action_index=0,
+        action_type="TonTransfer",
+    )
+    swap_identity = _provider_event_action_identity(
+        action_index=0,
+        action_type="JettonSwap",
+    )
+    assert transfer_identity["key"] == swap_identity["key"]
+
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                wallet_identity=wallet_identity,
+                transfers=[
+                    _transfer(
+                        EVENT_ID,
+                        event_action_identity=transfer_identity,
+                    )
+                ],
+            ),
+            _run(
+                2,
+                wallet_identity=wallet_identity,
+                swaps=[
+                    _swap(
+                        EVENT_ID,
+                        event_action_identity=swap_identity,
+                    )
+                ],
+            ),
+        ],
+        target_run_id=2,
+    )
+
+    assert result["event_action_identity_groups_total"] == 1
+    group = result["event_action_identity_groups"][0]
+    assert group["identity"] == transfer_identity["key"]
+    assert group["identity_type"] == "provider_event_action_observation"
+    assert group["identity_strength"] == "provider_scoped"
+    assert group["distinct_payload_count"] == 2
+    assert group["has_conflict"] is True
+    assert result["coverage"][
+        "conflicting_provider_scoped_event_action_identity_groups"
+    ] == 1
+    assert "event_action_payload_conflicts" in _blocker_codes(result)
+    assert result["history_complete"] is False
+    assert result["is_cost_basis"] is False
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "version",
+        "key",
+        "network",
+        "account",
+        "event_id",
+        "logical_time",
+        "action_index_bool",
+        "action_type_for_surface",
+        "raw_event_id",
+        "raw_surface",
+        "raw_source",
+        "row_event_id",
+        "row_logical_time",
+        "row_provider",
+        "source_status",
+        "safety_flag",
+        "extra_field",
+    ],
+)
+def test_event_action_identity_validation_fails_closed_on_tampering(tamper):
+    wallet_identity = _scoped_wallet_identity()
+    valid_identity = _provider_event_action_identity()
+    valid_row = _transfer(
+        EVENT_ID,
+        event_action_identity=valid_identity,
+    )
+    tampered_row = copy.deepcopy(valid_row)
+    identity = tampered_row["event_action_identity"]
+    raw = tampered_row["raw"]
+
+    if tamper == "version":
+        identity["version"] = "invented_v9"
+    elif tamper == "key":
+        identity["key"] += "|tampered"
+    elif tamper == "network":
+        identity["network"] = "ton-testnet"
+    elif tamper == "account":
+        identity["account_canonical"] = "0:" + "ef" * 32
+    elif tamper == "event_id":
+        identity["event_id_canonical"] = "ef" * 32
+    elif tamper == "logical_time":
+        identity["logical_time_canonical"] = "1"
+    elif tamper == "action_index_bool":
+        identity["action_index"] = True
+        raw["action_index"] = True
+    elif tamper == "action_type_for_surface":
+        identity["action_type"] = "JettonSwap"
+        raw["action_type"] = "JettonSwap"
+    elif tamper == "raw_event_id":
+        raw["event_id"] = "ef" * 32
+    elif tamper == "raw_surface":
+        raw["surface"] = "swaps"
+    elif tamper == "raw_source":
+        raw["source"] = "other"
+    elif tamper == "row_event_id":
+        tampered_row["tx_hash"] = "ef" * 32
+    elif tamper == "row_logical_time":
+        tampered_row["logical_time"] = "1"
+    elif tamper == "row_provider":
+        tampered_row["provider"] = "other"
+    elif tamper == "source_status":
+        tampered_row["source_status"] = "limited"
+    elif tamper == "safety_flag":
+        identity["eligible_for_cost_basis"] = True
+    elif tamper == "extra_field":
+        identity["invented_semantics"] = True
+
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                wallet_identity=wallet_identity,
+                transfers=[valid_row],
+            ),
+            _run(
+                2,
+                wallet_identity=wallet_identity,
+                transfers=[tampered_row],
+            ),
+        ],
+        target_run_id=2,
+    )
+
+    coverage = result["coverage"]
+    assert coverage[
+        "event_action_observations_with_provider_scoped_identity"
+    ] == 1
+    assert coverage["event_action_observations_with_unavailable_identity"] == 1
+    assert coverage[
+        "event_action_observations_with_invalid_identity_contract"
+    ] == 1
+    assert coverage["event_action_identity_coverage_state"] == "incomplete"
+    assert result["event_action_identity_groups_total"] == 0
+    blockers = {item["code"]: item for item in result["blockers"]}
+    assert blockers["event_action_identity_coverage_incomplete"]["run_ids"] == [2]
+    assert blockers["event_action_identity_contract_invalid"]["run_ids"] == [2]
+    assert blockers["event_action_identity_non_authoritative"]["run_ids"] == [1]
+    assert result["history_complete"] is False
+    assert result["eligible_for_cost_basis"] is False
+    assert result["used_by_pnl"] is False
+
+
+@pytest.mark.parametrize("tamper", ["row_event_id", "raw_lt", "raw_source"])
+def test_swap_event_action_identity_validation_fails_closed(tamper):
+    wallet_identity = _scoped_wallet_identity()
+    identity = _provider_event_action_identity(
+        action_index=1,
+        action_type="JettonSwap",
+    )
+    valid_swap = _swap(
+        EVENT_ID,
+        event_action_identity=identity,
+    )
+    tampered_swap = copy.deepcopy(valid_swap)
+    if tamper == "row_event_id":
+        tampered_swap["tx_hash"] = "ef" * 32
+    elif tamper == "raw_lt":
+        tampered_swap["raw"]["lt"] = "1"
+    elif tamper == "raw_source":
+        tampered_swap["raw"]["source"] = "other"
+
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                wallet_identity=wallet_identity,
+                swaps=[valid_swap],
+            ),
+            _run(
+                2,
+                wallet_identity=wallet_identity,
+                swaps=[tampered_swap],
+            ),
+        ],
+        target_run_id=2,
+    )
+
+    coverage = result["coverage"]
+    assert coverage["swap_observations_with_provider_scoped_identity"] == 1
+    assert coverage["swap_observations_with_weak_identity"] == 1
+    assert coverage[
+        "event_action_observations_with_invalid_identity_contract"
+    ] == 1
+    blockers = {item["code"]: item for item in result["blockers"]}
+    assert blockers["event_action_identity_contract_invalid"]["run_ids"] == [2]
+    assert blockers["event_action_identity_coverage_incomplete"]["run_ids"] == [2]
+    assert result["history_complete"] is False
+    assert result["is_cost_basis"] is False
+
+
+def test_unavailable_or_missing_event_action_identity_is_not_invalid():
+    unavailable = unavailable_ton_event_action_identity().to_public_dict()
+    transfer = _transfer(
+        EVENT_ID,
+        raw={
+            "provider": "tonapi",
+            "surface": "transfers",
+            "event_id": EVENT_ID,
+            "lt": EVENT_LOGICAL_TIME,
+            "action_index": 0,
+            "action_type": "TonTransfer",
+        },
+    )
+    transfer["event_action_identity"] = unavailable
+
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                wallet_identity=_scoped_wallet_identity(),
+                transfers=[transfer],
+            ),
+            _run(
+                2,
+                wallet_identity=_scoped_wallet_identity(),
+                swaps=[_swap("legacy-event", raw={"event_id": "legacy-event"})],
+            ),
+        ],
+        target_run_id=2,
+    )
+
+    coverage = result["coverage"]
+    assert coverage["event_action_observations"] == 2
+    assert coverage[
+        "event_action_observations_with_provider_scoped_identity"
+    ] == 0
+    assert coverage["event_action_observations_with_unavailable_identity"] == 2
+    assert coverage[
+        "event_action_observations_with_invalid_identity_contract"
+    ] == 0
+    assert coverage["event_action_identity_coverage_state"] == "incomplete"
+    blockers = _blocker_codes(result)
+    assert "event_action_identity_coverage_incomplete" in blockers
+    assert "event_action_identity_contract_invalid" not in blockers
+    assert "event_action_identity_non_authoritative" not in blockers
+    assert "weak_swap_identity" in blockers
+
+
 def test_swap_raw_action_ordinal_and_event_reference_both_remain_weak():
     first = _run(
         1,
@@ -1072,32 +1511,34 @@ def test_complete_event_stream_is_observed_without_promoting_display_actions():
     # Provider event ids are 256-bit hex and may be submitted in upper case.
     event_id = "FA" * 32
     logical_time = "46000000000002"
-    transfer = {
-        "tx_hash": event_id,
-        "logical_time": logical_time,
-        "timestamp": "2026-06-01T12:00:00Z",
-        "provider": "tonapi",
-        "source_status": "live",
-        "raw": {
-            "provider": "tonapi",
-            "surface": "transfers",
-            "event_id": event_id,
-            "lt": logical_time,
-        },
-    }
+    transfer_identity = _provider_event_action_identity(
+        event_id=event_id,
+        logical_time=logical_time,
+        action_index=0,
+        action_type="TonTransfer",
+    )
+    swap_identity = _provider_event_action_identity(
+        event_id=event_id,
+        logical_time=logical_time,
+        action_index=1,
+        action_type="JettonSwap",
+    )
+    transfer = _transfer(
+        event_id,
+        logical_time=logical_time,
+        timestamp="2026-06-01T12:00:00Z",
+        event_action_identity=transfer_identity,
+    )
     swap = _swap(
         event_id,
+        logical_time=logical_time,
         timestamp="2026-06-01T12:00:00Z",
-        raw={
-            "provider": "tonapi",
-            "surface": "swaps",
-            "event_id": event_id,
-            "lt": logical_time,
-        },
+        event_action_identity=swap_identity,
     )
     runs = [
         _run(
             1,
+            wallet_identity=_scoped_wallet_identity(),
             status="partial",
             requested_surfaces=["transfers", "swaps"],
             incomplete_surfaces=["transfers", "swaps"],
@@ -1105,6 +1546,7 @@ def test_complete_event_stream_is_observed_without_promoting_display_actions():
         ),
         _run(
             2,
+            wallet_identity=_scoped_wallet_identity(),
             status="partial",
             requested_surfaces=["transfers", "swaps"],
             incomplete_surfaces=["transfers", "swaps"],
@@ -1133,6 +1575,15 @@ def test_complete_event_stream_is_observed_without_promoting_display_actions():
     assert "provider_event_pagination_evidence_incomplete" not in blockers
     assert "pagination_completeness_unverified" in blockers
     assert "canonical_activity_identity_unavailable" in blockers
+    assert "event_action_identity_non_authoritative" in blockers
+    assert "event_action_identity_coverage_incomplete" not in blockers
+    assert result["coverage"]["event_action_observations"] == 2
+    assert result["coverage"][
+        "event_action_observations_with_provider_scoped_identity"
+    ] == 2
+    # One accepted provider event produced two separately identified actions.
+    # Event pagination remains valid because it compares unique event refs.
+    assert result["coverage"]["event_action_identity_coverage_state"] == "complete"
     assert result["requested_bounds_verified"] is False
     assert result["history_complete"] is False
     assert result["eligible_for_cost_basis"] is False
@@ -1318,7 +1769,7 @@ def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["analysis_version"] == "wallet_history_readiness_v0.22.5"
+    assert body["analysis_version"] == "wallet_history_readiness_v0.22.6"
     assert body["run_ids"] == [first_id, target_id]
     assert body["target_run_id"] == target_id
     assert next(scope for scope in body["runs"] if scope["is_target"])[

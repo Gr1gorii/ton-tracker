@@ -86,7 +86,61 @@ ACTIVITY_CSV_COLUMNS = [
     "transaction_logical_time_canonical",
     "transaction_hash_canonical",
     "transaction_identity_key",
+    "event_action_identity_status",
+    "event_action_identity_version",
+    "event_action_identity_provider",
+    "event_action_network",
+    "event_action_account_canonical",
+    "event_action_event_id_canonical",
+    "event_action_logical_time_canonical",
+    "event_action_index",
+    "event_action_type",
+    "event_action_identity_key",
+    "event_action_is_provider_observation_identity",
+    "event_action_is_blockchain_proof_verified",
+    "event_action_is_authoritative_activity_identity",
+    "event_action_is_ownership_proof",
+    "event_action_eligible_for_cost_basis",
+    "event_action_deduplication_applied",
+    "event_action_used_by_pnl",
 ]
+
+
+def _event_action_identity_csv_fields(item: dict) -> dict:
+    identity = item.get("event_action_identity") or {}
+    return {
+        "event_action_identity_status": identity.get("status"),
+        "event_action_identity_version": identity.get("version"),
+        "event_action_identity_provider": identity.get("provider"),
+        "event_action_network": identity.get("network"),
+        "event_action_account_canonical": identity.get("account_canonical"),
+        "event_action_event_id_canonical": identity.get(
+            "event_id_canonical"
+        ),
+        "event_action_logical_time_canonical": identity.get(
+            "logical_time_canonical"
+        ),
+        "event_action_index": identity.get("action_index"),
+        "event_action_type": identity.get("action_type"),
+        "event_action_identity_key": identity.get("key"),
+        "event_action_is_provider_observation_identity": identity.get(
+            "is_provider_observation_identity"
+        ),
+        "event_action_is_blockchain_proof_verified": identity.get(
+            "is_blockchain_proof_verified"
+        ),
+        "event_action_is_authoritative_activity_identity": identity.get(
+            "is_authoritative_activity_identity"
+        ),
+        "event_action_is_ownership_proof": identity.get("is_ownership_proof"),
+        "event_action_eligible_for_cost_basis": identity.get(
+            "eligible_for_cost_basis"
+        ),
+        "event_action_deduplication_applied": identity.get(
+            "deduplication_applied"
+        ),
+        "event_action_used_by_pnl": identity.get("used_by_pnl"),
+    }
 
 
 def wallet_ingestion_run_to_csv(run: dict) -> str:
@@ -113,6 +167,7 @@ def wallet_ingestion_run_to_csv(run: dict) -> str:
                 "counterparty": item.get("counterparty"),
                 "provider": item.get("provider"),
                 "source_status": item.get("source_status"),
+                **_event_action_identity_csv_fields(item),
             }
         )
     for item in run.get("transactions", []):
@@ -152,6 +207,7 @@ def wallet_ingestion_run_to_csv(run: dict) -> str:
                 "amount_out": item.get("amount_out"),
                 "provider": item.get("provider"),
                 "source_status": item.get("source_status"),
+                **_event_action_identity_csv_fields(item),
             }
         )
     for item in run.get("balances", []):

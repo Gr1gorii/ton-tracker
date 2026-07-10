@@ -35,7 +35,8 @@ DOMAIN_TABLES = tuple(sorted(database.Base.metadata.tables))
 WALLET_IDENTITY_REVISION = "20260710_0002"
 TRANSACTION_IDENTITY_REVISION = "20260710_0003"
 ACQUISITION_EVIDENCE_REVISION = "20260710_0004"
-CURRENT_REVISION = ACQUISITION_EVIDENCE_REVISION
+EVENT_ACTION_IDENTITY_REVISION = "20260710_0005"
+CURRENT_REVISION = EVENT_ACTION_IDENTITY_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -153,10 +154,38 @@ TRANSACTION_IDENTITY_COLUMNS = (
     "transaction_identity_key",
 )
 
+EVENT_ACTION_IDENTITY_COLUMNS = (
+    "event_action_identity_status",
+    "event_action_identity_version",
+    "event_action_network",
+    "event_action_account_canonical",
+    "event_action_event_id_canonical",
+    "event_action_logical_time_canonical",
+    "event_action_index",
+    "event_action_type",
+    "event_action_identity_key",
+)
+
+EVENT_ACTION_IDENTITY_COLUMN_DEFINITIONS = (
+    "event_action_identity_status VARCHAR(20) DEFAULT 'unavailable' NOT NULL",
+    "event_action_identity_version VARCHAR(32) DEFAULT 'unavailable' NOT NULL",
+    "event_action_network VARCHAR(16) DEFAULT 'ton-unknown' NOT NULL",
+    "event_action_account_canonical VARCHAR(76)",
+    "event_action_event_id_canonical VARCHAR(64)",
+    "event_action_logical_time_canonical VARCHAR(20)",
+    "event_action_index INTEGER",
+    "event_action_type VARCHAR(32)",
+    "event_action_identity_key VARCHAR(256)",
+)
+
 TRANSACTION_HASH = "cd" * 32
 SECOND_TRANSACTION_HASH = "ef" * 32
 TRANSACTION_LT = "89089355000001"
 TRANSACTION_IDENTITY_VERSION = "ton_account_tx_v1"
+EVENT_ACTION_ID = "ab" * 32
+SECOND_EVENT_ACTION_ID = "12" * 32
+EVENT_ACTION_LT = "89089355000002"
+EVENT_ACTION_IDENTITY_VERSION = "tonapi_event_action_obs_v1"
 
 
 def _engine(path: Path) -> Engine:
@@ -294,6 +323,19 @@ def _transaction_identity_snapshot(engine: Engine) -> dict[int, tuple[Any, ...]]
     return {int(row[0]): tuple(row[1:]) for row in rows}
 
 
+def _event_action_identity_snapshot(
+    engine: Engine,
+    table_name: str,
+) -> dict[int, tuple[Any, ...]]:
+    selected = ("id", *EVENT_ACTION_IDENTITY_COLUMNS)
+    columns = ", ".join(_quote(column) for column in selected)
+    with engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            f"SELECT {columns} FROM {_quote(table_name)} ORDER BY id"
+        ).fetchall()
+    return {int(row[0]): tuple(row[1:]) for row in rows}
+
+
 def _transaction_legacy_snapshot(engine: Engine) -> list[tuple[Any, ...]]:
     columns = PRE_0002_COLUMNS["wallet_transactions"]
     selected = ", ".join(_quote(column) for column in columns)
@@ -384,6 +426,111 @@ def _insert_transaction(
             json.dumps(raw, separators=(",", ":"), sort_keys=True),
         ),
     )
+
+
+def _insert_event_action_transfer(
+    connection,
+    *,
+    transfer_id: int,
+    run_id: int,
+    event_id: str = EVENT_ACTION_ID,
+    logical_time: str = EVENT_ACTION_LT,
+    action_index: Any = 2,
+    action_type: str = "TonTransfer",
+    provider: str = "tonapi",
+    source_status: str = "live",
+    raw: Any | None = None,
+) -> None:
+    if raw is None:
+        raw = {
+            "provider": "tonapi",
+            "source": "tonapi",
+            "surface": "transfers",
+            "event_id": event_id,
+            "lt": logical_time,
+            "action_index": action_index,
+            "action_type": action_type,
+        }
+    connection.exec_driver_sql(
+        "INSERT INTO wallet_transfers ("
+        "id, run_id, tx_hash, logical_time, timestamp, asset, amount, "
+        "direction, counterparty, provider, source_status, raw_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            transfer_id,
+            run_id,
+            event_id,
+            logical_time,
+            "2026-07-10 10:03:00.000000",
+            "TON",
+            "1.25",
+            "out",
+            RAW_ADDRESS,
+            provider,
+            source_status,
+            json.dumps(raw, separators=(",", ":"), sort_keys=True),
+        ),
+    )
+
+
+def _insert_event_action_swap(
+    connection,
+    *,
+    swap_id: int,
+    run_id: int,
+    event_id: str = SECOND_EVENT_ACTION_ID,
+    logical_time: str = EVENT_ACTION_LT,
+    action_index: Any = 4,
+    action_type: str = "JettonSwap",
+    provider: str = "tonapi",
+    source_status: str = "live",
+    raw: Any | None = None,
+) -> None:
+    if raw is None:
+        raw = {
+            "provider": "tonapi",
+            "source": "tonapi",
+            "surface": "swaps",
+            "event_id": event_id,
+            "lt": logical_time,
+            "action_index": action_index,
+            "action_type": action_type,
+        }
+    connection.exec_driver_sql(
+        "INSERT INTO wallet_swaps ("
+        "id, run_id, tx_hash, timestamp, dex, token_in, amount_in, "
+        "token_out, amount_out, estimated_usd, provider, source_status, "
+        "raw_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            swap_id,
+            run_id,
+            event_id,
+            "2026-07-10 10:04:00.000000",
+            "stonfi",
+            "TON",
+            "2.5",
+            "JETTON",
+            "25",
+            None,
+            provider,
+            source_status,
+            json.dumps(raw, separators=(",", ":"), sort_keys=True),
+        ),
+    )
+
+
+def _add_event_action_identity_columns(
+    connection,
+    table_name: str,
+    *,
+    count: int | None = None,
+) -> None:
+    definitions = EVENT_ACTION_IDENTITY_COLUMN_DEFINITIONS[:count]
+    for definition in definitions:
+        connection.exec_driver_sql(
+            f"ALTER TABLE {table_name} ADD COLUMN {definition}"
+        )
 
 
 def _schema_snapshot(engine: Engine) -> list[tuple[Any, ...]]:
@@ -657,6 +804,71 @@ def _assert_acquisition_evidence_schema(engine: Engine) -> None:
     assert page_foreign_keys[0]["options"] == {"ondelete": "CASCADE"}
 
 
+def _expected_event_action_identity_indexes(
+    table_name: str,
+) -> set[tuple[str, tuple[str, ...], bool]]:
+    surface = "transfers" if table_name == "wallet_transfers" else "swaps"
+    return {
+        (
+            f"uq_wallet_{surface}_run_event_action_identity",
+            ("run_id", "event_action_identity_key"),
+            True,
+        ),
+        (
+            f"ix_wallet_{surface}_event_action_identity_key",
+            ("event_action_identity_key",),
+            False,
+        ),
+        (
+            f"ix_wallet_{surface}_event_action_identity_tuple",
+            (
+                "provider",
+                "event_action_network",
+                "event_action_account_canonical",
+                "event_action_event_id_canonical",
+                "event_action_logical_time_canonical",
+                "event_action_index",
+            ),
+            False,
+        ),
+    }
+
+
+def _assert_event_action_identity_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    for table_name in ("wallet_transfers", "wallet_swaps"):
+        columns = {
+            column["name"] for column in inspector.get_columns(table_name)
+        }
+        assert set(EVENT_ACTION_IDENTITY_COLUMNS).issubset(columns)
+        assert "event_action_provider" not in columns
+        identity_indexes = {
+            (
+                index["name"],
+                tuple(index.get("column_names") or ()),
+                bool(index.get("unique")),
+            )
+            for index in inspector.get_indexes(table_name)
+            if "event_action" in str(index.get("name"))
+        }
+        assert identity_indexes == _expected_event_action_identity_indexes(
+            table_name
+        )
+
+
+def _assert_event_action_identity_schema_absent(engine: Engine) -> None:
+    inspector = inspect(engine)
+    for table_name in ("wallet_transfers", "wallet_swaps"):
+        columns = {
+            column["name"] for column in inspector.get_columns(table_name)
+        }
+        assert columns.isdisjoint(EVENT_ACTION_IDENTITY_COLUMNS)
+        assert all(
+            "event_action" not in str(index.get("name"))
+            for index in inspector.get_indexes(table_name)
+        )
+
+
 def _assert_legacy_identity_backfill(engine: Engine) -> None:
     rows = _identity_snapshot(engine)
 
@@ -751,6 +963,26 @@ def _assert_legacy_transaction_identity_backfill(engine: Engine) -> None:
     )
 
 
+def _assert_legacy_event_action_identity_backfill(engine: Engine) -> None:
+    unavailable = (
+        "unavailable",
+        "unavailable",
+        "ton-unknown",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    assert _event_action_identity_snapshot(engine, "wallet_transfers")[101] == (
+        unavailable
+    )
+    assert _event_action_identity_snapshot(engine, "wallet_swaps")[103] == (
+        unavailable
+    )
+
+
 def _revision_cell(
     engine: Engine,
     expected_revision: str,
@@ -788,11 +1020,13 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
+        EVENT_ACTION_IDENTITY_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
     _assert_transaction_identity_schema(engine)
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema(engine)
     assert _acquisition_evidence_counts(engine) == (0, 0)
 
     engine.dispose()
@@ -818,15 +1052,18 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
+        EVENT_ACTION_IDENTITY_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
     _assert_transaction_identity_schema(engine)
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema(engine)
     assert _acquisition_evidence_counts(engine) == (0, 0)
     _assert_legacy_identity_backfill(engine)
     _assert_legacy_transaction_identity_backfill(engine)
+    _assert_legacy_event_action_identity_backfill(engine)
     engine.dispose()
 
 
@@ -851,6 +1088,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
+        EVENT_ACTION_IDENTITY_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -870,6 +1108,12 @@ def test_runner_is_idempotent_at_head(tmp_path):
     data_after_first = _data_snapshot(engine)
     identities_after_first = _identity_snapshot(engine)
     transaction_identities_after_first = _transaction_identity_snapshot(engine)
+    transfer_identities_after_first = _event_action_identity_snapshot(
+        engine, "wallet_transfers"
+    )
+    swap_identities_after_first = _event_action_identity_snapshot(
+        engine, "wallet_swaps"
+    )
     acquisition_counts_after_first = _acquisition_evidence_counts(engine)
 
     second = run_database_migrations(engine)
@@ -886,10 +1130,20 @@ def test_runner_is_idempotent_at_head(tmp_path):
         _transaction_identity_snapshot(engine)
         == transaction_identities_after_first
     )
+    assert (
+        _event_action_identity_snapshot(engine, "wallet_transfers")
+        == transfer_identities_after_first
+    )
+    assert (
+        _event_action_identity_snapshot(engine, "wallet_swaps")
+        == swap_identities_after_first
+    )
     assert _acquisition_evidence_counts(engine) == acquisition_counts_after_first
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema(engine)
     _assert_legacy_identity_backfill(engine)
     _assert_legacy_transaction_identity_backfill(engine)
+    _assert_legacy_event_action_identity_backfill(engine)
     engine.dispose()
 
 
@@ -962,6 +1216,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
+        EVENT_ACTION_IDENTITY_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -976,6 +1231,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
     _assert_wallet_identity_schema(engine)
     _assert_transaction_identity_schema(engine)
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema(engine)
     engine.dispose()
 
 
@@ -1099,6 +1355,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
     assert report.applied_revisions == (
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
+        EVENT_ACTION_IDENTITY_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1160,6 +1417,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
     _assert_schema_matches_models(engine)
     _assert_transaction_identity_schema(engine)
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema(engine)
     engine.dispose()
 
 
@@ -1240,12 +1498,14 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
     assert report.applied_revisions == (
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
+        EVENT_ACTION_IDENTITY_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
     _assert_schema_matches_models(engine)
     _assert_transaction_identity_schema(engine)
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema(engine)
     engine.dispose()
 
 
@@ -1389,15 +1649,15 @@ def test_acquisition_evidence_migration_repairs_correct_partial_sqlite_ddl(
             "ON wallet_acquisition_streams (run_id, provider, stream_key)"
         )
 
-    report = run_database_migrations(engine)
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
 
-    assert report.action == "upgraded"
-    assert report.revision_before == TRANSACTION_IDENTITY_REVISION
-    assert report.revision_after == ACQUISITION_EVIDENCE_REVISION
-    assert report.applied_revisions == (ACQUISITION_EVIDENCE_REVISION,)
-    _assert_schema_matches_models(engine)
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema_absent(engine)
     assert _acquisition_evidence_counts(engine) == (0, 0)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
     engine.dispose()
 
 
@@ -1419,13 +1679,14 @@ def test_acquisition_evidence_migration_repairs_missing_page_index(tmp_path):
             ACQUISITION_PAGES_TABLE,
         )
 
-    report = run_database_migrations(engine)
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
 
-    assert report.revision_before == TRANSACTION_IDENTITY_REVISION
-    assert report.revision_after == ACQUISITION_EVIDENCE_REVISION
-    assert report.applied_revisions == (ACQUISITION_EVIDENCE_REVISION,)
-    _assert_schema_matches_models(engine)
     _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema_absent(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
     engine.dispose()
 
 
@@ -1445,7 +1706,7 @@ def test_partial_acquisition_table_shape_fails_before_more_ddl(tmp_path):
         )
 
     with pytest.raises(RuntimeError, match="columns do not match revision 0004"):
-        run_database_migrations(engine)
+        _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
 
     assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
     with engine.connect() as connection:
@@ -1470,7 +1731,7 @@ def test_wrong_partial_acquisition_index_fails_before_page_table(tmp_path):
         )
 
     with pytest.raises(RuntimeError, match="index does not match revision 0004"):
-        run_database_migrations(engine)
+        _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
 
     assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
     with engine.connect() as connection:
@@ -1499,7 +1760,7 @@ def test_wrong_partial_acquisition_foreign_key_options_fail_closed(tmp_path):
         RuntimeError,
         match="foreign keys do not match revision 0004",
     ):
-        run_database_migrations(engine)
+        _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
 
     assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
     with engine.connect() as connection:
@@ -1538,7 +1799,7 @@ def test_pre_revision_acquisition_evidence_rows_are_never_adopted(tmp_path):
         )
 
     with pytest.raises(RuntimeError, match="unexpected pre-revision data"):
-        run_database_migrations(engine)
+        _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
 
     assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
     with engine.connect() as connection:
@@ -1550,7 +1811,7 @@ def test_pre_revision_acquisition_evidence_rows_are_never_adopted(tmp_path):
 
 def test_acquisition_evidence_migration_is_forward_only(tmp_path):
     engine = _engine(tmp_path / "acquisition-forward-only.db")
-    run_database_migrations(engine)
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
 
     with engine.begin() as connection:
         with pytest.raises(
@@ -1562,11 +1823,359 @@ def test_acquisition_evidence_migration_is_forward_only(tmp_path):
                 TRANSACTION_IDENTITY_REVISION,
             )
 
-    _assert_schema_matches_models(engine)
+    _assert_acquisition_evidence_schema(engine)
+    _assert_event_action_identity_schema_absent(engine)
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
         ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "event-action-identity-vectors.db")
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_scoped_run(connection, run_id=2, network="ton-testnet")
+        _insert_scoped_run(connection, run_id=3, data_mode="mock")
+
+        _insert_event_action_transfer(
+            connection,
+            transfer_id=1,
+            run_id=1,
+            event_id=EVENT_ACTION_ID.upper(),
+            action_index=2,
+        )
+        _insert_event_action_swap(
+            connection,
+            swap_id=1,
+            run_id=2,
+            event_id=SECOND_EVENT_ACTION_ID.upper(),
+            action_index=4,
+        )
+
+        # v0.22.5 did not persist the original provider action ordinal. Even
+        # otherwise coherent rows must remain explicitly unavailable.
+        _insert_event_action_transfer(
+            connection,
+            transfer_id=2,
+            run_id=1,
+            raw={
+                "provider": "tonapi",
+                "source": "tonapi",
+                "surface": "transfers",
+                "event_id": EVENT_ACTION_ID,
+                "lt": EVENT_ACTION_LT,
+                "action_type": "TonTransfer",
+            },
+        )
+        _insert_event_action_swap(
+            connection,
+            swap_id=2,
+            run_id=1,
+            raw={
+                "provider": "tonapi",
+                "source": "tonapi",
+                "surface": "swaps",
+                "event_id": SECOND_EVENT_ACTION_ID,
+                "lt": EVENT_ACTION_LT,
+                "action_type": "JettonSwap",
+            },
+        )
+
+        # Missing exact raw.source provenance, mock data, and a boolean action
+        # index cannot receive a provider-scoped identity.
+        _insert_event_action_transfer(
+            connection,
+            transfer_id=3,
+            run_id=1,
+            event_id=SECOND_EVENT_ACTION_ID,
+            raw={
+                "provider": "tonapi",
+                "surface": "transfers",
+                "event_id": SECOND_EVENT_ACTION_ID,
+                "lt": EVENT_ACTION_LT,
+                "action_index": 1,
+                "action_type": "JettonTransfer",
+            },
+        )
+        _insert_event_action_swap(
+            connection,
+            swap_id=3,
+            run_id=3,
+        )
+        _insert_event_action_swap(
+            connection,
+            swap_id=4,
+            run_id=1,
+            event_id="34" * 32,
+            action_index=False,
+        )
+    source_before = _data_snapshot(engine)
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == ACQUISITION_EVIDENCE_REVISION
+    assert report.revision_after == EVENT_ACTION_IDENTITY_REVISION
+    assert report.applied_revisions == (EVENT_ACTION_IDENTITY_REVISION,)
+    assert _data_snapshot(engine) == source_before
+
+    mainnet_key = (
+        f"{EVENT_ACTION_IDENTITY_VERSION}|tonapi|ton-mainnet|{RAW_ADDRESS}|"
+        f"{EVENT_ACTION_ID}|{EVENT_ACTION_LT}|2"
+    )
+    testnet_key = (
+        f"{EVENT_ACTION_IDENTITY_VERSION}|tonapi|ton-testnet|{RAW_ADDRESS}|"
+        f"{SECOND_EVENT_ACTION_ID}|{EVENT_ACTION_LT}|4"
+    )
+    transfers = _event_action_identity_snapshot(engine, "wallet_transfers")
+    swaps = _event_action_identity_snapshot(engine, "wallet_swaps")
+    assert transfers[1] == (
+        "provider_scoped",
+        EVENT_ACTION_IDENTITY_VERSION,
+        "ton-mainnet",
+        RAW_ADDRESS,
+        EVENT_ACTION_ID,
+        EVENT_ACTION_LT,
+        2,
+        "TonTransfer",
+        mainnet_key,
+    )
+    assert swaps[1] == (
+        "provider_scoped",
+        EVENT_ACTION_IDENTITY_VERSION,
+        "ton-testnet",
+        RAW_ADDRESS,
+        SECOND_EVENT_ACTION_ID,
+        EVENT_ACTION_LT,
+        4,
+        "JettonSwap",
+        testnet_key,
+    )
+    unavailable = (
+        "unavailable",
+        "unavailable",
+        "ton-unknown",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    assert transfers[2] == unavailable
+    assert transfers[3] == unavailable
+    assert swaps[2] == unavailable
+    assert swaps[3] == unavailable
+    assert swaps[4] == unavailable
+    _assert_schema_matches_models(engine)
+    _assert_event_action_identity_schema(engine)
+    engine.dispose()
+
+
+def test_event_action_identity_migration_repairs_partial_columns_and_index(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "partial-event-action-identity.db")
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_event_action_transfer(connection, transfer_id=1, run_id=1)
+        _insert_event_action_swap(connection, swap_id=1, run_id=1)
+        _add_event_action_identity_columns(
+            connection,
+            "wallet_transfers",
+            count=4,
+        )
+        _add_event_action_identity_columns(connection, "wallet_swaps")
+        connection.exec_driver_sql(
+            "CREATE INDEX ix_wallet_swaps_event_action_identity_key "
+            "ON wallet_swaps (event_action_identity_key)"
+        )
+    source_before = _data_snapshot(engine)
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == ACQUISITION_EVIDENCE_REVISION
+    assert report.revision_after == EVENT_ACTION_IDENTITY_REVISION
+    assert report.applied_revisions == (EVENT_ACTION_IDENTITY_REVISION,)
+    assert _data_snapshot(engine) == source_before
+    assert _event_action_identity_snapshot(
+        engine, "wallet_transfers"
+    )[1][0] == "provider_scoped"
+    assert _event_action_identity_snapshot(
+        engine, "wallet_swaps"
+    )[1][0] == "provider_scoped"
+    _assert_schema_matches_models(engine)
+    _assert_event_action_identity_schema(engine)
+    engine.dispose()
+
+
+def test_partial_event_action_identity_column_shape_fails_before_other_table_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "malformed-event-action-column.db")
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE wallet_transfers ADD COLUMN "
+            "event_action_identity_status TEXT DEFAULT 'unavailable' NOT NULL"
+        )
+
+    with pytest.raises(RuntimeError, match="do not match revision 0005"):
+        run_database_migrations(engine)
+
+    transfer_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("wallet_transfers")
+    }
+    swap_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("wallet_swaps")
+    }
+    assert transfer_columns & set(EVENT_ACTION_IDENTITY_COLUMNS) == {
+        "event_action_identity_status"
+    }
+    assert swap_columns.isdisjoint(EVENT_ACTION_IDENTITY_COLUMNS)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_partial_event_action_identity_index_fails_before_other_indexes(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "malformed-event-action-index.db")
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _add_event_action_identity_columns(connection, "wallet_transfers")
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX "
+            "uq_wallet_transfers_run_event_action_identity "
+            "ON wallet_transfers (run_id, event_action_identity_key) "
+            "WHERE event_action_identity_key IS NULL"
+        )
+
+    with pytest.raises(RuntimeError, match="indexes do not match revision 0005"):
+        run_database_migrations(engine)
+
+    transfer_indexes = {
+        index["name"]: index
+        for index in inspect(engine).get_indexes("wallet_transfers")
+    }
+    assert transfer_indexes[
+        "uq_wallet_transfers_run_event_action_identity"
+    ]["dialect_options"]
+    assert "ix_wallet_transfers_event_action_identity_key" not in transfer_indexes
+    assert "ix_wallet_transfers_event_action_identity_tuple" not in transfer_indexes
+    swap_columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("wallet_swaps")
+    }
+    assert swap_columns.isdisjoint(EVENT_ACTION_IDENTITY_COLUMNS)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_event_action_identity_rejects_same_table_duplicate_before_indexes(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "duplicate-event-action-identity.db")
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_event_action_transfer(connection, transfer_id=1, run_id=1)
+        _insert_event_action_transfer(connection, transfer_id=2, run_id=1)
+
+    with pytest.raises(
+        RuntimeError,
+        match="Duplicate provider event-action observation identities",
+    ):
+        run_database_migrations(engine)
+
+    for table_name in ("wallet_transfers", "wallet_swaps"):
+        assert all(
+            "event_action" not in str(index.get("name"))
+            for index in inspect(engine).get_indexes(table_name)
+        )
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_event_action_identity_rejects_combined_transfer_swap_duplicate(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "cross-surface-event-action-identity.db")
+    _upgrade_to_revision(engine, ACQUISITION_EVIDENCE_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_event_action_transfer(
+            connection,
+            transfer_id=1,
+            run_id=1,
+            event_id=EVENT_ACTION_ID,
+            action_index=0,
+        )
+        _insert_event_action_swap(
+            connection,
+            swap_id=1,
+            run_id=1,
+            event_id=EVENT_ACTION_ID,
+            action_index=0,
+        )
+
+    for _ in range(2):
+        with pytest.raises(
+            RuntimeError,
+            match="appears in both wallet_transfers and wallet_swaps",
+        ):
+            run_database_migrations(engine)
+
+    for table_name in ("wallet_transfers", "wallet_swaps"):
+        assert all(
+            "event_action" not in str(index.get("name"))
+            for index in inspect(engine).get_indexes(table_name)
+        )
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_event_action_identity_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "event-action-forward-only.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+
+    with engine.begin() as connection:
+        with pytest.raises(
+            RuntimeError,
+            match="Event-action identity downgrade would discard",
+        ):
+            command.downgrade(
+                migration_config(connection),
+                ACQUISITION_EVIDENCE_REVISION,
+            )
+
+    _assert_schema_matches_models(engine)
+    _assert_event_action_identity_schema(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
     engine.dispose()
 
 
@@ -1764,6 +2373,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
+        EVENT_ACTION_IDENTITY_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

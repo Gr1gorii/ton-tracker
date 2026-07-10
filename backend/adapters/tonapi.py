@@ -13,7 +13,9 @@ does not provide full wallet intelligence by itself.
 
 from __future__ import annotations
 
+import http.client
 import json
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -32,12 +34,50 @@ from config import (
 )
 
 _HTTP_TIMEOUT = 10
+_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+_MAX_JSON_DEPTH = 64
+_MAX_JSON_NODES = 200_000
+_MAX_JSON_NUMBER_CHARS = 128
 _MAX_TRANSACTION_PAGE_LIMIT = 1000
 _MAX_EVENT_PAGE_LIMIT = 100
 _MAX_EVENT_DATE = 2114380800
 _MAX_LOGICAL_TIME = 2**64 - 1
 _LOGICAL_TIME_RE = re.compile(r"^[1-9][0-9]{0,19}$")
 _TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def _json_structure_is_bounded(value: Any) -> bool:
+    stack: list[tuple[Any, int]] = [(value, 0)]
+    node_count = 0
+    while stack:
+        current, depth = stack.pop()
+        node_count += 1
+        if node_count > _MAX_JSON_NODES or depth > _MAX_JSON_DEPTH:
+            return False
+        if isinstance(current, dict):
+            stack.extend((item, depth + 1) for item in current.values())
+        elif isinstance(current, list):
+            stack.extend((item, depth + 1) for item in current)
+    return True
+
+
+def _bounded_json_integer(value: str) -> int:
+    if len(value) > _MAX_JSON_NUMBER_CHARS:
+        raise ValueError("JSON integer token exceeds the configured limit.")
+    return int(value, 10)
+
+
+def _bounded_json_float(value: str) -> float:
+    if len(value) > _MAX_JSON_NUMBER_CHARS:
+        raise ValueError("JSON float token exceeds the configured limit.")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("JSON float token is not finite.")
+    return parsed
+
+
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-standard JSON constant is not allowed: {value}.")
 
 
 class TonapiAdapter:
@@ -83,6 +123,13 @@ class TonapiAdapter:
         return ProviderResult.failure(
             ERROR_PROVIDER_ERROR,
             self._sanitize_diagnostic(message) or "TonAPI provider error.",
+            source="real",
+        )
+
+    def _protocol_error(self, message: str) -> ProviderResult:
+        return ProviderResult.failure(
+            ERROR_PROVIDER_PROTOCOL,
+            self._sanitize_diagnostic(message) or "TonAPI protocol error.",
             source="real",
         )
 
@@ -193,16 +240,45 @@ class TonapiAdapter:
 
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw_body = response.read().decode("utf-8")
-            payload = json.loads(raw_body)
+                raw_bytes = response.read(_MAX_RESPONSE_BYTES + 1)
+            if not isinstance(raw_bytes, bytes):
+                return self._protocol_error(
+                    "TonAPI returned a non-byte response body."
+                )
+            if len(raw_bytes) > _MAX_RESPONSE_BYTES:
+                return self._protocol_error(
+                    "TonAPI response exceeded the configured byte limit."
+                )
+            raw_body = raw_bytes.decode("utf-8")
+            payload = json.loads(
+                raw_body,
+                parse_int=_bounded_json_integer,
+                parse_float=_bounded_json_float,
+                parse_constant=_reject_json_constant,
+            )
+            if not _json_structure_is_bounded(payload):
+                return self._protocol_error(
+                    "TonAPI JSON exceeded structural depth or node limits."
+                )
         except urllib.error.HTTPError as exc:
             return self._provider_error(
                 f"TonAPI HTTP error: {exc.code} {exc.reason}."
             )
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+            http.client.HTTPException,
+        ) as exc:
             return self._provider_error(f"TonAPI network error: {exc}.")
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return self._provider_error("TonAPI returned invalid JSON.")
+        except (
+            ValueError,
+            UnicodeDecodeError,
+            RecursionError,
+            MemoryError,
+            OverflowError,
+        ):
+            return self._protocol_error("TonAPI returned invalid JSON.")
 
         return ProviderResult.success(
             payload,
@@ -1029,7 +1105,7 @@ class TonapiAdapter:
             actions = event.get("actions")
             if not isinstance(actions, list):
                 continue
-            for action in actions:
+            for action_index, action in enumerate(actions):
                 if not isinstance(action, dict):
                     continue
                 action_type = cls._optional_string(action.get("type"))
@@ -1047,6 +1123,7 @@ class TonapiAdapter:
                         utime,
                         lt,
                         account_norm,
+                        action_index,
                     )
                 )
         return transfers
@@ -1133,6 +1210,7 @@ class TonapiAdapter:
         utime: int | None,
         lt: str | None,
         account_norm: str,
+        action_index: int,
     ) -> dict:
         sender_addr = cls._account_address(detail.get("sender"))
         recipient_addr = cls._account_address(detail.get("recipient"))
@@ -1166,6 +1244,7 @@ class TonapiAdapter:
             "utime": utime,
             "lt": lt,
             "action_type": action_type,
+            "action_index": action_index,
             "asset": asset,
             "raw_amount": cls._optional_string(detail.get("amount")),
             "decimals": decimals,
@@ -1208,7 +1287,7 @@ class TonapiAdapter:
             actions = event.get("actions")
             if not isinstance(actions, list):
                 continue
-            for action in actions:
+            for action_index, action in enumerate(actions):
                 if not isinstance(action, dict):
                     continue
                 if cls._optional_string(action.get("type")) != "JettonSwap":
@@ -1217,7 +1296,14 @@ class TonapiAdapter:
                 if not isinstance(detail, dict):
                     continue
                 swaps.append(
-                    cls.normalize_swap(detail, action, event_id, utime, lt)
+                    cls.normalize_swap(
+                        detail,
+                        action,
+                        event_id,
+                        utime,
+                        lt,
+                        action_index,
+                    )
                 )
         return swaps
 
@@ -1229,6 +1315,7 @@ class TonapiAdapter:
         event_id: str | None,
         utime: int | None,
         lt: str | None,
+        action_index: int,
     ) -> dict:
         token_in, amount_in, decimals_in, address_in = cls._swap_side(
             detail, "in"
@@ -1240,6 +1327,8 @@ class TonapiAdapter:
             "event_id": event_id,
             "utime": utime,
             "lt": lt,
+            "action_type": "JettonSwap",
+            "action_index": action_index,
             "dex": cls._optional_string(detail.get("dex")),
             "token_in": token_in,
             "token_in_address": address_in,

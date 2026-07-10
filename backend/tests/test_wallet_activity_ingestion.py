@@ -26,6 +26,7 @@ VALID_MAINNET_CANONICAL = (
     "0:ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 )
 VALID_TRANSACTION_HASH = "ab" * 32
+EVENT_ACTION_IDENTITY_VERSION = "tonapi_event_action_obs_v1"
 
 
 def _event_page(
@@ -871,6 +872,21 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
     assert transfer["provider"] == "tonapi"
     assert transfer["source_status"] == "live"
     assert transfer["raw"]["surface"] == "transfers"
+    assert transfer["raw"]["action_index"] == 0
+    identity = transfer["event_action_identity"]
+    assert identity["status"] == "provider_scoped"
+    assert identity["version"] == EVENT_ACTION_IDENTITY_VERSION
+    assert identity["provider"] == "tonapi"
+    assert identity["network"] == "ton-mainnet"
+    assert identity["account_canonical"] == VALID_MAINNET_CANONICAL
+    assert identity["event_id_canonical"] == "33" * 32
+    assert identity["logical_time_canonical"] == "46000000000001"
+    assert identity["action_index"] == 0
+    assert identity["action_type"] == "TonTransfer"
+    assert identity["is_provider_observation_identity"] is True
+    assert identity["is_authoritative_activity_identity"] is False
+    assert identity["eligible_for_cost_basis"] is False
+    assert identity["used_by_pnl"] is False
 
     read_back = client.get(f"/api/wallets/ingest/{run_id}")
     assert read_back.status_code == 200
@@ -880,6 +896,29 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
     assert len(read_body["acquisition_streams"]) == 1
     assert read_body["acquisition_streams"][0]["stream_key"] == "account_events"
     assert read_body["acquisition_streams"][0]["page_count"] == 2
+    assert read_body["transfers"][0]["event_action_identity"] == identity
+
+    export_response = client.get(
+        f"/api/wallets/ingest/{run_id}/export.csv"
+    )
+    assert export_response.status_code == 200
+    export_rows = list(csv.DictReader(io.StringIO(export_response.text)))
+    transfer_rows = [
+        row for row in export_rows if row["surface"] == "transfer"
+    ]
+    assert len(transfer_rows) == 1
+    assert transfer_rows[0]["event_action_identity_status"] == "provider_scoped"
+    assert transfer_rows[0]["event_action_identity_version"] == (
+        EVENT_ACTION_IDENTITY_VERSION
+    )
+    assert transfer_rows[0]["event_action_index"] == "0"
+    assert transfer_rows[0]["event_action_type"] == "TonTransfer"
+    assert transfer_rows[0]["event_action_identity_key"] == identity["key"]
+    assert (
+        transfer_rows[0]["event_action_is_provider_observation_identity"]
+        == "True"
+    )
+    assert transfer_rows[0]["event_action_used_by_pnl"] == "False"
 
 
 def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
@@ -980,6 +1019,20 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
     assert swap["estimated_usd"] is None
     assert swap["source_status"] == "live"
     assert swap["raw"]["surface"] == "swaps"
+    assert swap["raw"]["action_index"] == 0
+    assert swap["raw"]["action_type"] == "JettonSwap"
+    identity = swap["event_action_identity"]
+    assert identity["status"] == "provider_scoped"
+    assert identity["version"] == EVENT_ACTION_IDENTITY_VERSION
+    assert identity["provider"] == "tonapi"
+    assert identity["network"] == "ton-mainnet"
+    assert identity["account_canonical"] == VALID_MAINNET_CANONICAL
+    assert identity["event_id_canonical"] == "44" * 32
+    assert identity["logical_time_canonical"] == "46000000000002"
+    assert identity["action_index"] == 0
+    assert identity["action_type"] == "JettonSwap"
+    assert identity["is_provider_observation_identity"] is True
+    assert identity["is_authoritative_activity_identity"] is False
 
     read_back = client.get(f"/api/wallets/ingest/{run_id}")
     assert read_back.status_code == 200
@@ -987,6 +1040,7 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_dex_swaps(
     # Jetton master addresses survive persistence via the stored raw payload.
     assert read_swap["token_out_address"] == "EQjetton"
     assert read_swap["token_in_address"] is None
+    assert read_swap["event_action_identity"] == identity
     read_streams = read_back.json()["acquisition_streams"]
     assert len(read_streams) == 1
     assert read_streams[0]["stream_key"] == "account_events"
@@ -1181,6 +1235,20 @@ def test_wallet_ingestion_run_csv_export_download(client, monkeypatch):
         and row["transaction_identity_key"] == ""
         for row in transaction_rows
     )
+    event_action_rows = [
+        row for row in rows if row["surface"] in {"transfer", "swap"}
+    ]
+    assert event_action_rows
+    assert all(
+        row["event_action_identity_status"] == "unavailable"
+        and row["event_action_identity_version"] == "unavailable"
+        and row["event_action_network"] == "ton-unknown"
+        and row["event_action_identity_key"] == ""
+        and row["event_action_is_provider_observation_identity"] == "False"
+        and row["event_action_is_authoritative_activity_identity"] == "False"
+        and row["event_action_used_by_pnl"] == "False"
+        for row in event_action_rows
+    )
 
     missing = client.get("/api/wallets/ingest/99999/export.csv")
     assert missing.status_code == 404
@@ -1228,6 +1296,12 @@ def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
         and transaction["transaction_identity"]["key"] is None
         and transaction["transaction_identity"]["used_by_pnl"] is False
         for transaction in body["transactions"]
+    )
+    assert all(
+        item["event_action_identity"]["status"] == "unavailable"
+        and item["event_action_identity"]["key"] is None
+        and item["event_action_identity"]["used_by_pnl"] is False
+        for item in body["transfers"] + body["swaps"]
     )
 
     read_response = client.get(f"/api/wallets/ingest/{body['run_id']}")

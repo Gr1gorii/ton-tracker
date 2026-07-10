@@ -21,6 +21,11 @@ from sqlalchemy.orm import Session
 
 from models import WalletIngestionRun
 from services.ton_address_identity import parse_ton_address
+from services.ton_event_action_identity import (
+    TON_EVENT_ACTION_IDENTITY_VERSION,
+    derive_ton_event_action_identity,
+    unavailable_ton_event_action_identity,
+)
 from services.wallet_activity_ingestion import wallet_ingestion_run_to_response
 
 _SWAP_ORDINAL_KEYS = ("action_id", "action_index", "action_ordinal")
@@ -28,6 +33,7 @@ _TRANSACTION_IDENTITY_VERSION = "ton_account_tx_v1"
 _TRANSACTION_IDENTITY_UNAVAILABLE = "unavailable"
 _TRANSACTION_ACQUISITION_VERSION = "tonapi_account_transactions_v1"
 _EVENT_ACQUISITION_VERSION = "tonapi_account_events_display_v1"
+_PROVIDER_EVENT_ACTION_IDENTITY_TYPE = "provider_event_action_observation"
 _TRANSACTION_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _SUBMITTED_TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _LOGICAL_TIME_RE = re.compile(r"^(?:0|[1-9][0-9]*)$")
@@ -129,6 +135,18 @@ def _swap_semantic_payload(swap: dict[str, Any]) -> dict[str, Any]:
         "estimated_usd": _normalized_decimal(swap.get("estimated_usd")),
         "provider": swap.get("provider"),
         "source_status": swap.get("source_status"),
+    }
+
+
+def _transfer_semantic_payload(transfer: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "timestamp": _normalized_timestamp(transfer.get("timestamp")),
+        "asset": transfer.get("asset"),
+        "amount": _normalized_decimal(transfer.get("amount")),
+        "direction": transfer.get("direction"),
+        "counterparty": transfer.get("counterparty"),
+        "provider": transfer.get("provider"),
+        "source_status": transfer.get("source_status"),
     }
 
 
@@ -304,6 +322,95 @@ def _transaction_identity_classification(
     legacy_hash = _legacy_transaction_hash(transaction)
     if legacy_hash is not None:
         return "weak", legacy_hash, invalid_contract
+    return "unavailable", None, invalid_contract
+
+
+def _is_explicit_unavailable_event_action_identity(
+    identity: dict[str, Any],
+) -> bool:
+    """Accept only the complete, proof-safe unavailable public contract."""
+    return identity == unavailable_ton_event_action_identity().to_public_dict()
+
+
+def _validated_event_action_identity_key(
+    run: dict[str, Any],
+    row: dict[str, Any],
+    *,
+    surface: str,
+) -> str | None:
+    """Return a provider observation key only when every component recomputes.
+
+    The identity is deliberately provider-scoped.  Validation proves that the
+    persisted object, normalized row, raw provider coordinates, and run-wallet
+    scope agree; it does not make the mutable TonAPI action authoritative.
+    """
+    identity = row.get("event_action_identity")
+    if not isinstance(identity, dict):
+        return None
+    raw = row.get("raw")
+    if not isinstance(raw, dict):
+        return None
+
+    wallet_identity = _wallet_identity(run)
+    logical_time = (
+        row.get("logical_time") if surface == "transfers" else raw.get("lt")
+    )
+    derived = derive_ton_event_action_identity(
+        network=wallet_identity.get("network"),
+        account_address_canonical=wallet_identity.get("canonical_address"),
+        account_identity_status=wallet_identity.get("status"),
+        account_identity_version=wallet_identity.get("version"),
+        account_workchain_id=wallet_identity.get("workchain_id"),
+        account_id_hex=wallet_identity.get("account_id_hex"),
+        event_id=row.get("tx_hash"),
+        logical_time=logical_time,
+        action_index=raw.get("action_index"),
+        action_type=raw.get("action_type"),
+        surface=surface,
+        data_mode=run.get("data_mode"),
+        source_status=row.get("source_status"),
+        provider=row.get("provider"),
+        raw=raw,
+    )
+    if (
+        derived.status != "provider_scoped"
+        or derived.version != TON_EVENT_ACTION_IDENTITY_VERSION
+        or derived.key is None
+    ):
+        return None
+
+    # Exact mapping equality rejects omitted safety flags, stale components,
+    # and invented extensions that could change the meaning of this contract.
+    if identity != derived.to_public_dict():
+        return None
+    return derived.key
+
+
+def _event_action_identity_classification(
+    run: dict[str, Any],
+    row: Any,
+    *,
+    surface: str,
+) -> tuple[str, str | None, bool]:
+    """Classify a strict provider observation or explicit legacy fallback."""
+    if not isinstance(row, dict):
+        return "unavailable", None, True
+    identity = row.get("event_action_identity")
+    provider_key = _validated_event_action_identity_key(
+        run,
+        row,
+        surface=surface,
+    )
+    if provider_key is not None:
+        return "provider_scoped", provider_key, False
+
+    invalid_contract = False
+    if isinstance(identity, dict):
+        invalid_contract = not _is_explicit_unavailable_event_action_identity(
+            identity
+        )
+    elif identity is not None:
+        invalid_contract = True
     return "unavailable", None, invalid_contract
 
 
@@ -977,7 +1084,12 @@ def _identity_groups(
             continue
         payloads = {_fingerprint(row[1]) for row in rows}
         strengths = {row[2] for row in rows}
-        identity_strength = "exact" if strengths == {"exact"} else "weak"
+        if strengths == {"exact"}:
+            identity_strength = "exact"
+        elif strengths == {"provider_scoped"}:
+            identity_strength = "provider_scoped"
+        else:
+            identity_strength = "weak"
         groups.append(
             {
                 "identity": identity,
@@ -987,7 +1099,8 @@ def _identity_groups(
                 "observation_count": len(rows),
                 "distinct_payload_count": len(payloads),
                 "has_conflict": (
-                    identity_strength == "exact" and len(payloads) > 1
+                    identity_strength in {"exact", "provider_scoped"}
+                    and len(payloads) > 1
                 ),
             }
         )
@@ -1046,7 +1159,7 @@ def _transaction_groups(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def _swap_identity(swap: dict[str, Any]) -> tuple[str, str, str]:
+def _legacy_swap_identity(swap: dict[str, Any]) -> tuple[str, str, str]:
     raw = swap.get("raw") if isinstance(swap.get("raw"), dict) else {}
     provider = swap.get("provider")
     provider_key = provider.strip() if isinstance(provider, str) else "unknown"
@@ -1078,6 +1191,71 @@ def _swap_identity(swap: dict[str, Any]) -> tuple[str, str, str]:
     return f"sha256:{_fingerprint(signature)}", "swap_fingerprint", "weak"
 
 
+def _swap_identity(
+    run: dict[str, Any],
+    swap: dict[str, Any],
+) -> tuple[str, str, str]:
+    strength, identity, _ = _event_action_identity_classification(
+        run,
+        swap,
+        surface="swaps",
+    )
+    if strength == "provider_scoped" and identity is not None:
+        return (
+            identity,
+            _PROVIDER_EVENT_ACTION_IDENTITY_TYPE,
+            "provider_scoped",
+        )
+    return _legacy_swap_identity(swap)
+
+
+def _event_action_semantic_payload(
+    row: dict[str, Any],
+    *,
+    surface: str,
+) -> dict[str, Any]:
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    semantic = (
+        _transfer_semantic_payload(row)
+        if surface == "transfers"
+        else _swap_semantic_payload(row)
+    )
+    return {
+        "surface": surface,
+        "action_type": raw.get("action_type"),
+        **semantic,
+    }
+
+
+def _event_action_groups(
+    runs: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    observations: dict[
+        tuple[str, str],
+        list[tuple[int, dict[str, Any], str]],
+    ] = defaultdict(list)
+    for run in runs:
+        for surface in ("transfers", "swaps"):
+            for row in run.get(surface) or []:
+                strength, identity, _ = _event_action_identity_classification(
+                    run,
+                    row,
+                    surface=surface,
+                )
+                if strength != "provider_scoped" or identity is None:
+                    continue
+                observations[
+                    (_PROVIDER_EVENT_ACTION_IDENTITY_TYPE, identity)
+                ].append(
+                    (
+                        run["run_id"],
+                        _event_action_semantic_payload(row, surface=surface),
+                        "provider_scoped",
+                    )
+                )
+    return _identity_groups(observations)
+
+
 def _swap_groups(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     observations: dict[
         tuple[str, str],
@@ -1085,7 +1263,7 @@ def _swap_groups(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     ] = defaultdict(list)
     for run in runs:
         for swap in run.get("swaps") or []:
-            identity, identity_type, strength = _swap_identity(swap)
+            identity, identity_type, strength = _swap_identity(run, swap)
             observations[(identity_type, identity)].append(
                 (
                     run["run_id"],
@@ -1100,6 +1278,7 @@ def _coverage(
     runs: list[dict[str, Any]],
     transaction_groups: list[dict[str, Any]],
     swap_groups: list[dict[str, Any]],
+    event_action_groups: list[dict[str, Any]],
 ) -> dict[str, Any]:
     transfers = [row for run in runs for row in (run.get("transfers") or [])]
     transactions = [row for run in runs for row in (run.get("transactions") or [])]
@@ -1128,7 +1307,40 @@ def _coverage(
     else:
         transaction_identity_coverage_state = "incomplete"
 
+    event_action_identity_counts = {
+        "provider_scoped": 0,
+        "unavailable": 0,
+    }
+    invalid_event_action_identity_contracts = 0
+    for run in runs:
+        for surface in ("transfers", "swaps"):
+            for row in run.get(surface) or []:
+                strength, _, invalid_contract = (
+                    _event_action_identity_classification(
+                        run,
+                        row,
+                        surface=surface,
+                    )
+                )
+                event_action_identity_counts[strength] += 1
+                if invalid_contract:
+                    invalid_event_action_identity_contracts += 1
+
+    event_action_observations = len(transfers) + len(swaps)
+    if not event_action_observations:
+        event_action_identity_coverage_state = "not_observed"
+    elif (
+        event_action_identity_counts["provider_scoped"]
+        == event_action_observations
+        and invalid_event_action_identity_contracts == 0
+    ):
+        event_action_identity_coverage_state = "complete"
+    else:
+        event_action_identity_coverage_state = "incomplete"
+
     exact_swap_observations = 0
+    provider_scoped_swap_observations = 0
+    weak_swap_observations = 0
     non_ton_legs = 0
     addressed_non_ton_legs = 0
     fee_hash_matches = 0
@@ -1140,9 +1352,13 @@ def _coverage(
             if row.get("tx_hash")
         }
         for swap in run.get("swaps") or []:
-            _, _, strength = _swap_identity(swap)
+            _, _, strength = _swap_identity(run, swap)
             if strength == "exact":
                 exact_swap_observations += 1
+            elif strength == "provider_scoped":
+                provider_scoped_swap_observations += 1
+            else:
+                weak_swap_observations += 1
             for token_key, address_key in (
                 ("token_in", "token_in_address"),
                 ("token_out", "token_out_address"),
@@ -1206,10 +1422,43 @@ def _coverage(
         "conflicting_transaction_identity_groups": sum(
             1 for group in transaction_groups if group["has_conflict"]
         ),
+        "event_action_observations": event_action_observations,
+        "event_action_observations_with_provider_scoped_identity": (
+            event_action_identity_counts["provider_scoped"]
+        ),
+        "event_action_observations_with_unavailable_identity": (
+            event_action_identity_counts["unavailable"]
+        ),
+        "event_action_observations_with_invalid_identity_contract": (
+            invalid_event_action_identity_contracts
+        ),
+        "event_action_identity_coverage_state": (
+            event_action_identity_coverage_state
+        ),
+        "overlapping_provider_scoped_event_action_identity_groups": sum(
+            1
+            for group in event_action_groups
+            if group["identity_strength"] == "provider_scoped"
+        ),
+        "conflicting_provider_scoped_event_action_identity_groups": sum(
+            1
+            for group in event_action_groups
+            if group["identity_strength"] == "provider_scoped"
+            and group["has_conflict"]
+        ),
         "swap_observations": len(swaps),
         "swap_observations_with_exact_identity": exact_swap_observations,
+        "swap_observations_with_provider_scoped_identity": (
+            provider_scoped_swap_observations
+        ),
+        "swap_observations_with_weak_identity": weak_swap_observations,
         "overlapping_exact_swap_identity_groups": sum(
             1 for group in swap_groups if group["identity_strength"] == "exact"
+        ),
+        "overlapping_provider_scoped_swap_identity_groups": sum(
+            1
+            for group in swap_groups
+            if group["identity_strength"] == "provider_scoped"
         ),
         "overlapping_weak_swap_identity_groups": sum(
             1 for group in swap_groups if group["identity_strength"] == "weak"
@@ -1246,6 +1495,7 @@ def _build_blockers(
     runs: list[dict[str, Any]],
     transaction_groups: list[dict[str, Any]],
     swap_groups: list[dict[str, Any]],
+    event_action_groups: list[dict[str, Any]],
     coverage: dict[str, Any],
 ) -> list[dict[str, Any]]:
     run_ids = [run["run_id"] for run in runs]
@@ -1271,6 +1521,31 @@ def _build_blockers(
         for item in requested_event_pagination
         if item["state"] != "provider_stream_complete"
     ]
+    incomplete_event_action_identity_run_ids: list[int] = []
+    invalid_event_action_identity_run_ids: list[int] = []
+    provider_scoped_event_action_identity_run_ids: list[int] = []
+    for run in runs:
+        run_has_incomplete_identity = False
+        run_has_invalid_identity = False
+        run_has_provider_identity = False
+        for surface in ("transfers", "swaps"):
+            for row in run.get(surface) or []:
+                strength, _, invalid_contract = (
+                    _event_action_identity_classification(
+                        run,
+                        row,
+                        surface=surface,
+                    )
+                )
+                run_has_provider_identity |= strength == "provider_scoped"
+                run_has_incomplete_identity |= strength != "provider_scoped"
+                run_has_invalid_identity |= invalid_contract
+        if run_has_incomplete_identity:
+            incomplete_event_action_identity_run_ids.append(run["run_id"])
+        if run_has_invalid_identity:
+            invalid_event_action_identity_run_ids.append(run["run_id"])
+        if run_has_provider_identity:
+            provider_scoped_event_action_identity_run_ids.append(run["run_id"])
     blockers = [
         _blocker(
             "requested_bounds_unverified",
@@ -1290,7 +1565,7 @@ def _build_blockers(
         ),
         _blocker(
             "canonical_activity_identity_unavailable",
-            "Transfer, swap-action, jetton-asset, and counterparty rows do not yet share a complete canonical identity contract.",
+            "Provider-scoped event-action observations do not establish canonical transfer, swap, jetton-asset, or counterparty identity.",
             run_ids=run_ids,
         ),
         _blocker(
@@ -1456,6 +1731,77 @@ def _build_blockers(
             )
         )
 
+    if incomplete_event_action_identity_run_ids:
+        blockers.append(
+            _blocker(
+                "event_action_identity_coverage_incomplete",
+                "Some transfer or swap observations lack a valid persisted TonAPI provider-scoped event-action identity.",
+                run_ids=incomplete_event_action_identity_run_ids,
+                evidence={
+                    "provider_scoped": coverage[
+                        "event_action_observations_with_provider_scoped_identity"
+                    ],
+                    "unavailable": coverage[
+                        "event_action_observations_with_unavailable_identity"
+                    ],
+                    "invalid": coverage[
+                        "event_action_observations_with_invalid_identity_contract"
+                    ],
+                    "total": coverage["event_action_observations"],
+                },
+            )
+        )
+
+    if invalid_event_action_identity_run_ids:
+        blockers.append(
+            _blocker(
+                "event_action_identity_contract_invalid",
+                "At least one transfer or swap claims an event-action identity whose persisted object does not recompute from its run, row, and raw TonAPI coordinates.",
+                run_ids=invalid_event_action_identity_run_ids,
+                evidence={
+                    "invalid_observations": coverage[
+                        "event_action_observations_with_invalid_identity_contract"
+                    ]
+                },
+            )
+        )
+
+    if provider_scoped_event_action_identity_run_ids:
+        blockers.append(
+            _blocker(
+                "event_action_identity_non_authoritative",
+                "A provider-scoped TonAPI event-action key identifies one mutable provider observation only; it is not authoritative activity, blockchain proof, ownership proof, or cost-basis evidence.",
+                run_ids=provider_scoped_event_action_identity_run_ids,
+                evidence={
+                    "provider_scoped_observations": coverage[
+                        "event_action_observations_with_provider_scoped_identity"
+                    ],
+                    "is_authoritative_activity_identity": False,
+                    "eligible_for_cost_basis": False,
+                    "used_by_pnl": False,
+                },
+            )
+        )
+
+    event_action_conflicts = [
+        group["identity"]
+        for group in event_action_groups
+        if group["identity_strength"] == "provider_scoped"
+        and group["has_conflict"]
+    ]
+    if event_action_conflicts:
+        blockers.append(
+            _blocker(
+                "event_action_payload_conflicts",
+                "The same provider-scoped event-action coordinate has differing normalized semantic payloads across runs.",
+                run_ids=run_ids,
+                evidence={
+                    "identity_count": len(event_action_conflicts),
+                    "identity_sample": event_action_conflicts[:50],
+                },
+            )
+        )
+
     outside_bounds = {
         str(scope["run_id"]): scope["outside_requested_bounds_count"]
         for scope in (_run_scope(run, -1) for run in runs)
@@ -1501,16 +1847,19 @@ def _build_blockers(
             )
         )
 
-    if coverage["swap_observations"] > coverage["swap_observations_with_exact_identity"]:
+    if coverage["swap_observations_with_weak_identity"]:
         blockers.append(
             _blocker(
                 "weak_swap_identity",
-                "TonAPI event references, including raw action ordinals, remain weak provider-derived evidence and are not exact cross-run swap identities.",
+                "Some legacy swap rows have only raw event references, action ordinals, or semantic fingerprints and lack the strict provider-scoped observation contract.",
                 run_ids=run_ids,
                 evidence={
                     "swap_observations": coverage["swap_observations"],
-                    "exact_identity_observations": coverage[
-                        "swap_observations_with_exact_identity"
+                    "provider_scoped_identity_observations": coverage[
+                        "swap_observations_with_provider_scoped_identity"
+                    ],
+                    "weak_identity_observations": coverage[
+                        "swap_observations_with_weak_identity"
                     ],
                 },
             )
@@ -1606,14 +1955,20 @@ def assess_wallet_history_readiness(
     run_ids = [run["run_id"] for run in run_responses]
     transaction_groups = _transaction_groups(run_responses)
     swap_groups = _swap_groups(run_responses)
-    coverage = _coverage(run_responses, transaction_groups, swap_groups)
+    event_action_groups = _event_action_groups(run_responses)
+    coverage = _coverage(
+        run_responses,
+        transaction_groups,
+        swap_groups,
+        event_action_groups,
+    )
     scopes = [_run_scope(run, target_run_id) for run in run_responses]
     all_timestamps = [
         timestamp for run in run_responses for timestamp in _activity_timestamps(run)
     ]
 
     return {
-        "analysis_version": "wallet_history_readiness_v0.22.5",
+        "analysis_version": "wallet_history_readiness_v0.22.6",
         "target_run_id": target_run_id,
         "run_ids": run_ids,
         "wallet_address": target_run["wallet_address"],
@@ -1629,15 +1984,22 @@ def assess_wallet_history_readiness(
         "runs": scopes,
         "transaction_identity_groups": transaction_groups[:_MAX_IDENTITY_GROUPS],
         "swap_identity_groups": swap_groups[:_MAX_IDENTITY_GROUPS],
+        "event_action_identity_groups": event_action_groups[:_MAX_IDENTITY_GROUPS],
         "transaction_identity_groups_total": len(transaction_groups),
         "swap_identity_groups_total": len(swap_groups),
+        "event_action_identity_groups_total": len(event_action_groups),
         "evidence_groups_truncated": (
             len(transaction_groups) > _MAX_IDENTITY_GROUPS
             or len(swap_groups) > _MAX_IDENTITY_GROUPS
+            or len(event_action_groups) > _MAX_IDENTITY_GROUPS
         ),
         "coverage": coverage,
         "blockers": _build_blockers(
-            run_responses, transaction_groups, swap_groups, coverage
+            run_responses,
+            transaction_groups,
+            swap_groups,
+            event_action_groups,
+            coverage,
         ),
         "history_complete": False,
         "deduplication_applied": False,

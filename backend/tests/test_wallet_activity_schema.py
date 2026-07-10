@@ -20,6 +20,7 @@ from models import (
 )
 from schemas import (
     WalletActivityProviderEvidence,
+    WalletEventActionIdentityRecord,
     WalletIdentityRecord,
     WalletIngestionPreviewRequest,
     WalletIngestionRunResponse,
@@ -71,7 +72,31 @@ def test_wallet_activity_tables_are_registered():
         "provider",
         "source_status",
         "raw_json",
+        "event_action_identity_status",
+        "event_action_identity_version",
+        "event_action_network",
+        "event_action_account_canonical",
+        "event_action_event_id_canonical",
+        "event_action_logical_time_canonical",
+        "event_action_index",
+        "event_action_type",
+        "event_action_identity_key",
     }.issubset(transfer_columns)
+
+    swap_columns = {
+        column["name"] for column in inspector.get_columns("wallet_swaps")
+    }
+    assert {
+        "event_action_identity_status",
+        "event_action_identity_version",
+        "event_action_network",
+        "event_action_account_canonical",
+        "event_action_event_id_canonical",
+        "event_action_logical_time_canonical",
+        "event_action_index",
+        "event_action_type",
+        "event_action_identity_key",
+    }.issubset(swap_columns)
 
 
 def test_wallet_ingestion_run_persists_child_records_and_cascades():
@@ -219,6 +244,12 @@ def test_wallet_ingestion_response_contract_preserves_provider_evidence():
                 direction="in",
                 provider="mock",
                 source_status="mock",
+                event_action_identity=WalletEventActionIdentityRecord(
+                    status="unavailable",
+                    version="unavailable",
+                    network="ton-unknown",
+                    is_provider_observation_identity=False,
+                ),
             )
         ],
         warnings=[
@@ -236,4 +267,10 @@ def test_wallet_ingestion_response_contract_preserves_provider_evidence():
     assert response.wallet_identity.status == "unavailable"
     assert response.wallet_identity.is_ownership_proof is False
     assert response.transfers[0].asset == "TON"
+    assert response.transfers[0].event_action_identity.status == "unavailable"
+    assert (
+        response.transfers[0]
+        .event_action_identity.is_authoritative_activity_identity
+        is False
+    )
     assert response.warnings[0].evidence_key == "wallet_history"
