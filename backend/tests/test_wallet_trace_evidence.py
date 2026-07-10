@@ -42,6 +42,9 @@ WALLET_TABLES = (
     "wallet_ingestion_warnings",
     "wallet_acquisition_streams",
     "wallet_acquisition_pages",
+    "wallet_trace_evidence_captures",
+    "wallet_trace_evidence_nodes",
+    "wallet_trace_evidence_messages",
 )
 
 

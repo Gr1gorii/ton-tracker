@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WalletTransactionRecord } from "./types";
 import {
   eligibleTraceTransactions,
+  validatePersistedWalletTransactionTraceEvidenceResponse,
   validateWalletTransactionTraceEvidenceResponse,
 } from "./walletTraceEvidence";
 
@@ -14,6 +15,11 @@ const EXPECTED = {
   transactionHash: HASH,
   logicalTime: "46000000000001",
   accountCanonical: ACCOUNT,
+};
+
+const PERSISTED_EXPECTED = {
+  ...EXPECTED,
+  network: "ton-mainnet" as const,
 };
 
 function response(overrides: Record<string, unknown> = {}) {
@@ -50,6 +56,58 @@ function response(overrides: Record<string, unknown> = {}) {
     used_by_pnl: false,
     is_ownership_proof: false,
     message: "Sanitized provider trace summary.",
+    ...overrides,
+  };
+}
+
+function persistedResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    contract_version: "tonapi_low_level_trace_evidence_v1",
+    capture_id: "9",
+    run_id: "25",
+    provider: "tonapi",
+    source_status: "live",
+    network: "ton-mainnet",
+    trace_state: "finalized",
+    captured_at: "2026-07-10T12:34:56.123456Z",
+    anchor: {
+      transaction_hash: HASH,
+      logical_time: "46000000000001",
+      account_canonical: ACCOUNT,
+      matches_stored_transaction: true,
+    },
+    summary: {
+      root_transaction_hash: ROOT_HASH,
+      transaction_count: 3,
+      max_depth: 2,
+      message_count: 5,
+      root_inbound_message_count: 1,
+      child_internal_message_count: 2,
+      remaining_out_message_count: 2,
+      internal_message_count: 2,
+      external_in_message_count: 1,
+      external_out_message_count: 2,
+      successful_transaction_count: 2,
+      failed_transaction_count: 1,
+      aborted_transaction_count: 1,
+      unique_account_count: 2,
+    },
+    evidence_digest_sha256: "d".repeat(64),
+    is_provider_indexed_low_level_trace: true,
+    provider_structure_validated: true,
+    persisted_graph_revalidated: true,
+    is_immutable_record: true,
+    raw_boc_persisted: false,
+    message_body_persisted: false,
+    is_blockchain_proof_verified: false,
+    is_authoritative_activity_identity: false,
+    semantic_reconstruction_applied: false,
+    activity_merge_applied: false,
+    deduplication_applied: false,
+    eligible_for_cost_basis: false,
+    used_by_pnl: false,
+    is_ownership_proof: false,
+    message: "Immutable sanitized low-level trace evidence.",
     ...overrides,
   };
 }
@@ -220,8 +278,87 @@ describe("eligibleTraceTransactions", () => {
         transactionHash: HASH,
         logicalTime: "46000000000001",
         accountCanonical: ACCOUNT,
+        network: "ton-mainnet",
         timestamp: "2026-07-10T01:00:00Z",
       },
     ]);
+  });
+
+  it("rejects an unknown-network identity before either trace endpoint", () => {
+    expect(
+      eligibleTraceTransactions([
+        transaction({
+          transaction_identity: {
+            ...transaction().transaction_identity,
+            network: "ton-unknown",
+          },
+        }),
+      ]),
+    ).toEqual([]);
+  });
+});
+
+describe("validatePersistedWalletTransactionTraceEvidenceResponse", () => {
+  it("accepts the exact immutable finalized graph contract", () => {
+    const validated = validatePersistedWalletTransactionTraceEvidenceResponse(
+      persistedResponse(),
+      PERSISTED_EXPECTED,
+    );
+
+    expect(validated.capture_id).toBe("9");
+    expect(validated.network).toBe("ton-mainnet");
+    expect(validated.summary.message_count).toBe(5);
+    expect(validated.persisted_graph_revalidated).toBe(true);
+    expect(validated.is_blockchain_proof_verified).toBe(false);
+    expect(validated.raw_boc_persisted).toBe(false);
+  });
+
+  it.each([
+    ["extra raw field", { ...persistedResponse(), raw_trace: {} }],
+    ["wrong network", persistedResponse({ network: "ton-testnet" })],
+    ["noncanonical capture id", persistedResponse({ capture_id: "09" })],
+    ["non-UTC capture time", persistedResponse({ captured_at: "2026-07-10T12:34:56+02:00" })],
+    ["mutable record", persistedResponse({ is_immutable_record: false })],
+    ["unvalidated provider structure", persistedResponse({ provider_structure_validated: false })],
+    ["raw BOC promotion", persistedResponse({ raw_boc_persisted: true })],
+    ["semantic promotion", persistedResponse({ semantic_reconstruction_applied: true })],
+  ])("rejects %s fail closed", (_label, candidate) => {
+    expect(() =>
+      validatePersistedWalletTransactionTraceEvidenceResponse(
+        candidate,
+        PERSISTED_EXPECTED,
+      ),
+    ).toThrow();
+  });
+
+  it.each([
+    [
+      "child edge mismatch",
+      { ...persistedResponse().summary, child_internal_message_count: 1 },
+    ],
+    [
+      "message total mismatch",
+      { ...persistedResponse().summary, message_count: 6 },
+    ],
+    [
+      "message type mismatch",
+      { ...persistedResponse().summary, external_out_message_count: 1 },
+    ],
+    [
+      "message cap",
+      {
+        ...persistedResponse().summary,
+        message_count: 2305,
+        remaining_out_message_count: 2302,
+        external_out_message_count: 2302,
+      },
+    ],
+  ])("rejects an incoherent %s", (_label, summary) => {
+    expect(() =>
+      validatePersistedWalletTransactionTraceEvidenceResponse(
+        persistedResponse({ summary }),
+        PERSISTED_EXPECTED,
+      ),
+    ).toThrow("graph summary values");
   });
 });

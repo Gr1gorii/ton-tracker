@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.23.0 TRACE EVIDENCE PREVIEW
+# TON Wallet Intelligence Dashboard — v0.23.1 PERSISTED TRACE EVIDENCE
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -11,6 +11,9 @@ privacy-bounded newest-run catalog that discovers stored ids without loading
 full activity. v0.23.0 adds one explicit read-only provider trace preview for a
 strictly eligible persisted low-level transaction. It changes no acquisition,
 persistence, identity, readiness, interval, cost-basis, or PnL contract.
+v0.23.1 adds a separate finalized-only relational trace/message observation
+ledger with provider-free readback and mandatory local graph revalidation. It
+still changes no activity, semantic identity, cost-basis, or PnL contract.
 
 ## Objective
 
@@ -228,6 +231,29 @@ v0.23.0 adds no model, column, index, table, migration, or backfill. Alembic hea
 remains `20260710_0005`; backend `VERSION=0.2.1`,
 `wallet_history_readiness_v0.22.7`, and
 `wallet_multi_run_interval_coverage_v1` remain unchanged.
+
+## Persisted trace evidence contract
+
+v0.23.1 adds `tonapi_low_level_trace_evidence_v1` at the same canonical
+run/transaction scope through `GET` and `POST` on the `/persisted` child
+resource. GET is database-only. POST is explicit, idempotent for an existing
+graph, and otherwise performs one provider request. Only a finalized candidate
+can enter the ledger.
+
+Revision `20260710_0006` stores one capture row, strict DFS-preorder transaction
+nodes, and role/ordinal-scoped message headers. A capture uses one of 16 unique
+per-run slots. All parent links, account+LT+hash coordinates, message endpoint
+roles, counts, capture context, and the SHA-256 canonical evidence digest are
+recomputed before commit and again on every read. A failed check rolls the whole
+candidate back.
+
+Raw provider JSON, transaction/message BOCs, message bodies, decoded data,
+interfaces, actions, presentation metadata, and credentials are not persisted.
+The message observation coordinate is provider-scoped and deliberately not
+globally unique across runs. `provider_structure_validated` and
+`persisted_graph_revalidated` therefore never imply blockchain proof,
+authoritative activity identity, semantic reconstruction, merge, deduplication,
+cost basis, PnL, or ownership proof.
 
 ## Acquisition persistence contract
 
@@ -450,7 +476,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.23.0
+## Surface status in v0.23.1
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -459,7 +485,8 @@ intervals are contiguous.
 | Swaps | Same shared chain, `JettonSwap` interpretation, and shared observation-identity namespace | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
 | Jettons | Account jetton balance snapshot | Point-in-time snapshot, not history |
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
-| Transaction trace evidence | One explicit guarded TonAPI trace read for an eligible stored transaction | Sanitized provider lifecycle/structure preview only; not persisted, locally verified, reconstructed, authoritative, or used by PnL |
+| Transaction trace preview | One explicit guarded TonAPI trace read for an eligible stored transaction | Sanitized provider lifecycle/structure preview only; not persisted, locally verified, reconstructed, authoritative, or used by PnL |
+| Persisted trace evidence | Explicit finalized-only capture plus provider-free locally revalidated readback | Immutable provider-indexed transaction/message header graph; no raw BOC/body, blockchain proof, semantic reconstruction, merge, cost basis, or PnL |
 | Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
@@ -541,8 +568,8 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - No authoritative logic built from TonAPI high-level event actions.
 - No automatic trace call, polling, account-trace discovery, trace pagination,
   provider retry, or hidden fallback.
-- No persisted raw trace, trace summary, lifecycle state, interface, message,
-  BOC, decoded body, or trace-derived semantic activity row.
+- No persisted raw provider trace, BOC, message body, decoded data, interface,
+  action, presentation metadata, or trace-derived semantic activity row.
 - No authoritative transfer/trade reconstruction from the structural trace
   preview and no promotion of a finalized provider state to success or proof.
 - No activity-row merge, semantic stitching, or cross-run deduplication. The
@@ -556,7 +583,7 @@ surfaces do not convert an incomplete transaction stream into complete history.
 
 ## Verification gates
 
-- Fresh, exact legacy, and interrupted SQLite migrations reach revision 0005
+- Fresh, exact legacy, and interrupted SQLite migrations reach revision 0006
   without changing pre-existing domain rows.
 - Malformed partial tables, indexes, foreign-key options, or unexpected evidence
   rows fail before further DDL.
@@ -615,17 +642,13 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.23.0
+## Roadmap beyond v0.23.1
 
-1. Define a separately versioned persisted low-level message/trace evidence
-   contract with local revalidation before reconstructing authoritative transfer
-   or trade semantics. The v0.23.0 on-demand structural summary is not that
-   ledger and cannot be backfilled as one.
-2. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
+1. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
    coordinate as a substitute.
-3. Use the bounded continuity diagnostics as evidence for a separately designed
+2. Use the bounded continuity diagnostics as evidence for a separately designed
    activity-row merge and explicit cross-run deduplication contract; never
    infer those operations from interval adjacency alone.
-4. Only after those gates, evaluate multi-run acquisition cost basis and PnL
+3. Only after those gates, evaluate multi-run acquisition cost basis and PnL
    integration.

@@ -1,3 +1,65 @@
+# TON Wallet Intelligence Dashboard — v0.23.1 PERSISTED TRACE EVIDENCE
+
+v0.23.1 adds an explicit finalized-only persistence boundary for one bounded
+TonAPI low-level trace graph. The existing v0.23.0 live preview remains
+read-only and unchanged. A persisted graph is provider-indexed structural
+evidence only: it is not blockchain proof, semantic transfer/trade
+reconstruction, activity identity, cost basis, ownership proof, or PnL input.
+
+## v0.23.1 scope
+
+- `GET .../trace-evidence/persisted` reads one stored graph and performs no
+  provider call. Absence is 404; malformed stored identity or graph is 409.
+- `POST .../trace-evidence/persisted` is the only capture operation. The first
+  eligible capture makes exactly one `GET /v2/traces/{transaction_hash}` call;
+  an already stored graph returns provider-free and mutation-free.
+- Only a non-emulated `finalized` trace is persisted. A `pending` trace remains
+  preview-only and returns 409 without a database write.
+- Capture is atomic: all nodes, parent links, message roles, counts, identities,
+  capture context, and the evidence digest are revalidated before commit.
+- Each run has 16 database-enforced capture slots. The lowest free slot is used;
+  a unique `(run_id, capture_slot)` index prevents concurrent overflow.
+- The normalized graph is strict DFS preorder with at most 256 transactions,
+  depth 32, 2,048 remaining outgoing messages, and 2,304 total persisted
+  message observations.
+- Every non-root node has one coherent internal inbound edge from its current
+  DFS parent. Root inbound and remaining outbound roles accept only their
+  contract-compatible message types.
+- Provider names, icons, interfaces, decoded bodies, semantic actions, raw
+  transaction/message JSON, BOCs, message bodies, credentials, and headers are
+  excluded from persistence.
+- The digest covers the canonical graph plus run id, capture slot, exact
+  persisted transaction anchor, and capture timestamp. Readback reconstructs
+  and re-hashes that document before returning `persisted_graph_revalidated`.
+- Every success and handled failure uses `Cache-Control: no-store`.
+
+## v0.23.1 schema
+
+Alembic revision `20260710_0006` adds three forward-only tables:
+
+1. `wallet_trace_evidence_captures` — immutable finalized capture metadata,
+   strict per-run slot, aggregate counts, anchor relationship, and digest;
+2. `wallet_trace_evidence_nodes` — unique capture preorder/hash/account+LT
+   transaction observations with explicit parent linkage;
+3. `wallet_trace_evidence_messages` — role/ordinal-scoped sanitized message
+   headers and provider-observation identities.
+
+The migration is online-validation-only, repairs only exact empty interrupted
+fragments, rejects schema drift or pre-revision rows, performs no legacy
+backfill, and refuses downgrade. Foreign keys cascade capture → node → message.
+Message observation keys are deliberately non-unique across captures/runs; this
+release does not introduce hidden global or cross-run deduplication.
+
+## v0.23.1 workspace
+
+The trace card automatically performs only the database readback for the
+selected eligible anchor. Live preview and finalized capture remain separate
+manual actions. Scope, abort, and monotonic sequence guards include run, mode,
+account, LT, and hash. Read, preview, and capture errors are independent; a
+failed live request never removes a previously confirmed immutable record.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.0 TRACE EVIDENCE PREVIEW
 
 This release adds one explicit, read-only trace evidence preview for an eligible

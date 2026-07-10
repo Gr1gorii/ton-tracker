@@ -7,6 +7,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database import get_session
@@ -16,6 +17,7 @@ from schemas import WalletIngestionPreviewRequest, WalletIngestionPreviewRespons
 from schemas import (
     WalletIngestionRunCatalogResponse,
     WalletIngestionRunResponse,
+    WalletPersistedTraceEvidenceResponse,
     WalletRunSignalsResponse,
     WalletTransactionTraceEvidenceResponse,
 )
@@ -38,6 +40,12 @@ from services.wallet_trace_evidence import (
     WalletTraceEvidenceNotFound,
     WalletTraceEvidenceProviderFailure,
     get_wallet_transaction_trace_evidence,
+)
+from services.wallet_persisted_trace_evidence import (
+    WalletPersistedTraceEvidenceConflict,
+    WalletPersistedTraceEvidenceFailure,
+    capture_persisted_wallet_transaction_trace_evidence,
+    get_persisted_wallet_transaction_trace_evidence,
 )
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
@@ -228,6 +236,160 @@ def read_wallet_transaction_trace_evidence(
             detail=str(exc),
             headers=no_store_headers,
         ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/persisted",
+    response_model=WalletPersistedTraceEvidenceResponse,
+)
+def read_persisted_wallet_transaction_trace_evidence(
+    response: Response,
+    run_id: str = Path(
+        ...,
+        description="Canonical positive persisted run id.",
+    ),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read one locally revalidated stored trace graph without provider access."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result = get_persisted_wallet_transaction_trace_evidence(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Persisted trace evidence not found",
+                headers=no_store_headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (WalletPersistedTraceEvidenceFailure, SQLAlchemyError) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Persisted trace evidence storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
+
+
+@router.post(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/persisted",
+    response_model=WalletPersistedTraceEvidenceResponse,
+)
+def capture_persisted_wallet_transaction_trace_evidence_route(
+    response: Response,
+    run_id: str = Path(
+        ...,
+        description="Canonical positive persisted run id.",
+    ),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Capture one finalized trace graph with one explicit provider request."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result, created = capture_persisted_wallet_transaction_trace_evidence(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if created:
+            response.status_code = 201
+        return result
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletPersistedTraceEvidenceFailure,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except WalletTraceEvidenceProviderFailure as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Persisted trace evidence storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
+
+
+def _validated_trace_path(
+    run_id: str,
+    transaction_hash: str,
+    headers: dict[str, str],
+) -> int:
+    if _CANONICAL_RUN_ID_RE.fullmatch(run_id) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="run_id must be a canonical positive signed 64-bit integer",
+            headers=headers,
+        )
+    if _CANONICAL_TRACE_HASH_RE.fullmatch(transaction_hash) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="transaction_hash must be canonical lowercase 32-byte hex",
+            headers=headers,
+        )
+    canonical_run_id = int(run_id, 10)
+    if canonical_run_id > _MAX_SQLITE_RUN_ID:
+        raise HTTPException(
+            status_code=422,
+            detail="run_id must be a canonical positive signed 64-bit integer",
+            headers=headers,
+        )
+    return canonical_run_id
 
 
 @router.get(

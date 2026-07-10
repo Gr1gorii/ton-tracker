@@ -124,6 +124,11 @@ class WalletIngestionRun(Base):
         back_populates="run",
         cascade="all, delete-orphan",
     )
+    trace_evidence_captures = relationship(
+        "WalletTraceEvidenceCapture",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
 
 
 class WalletAcquisitionStream(Base):
@@ -430,6 +435,208 @@ class WalletTransaction(Base):
     transaction_identity_key = Column(String(192), nullable=True)
 
     run = relationship("WalletIngestionRun", back_populates="transactions")
+    captured_trace_evidence = relationship(
+        "WalletTraceEvidenceCapture",
+        back_populates="captured_via_transaction",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletTraceEvidenceCapture(Base):
+    """Finalized, locally revalidatable low-level trace evidence capture."""
+
+    __tablename__ = "wallet_trace_evidence_captures"
+    __table_args__ = (
+        Index(
+            "uq_wallet_trace_captures_run_root",
+            "run_id",
+            "provider",
+            "contract_version",
+            "root_transaction_hash",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_trace_captures_run_anchor",
+            "run_id",
+            "captured_via_transaction_id",
+            "contract_version",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_trace_captures_run_slot",
+            "run_id",
+            "capture_slot",
+            unique=True,
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(
+        Integer,
+        ForeignKey("wallet_ingestion_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    captured_via_transaction_id = Column(
+        Integer,
+        ForeignKey("wallet_transactions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    capture_slot = Column(Integer, nullable=False)
+    provider = Column(String(32), nullable=False)
+    contract_version = Column(String(48), nullable=False)
+    network = Column(String(16), nullable=False)
+    root_transaction_hash = Column(String(64), nullable=False)
+    trace_state = Column(String(16), nullable=False)
+    transaction_count = Column(Integer, nullable=False)
+    max_depth = Column(Integer, nullable=False)
+    message_count = Column(Integer, nullable=False)
+    root_inbound_message_count = Column(Integer, nullable=False)
+    child_internal_message_count = Column(Integer, nullable=False)
+    remaining_out_message_count = Column(Integer, nullable=False)
+    internal_message_count = Column(Integer, nullable=False)
+    external_in_message_count = Column(Integer, nullable=False)
+    external_out_message_count = Column(Integer, nullable=False)
+    successful_transaction_count = Column(Integer, nullable=False)
+    failed_transaction_count = Column(Integer, nullable=False)
+    aborted_transaction_count = Column(Integer, nullable=False)
+    unique_account_count = Column(Integer, nullable=False)
+    evidence_digest_sha256 = Column(String(64), nullable=False)
+    captured_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    run = relationship(
+        "WalletIngestionRun",
+        back_populates="trace_evidence_captures",
+    )
+    captured_via_transaction = relationship(
+        "WalletTransaction",
+        back_populates="captured_trace_evidence",
+    )
+    nodes = relationship(
+        "WalletTraceEvidenceNode",
+        back_populates="capture",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletTraceEvidenceNode(Base):
+    """One transaction node in a persisted trace evidence capture."""
+
+    __tablename__ = "wallet_trace_evidence_nodes"
+    __table_args__ = (
+        Index(
+            "uq_wallet_trace_nodes_capture_preorder",
+            "capture_id",
+            "preorder_index",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_trace_nodes_capture_hash",
+            "capture_id",
+            "transaction_hash",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_trace_nodes_capture_coordinate",
+            "capture_id",
+            "account_canonical",
+            "logical_time",
+            unique=True,
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    capture_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_evidence_captures.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    preorder_index = Column(Integer, nullable=False)
+    parent_node_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_evidence_nodes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    depth = Column(Integer, nullable=False)
+    transaction_hash = Column(String(64), nullable=False)
+    account_canonical = Column(String(76), nullable=False)
+    logical_time = Column(String(20), nullable=False)
+    unix_time = Column(Integer, nullable=False)
+    success = Column(Boolean, nullable=False)
+    aborted = Column(Boolean, nullable=False)
+
+    capture = relationship(
+        "WalletTraceEvidenceCapture",
+        back_populates="nodes",
+    )
+    parent = relationship(
+        "WalletTraceEvidenceNode",
+        remote_side=[id],
+        back_populates="children",
+    )
+    children = relationship(
+        "WalletTraceEvidenceNode",
+        back_populates="parent",
+    )
+    messages = relationship(
+        "WalletTraceEvidenceMessage",
+        back_populates="node",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletTraceEvidenceMessage(Base):
+    """One sanitized low-level message observation attached to a trace node."""
+
+    __tablename__ = "wallet_trace_evidence_messages"
+    __table_args__ = (
+        Index(
+            "uq_wallet_trace_messages_node_role_ordinal",
+            "node_id",
+            "role",
+            "ordinal",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_trace_messages_observation",
+            "observation_identity_key",
+        ),
+        Index(
+            "ix_wallet_trace_messages_hash",
+            "message_hash",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    node_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_evidence_nodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role = Column(String(24), nullable=False)
+    ordinal = Column(Integer, nullable=False)
+    message_hash = Column(String(64), nullable=False)
+    message_type = Column(String(16), nullable=False)
+    source_account_canonical = Column(String(76), nullable=True)
+    destination_account_canonical = Column(String(76), nullable=True)
+    created_logical_time = Column(String(20), nullable=False)
+    unix_time = Column(Integer, nullable=False)
+    value_nanoton = Column(String(20), nullable=False)
+    forward_fee_nanoton = Column(String(20), nullable=False)
+    ihr_fee_nanoton = Column(String(20), nullable=False)
+    import_fee_nanoton = Column(String(20), nullable=False)
+    ihr_disabled = Column(Boolean, nullable=False)
+    bounce = Column(Boolean, nullable=False)
+    bounced = Column(Boolean, nullable=False)
+    observation_identity_key = Column(String(256), nullable=False)
+
+    node = relationship(
+        "WalletTraceEvidenceNode",
+        back_populates="messages",
+    )
 
 
 class WalletSwap(Base):

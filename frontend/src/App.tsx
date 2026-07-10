@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.0 TRACE EVIDENCE PREVIEW";
+const RELEASE_LABEL = "v0.23.1 PERSISTED TRACE EVIDENCE";
 
 const navItems = [
   "DASHBOARD",
@@ -942,20 +942,20 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Explicit transaction trace evidence preview</strong>
+            <strong>Immutable low-level trace evidence</strong>
             <p>
-              Choose one eligible transaction from a real stored run and inspect
-              a sanitized provider-indexed trace summary only after an explicit
-              action. The preview never persists, reconstructs activity, proves
-              authority or ownership, or feeds PnL.
+              Reopen locally revalidated saved evidence without a provider call,
+              or explicitly preview and capture one eligible finalized trace.
+              Persistence never proves authority or ownership, reconstructs
+              activity, or feeds PnL.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
           <ReleaseReadinessItem
             tone="scoped"
-            label="Transaction trace preview"
-            text="One explicit no-store request validates a stored account + logical-time + transaction-hash anchor and returns bounded trace counts. Provider evidence never upgrades the transaction to blockchain proof, semantic reconstruction, authoritative activity, cost basis, ownership proof, or PnL input."
+            label="Persisted trace evidence"
+            text="Database-only readback is automatic for the selected anchor; live preview and immutable capture are separate explicit actions. Stored provider structure never becomes blockchain proof, semantic activity, cost basis, ownership proof, or PnL input."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1010,7 +1010,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Retry-safe migration 0005 adds strict transfer/swap observation identity columns and indexes. Legacy rows without the original provider action index stay explicitly unavailable."
+            text="Retry-safe migration 0006 adds immutable finalized trace captures, nodes, and messages; migration 0005 observation identity and its explicit legacy limits remain intact."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1049,7 +1049,7 @@ function EvidenceColumn({
         <EvidenceItem
           tone="info"
           title="Can show stored-run intelligence"
-          text="Activity rows, explicit per-transaction trace evidence previews, selected-run interval diagnostics, evidence signals, run-scoped PnL, probabilistic cluster comparison, provider previews, and explicit limitations."
+          text="Activity rows, immutable per-transaction trace evidence with explicit live preview, selected-run interval diagnostics, evidence signals, run-scoped PnL, probabilistic cluster comparison, provider previews, and explicit limitations."
         />
         <EvidenceItem
           tone="info"

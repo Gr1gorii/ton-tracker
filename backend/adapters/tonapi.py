@@ -45,8 +45,14 @@ _MAX_LOGICAL_TIME = 2**64 - 1
 _MAX_TRACE_TRANSACTION_NODES = 256
 _MAX_TRACE_DEPTH = 32
 _MAX_TRACE_OUT_MESSAGES = 2048
+_MAX_TRACE_PERSISTED_MESSAGES = (
+    _MAX_TRACE_TRANSACTION_NODES + _MAX_TRACE_OUT_MESSAGES
+)
 _MAX_TRACE_INTERFACES_PER_NODE = 128
 _MAX_TRACE_INTERFACE_LENGTH = 128
+_MAX_SIGNED_64 = 2**63 - 1
+_TRACE_MESSAGE_OBSERVATION_VERSION = "tonapi_trace_message_obs_v1"
+_SUPPORTED_TRACE_NETWORKS = frozenset(("ton-mainnet", "ton-testnet"))
 _LOGICAL_TIME_RE = re.compile(r"^[1-9][0-9]{0,19}$")
 _TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _RAW_ACCOUNT_RE = re.compile(
@@ -628,6 +634,65 @@ class TonapiAdapter:
                 "structurally validated. This provider-indexed summary is "
                 "not locally verified blockchain proof or authoritative "
                 "semantic activity reconstruction."
+            ),
+        )
+
+    def get_transaction_trace_persisted_evidence(
+        self,
+        transaction_hash: str,
+        network: str,
+    ) -> ProviderResult:
+        """Fetch one trace candidate for a bounded persisted evidence ledger."""
+        if (
+            not isinstance(transaction_hash, str)
+            or transaction_hash != transaction_hash.lower()
+            or _TRANSACTION_HASH_RE.fullmatch(transaction_hash) is None
+        ):
+            return self._provider_error(
+                "TonAPI persisted trace evidence requires a canonical "
+                "lowercase 32-byte transaction hash."
+            )
+        if network not in _SUPPORTED_TRACE_NETWORKS:
+            return self._provider_error(
+                "TonAPI persisted trace evidence requires a supported "
+                "canonical TON network."
+            )
+        if self.settings.is_mock:
+            return self._provider_error(
+                "TonAPI persisted trace evidence requires guarded real mode."
+            )
+
+        result = self.fetch_json(f"/v2/traces/{transaction_hash}")
+        if not result.ok:
+            return result
+
+        try:
+            normalized = (
+                self.normalize_transaction_trace_persisted_evidence_response(
+                    result.data,
+                    requested_transaction_hash=transaction_hash,
+                    network=network,
+                )
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_PROTOCOL,
+                self._sanitize_diagnostic(
+                    "TonAPI response had an unexpected structure for "
+                    f"persisted transaction trace evidence: {exc}."
+                )
+                or "TonAPI persisted transaction trace evidence protocol error.",
+                source="real",
+            )
+
+        return ProviderResult.success(
+            normalized,
+            source="real",
+            message=(
+                "TonAPI low-level transaction and message evidence was "
+                "structurally validated as a persistence candidate. It is not "
+                "locally verified blockchain proof or authoritative semantic "
+                "activity reconstruction."
             ),
         )
 
@@ -1348,6 +1413,329 @@ class TonapiAdapter:
                 "aborted_transaction_count": aborted_transaction_count,
                 "unique_account_count": len(accounts),
             },
+        }
+
+    @classmethod
+    def normalize_transaction_trace_persisted_evidence_response(
+        cls,
+        payload: Any,
+        *,
+        requested_transaction_hash: str,
+        network: str,
+    ) -> dict[str, Any]:
+        """Return a strict transaction/message observation graph candidate.
+
+        The existing preview normalizer remains the first validation boundary.
+        This second pass adds only the bounded fields needed by the persisted
+        provider-observation ledger; it never returns raw cells, decoded
+        bodies, interfaces, or semantic actions.
+        """
+        preview = cls.normalize_transaction_trace_evidence_response(
+            payload,
+            requested_transaction_hash=requested_transaction_hash,
+        )
+        if network not in _SUPPORTED_TRACE_NETWORKS:
+            raise ValueError("persisted trace network is not supported")
+        root_transaction_hash = preview["summary"][
+            "root_transaction_hash"
+        ]
+        nodes: list[dict[str, Any]] = []
+        root_inbound_message_count = 0
+        child_internal_message_count = 0
+        remaining_out_message_count = 0
+        type_counts = {
+            "int_msg": 0,
+            "ext_in_msg": 0,
+            "ext_out_msg": 0,
+        }
+        observation_keys: set[str] = set()
+        stack: list[tuple[dict[str, Any], int | None, str | None, int]] = [
+            (payload, None, None, 0)
+        ]
+
+        while stack:
+            node, parent_preorder_index, parent_account, depth = stack.pop()
+            transaction = node["transaction"]
+            preorder_index = len(nodes)
+            transaction_hash = transaction["hash"].lower()
+            account = cls._canonical_raw_account_address(
+                transaction["account"]
+            )
+            logical_time = cls._strict_logical_time(transaction["lt"])
+            if account is None or logical_time is None:
+                raise ValueError(
+                    "trace transaction identity changed during normalization"
+                )
+
+            raw_in_message = transaction.get("in_msg")
+            if raw_in_message is None:
+                if parent_preorder_index is not None:
+                    raise ValueError(
+                        "trace child transaction is missing its internal "
+                        "incoming message"
+                    )
+                in_message = None
+            else:
+                if not isinstance(raw_in_message, dict):
+                    raise ValueError(
+                        "trace transaction in_msg must be an object or null"
+                    )
+                role = (
+                    "root_inbound"
+                    if parent_preorder_index is None
+                    else "child_inbound"
+                )
+                in_message = cls._normalize_persisted_trace_message(
+                    raw_in_message,
+                    network=network,
+                    root_transaction_hash=root_transaction_hash,
+                    preorder_index=preorder_index,
+                    role=role,
+                    ordinal=0,
+                )
+                if parent_preorder_index is None:
+                    if in_message["message_type"] == "ext_out_msg":
+                        raise ValueError(
+                            "trace root incoming message has invalid type"
+                        )
+                    root_inbound_message_count += 1
+                else:
+                    if (
+                        in_message["message_type"] != "int_msg"
+                        or in_message["source_account_canonical"]
+                        != parent_account
+                        or in_message["destination_account_canonical"]
+                        != account
+                    ):
+                        raise ValueError(
+                            "trace child incoming message does not match its "
+                            "parent/account edge"
+                        )
+                    child_internal_message_count += 1
+                observation_key = in_message["observation_identity_key"]
+                if observation_key in observation_keys:
+                    raise ValueError(
+                        "trace reuses a message observation identity"
+                    )
+                observation_keys.add(observation_key)
+                type_counts[in_message["message_type"]] += 1
+
+            out_messages: list[dict[str, Any]] = []
+            for ordinal, raw_message in enumerate(transaction["out_msgs"]):
+                message = cls._normalize_persisted_trace_message(
+                    raw_message,
+                    network=network,
+                    root_transaction_hash=root_transaction_hash,
+                    preorder_index=preorder_index,
+                    role="remaining_outbound",
+                    ordinal=ordinal,
+                )
+                if message["message_type"] not in (
+                    "int_msg",
+                    "ext_out_msg",
+                ):
+                    raise ValueError(
+                        "trace has an invalid remaining outgoing message type"
+                    )
+                observation_key = message["observation_identity_key"]
+                if observation_key in observation_keys:
+                    raise ValueError(
+                        "trace reuses a message observation identity"
+                    )
+                observation_keys.add(observation_key)
+                type_counts[message["message_type"]] += 1
+                remaining_out_message_count += 1
+                out_messages.append(message)
+
+            nodes.append(
+                {
+                    "preorder_index": preorder_index,
+                    "parent_preorder_index": parent_preorder_index,
+                    "depth": depth,
+                    "transaction_hash": transaction_hash,
+                    "account_canonical": account,
+                    "logical_time": logical_time,
+                    "unix_time": transaction["utime"],
+                    "success": transaction["success"],
+                    "aborted": transaction["aborted"],
+                    "in_message": in_message,
+                    "out_messages": out_messages,
+                }
+            )
+
+            raw_children = node.get("children", [])
+            for child in reversed(raw_children):
+                stack.append((child, preorder_index, account, depth + 1))
+
+        message_count = (
+            root_inbound_message_count
+            + child_internal_message_count
+            + remaining_out_message_count
+        )
+        if message_count > _MAX_TRACE_PERSISTED_MESSAGES:
+            raise ValueError(
+                "trace exceeds the maximum persisted-message count"
+            )
+        if child_internal_message_count != len(nodes) - 1:
+            raise ValueError(
+                "trace child-message count does not cover every child node"
+            )
+        if sum(type_counts.values()) != message_count:
+            raise ValueError("trace message type counts are incoherent")
+
+        preview_summary = preview["summary"]
+        return {
+            "trace_state": preview["trace_state"],
+            "anchor": preview["anchor"],
+            "summary": {
+                "root_transaction_hash": root_transaction_hash,
+                "transaction_count": preview_summary["transaction_count"],
+                "max_depth": preview_summary["max_depth"],
+                "message_count": message_count,
+                "root_inbound_message_count": root_inbound_message_count,
+                "child_internal_message_count": (
+                    child_internal_message_count
+                ),
+                "remaining_out_message_count": remaining_out_message_count,
+                "internal_message_count": type_counts["int_msg"],
+                "external_in_message_count": type_counts["ext_in_msg"],
+                "external_out_message_count": type_counts["ext_out_msg"],
+                "successful_transaction_count": preview_summary[
+                    "successful_transaction_count"
+                ],
+                "failed_transaction_count": preview_summary[
+                    "failed_transaction_count"
+                ],
+                "aborted_transaction_count": preview_summary[
+                    "aborted_transaction_count"
+                ],
+                "unique_account_count": preview_summary[
+                    "unique_account_count"
+                ],
+            },
+            "nodes": nodes,
+        }
+
+    @classmethod
+    def _normalize_persisted_trace_message(
+        cls,
+        message: Any,
+        *,
+        network: str,
+        root_transaction_hash: str,
+        preorder_index: int,
+        role: str,
+        ordinal: int,
+    ) -> dict[str, Any]:
+        if not isinstance(message, dict):
+            raise ValueError("trace message must be an object")
+        raw_hash = message.get("hash")
+        if (
+            not isinstance(raw_hash, str)
+            or raw_hash != raw_hash.strip()
+            or _TRANSACTION_HASH_RE.fullmatch(raw_hash) is None
+        ):
+            raise ValueError("trace message has invalid hash")
+        message_hash = raw_hash.lower()
+        message_type = message.get("msg_type")
+        if message_type not in ("int_msg", "ext_in_msg", "ext_out_msg"):
+            raise ValueError("trace message has invalid type")
+
+        accounts: dict[str, str | None] = {}
+        for provider_field, output_field in (
+            ("source", "source_account_canonical"),
+            ("destination", "destination_account_canonical"),
+        ):
+            raw_account = message.get(provider_field)
+            if raw_account is None:
+                accounts[output_field] = None
+                continue
+            canonical_account = cls._canonical_raw_account_address(raw_account)
+            if canonical_account is None:
+                raise ValueError(
+                    f"trace message has invalid {provider_field} account"
+                )
+            accounts[output_field] = canonical_account
+
+        source_account = accounts["source_account_canonical"]
+        destination_account = accounts["destination_account_canonical"]
+        if message_type == "int_msg" and (
+            source_account is None or destination_account is None
+        ):
+            raise ValueError(
+                "trace internal message requires source and destination accounts"
+            )
+        if message_type == "ext_in_msg" and (
+            source_account is not None or destination_account is None
+        ):
+            raise ValueError(
+                "trace external inbound message endpoints are incoherent"
+            )
+        if message_type == "ext_out_msg" and (
+            source_account is None or destination_account is not None
+        ):
+            raise ValueError(
+                "trace external outbound message endpoints are incoherent"
+            )
+
+        created_logical_time = cls._strict_nonnegative_integer_string(
+            message.get("created_lt")
+        )
+        if created_logical_time is None:
+            raise ValueError("trace message has invalid created logical time")
+        unix_time = message.get("created_at")
+        if (
+            isinstance(unix_time, bool)
+            or not isinstance(unix_time, int)
+            or not 0 <= unix_time <= _MAX_SIGNED_64
+        ):
+            raise ValueError("trace message has invalid unix time")
+
+        amounts: dict[str, str] = {}
+        for provider_field, output_field in (
+            ("value", "value_nanoton"),
+            ("fwd_fee", "forward_fee_nanoton"),
+            ("ihr_fee", "ihr_fee_nanoton"),
+            ("import_fee", "import_fee_nanoton"),
+        ):
+            amount = cls._strict_nonnegative_integer_string(
+                message.get(provider_field)
+            )
+            if amount is None:
+                raise ValueError(
+                    f"trace message has invalid {provider_field}"
+                )
+            amounts[output_field] = amount
+
+        flags: dict[str, bool] = {}
+        for field in ("ihr_disabled", "bounce", "bounced"):
+            flag = message.get(field)
+            if not isinstance(flag, bool):
+                raise ValueError(f"trace message {field} must be boolean")
+            flags[field] = flag
+
+        observation_identity_key = "|".join(
+            (
+                _TRACE_MESSAGE_OBSERVATION_VERSION,
+                network,
+                root_transaction_hash,
+                str(preorder_index),
+                role,
+                str(ordinal),
+                message_hash,
+            )
+        )
+        return {
+            "role": role,
+            "ordinal": ordinal,
+            "message_hash": message_hash,
+            "message_type": message_type,
+            **accounts,
+            "created_logical_time": created_logical_time,
+            "unix_time": unix_time,
+            **amounts,
+            **flags,
+            "observation_identity_key": observation_identity_key,
         }
 
     @classmethod

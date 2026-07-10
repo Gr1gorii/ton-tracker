@@ -101,7 +101,7 @@ const CAN_SHOW = [
   "Network-scoped transaction identity",
   "Provider-scoped event-action observation identity",
   "Transaction acquisition bounds and page evidence",
-  "Explicit transaction trace evidence preview",
+  "Persisted low-level transaction trace evidence",
   "Selected-run interval gaps (diagnostic)",
   "Swaps",
   "Balances",
