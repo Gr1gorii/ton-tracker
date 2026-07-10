@@ -509,6 +509,139 @@ class WalletPersistedTraceEvidenceResponse(BaseModel):
         return value
 
 
+class WalletTraceBocVerifierRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Literal["pytoniq-core"]
+    version: Literal["0.1.46"]
+
+
+class WalletTraceBocVerificationSummaryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transaction_count: Annotated[int, Field(strict=True, ge=1, le=256)]
+    message_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    total_boc_bytes: Annotated[
+        int,
+        Field(strict=True, ge=1, le=8 * 1024 * 1024),
+    ]
+    normalized_external_in_hash_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=2304),
+    ]
+    direct_cell_hash_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=2304),
+    ]
+    body_hash_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    opcode_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+
+    @model_validator(mode="after")
+    def _locally_verified_message_counts_must_be_coherent(self):
+        if (
+            self.normalized_external_in_hash_count
+            + self.direct_cell_hash_message_count
+            != self.message_count
+        ):
+            raise ValueError("verified message hash kinds must cover all messages")
+        if self.body_hash_count != self.message_count:
+            raise ValueError("every verified message requires a body hash")
+        if self.opcode_count > self.body_hash_count:
+            raise ValueError("opcode count exceeds verified message body count")
+        return self
+
+
+class WalletTraceBocTransactionRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    preorder_index: Annotated[int, Field(strict=True, ge=0, le=255)]
+    transaction_hash: CanonicalTraceTransactionHash
+    transaction_boc_bytes: Annotated[
+        int,
+        Field(strict=True, ge=1, le=1024 * 1024),
+    ]
+    transaction_cell_hash: CanonicalTraceTransactionHash
+    raw_out_message_count: Annotated[int, Field(strict=True, ge=0, le=2048)]
+    message_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    body_hash_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    opcode_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    message_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _transaction_boc_counts_must_be_coherent(self):
+        if self.transaction_cell_hash != self.transaction_hash:
+            raise ValueError("transaction BOC cell hash must match transaction hash")
+        if self.body_hash_count != self.message_count:
+            raise ValueError("transaction body hashes must cover owned messages")
+        if self.opcode_count > self.body_hash_count:
+            raise ValueError("transaction opcode count exceeds body count")
+        return self
+
+
+class WalletTraceBocVerificationResponse(BaseModel):
+    """Provider-safe summary of locally reparsed transaction BOC evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_boc_trace_verification_v1"]
+    verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    provider: Literal["tonapi"]
+    source_status: Literal["live"]
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$", max_length=16)
+    verified_at: datetime
+    verifier: WalletTraceBocVerifierRecord
+    anchor: WalletTransactionTraceAnchorRecord
+    capture_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    summary: WalletTraceBocVerificationSummaryRecord
+    transactions: list[WalletTraceBocTransactionRecord]
+    transaction_bocs_deserialized_locally: Literal[True]
+    transaction_cell_hashes_verified: Literal[True]
+    transaction_headers_verified: Literal[True]
+    message_hashes_verified: Literal[True]
+    message_headers_verified: Literal[True]
+    message_body_hashes_derived: Literal[True]
+    raw_boc_persisted: Literal[True]
+    raw_boc_returned: Literal[False] = False
+    message_bodies_returned: Literal[False] = False
+    is_blockchain_inclusion_proof_verified: Literal[False] = False
+    is_authoritative_activity_identity: Literal[False] = False
+    semantic_reconstruction_applied: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=600)
+
+    @field_validator("verification_id", "capture_id", "run_id")
+    @classmethod
+    def _boc_verification_ids_must_fit_sqlite(cls, value: str) -> str:
+        if int(value, 10) > 2**63 - 1:
+            raise ValueError("BOC verification id exceeds signed 64-bit range")
+        return value
+
+    @model_validator(mode="after")
+    def _boc_transaction_rows_must_match_summary(self):
+        if len(self.transactions) != self.summary.transaction_count:
+            raise ValueError("verified transaction rows must match summary")
+        if [row.preorder_index for row in self.transactions] != list(
+            range(len(self.transactions))
+        ):
+            raise ValueError("verified transaction rows require canonical preorder")
+        if sum(row.transaction_boc_bytes for row in self.transactions) != (
+            self.summary.total_boc_bytes
+        ):
+            raise ValueError("verified transaction BOC bytes must match summary")
+        if sum(row.message_count for row in self.transactions) != (
+            self.summary.message_count
+        ):
+            raise ValueError("verified transaction message counts must match summary")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

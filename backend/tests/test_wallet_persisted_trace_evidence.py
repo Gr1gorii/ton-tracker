@@ -7,6 +7,8 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from pytoniq_core import Address, Builder
+from pytoniq_core.tlb.transaction import ExternalMsgInfo, MessageAny
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -17,12 +19,21 @@ from database import Base, get_session
 from main import app
 from models import (
     WalletIngestionRun,
+    WalletTraceBocTransaction,
+    WalletTraceBocVerification,
     WalletTraceEvidenceCapture,
     WalletTraceEvidenceMessage,
     WalletTraceEvidenceNode,
     WalletTransaction,
 )
-from schemas import WalletPersistedTraceEvidenceResponse
+from schemas import (
+    WalletPersistedTraceEvidenceResponse,
+    WalletTraceBocVerificationResponse,
+)
+import services.wallet_trace_boc_verification as boc_service
+from services.wallet_trace_boc_verification import (
+    WalletTraceBocVerificationConflict,
+)
 from services.ton_transaction_identity import derive_ton_transaction_identity
 
 
@@ -762,3 +773,315 @@ def test_persisted_trace_paths_are_canonical_and_no_store(
     assert response.status_code == 422
     assert response.headers["cache-control"] == "no-store"
     assert _counts(testing_session) == (0, 0, 0)
+
+
+def _boc_url(run_id: int | str, transaction_hash: str = ROOT_HASH) -> str:
+    return (
+        f"/api/wallets/ingest/{run_id}/transactions/{transaction_hash}"
+        "/trace-evidence/boc-verification"
+    )
+
+
+def _fake_boc_derived(_capture, raw_rows):
+    hashes = (ROOT_HASH, CHILD_HASH)
+    owned_counts = (2, 1)
+    canonical = []
+    for index, row in enumerate(raw_rows):
+        messages = [
+            {
+                "hash_kind": (
+                    "normalized_external_in"
+                    if index == 0 and position == 0
+                    else "cell_hash"
+                ),
+                "opcode_hex": "0x00000001" if position == 0 else None,
+            }
+            for position in range(owned_counts[index])
+        ]
+        canonical.append(
+            {
+                "preorder_index": index,
+                "transaction_hash": hashes[index],
+                "transaction_boc_hex": row["transaction_boc_hex"],
+                "transaction_boc_bytes": row["transaction_boc_bytes"],
+                "transaction_cell_hash": hashes[index],
+                "account_hash_hex": ("33" if index == 0 else "44") * 32,
+                "logical_time": ROOT_LT if index == 0 else CHILD_LT,
+                "unix_time": 1_717_236_000 + index,
+                "aborted": index == 1,
+                "raw_out_message_count": 2 if index == 0 else 0,
+                "message_count": owned_counts[index],
+                "messages": messages,
+                "outgoing_edge_checks": messages,
+            }
+        )
+    return {
+        "transaction_count": 2,
+        "message_count": 3,
+        "total_boc_bytes": 2,
+        "normalized_external_in_hash_count": 1,
+        "direct_cell_hash_message_count": 2,
+        "body_hash_count": 3,
+        "opcode_count": 2,
+        "canonical_transactions": canonical,
+    }
+
+
+def _capture_then_verify_bocs(client, run_id, monkeypatch):
+    monkeypatch.setattr(
+        TonapiAdapter,
+        "get_transaction_trace_persisted_evidence",
+        lambda *args, **kwargs: ProviderResult.success(
+            _normalized_finalized_candidate(),
+            source="real",
+        ),
+    )
+    assert client.post(_url(run_id)).status_code == 201
+    calls = []
+
+    def fake_boc_candidate(self, transaction_hash, network):
+        calls.append((transaction_hash, network))
+        return ProviderResult.success(
+            {
+                "trace": _normalized_finalized_candidate(),
+                "transaction_bocs": [
+                    {
+                        "preorder_index": 0,
+                        "transaction_hash": ROOT_HASH,
+                        "transaction_boc_hex": "00",
+                        "transaction_boc_bytes": 1,
+                    },
+                    {
+                        "preorder_index": 1,
+                        "transaction_hash": CHILD_HASH,
+                        "transaction_boc_hex": "01",
+                        "transaction_boc_bytes": 1,
+                    },
+                ],
+                "total_boc_bytes": 2,
+            },
+            source="real",
+        )
+
+    monkeypatch.setattr(
+        TonapiAdapter,
+        "get_transaction_trace_boc_verification_candidate",
+        fake_boc_candidate,
+    )
+    monkeypatch.setattr(boc_service, "_derive_boc_evidence", _fake_boc_derived)
+    return calls
+
+
+def test_boc_verification_requires_a_persisted_capture_and_is_provider_free(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, _testing_session, run_id = persisted_trace_client
+    monkeypatch.setattr(
+        TonapiAdapter,
+        "get_transaction_trace_boc_verification_candidate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("provider must not be called without a capture")
+        ),
+    )
+
+    absent = client.get(_boc_url(run_id))
+    assert absent.status_code == 404
+    assert absent.headers["cache-control"] == "no-store"
+
+    rejected = client.post(_boc_url(run_id))
+    assert rejected.status_code == 409
+    assert rejected.headers["cache-control"] == "no-store"
+    assert "must be captured" in rejected.json()["detail"]
+
+
+def test_boc_verification_is_atomic_idempotent_and_never_returns_raw_bocs(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, testing_session, run_id = persisted_trace_client
+    calls = _capture_then_verify_bocs(client, run_id, monkeypatch)
+
+    created = client.post(_boc_url(run_id))
+    assert created.status_code == 201
+    assert created.headers["cache-control"] == "no-store"
+    payload = created.json()
+    WalletTraceBocVerificationResponse.model_validate(payload)
+    assert payload["contract_version"] == "ton_boc_trace_verification_v1"
+    assert payload["summary"]["transaction_count"] == 2
+    assert payload["summary"]["message_count"] == 3
+    assert payload["transaction_bocs_deserialized_locally"] is True
+    assert payload["is_blockchain_inclusion_proof_verified"] is False
+    assert payload["semantic_reconstruction_applied"] is False
+    assert "transaction_boc_hex" not in json.dumps(payload)
+    assert calls == [(ROOT_HASH, "ton-mainnet")]
+
+    repeated = client.post(_boc_url(run_id))
+    assert repeated.status_code == 200
+    assert repeated.json() == payload
+    assert calls == [(ROOT_HASH, "ton-mainnet")]
+
+    monkeypatch.setattr(
+        TonapiAdapter,
+        "get_transaction_trace_boc_verification_candidate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("stored BOC readback must be provider-free")
+        ),
+    )
+    readback = client.get(_boc_url(run_id))
+    assert readback.status_code == 200
+    assert readback.json() == payload
+    with testing_session() as session:
+        assert session.scalar(
+            select(func.count()).select_from(WalletTraceBocVerification)
+        ) == 1
+        assert session.scalar(
+            select(func.count()).select_from(WalletTraceBocTransaction)
+        ) == 2
+
+
+def test_boc_verification_readback_rejects_relational_tampering(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, testing_session, run_id = persisted_trace_client
+    _capture_then_verify_bocs(client, run_id, monkeypatch)
+    assert client.post(_boc_url(run_id)).status_code == 201
+    with testing_session() as session:
+        row = session.scalar(select(WalletTraceBocTransaction))
+        assert row is not None
+        row.transaction_cell_hash = "ff" * 32
+        session.commit()
+
+    response = client.get(_boc_url(run_id))
+    assert response.status_code == 409
+    assert response.headers["cache-control"] == "no-store"
+    assert "row failed local revalidation" in response.json()["detail"]
+
+
+def _storage_transaction_boc() -> tuple[str, str]:
+    messages = Builder().store_bit(0).store_bit(0).end_cell()
+    zero_fees = Builder().store_coins(0).store_bit(0).end_cell()
+    state_update = (
+        Builder()
+        .store_uint(0x72, 8)
+        .store_bytes(bytes(32))
+        .store_bytes(bytes(32))
+        .end_cell()
+    )
+    storage_description = (
+        Builder()
+        .store_uint(1, 4)
+        .store_coins(0)
+        .store_bit(0)
+        .store_bit(0)
+        .end_cell()
+    )
+    transaction = (
+        Builder()
+        .store_uint(7, 4)
+        .store_bytes(bytes.fromhex("33" * 32))
+        .store_uint(int(ROOT_LT), 64)
+        .store_bytes(bytes(32))
+        .store_uint(0, 64)
+        .store_uint(1_717_236_000, 32)
+        .store_uint(0, 15)
+        .store_uint(2, 2)
+        .store_uint(2, 2)
+        .store_ref(messages)
+        .store_cell(zero_fees)
+        .store_ref(state_update)
+        .store_ref(storage_description)
+        .end_cell()
+    )
+    return transaction.hash.hex(), transaction.to_boc().hex()
+
+
+def test_local_boc_parser_verifies_a_generated_storage_transaction():
+    transaction_hash, boc_hex = _storage_transaction_boc()
+    capture = WalletTraceEvidenceCapture(
+        id=1,
+        provider="tonapi",
+        contract_version=PERSISTED_CONTRACT,
+        network="ton-mainnet",
+        root_transaction_hash=transaction_hash,
+        trace_state="finalized",
+        transaction_count=1,
+        max_depth=0,
+        message_count=0,
+        root_inbound_message_count=0,
+        child_internal_message_count=0,
+        remaining_out_message_count=0,
+        internal_message_count=0,
+        external_in_message_count=0,
+        external_out_message_count=0,
+        successful_transaction_count=1,
+        failed_transaction_count=0,
+        aborted_transaction_count=0,
+        unique_account_count=1,
+        evidence_digest_sha256="ab" * 32,
+        captured_at=datetime(2026, 7, 10, tzinfo=timezone.utc),
+    )
+    node = WalletTraceEvidenceNode(
+        id=1,
+        preorder_index=0,
+        depth=0,
+        transaction_hash=transaction_hash,
+        account_canonical=ROOT_ACCOUNT,
+        logical_time=ROOT_LT,
+        unix_time=1_717_236_000,
+        success=True,
+        aborted=False,
+    )
+    capture.nodes.append(node)
+    raw_rows = [
+        {
+            "preorder_index": 0,
+            "transaction_hash": transaction_hash,
+            "transaction_boc_hex": boc_hex,
+            "transaction_boc_bytes": len(boc_hex) // 2,
+        }
+    ]
+
+    derived = boc_service._derive_boc_evidence(capture, raw_rows)
+
+    assert derived["transaction_count"] == 1
+    assert derived["message_count"] == 0
+    assert derived["total_boc_bytes"] == len(boc_hex) // 2
+    assert derived["canonical_transactions"][0]["transaction_cell_hash"] == (
+        transaction_hash
+    )
+    node.logical_time = str(int(ROOT_LT) + 1)
+    with pytest.raises(
+        WalletTraceBocVerificationConflict,
+        match="header does not match",
+    ):
+        boc_service._derive_boc_evidence(capture, raw_rows)
+
+
+def test_external_in_message_hash_uses_normalized_cell_layout():
+    destination = Address(ROOT_ACCOUNT)
+    body = Builder().store_uint(0x12345678, 32).end_cell()
+    message = MessageAny(
+        ExternalMsgInfo(src=None, dest=destination, import_fee=123),
+        init=None,
+        body=body,
+    )
+    expected = (
+        Builder()
+        .store_uint(2, 2)
+        .store_uint(0, 2)
+        .store_address(destination)
+        .store_uint(0, 4)
+        .store_bit(0)
+        .store_bit(1)
+        .store_ref(body)
+        .end_cell()
+        .hash.hex()
+    )
+
+    provider_hash, raw_hash, hash_kind = boc_service._message_hashes(message)
+
+    assert provider_hash == expected
+    assert provider_hash != raw_hash
+    assert hash_kind == "normalized_external_in"

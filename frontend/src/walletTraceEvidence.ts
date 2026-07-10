@@ -1,6 +1,9 @@
 import type {
   WalletPersistedTransactionTraceEvidenceResponse,
   WalletPersistedTransactionTraceEvidenceSummary,
+  WalletTraceBocVerificationResponse,
+  WalletTraceBocVerificationSummary,
+  WalletTraceBocVerifiedTransaction,
   WalletTransactionRecord,
   WalletTransactionTraceEvidenceAnchor,
   WalletTransactionTraceEvidenceResponse,
@@ -103,6 +106,81 @@ const PERSISTED_FALSE_FLAG_KEYS = [
   "raw_boc_persisted",
   "message_body_persisted",
 ] as const;
+const BOC_RESPONSE_KEYS = [
+  "activity_merge_applied",
+  "anchor",
+  "capture_evidence_digest_sha256",
+  "capture_id",
+  "contract_version",
+  "deduplication_applied",
+  "eligible_for_cost_basis",
+  "evidence_digest_sha256",
+  "is_authoritative_activity_identity",
+  "is_blockchain_inclusion_proof_verified",
+  "is_ownership_proof",
+  "message",
+  "message_bodies_returned",
+  "message_body_hashes_derived",
+  "message_hashes_verified",
+  "message_headers_verified",
+  "network",
+  "provider",
+  "raw_boc_persisted",
+  "raw_boc_returned",
+  "run_id",
+  "semantic_reconstruction_applied",
+  "source_status",
+  "summary",
+  "transaction_bocs_deserialized_locally",
+  "transaction_cell_hashes_verified",
+  "transaction_headers_verified",
+  "transactions",
+  "used_by_pnl",
+  "verification_id",
+  "verified_at",
+  "verifier",
+] as const;
+const BOC_SUMMARY_KEYS = [
+  "body_hash_count",
+  "direct_cell_hash_message_count",
+  "message_count",
+  "normalized_external_in_hash_count",
+  "opcode_count",
+  "total_boc_bytes",
+  "transaction_count",
+] as const;
+const BOC_TRANSACTION_KEYS = [
+  "body_hash_count",
+  "message_count",
+  "message_evidence_digest_sha256",
+  "opcode_count",
+  "preorder_index",
+  "raw_out_message_count",
+  "transaction_boc_bytes",
+  "transaction_cell_hash",
+  "transaction_hash",
+] as const;
+const BOC_TRUE_FLAG_KEYS = [
+  "message_body_hashes_derived",
+  "message_hashes_verified",
+  "message_headers_verified",
+  "raw_boc_persisted",
+  "transaction_bocs_deserialized_locally",
+  "transaction_cell_hashes_verified",
+  "transaction_headers_verified",
+] as const;
+const BOC_FALSE_FLAG_KEYS = [
+  "activity_merge_applied",
+  "deduplication_applied",
+  "eligible_for_cost_basis",
+  "is_authoritative_activity_identity",
+  "is_blockchain_inclusion_proof_verified",
+  "is_ownership_proof",
+  "message_bodies_returned",
+  "raw_boc_returned",
+  "semantic_reconstruction_applied",
+  "used_by_pnl",
+] as const;
 
 export interface WalletTraceEvidenceExpectedAnchor {
   runId: number;
@@ -122,6 +200,14 @@ export interface WalletTraceEligibleTransaction {
 export interface WalletPersistedTraceEvidenceExpectedAnchor
   extends WalletTraceEvidenceExpectedAnchor {
   network: "ton-mainnet" | "ton-testnet";
+}
+
+export interface WalletTraceBocVerificationExpectedAnchor
+  extends WalletPersistedTraceEvidenceExpectedAnchor {
+  captureId: string;
+  captureEvidenceDigest: string;
+  transactionCount: number;
+  messageCount: number;
 }
 
 export function eligibleTraceTransactions(
@@ -214,6 +300,106 @@ export function validatePersistedWalletTransactionTraceEvidenceResponse(
     raw_boc_persisted: false,
     message_body_persisted: false,
     is_blockchain_proof_verified: false,
+    is_authoritative_activity_identity: false,
+    semantic_reconstruction_applied: false,
+    activity_merge_applied: false,
+    deduplication_applied: false,
+    eligible_for_cost_basis: false,
+    used_by_pnl: false,
+    is_ownership_proof: false,
+    message: value.message,
+  };
+}
+
+export function validateWalletTransactionTraceBocVerificationResponse(
+  value: unknown,
+  expected: WalletTraceBocVerificationExpectedAnchor,
+): WalletTraceBocVerificationResponse {
+  validateExpectedAnchor(expected);
+  if (
+    !isCanonicalPositiveInt64(expected.captureId) ||
+    !isCanonicalHash(expected.captureEvidenceDigest) ||
+    !isRecord(value) ||
+    !hasExactKeys(value, BOC_RESPONSE_KEYS)
+  ) {
+    throw new Error("Local BOC verification returned an unexpected response shape.");
+  }
+  if (
+    value.contract_version !== "ton_boc_trace_verification_v1" ||
+    !isCanonicalPositiveInt64(value.verification_id) ||
+    value.capture_id !== expected.captureId ||
+    value.run_id !== String(expected.runId) ||
+    value.provider !== "tonapi" ||
+    value.source_status !== "live" ||
+    value.network !== expected.network ||
+    !isUtcIsoTimestamp(value.verified_at) ||
+    value.capture_evidence_digest_sha256 !== expected.captureEvidenceDigest ||
+    !isCanonicalHash(value.evidence_digest_sha256) ||
+    !isRecord(value.verifier) ||
+    !hasExactKeys(value.verifier, ["name", "version"]) ||
+    value.verifier.name !== "pytoniq-core" ||
+    value.verifier.version !== "0.1.46" ||
+    typeof value.message !== "string" ||
+    value.message.trim().length === 0 ||
+    value.message.length > 600 ||
+    BOC_TRUE_FLAG_KEYS.some((key) => value[key] !== true) ||
+    BOC_FALSE_FLAG_KEYS.some((key) => value[key] !== false)
+  ) {
+    throw new Error("Local BOC verification returned invalid contract metadata.");
+  }
+
+  const anchor = validateAnchor(value.anchor, expected);
+  const summary = validateBocSummary(value.summary);
+  if (
+    summary.transaction_count !== expected.transactionCount ||
+    summary.message_count !== expected.messageCount
+  ) {
+    throw new Error("Local BOC verification changed persisted trace counts.");
+  }
+  if (!Array.isArray(value.transactions)) {
+    throw new Error("Local BOC verification omitted transaction summaries.");
+  }
+  const transactions = value.transactions.map((row, index) =>
+    validateBocTransaction(row, index),
+  );
+  if (
+    transactions.length !== summary.transaction_count ||
+    transactions.reduce((total, row) => total + row.transaction_boc_bytes, 0) !==
+      summary.total_boc_bytes ||
+    transactions.reduce((total, row) => total + row.message_count, 0) !==
+      summary.message_count ||
+    transactions.reduce((total, row) => total + row.body_hash_count, 0) !==
+      summary.body_hash_count ||
+    transactions.reduce((total, row) => total + row.opcode_count, 0) !==
+      summary.opcode_count
+  ) {
+    throw new Error("Local BOC verification transaction totals are incoherent.");
+  }
+  return {
+    contract_version: "ton_boc_trace_verification_v1",
+    verification_id: value.verification_id,
+    capture_id: value.capture_id,
+    run_id: value.run_id,
+    provider: "tonapi",
+    source_status: "live",
+    network: expected.network,
+    verified_at: value.verified_at,
+    verifier: { name: "pytoniq-core", version: "0.1.46" },
+    anchor,
+    capture_evidence_digest_sha256: value.capture_evidence_digest_sha256,
+    evidence_digest_sha256: value.evidence_digest_sha256,
+    summary,
+    transactions,
+    transaction_bocs_deserialized_locally: true,
+    transaction_cell_hashes_verified: true,
+    transaction_headers_verified: true,
+    message_hashes_verified: true,
+    message_headers_verified: true,
+    message_body_hashes_derived: true,
+    raw_boc_persisted: true,
+    raw_boc_returned: false,
+    message_bodies_returned: false,
+    is_blockchain_inclusion_proof_verified: false,
     is_authoritative_activity_identity: false,
     semantic_reconstruction_applied: false,
     activity_merge_applied: false,
@@ -433,6 +619,75 @@ function validatePersistedSummary(
     failed_transaction_count: summary.failed_transaction_count,
     aborted_transaction_count: summary.aborted_transaction_count,
     unique_account_count: summary.unique_account_count,
+  };
+}
+
+function validateBocSummary(value: unknown): WalletTraceBocVerificationSummary {
+  if (!isRecord(value) || !hasExactKeys(value, BOC_SUMMARY_KEYS)) {
+    throw new Error("Local BOC verification returned an invalid summary.");
+  }
+  if (BOC_SUMMARY_KEYS.some((key) => !isNonnegativeSafeInteger(value[key]))) {
+    throw new Error("Local BOC verification returned invalid summary values.");
+  }
+  const summary = value as unknown as WalletTraceBocVerificationSummary;
+  if (
+    summary.transaction_count < 1 ||
+    summary.transaction_count > 256 ||
+    summary.message_count > 2304 ||
+    summary.total_boc_bytes < 1 ||
+    summary.total_boc_bytes > 8 * 1024 * 1024 ||
+    summary.normalized_external_in_hash_count +
+      summary.direct_cell_hash_message_count !==
+      summary.message_count ||
+    summary.body_hash_count !== summary.message_count ||
+    summary.opcode_count > summary.body_hash_count
+  ) {
+    throw new Error("Local BOC verification returned incoherent summary values.");
+  }
+  return { ...summary };
+}
+
+function validateBocTransaction(
+  value: unknown,
+  expectedIndex: number,
+): WalletTraceBocVerifiedTransaction {
+  if (!isRecord(value) || !hasExactKeys(value, BOC_TRANSACTION_KEYS)) {
+    throw new Error("Local BOC verification returned an invalid transaction row.");
+  }
+  const integerKeys = [
+    "body_hash_count",
+    "message_count",
+    "opcode_count",
+    "preorder_index",
+    "raw_out_message_count",
+    "transaction_boc_bytes",
+  ] as const;
+  if (
+    integerKeys.some((key) => !isNonnegativeSafeInteger(value[key])) ||
+    value.preorder_index !== expectedIndex ||
+    expectedIndex > 255 ||
+    !isCanonicalHash(value.transaction_hash) ||
+    value.transaction_cell_hash !== value.transaction_hash ||
+    !isCanonicalHash(value.message_evidence_digest_sha256) ||
+    (value.transaction_boc_bytes as number) < 1 ||
+    (value.transaction_boc_bytes as number) > 1024 * 1024 ||
+    (value.raw_out_message_count as number) > 2048 ||
+    (value.message_count as number) > 2304 ||
+    value.body_hash_count !== value.message_count ||
+    (value.opcode_count as number) > (value.body_hash_count as number)
+  ) {
+    throw new Error("Local BOC verification returned invalid transaction values.");
+  }
+  return {
+    preorder_index: value.preorder_index as number,
+    transaction_hash: value.transaction_hash,
+    transaction_boc_bytes: value.transaction_boc_bytes as number,
+    transaction_cell_hash: value.transaction_cell_hash as string,
+    raw_out_message_count: value.raw_out_message_count as number,
+    message_count: value.message_count as number,
+    body_hash_count: value.body_hash_count as number,
+    opcode_count: value.opcode_count as number,
+    message_evidence_digest_sha256: value.message_evidence_digest_sha256,
   };
 }
 

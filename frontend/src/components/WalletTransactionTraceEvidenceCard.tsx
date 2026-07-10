@@ -8,19 +8,24 @@ import {
 
 import {
   getPersistedWalletTransactionTraceEvidence,
+  getWalletTransactionTraceBocVerification,
   getWalletTransactionTraceEvidence,
   persistWalletTransactionTraceEvidence,
+  verifyWalletTransactionTraceBocs,
 } from "../api";
 import type {
   WalletPersistedTransactionTraceEvidenceResponse,
+  WalletTraceBocVerificationResponse,
   WalletTransactionRecord,
   WalletTransactionTraceEvidenceResponse,
 } from "../types";
 import {
   eligibleTraceTransactions,
   validatePersistedWalletTransactionTraceEvidenceResponse,
+  validateWalletTransactionTraceBocVerificationResponse,
   validateWalletTransactionTraceEvidenceResponse,
   type WalletPersistedTraceEvidenceExpectedAnchor,
+  type WalletTraceBocVerificationExpectedAnchor,
   type WalletTraceEligibleTransaction,
 } from "../walletTraceEvidence";
 import PreviewReadinessStrip, {
@@ -103,10 +108,19 @@ export default function WalletTransactionTraceEvidenceCard({
     useState<WalletPersistedTransactionTraceEvidenceResponse | null>(null);
   const [captureLoading, setCaptureLoading] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
+  const [bocReadState, setBocReadState] =
+    useState<PersistedReadState>("idle");
+  const [bocReadError, setBocReadError] = useState<string | null>(null);
+  const [bocResult, setBocResult] =
+    useState<WalletTraceBocVerificationResponse | null>(null);
+  const [bocVerifyLoading, setBocVerifyLoading] = useState(false);
+  const [bocVerifyError, setBocVerifyError] = useState<string | null>(null);
   const previewSequence = useRef(0);
   const persistedSequence = useRef(0);
+  const bocSequence = useRef(0);
   const previewController = useRef<AbortController | null>(null);
   const persistedController = useRef<AbortController | null>(null);
+  const bocController = useRef<AbortController | null>(null);
 
   const selectedTransaction =
     eligibleTransactions.find(
@@ -125,22 +139,38 @@ export default function WalletTransactionTraceEvidenceCard({
     persistedResultMatchesScope(persistedResult, runId, selectedTransaction)
       ? persistedResult
       : null;
+  const visibleBocResult =
+    bocResult &&
+    visiblePersistedResult &&
+    bocResult.run_id === String(runId) &&
+    bocResult.capture_id === visiblePersistedResult.capture_id &&
+    bocResult.anchor.transaction_hash === selectedTransaction?.transactionHash
+      ? bocResult
+      : null;
   const busy =
-    previewLoading || persistedReadState === "loading" || captureLoading;
+    previewLoading ||
+    persistedReadState === "loading" ||
+    captureLoading ||
+    bocReadState === "loading" ||
+    bocVerifyLoading;
   const canInspect =
     dataMode === "real" &&
     selectedTransaction !== null &&
-    persistedReadState !== "loading" &&
-    !previewLoading &&
-    !captureLoading;
+    !busy;
+  const canVerifyBocs =
+    dataMode === "real" &&
+    selectedTransaction !== null &&
+    visiblePersistedResult !== null &&
+    bocReadState === "empty" &&
+    visibleBocResult === null &&
+    !busy;
   const canCapture =
     dataMode === "real" &&
     selectedTransaction !== null &&
     visiblePreviewResult?.trace_state === "finalized" &&
     persistedReadState === "empty" &&
     visiblePersistedResult === null &&
-    !previewLoading &&
-    !captureLoading;
+    !busy;
   const titleId = `transaction-trace-evidence-title-${runId}`;
   const selectId = `transaction-trace-evidence-anchor-${runId}`;
   const helpId = `${selectId}-help`;
@@ -171,6 +201,11 @@ export default function WalletTransactionTraceEvidenceCard({
     setPersistedResult(null);
     setCaptureLoading(false);
     setCaptureError(null);
+    setBocReadState("idle");
+    setBocReadError(null);
+    setBocResult(null);
+    setBocVerifyLoading(false);
+    setBocVerifyError(null);
 
     if (dataMode !== "real" || selectedTransaction === null) {
       setPersistedReadState("idle");
@@ -191,10 +226,13 @@ export default function WalletTransactionTraceEvidenceCard({
   function invalidateAllRequests() {
     previewSequence.current += 1;
     persistedSequence.current += 1;
+    bocSequence.current += 1;
     previewController.current?.abort();
     persistedController.current?.abort();
+    bocController.current?.abort();
     previewController.current = null;
     persistedController.current = null;
+    bocController.current = null;
   }
 
   function resetScopedState() {
@@ -206,6 +244,11 @@ export default function WalletTransactionTraceEvidenceCard({
     setPersistedResult(null);
     setCaptureLoading(false);
     setCaptureError(null);
+    setBocReadState("idle");
+    setBocReadError(null);
+    setBocResult(null);
+    setBocVerifyLoading(false);
+    setBocVerifyError(null);
   }
 
   async function readPersistedEvidence(
@@ -251,6 +294,7 @@ export default function WalletTransactionTraceEvidenceCard({
       }
       setPersistedResult(validated);
       setPersistedReadState("ready");
+      void readBocVerification(validated, expectedScopeKey);
     } catch (caught) {
       if (
         nextController.signal.aborted ||
@@ -268,6 +312,60 @@ export default function WalletTransactionTraceEvidenceCard({
     }
   }
 
+  async function readBocVerification(
+    persisted: WalletPersistedTransactionTraceEvidenceResponse,
+    expectedScopeKey: string,
+  ) {
+    const sequence = bocSequence.current + 1;
+    bocSequence.current = sequence;
+    bocController.current?.abort();
+    const nextController = new AbortController();
+    bocController.current = nextController;
+    setBocReadState("loading");
+    setBocReadError(null);
+    setBocVerifyError(null);
+    const expected = expectedBocAnchor(persisted);
+    try {
+      const response = await getWalletTransactionTraceBocVerification(
+        expected.runId,
+        expected.transactionHash,
+        nextController.signal,
+      );
+      if (
+        nextController.signal.aborted ||
+        bocSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      if (response === null) {
+        setBocResult(null);
+        setBocReadState("empty");
+        return;
+      }
+      const validated = validateWalletTransactionTraceBocVerificationResponse(
+        response,
+        expected,
+      );
+      setBocResult(validated);
+      setBocReadState("ready");
+    } catch (caught) {
+      if (
+        nextController.signal.aborted ||
+        bocSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setBocReadError(
+        errorMessage(caught, "Unknown local transaction BOC read error."),
+      );
+      setBocReadState("error");
+    } finally {
+      if (bocSequence.current === sequence) bocController.current = null;
+    }
+  }
+
   function handleAnchorChange(nextHash: string) {
     invalidateAllRequests();
     setSelectedHash(nextHash);
@@ -280,6 +378,11 @@ export default function WalletTransactionTraceEvidenceCard({
       expectedAnchor(runId, selectedTransaction),
       scopeKey,
     );
+  }
+
+  function handleBocReadRetry() {
+    if (visiblePersistedResult === null) return;
+    void readBocVerification(visiblePersistedResult, scopeKey);
   }
 
   async function handleInspect(event: FormEvent<HTMLFormElement>) {
@@ -362,6 +465,7 @@ export default function WalletTransactionTraceEvidenceCard({
       }
       setPersistedResult(validated);
       setPersistedReadState("ready");
+      void readBocVerification(validated, expectedScopeKey);
     } catch (caught) {
       if (
         nextController.signal.aborted ||
@@ -375,6 +479,61 @@ export default function WalletTransactionTraceEvidenceCard({
       if (persistedSequence.current === sequence) {
         persistedController.current = null;
         setCaptureLoading(false);
+      }
+    }
+  }
+
+  async function handleVerifyBocs() {
+    if (
+      !canVerifyBocs ||
+      selectedTransaction === null ||
+      visiblePersistedResult === null
+    ) {
+      return;
+    }
+    const sequence = bocSequence.current + 1;
+    bocSequence.current = sequence;
+    bocController.current?.abort();
+    const nextController = new AbortController();
+    bocController.current = nextController;
+    const expectedScopeKey = scopeKey;
+    const expected = expectedBocAnchor(visiblePersistedResult);
+    setBocVerifyLoading(true);
+    setBocVerifyError(null);
+    try {
+      const response = await verifyWalletTransactionTraceBocs(
+        runId,
+        selectedTransaction.transactionHash,
+        nextController.signal,
+      );
+      const validated = validateWalletTransactionTraceBocVerificationResponse(
+        response,
+        expected,
+      );
+      if (
+        nextController.signal.aborted ||
+        bocSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setBocResult(validated);
+      setBocReadState("ready");
+    } catch (caught) {
+      if (
+        nextController.signal.aborted ||
+        bocSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setBocVerifyError(
+        errorMessage(caught, "Unknown local transaction BOC verification error."),
+      );
+    } finally {
+      if (bocSequence.current === sequence) {
+        bocController.current = null;
+        setBocVerifyLoading(false);
       }
     }
   }
@@ -397,6 +556,7 @@ export default function WalletTransactionTraceEvidenceCard({
         </div>
         <div className="table-meta" aria-label="Permanent trace limitations">
           <span className="badge badge-mock">STORED ≠ VERIFIED</span>
+          <span className="badge badge-mock">LOCAL BOC ≠ CHAIN PROOF</span>
           <span className="badge badge-mock">NON-AUTHORITATIVE</span>
           <span className="badge badge-mock">NOT PNL</span>
           <span className="badge badge-mock">NO OWNERSHIP PROOF</span>
@@ -404,11 +564,11 @@ export default function WalletTransactionTraceEvidenceCard({
       </div>
 
       <div className="trace-evidence-safety" role="note">
-        <strong>Persistence is not blockchain verification.</strong>
+        <strong>Local BOC verification is not a chain inclusion proof.</strong>
         <span>
-          Local graph revalidation checks the stored structural contract only.
-          It does not prove chain state, reconstruct transfer or swap semantics,
-          establish full history, ownership, or cost-basis eligibility.
+          The optional local pass reparses every transaction BOC and checks cell
+          hashes, bounded headers, message edges and body hashes. It does not
+          prove chain state, reconstruct semantics, ownership, or cost basis.
         </span>
       </div>
 
@@ -474,6 +634,20 @@ export default function WalletTransactionTraceEvidenceCard({
               readState: persistedReadState,
             })}
           </button>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            disabled={!canVerifyBocs}
+            onClick={handleVerifyBocs}
+          >
+            {bocVerifyLoading
+              ? "Verifying transaction BOCs"
+              : visibleBocResult
+                ? "Transaction BOCs verified"
+                : bocReadState === "loading"
+                  ? "Checking local BOC record"
+                  : "Verify transaction BOCs"}
+          </button>
         </div>
       </form>
 
@@ -513,8 +687,32 @@ export default function WalletTransactionTraceEvidenceCard({
         </div>
       )}
 
+      {bocReadError && (
+        <div className="trace-evidence-error" role="alert">
+          <strong>Local BOC verification read failed.</strong>
+          <span>{bocReadError}</span>
+          <button className="btn btn-secondary" type="button" onClick={handleBocReadRetry}>
+            Retry local BOC read
+          </button>
+        </div>
+      )}
+
+      {bocVerifyError && (
+        <div className="trace-evidence-error" role="alert">
+          <strong>Transaction BOCs were not verified.</strong>
+          <span>{bocVerifyError}</span>
+          {visiblePersistedResult && (
+            <small>The saved trace graph remains unchanged.</small>
+          )}
+        </div>
+      )}
+
       {visiblePersistedResult && (
         <PersistedTraceEvidenceResult result={visiblePersistedResult} />
+      )}
+
+      {visibleBocResult && (
+        <BocVerificationResult result={visibleBocResult} />
       )}
 
       {previewLoading && (
@@ -625,6 +823,83 @@ function PersistedTraceEvidenceResult({
               <TraceDetailRow label="Internal messages" value={String(summary.internal_message_count)} />
               <TraceDetailRow label="External-in messages" value={String(summary.external_in_message_count)} />
               <TraceDetailRow label="External-out messages" value={String(summary.external_out_message_count)} />
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function BocVerificationResult({
+  result,
+}: {
+  result: WalletTraceBocVerificationResponse;
+}) {
+  const summary = result.summary;
+  return (
+    <div className="trace-evidence-results trace-evidence-boc-results">
+      <div className="trace-evidence-result-heading">
+        <div>
+          <span className="section-eyebrow">Local BOC verification record</span>
+          <h3>Transaction cells and messages matched</h3>
+        </div>
+        <div className="trace-evidence-validation-badges">
+          <span className="source-badge source-real">BOCS DESERIALIZED</span>
+          <span className="source-badge source-real">CELL HASHES MATCHED</span>
+          <span className="source-badge source-real">MESSAGE EDGES MATCHED</span>
+        </div>
+      </div>
+
+      <div className="trace-evidence-contract-strip trace-evidence-persisted-strip">
+        <div><span>Contract</span><strong>{result.contract_version}</strong></div>
+        <div><span>Verification ID</span><strong>#{result.verification_id}</strong></div>
+        <div><span>Verifier</span><strong>{result.verifier.name} {result.verifier.version}</strong></div>
+        <div><span>Verified</span><strong><time dateTime={result.verified_at}>{result.verified_at}</time></strong></div>
+      </div>
+
+      <p className="trace-evidence-message">{result.message}</p>
+      <div className="trace-evidence-metrics" aria-label="Local BOC verification counts">
+        <TraceMetric label="Transactions" value={summary.transaction_count} />
+        <TraceMetric label="Messages" value={summary.message_count} />
+        <TraceMetric label="BOC bytes" value={summary.total_boc_bytes} />
+        <TraceMetric label="Body hashes" value={summary.body_hash_count} />
+        <TraceMetric label="32-bit opcodes" value={summary.opcode_count} />
+        <TraceMetric label="Normalized ext-in" value={summary.normalized_external_in_hash_count} />
+      </div>
+
+      <details className="trace-evidence-details">
+        <summary>
+          <span>Per-transaction local verification digests</span>
+          <span>RAW BOC HIDDEN</span>
+        </summary>
+        <div className="table-wrap trace-evidence-table-wrap">
+          <table className="data-table trace-evidence-table">
+            <caption>
+              Locally reparsed transaction cells for capture #{result.capture_id};
+              raw BOCs and message bodies are intentionally not returned.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Preorder</th>
+                <th scope="col">Transaction hash</th>
+                <th scope="col">BOC bytes</th>
+                <th scope="col">Messages</th>
+                <th scope="col">Body hashes</th>
+                <th scope="col">Evidence SHA-256</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.transactions.map((transaction) => (
+                <tr key={transaction.preorder_index}>
+                  <th scope="row">{transaction.preorder_index}</th>
+                  <td className="mono">{transaction.transaction_hash}</td>
+                  <td>{transaction.transaction_boc_bytes}</td>
+                  <td>{transaction.message_count}</td>
+                  <td>{transaction.body_hash_count}</td>
+                  <td className="mono">{transaction.message_evidence_digest_sha256}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -843,6 +1118,22 @@ function expectedAnchor(
     logicalTime: transaction.logicalTime,
     accountCanonical: transaction.accountCanonical,
     network: transaction.network,
+  };
+}
+
+function expectedBocAnchor(
+  persisted: WalletPersistedTransactionTraceEvidenceResponse,
+): WalletTraceBocVerificationExpectedAnchor {
+  return {
+    runId: Number(persisted.run_id),
+    transactionHash: persisted.anchor.transaction_hash,
+    logicalTime: persisted.anchor.logical_time,
+    accountCanonical: persisted.anchor.account_canonical,
+    network: persisted.network,
+    captureId: persisted.capture_id,
+    captureEvidenceDigest: persisted.evidence_digest_sha256,
+    transactionCount: persisted.summary.transaction_count,
+    messageCount: persisted.summary.message_count,
   };
 }
 

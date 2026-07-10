@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.1 PERSISTED TRACE EVIDENCE";
+const RELEASE_LABEL = "v0.23.2 LOCAL BOC VERIFICATION";
 
 const navItems = [
   "DASHBOARD",
@@ -942,16 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Immutable low-level trace evidence</strong>
+            <strong>Locally reparsed transaction BOC evidence</strong>
             <p>
-              Reopen locally revalidated saved evidence without a provider call,
-              or explicitly preview and capture one eligible finalized trace.
-              Persistence never proves authority or ownership, reconstructs
-              activity, or feeds PnL.
+              Reopen the persisted trace and its locally verified BOC record
+              without a provider call, or explicitly run the one-call BOC
+              verification. Local deserialization never becomes chain inclusion
+              proof, semantic activity, ownership evidence, or PnL input.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Local BOC verification"
+            text="Every transaction BOC is persisted only after its cell hash, bounded transaction header, message hashes and headers, body hashes, and outgoing trace edges match the immutable trace graph. Provider-free readback reparses all BOCs again; raw BOCs and bodies are never returned to the browser."
+          />
           <ReleaseReadinessItem
             tone="scoped"
             label="Persisted trace evidence"
@@ -1010,7 +1015,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Retry-safe migration 0006 adds immutable finalized trace captures, nodes, and messages; migration 0005 observation identity and its explicit legacy limits remain intact."
+            text="Retry-safe migration 0007 adds capture-bound BOC verification and transaction rows on top of the immutable 0006 trace graph. Both revisions are forward-only and reject drift or pre-revision data."
           />
           <ReleaseReadinessItem
             tone="ready"

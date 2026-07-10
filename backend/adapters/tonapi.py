@@ -51,6 +51,8 @@ _MAX_TRACE_PERSISTED_MESSAGES = (
 _MAX_TRACE_INTERFACES_PER_NODE = 128
 _MAX_TRACE_INTERFACE_LENGTH = 128
 _MAX_SIGNED_64 = 2**63 - 1
+_MAX_TRACE_TRANSACTION_BOC_BYTES = 1024 * 1024
+_MAX_TRACE_TOTAL_BOC_BYTES = 8 * 1024 * 1024
 _TRACE_MESSAGE_OBSERVATION_VERSION = "tonapi_trace_message_obs_v1"
 _SUPPORTED_TRACE_NETWORKS = frozenset(("ton-mainnet", "ton-testnet"))
 _LOGICAL_TIME_RE = re.compile(r"^[1-9][0-9]{0,19}$")
@@ -693,6 +695,59 @@ class TonapiAdapter:
                 "structurally validated as a persistence candidate. It is not "
                 "locally verified blockchain proof or authoritative semantic "
                 "activity reconstruction."
+            ),
+        )
+
+    def get_transaction_trace_boc_verification_candidate(
+        self,
+        transaction_hash: str,
+        network: str,
+    ) -> ProviderResult:
+        """Fetch one bounded trace including transaction BOCs for local checks."""
+        if (
+            not isinstance(transaction_hash, str)
+            or transaction_hash != transaction_hash.lower()
+            or _TRANSACTION_HASH_RE.fullmatch(transaction_hash) is None
+        ):
+            return self._provider_error(
+                "TonAPI BOC verification requires a canonical lowercase "
+                "32-byte transaction hash."
+            )
+        if network not in _SUPPORTED_TRACE_NETWORKS:
+            return self._provider_error(
+                "TonAPI BOC verification requires a supported canonical TON network."
+            )
+        if self.settings.is_mock:
+            return self._provider_error(
+                "TonAPI BOC verification requires guarded real mode."
+            )
+
+        result = self.fetch_json(f"/v2/traces/{transaction_hash}")
+        if not result.ok:
+            return result
+        try:
+            normalized = self.normalize_transaction_trace_boc_verification_response(
+                result.data,
+                requested_transaction_hash=transaction_hash,
+                network=network,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_PROTOCOL,
+                self._sanitize_diagnostic(
+                    "TonAPI response had an unexpected structure for local "
+                    f"transaction BOC verification: {exc}."
+                )
+                or "TonAPI transaction BOC verification protocol error.",
+                source="real",
+            )
+        return ProviderResult.success(
+            normalized,
+            source="real",
+            message=(
+                "TonAPI transaction BOCs were fetched as a bounded local "
+                "verification candidate. Provider delivery alone is not a "
+                "blockchain inclusion proof."
             ),
         )
 
@@ -1614,6 +1669,65 @@ class TonapiAdapter:
                 ],
             },
             "nodes": nodes,
+        }
+
+    @classmethod
+    def normalize_transaction_trace_boc_verification_response(
+        cls,
+        payload: Any,
+        *,
+        requested_transaction_hash: str,
+        network: str,
+    ) -> dict[str, Any]:
+        """Add bounded canonical transaction BOCs to the persisted graph candidate."""
+        trace = cls.normalize_transaction_trace_persisted_evidence_response(
+            payload,
+            requested_transaction_hash=requested_transaction_hash,
+            network=network,
+        )
+        transaction_bocs: list[dict[str, Any]] = []
+        total_boc_bytes = 0
+        stack: list[dict[str, Any]] = [payload]
+        while stack:
+            node = stack.pop()
+            preorder_index = len(transaction_bocs)
+            transaction = node.get("transaction")
+            if not isinstance(transaction, dict):
+                raise ValueError("trace BOC node transaction must be an object")
+            raw_boc = transaction.get("raw")
+            if (
+                not isinstance(raw_boc, str)
+                or not raw_boc
+                or raw_boc != raw_boc.strip()
+                or len(raw_boc) % 2 != 0
+                or re.fullmatch(r"[0-9a-fA-F]+", raw_boc) is None
+            ):
+                raise ValueError("trace transaction raw BOC must be canonical hex")
+            boc_bytes = len(raw_boc) // 2
+            if boc_bytes > _MAX_TRACE_TRANSACTION_BOC_BYTES:
+                raise ValueError("trace transaction BOC exceeds the per-node limit")
+            total_boc_bytes += boc_bytes
+            if total_boc_bytes > _MAX_TRACE_TOTAL_BOC_BYTES:
+                raise ValueError("trace transaction BOCs exceed the aggregate limit")
+            expected_node = trace["nodes"][preorder_index]
+            transaction_bocs.append(
+                {
+                    "preorder_index": preorder_index,
+                    "transaction_hash": expected_node["transaction_hash"],
+                    "transaction_boc_hex": raw_boc.lower(),
+                    "transaction_boc_bytes": boc_bytes,
+                }
+            )
+            children = node.get("children", [])
+            for child in reversed(children):
+                stack.append(child)
+
+        if len(transaction_bocs) != trace["summary"]["transaction_count"]:
+            raise ValueError("trace transaction BOC count is incoherent")
+        return {
+            "trace": trace,
+            "transaction_bocs": transaction_bocs,
+            "total_boc_bytes": total_boc_bytes,
         }
 
     @classmethod

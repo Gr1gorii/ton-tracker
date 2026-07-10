@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   API_BASE,
   getPersistedWalletTransactionTraceEvidence,
+  getWalletTransactionTraceBocVerification,
   getWalletTransactionTraceEvidence,
   persistWalletTransactionTraceEvidence,
+  verifyWalletTransactionTraceBocs,
 } from "./api";
 
 const HASH = "a".repeat(64);
@@ -129,6 +131,65 @@ describe("persisted transaction trace evidence API", () => {
         cache: "no-store",
         signal: controller.signal,
       },
+    );
+  });
+});
+
+describe("local transaction BOC verification API", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads provider-free and maps only the exact absence detail to null", async () => {
+    const payload = { contract_version: "ton_boc_trace_verification_v1" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            detail: "Locally verified transaction BOC evidence not found",
+          }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(
+      getWalletTransactionTraceBocVerification(25, HASH, controller.signal),
+    ).resolves.toEqual(payload);
+    await expect(
+      getWalletTransactionTraceBocVerification(25, HASH),
+    ).resolves.toBeNull();
+    expect(fetchMock.mock.calls[0]).toEqual([
+      `${API_BASE}/api/wallets/ingest/25/transactions/${HASH}/trace-evidence/boc-verification`,
+      { cache: "no-store", signal: controller.signal },
+    ]);
+  });
+
+  it("uses an explicit no-store POST for local verification", async () => {
+    const payload = { contract_version: "ton_boc_trace_verification_v1" };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(
+      verifyWalletTransactionTraceBocs(25, HASH, controller.signal),
+    ).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/wallets/ingest/25/transactions/${HASH}/trace-evidence/boc-verification`,
+      { method: "POST", cache: "no-store", signal: controller.signal },
     );
   });
 });

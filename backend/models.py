@@ -520,6 +520,11 @@ class WalletTraceEvidenceCapture(Base):
         back_populates="capture",
         cascade="all, delete-orphan",
     )
+    boc_verifications = relationship(
+        "WalletTraceBocVerification",
+        back_populates="capture",
+        cascade="all, delete-orphan",
+    )
 
 
 class WalletTraceEvidenceNode(Base):
@@ -586,6 +591,11 @@ class WalletTraceEvidenceNode(Base):
         back_populates="node",
         cascade="all, delete-orphan",
     )
+    boc_transactions = relationship(
+        "WalletTraceBocTransaction",
+        back_populates="node",
+        cascade="all, delete-orphan",
+    )
 
 
 class WalletTraceEvidenceMessage(Base):
@@ -636,6 +646,112 @@ class WalletTraceEvidenceMessage(Base):
     node = relationship(
         "WalletTraceEvidenceNode",
         back_populates="messages",
+    )
+
+
+class WalletTraceBocVerification(Base):
+    """Locally deserialized BOC verification for one persisted trace graph."""
+
+    __tablename__ = "wallet_trace_boc_verifications"
+    __table_args__ = (
+        Index(
+            "uq_wallet_trace_boc_verifications_capture_contract",
+            "capture_id",
+            "contract_version",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_trace_boc_verifications_digest",
+            "evidence_digest_sha256",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    capture_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_evidence_captures.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    contract_version = Column(String(48), nullable=False)
+    verifier_name = Column(String(32), nullable=False)
+    verifier_version = Column(String(24), nullable=False)
+    network = Column(String(16), nullable=False)
+    transaction_count = Column(Integer, nullable=False)
+    message_count = Column(Integer, nullable=False)
+    total_boc_bytes = Column(Integer, nullable=False)
+    normalized_external_in_hash_count = Column(Integer, nullable=False)
+    direct_cell_hash_message_count = Column(Integer, nullable=False)
+    body_hash_count = Column(Integer, nullable=False)
+    opcode_count = Column(Integer, nullable=False)
+    evidence_digest_sha256 = Column(String(64), nullable=False)
+    verified_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    capture = relationship(
+        "WalletTraceEvidenceCapture",
+        back_populates="boc_verifications",
+    )
+    transactions = relationship(
+        "WalletTraceBocTransaction",
+        back_populates="verification",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletTraceBocTransaction(Base):
+    """One bounded raw transaction BOC and its locally derived evidence."""
+
+    __tablename__ = "wallet_trace_boc_transactions"
+    __table_args__ = (
+        Index(
+            "uq_wallet_trace_boc_transactions_verification_node",
+            "verification_id",
+            "node_id",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_trace_boc_transactions_verification_preorder",
+            "verification_id",
+            "preorder_index",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_trace_boc_transactions_verification_hash",
+            "verification_id",
+            "transaction_hash",
+            unique=True,
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    verification_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_boc_verifications.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    node_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_evidence_nodes.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    preorder_index = Column(Integer, nullable=False)
+    transaction_hash = Column(String(64), nullable=False)
+    transaction_boc_hex = Column(Text, nullable=False)
+    transaction_boc_bytes = Column(Integer, nullable=False)
+    transaction_cell_hash = Column(String(64), nullable=False)
+    message_count = Column(Integer, nullable=False)
+    message_evidence_digest_sha256 = Column(String(64), nullable=False)
+
+    verification = relationship(
+        "WalletTraceBocVerification",
+        back_populates="transactions",
+    )
+    node = relationship(
+        "WalletTraceEvidenceNode",
+        back_populates="boc_transactions",
     )
 
 

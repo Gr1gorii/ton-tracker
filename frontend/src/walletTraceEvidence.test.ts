@@ -4,6 +4,7 @@ import type { WalletTransactionRecord } from "./types";
 import {
   eligibleTraceTransactions,
   validatePersistedWalletTransactionTraceEvidenceResponse,
+  validateWalletTransactionTraceBocVerificationResponse,
   validateWalletTransactionTraceEvidenceResponse,
 } from "./walletTraceEvidence";
 
@@ -20,6 +21,14 @@ const EXPECTED = {
 const PERSISTED_EXPECTED = {
   ...EXPECTED,
   network: "ton-mainnet" as const,
+};
+
+const BOC_EXPECTED = {
+  ...PERSISTED_EXPECTED,
+  captureId: "9",
+  captureEvidenceDigest: "d".repeat(64),
+  transactionCount: 2,
+  messageCount: 3,
 };
 
 function response(overrides: Record<string, unknown> = {}) {
@@ -108,6 +117,75 @@ function persistedResponse(overrides: Record<string, unknown> = {}) {
     used_by_pnl: false,
     is_ownership_proof: false,
     message: "Immutable sanitized low-level trace evidence.",
+    ...overrides,
+  };
+}
+
+function bocResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    contract_version: "ton_boc_trace_verification_v1",
+    verification_id: "4",
+    capture_id: "9",
+    run_id: "25",
+    provider: "tonapi",
+    source_status: "live",
+    network: "ton-mainnet",
+    verified_at: "2026-07-10T13:00:00.123456Z",
+    verifier: { name: "pytoniq-core", version: "0.1.46" },
+    anchor: persistedResponse().anchor,
+    capture_evidence_digest_sha256: "d".repeat(64),
+    evidence_digest_sha256: "e".repeat(64),
+    summary: {
+      transaction_count: 2,
+      message_count: 3,
+      total_boc_bytes: 1020,
+      normalized_external_in_hash_count: 1,
+      direct_cell_hash_message_count: 2,
+      body_hash_count: 3,
+      opcode_count: 2,
+    },
+    transactions: [
+      {
+        preorder_index: 0,
+        transaction_hash: ROOT_HASH,
+        transaction_boc_bytes: 607,
+        transaction_cell_hash: ROOT_HASH,
+        raw_out_message_count: 1,
+        message_count: 2,
+        body_hash_count: 2,
+        opcode_count: 1,
+        message_evidence_digest_sha256: "1".repeat(64),
+      },
+      {
+        preorder_index: 1,
+        transaction_hash: HASH,
+        transaction_boc_bytes: 413,
+        transaction_cell_hash: HASH,
+        raw_out_message_count: 0,
+        message_count: 1,
+        body_hash_count: 1,
+        opcode_count: 1,
+        message_evidence_digest_sha256: "2".repeat(64),
+      },
+    ],
+    transaction_bocs_deserialized_locally: true,
+    transaction_cell_hashes_verified: true,
+    transaction_headers_verified: true,
+    message_hashes_verified: true,
+    message_headers_verified: true,
+    message_body_hashes_derived: true,
+    raw_boc_persisted: true,
+    raw_boc_returned: false,
+    message_bodies_returned: false,
+    is_blockchain_inclusion_proof_verified: false,
+    is_authoritative_activity_identity: false,
+    semantic_reconstruction_applied: false,
+    activity_merge_applied: false,
+    deduplication_applied: false,
+    eligible_for_cost_basis: false,
+    used_by_pnl: false,
+    is_ownership_proof: false,
+    message: "Locally reparsed and trace-bound transaction BOC evidence.",
     ...overrides,
   };
 }
@@ -360,5 +438,63 @@ describe("validatePersistedWalletTransactionTraceEvidenceResponse", () => {
         PERSISTED_EXPECTED,
       ),
     ).toThrow("graph summary values");
+  });
+});
+
+describe("validateWalletTransactionTraceBocVerificationResponse", () => {
+  it("accepts exact local verification metadata without exposing BOCs", () => {
+    const validated = validateWalletTransactionTraceBocVerificationResponse(
+      bocResponse(),
+      BOC_EXPECTED,
+    );
+
+    expect(validated.capture_id).toBe("9");
+    expect(validated.summary.total_boc_bytes).toBe(1020);
+    expect(validated.transactions).toHaveLength(2);
+    expect(validated.raw_boc_persisted).toBe(true);
+    expect(validated.raw_boc_returned).toBe(false);
+    expect(JSON.stringify(validated)).not.toContain("transaction_boc_hex");
+  });
+
+  it.each([
+    ["raw BOC field", { ...bocResponse(), transaction_boc_hex: "00" }],
+    ["wrong capture", bocResponse({ capture_id: "10" })],
+    ["wrong capture digest", bocResponse({ capture_evidence_digest_sha256: "f".repeat(64) })],
+    ["wrong verifier", bocResponse({ verifier: { name: "other", version: "0.1.46" } })],
+    ["proof promotion", bocResponse({ is_blockchain_inclusion_proof_verified: true })],
+    ["raw response promotion", bocResponse({ raw_boc_returned: true })],
+    ["semantic promotion", bocResponse({ semantic_reconstruction_applied: true })],
+  ])("rejects %s fail closed", (_label, candidate) => {
+    expect(() =>
+      validateWalletTransactionTraceBocVerificationResponse(
+        candidate,
+        BOC_EXPECTED,
+      ),
+    ).toThrow();
+  });
+
+  it("rejects incoherent transaction and message totals", () => {
+    expect(() =>
+      validateWalletTransactionTraceBocVerificationResponse(
+        bocResponse({
+          summary: { ...bocResponse().summary, message_count: 4 },
+        }),
+        BOC_EXPECTED,
+      ),
+    ).toThrow();
+    expect(() =>
+      validateWalletTransactionTraceBocVerificationResponse(
+        bocResponse({
+          transactions: [
+            ...bocResponse().transactions.slice(0, 1),
+            {
+              ...bocResponse().transactions[1],
+              transaction_cell_hash: "f".repeat(64),
+            },
+          ],
+        }),
+        BOC_EXPECTED,
+      ),
+    ).toThrow("transaction values");
   });
 });
