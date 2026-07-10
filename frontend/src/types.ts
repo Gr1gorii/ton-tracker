@@ -1430,8 +1430,22 @@ export interface WalletMultiAssetLotReadinessSummaryRecord {
   blocked_row_count: number;
 }
 
+export interface WalletRealPnlSafetyGateRecord {
+  contract_version: "ton_real_pnl_safety_gate_v1";
+  target_run_id: number;
+  selected_run_ids: number[];
+  source_native_analysis_digest_sha256: string;
+  required_requirement_codes: WalletMultiAssetPnlRequirementCode[];
+  satisfied_requirement_codes: WalletMultiAssetPnlRequirementCode[];
+  blocking_requirement_codes: WalletMultiAssetPnlRequirementCode[];
+  all_requirements_satisfied: false;
+  calculation_authorized: false;
+  refuses_partial_calculation: true;
+  gate_digest_sha256: string;
+}
+
 export interface WalletMultiAssetPnlReadinessResponse {
-  contract_version: "ton_multi_asset_pnl_readiness_v3";
+  contract_version: "ton_multi_asset_pnl_readiness_v4";
   target_run_id: number;
   selected_run_ids: number[];
   network: string;
@@ -1444,6 +1458,7 @@ export interface WalletMultiAssetPnlReadinessResponse {
   requirements: WalletMultiAssetPnlRequirementRecord[];
   blocked_requirement_codes: WalletMultiAssetPnlRequirementCode[];
   lot_readiness_summary: WalletMultiAssetLotReadinessSummaryRecord;
+  real_pnl_gate: WalletRealPnlSafetyGateRecord;
   analysis_digest_sha256: string;
   analysis_status: "blocked_missing_evidence";
   calculation_mode: "evidence_reconciliation_only";

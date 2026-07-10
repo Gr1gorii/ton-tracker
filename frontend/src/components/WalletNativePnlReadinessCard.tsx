@@ -240,10 +240,14 @@ export default function WalletNativePnlReadinessCard({
           <div className="native-pnl-gate" role="note">
             <div>
               <span>Calculation state</span>
-              <strong>PNL REMAINS LOCKED</strong>
+              <strong>REAL PNL REFUSED</strong>
             </div>
-            <p>{result.message}</p>
+            <p>
+              {result.real_pnl_gate.blocking_requirement_codes.length} blockers ·
+              partial calculation refused · gate {result.real_pnl_gate.gate_digest_sha256.slice(0, 12)}…
+            </p>
           </div>
+          <p className="muted small">{result.message}</p>
 
           <ul className="native-pnl-requirements" aria-label="PnL requirements">
             {result.requirements.map((requirement) => (

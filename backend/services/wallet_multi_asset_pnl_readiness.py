@@ -27,7 +27,7 @@ from services.wallet_native_activity_pnl_readiness import (
 from services.wallet_jetton_contract_verification import _record_response
 
 
-MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION = "ton_multi_asset_pnl_readiness_v3"
+MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION = "ton_multi_asset_pnl_readiness_v4"
 JETTON_PROVIDER_ASSET_OBSERVATION_VERSION = "tonapi_jetton_snapshot_v1"
 NANOTON_PER_TON = Decimal("1000000000")
 MAX_SELECTED_CAPTURES = 2500
@@ -120,6 +120,26 @@ def build_multi_asset_pnl_readiness(
         "lot_eligible_row_count": 0,
         "blocked_row_count": unique_count,
     }
+    gate_document = {
+        "contract_version": "ton_real_pnl_safety_gate_v1",
+        "target_run_id": target_run_id,
+        "selected_run_ids": selected_run_ids,
+        "source_native_analysis_digest_sha256": native[
+            "analysis_digest_sha256"
+        ],
+        "required_requirement_codes": [row["code"] for row in requirements],
+        "satisfied_requirement_codes": [
+            row["code"] for row in requirements if row["available"]
+        ],
+        "blocking_requirement_codes": blocked_codes,
+        "all_requirements_satisfied": not blocked_codes,
+        "calculation_authorized": not blocked_codes,
+        "refuses_partial_calculation": True,
+    }
+    real_pnl_gate = {
+        **gate_document,
+        "gate_digest_sha256": _digest_json(gate_document),
+    }
     document = {
         "contract_version": MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION,
         "target_run_id": target_run_id,
@@ -136,6 +156,7 @@ def build_multi_asset_pnl_readiness(
         "requirements": requirements,
         "blocked_requirement_codes": blocked_codes,
         "lot_readiness_summary": lot_readiness,
+        "real_pnl_gate": real_pnl_gate,
     }
     return {
         **document,

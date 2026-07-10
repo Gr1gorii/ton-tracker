@@ -1768,10 +1768,39 @@ class WalletMultiAssetLotReadinessSummaryRecord(BaseModel):
         return self
 
 
+class WalletRealPnlSafetyGateRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_real_pnl_safety_gate_v1"]
+    target_run_id: PositiveStrictRunId
+    selected_run_ids: list[PositiveStrictRunId] = Field(min_length=2, max_length=50)
+    source_native_analysis_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    required_requirement_codes: list[MultiAssetPnlRequirementCode]
+    satisfied_requirement_codes: list[MultiAssetPnlRequirementCode]
+    blocking_requirement_codes: list[MultiAssetPnlRequirementCode]
+    all_requirements_satisfied: Literal[False] = False
+    calculation_authorized: Literal[False] = False
+    refuses_partial_calculation: Literal[True]
+    gate_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _safety_gate_must_be_a_complete_partition(self):
+        if (
+            self.target_run_id not in self.selected_run_ids
+            or len(set(self.selected_run_ids)) != len(self.selected_run_ids)
+            or len(set(self.required_requirement_codes))
+            != len(self.required_requirement_codes)
+            or self.required_requirement_codes
+            != self.satisfied_requirement_codes + self.blocking_requirement_codes
+        ):
+            raise ValueError("real PnL safety gate partition changed")
+        return self
+
+
 class WalletMultiAssetPnlReadinessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contract_version: Literal["ton_multi_asset_pnl_readiness_v3"]
+    contract_version: Literal["ton_multi_asset_pnl_readiness_v4"]
     target_run_id: PositiveStrictRunId
     selected_run_ids: list[PositiveStrictRunId] = Field(min_length=2, max_length=50)
     network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
@@ -1784,6 +1813,7 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
     requirements: list[WalletMultiAssetPnlRequirementRecord]
     blocked_requirement_codes: list[MultiAssetPnlRequirementCode]
     lot_readiness_summary: WalletMultiAssetLotReadinessSummaryRecord
+    real_pnl_gate: WalletRealPnlSafetyGateRecord
     analysis_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     analysis_status: Literal["blocked_missing_evidence"]
     calculation_mode: Literal["evidence_reconciliation_only"]
@@ -1817,6 +1847,7 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
     def _multi_asset_readiness_must_stay_coherent(self):
         summary = self.jetton_evidence_summary
         lots = self.lot_readiness_summary
+        gate = self.real_pnl_gate
         if summary.verified_capture_count > summary.selected_capture_count:
             raise ValueError("verified capture count changed")
         if summary.source_message_count != (
@@ -1932,6 +1963,17 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
         expected_blocked = [row.code for row in self.requirements if not row.available]
         if self.blocked_requirement_codes != expected_blocked:
             raise ValueError("multi-asset blocked requirement codes changed")
+        if (
+            gate.target_run_id != self.target_run_id
+            or gate.selected_run_ids != self.selected_run_ids
+            or gate.source_native_analysis_digest_sha256
+            != self.source_native_analysis_digest_sha256
+            or gate.required_requirement_codes != expected_codes
+            or gate.satisfied_requirement_codes
+            != [row.code for row in self.requirements if row.available]
+            or gate.blocking_requirement_codes != expected_blocked
+        ):
+            raise ValueError("real PnL safety gate changed")
         if self.jetton_payload_semantics_used_by_pnl_readiness != bool(self.evidence):
             raise ValueError("jetton readiness usage flag changed")
         if self.verified_contract_identity_used_by_pnl_readiness != bool(summary.asset_matched_observation_count):

@@ -16,7 +16,7 @@ import WalletNativePnlReadinessCard from "./WalletNativePnlReadinessCard";
 
 function response(): WalletMultiAssetPnlReadinessResponse {
   return {
-    contract_version: "ton_multi_asset_pnl_readiness_v3",
+    contract_version: "ton_multi_asset_pnl_readiness_v4",
     target_run_id: 33,
     selected_run_ids: [32, 33],
     network: "ton-mainnet",
@@ -160,6 +160,40 @@ function response(): WalletMultiAssetPnlReadinessResponse {
       lot_eligible_row_count: 0,
       blocked_row_count: 1,
     },
+    real_pnl_gate: {
+      contract_version: "ton_real_pnl_safety_gate_v1",
+      target_run_id: 33,
+      selected_run_ids: [32, 33],
+      source_native_analysis_digest_sha256: "11".repeat(32),
+      required_requirement_codes: [
+        "deduplicated_native_activity",
+        "verified_jetton_payload_semantics",
+        "proof_checked_jetton_asset_identity",
+        "exact_transaction_fee_evidence",
+        "complete_wallet_history",
+        "authoritative_trade_semantics",
+        "historical_trade_prices",
+        "transaction_fee_allocation",
+        "acquisition_lots_and_cost_basis",
+      ],
+      satisfied_requirement_codes: [
+        "deduplicated_native_activity",
+        "verified_jetton_payload_semantics",
+        "proof_checked_jetton_asset_identity",
+        "exact_transaction_fee_evidence",
+      ],
+      blocking_requirement_codes: [
+        "complete_wallet_history",
+        "authoritative_trade_semantics",
+        "historical_trade_prices",
+        "transaction_fee_allocation",
+        "acquisition_lots_and_cost_basis",
+      ],
+      all_requirements_satisfied: false,
+      calculation_authorized: false,
+      refuses_partial_calculation: true,
+      gate_digest_sha256: "99".repeat(32),
+    },
     analysis_digest_sha256: "33".repeat(32),
     analysis_status: "blocked_missing_evidence",
     calculation_mode: "evidence_reconciliation_only",
@@ -216,7 +250,7 @@ describe("WalletNativePnlReadinessCard", () => {
         [33, 32],
       ),
     );
-    expect(screen.getByText("PNL REMAINS LOCKED")).toBeTruthy();
+    expect(screen.getByText("REAL PNL REFUSED")).toBeTruthy();
     expect(screen.getAllByText("-3.34 TON").length).toBeGreaterThan(0);
     expect(screen.getByText("Acquisition lots and cost basis")).toBeTruthy();
     expect(screen.getByText("JET · contract proof")).toBeTruthy();
@@ -224,6 +258,8 @@ describe("WalletNativePnlReadinessCard", () => {
     expect(screen.getByText("Trade-qualified rows")).toBeTruthy();
     expect(screen.getByText("Lot-eligible rows")).toBeTruthy();
     expect(screen.getByText("1 rows blocked fail-closed")).toBeTruthy();
+    expect(screen.getByText("REAL PNL REFUSED")).toBeTruthy();
+    expect(screen.getByText(/partial calculation refused/)).toBeTruthy();
   });
 
   it("rejects a selection that contains only the target", async () => {

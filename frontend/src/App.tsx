@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.29.0 VALUATION AND LOT READINESS";
+const RELEASE_LABEL = "v0.30.0 REAL PNL SAFETY GATE";
 
 const navItems = [
   "DASHBOARD",
@@ -942,15 +942,20 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Valuation, fee, and lot readiness</strong>
+            <strong>Real PnL safety gate</strong>
             <p>
-              Every proof-bound row now exposes whether trade semantics,
-              historical pricing, fee allocation, and lots are actually safe.
-              Unsupported rows remain blocked before calculation.
+              Every required evidence state is partitioned into satisfied and
+              blocking inputs, digest-bound, and checked before calculation.
+              Partial real PnL is explicitly refused.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Real PnL safety gate"
+            text="A digest-bound gate partitions every prerequisite into satisfied and blocking requirements. Calculation authorization stays false and partial calculations are refused until complete history, trade semantics, prices, allocated fees, and acquisition lots are all established."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Valuation and lot readiness matrix"
