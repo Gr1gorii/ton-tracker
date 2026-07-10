@@ -1046,6 +1046,74 @@ class WalletNativeActivityMergeResponse(BaseModel):
         return self
 
 
+class WalletActivitySourceOccurrenceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_run_id: int
+    source_ledger_id: str
+    merge_index: int
+
+
+class WalletDeduplicatedNativeActivityRecord(WalletNativeActivityRecord):
+    source_run_id: int
+    source_ledger_id: str
+    dedup_index: int
+    occurrence_count: int
+    source_occurrences: list[WalletActivitySourceOccurrenceRecord]
+
+
+class WalletNativeActivityDedupResolutionRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    activity_identity_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    winner: WalletActivitySourceOccurrenceRecord
+    suppressed: list[WalletActivitySourceOccurrenceRecord]
+    suppressed_count: int
+    selection_rule: Literal["first_deterministic_merge_occurrence"]
+
+
+class WalletNativeActivityDedupResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contract_version: Literal["ton_native_activity_dedup_v1"]
+    target_run_id: int
+    selected_run_ids: list[int]
+    source_merge_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    activities: list[WalletDeduplicatedNativeActivityRecord]
+    resolutions: list[WalletNativeActivityDedupResolutionRecord]
+    network: str
+    wallet_account_canonical: str
+    source_ledger_count: int
+    merged_activity_count: int
+    deduplicated_activity_count: int
+    suppressed_occurrence_count: int
+    resolution_count: int
+    dedup_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    activity_merge_applied: Literal[True]
+    cross_run_deduplication_applied: Literal[True]
+    canonical_winner_rule_applied: Literal[True]
+    duplicates_retained: Literal[False] = False
+    establishes_complete_wallet_history: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    message: str
+
+    @model_validator(mode="after")
+    def _dedup_counts_must_match(self):
+        if self.deduplicated_activity_count != len(self.activities):
+            raise ValueError("deduplicated activity count changed")
+        if self.resolution_count != len(self.resolutions):
+            raise ValueError("resolution count changed")
+        if self.suppressed_occurrence_count != sum(
+            value.suppressed_count for value in self.resolutions
+        ):
+            raise ValueError("suppressed occurrence count changed")
+        if self.merged_activity_count != (
+            self.deduplicated_activity_count + self.suppressed_occurrence_count
+        ):
+            raise ValueError("dedup conservation failed")
+        if [row.dedup_index for row in self.activities] != list(range(len(self.activities))):
+            raise ValueError("dedup indexes are not canonical")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

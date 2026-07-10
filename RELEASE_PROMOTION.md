@@ -1,13 +1,13 @@
-# TON Wallet Intelligence Dashboard — v0.23.8 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.23.9 Promotion Checklist
 
-Operational gates for explicit multi-run native activity merge.
+Operational gates for canonical cross-run native activity deduplication.
 
 ## Version and migration
 
-- Product label is `v0.23.8 MULTI-RUN NATIVE ACTIVITY MERGE`; backend API version stays
+- Product label is `v0.23.9 CROSS-RUN NATIVE ACTIVITY DEDUP`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is `ton_native_activity_merge_v1`; the persisted ledger
-  and all lower evidence contracts remain unchanged.
+- New public contract is `ton_native_activity_dedup_v1`; the persisted ledger,
+  merge, and all lower evidence contracts remain unchanged.
 - Alembic head is `20260710_0008`, adding native activity ledgers and rows on
   top of the unchanged 0007 BOC tables.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
@@ -42,6 +42,11 @@ Operational gates for explicit multi-run native activity merge.
 
 ## Endpoint and UI
 
+- POST `.../{target_run_id}/native-activity-dedup` runs the unchanged merge,
+  chooses the first deterministic occurrence per identity, and preserves every
+  winner/suppressed coordinate in digest-bound resolution evidence.
+- A duplicate identity with conflicting verified semantics returns 409. The
+  contract does not establish complete history, cost basis, or PnL eligibility.
 - POST `.../{target_run_id}/native-activity-merge` accepts 2–50 unique selected
   ids including the target; every run must share wallet/network identity.
 - Every source ledger is fully revalidated. Rows receive deterministic
@@ -85,11 +90,12 @@ Operational gates for explicit multi-run native activity merge.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Deterministic two-run fixtures prove ordering, duplicate grouping, retained
-  occurrences, response validation, and incompatible-wallet rejection.
+- Deterministic two-run fixtures prove ordering, duplicate grouping, canonical
+  winner selection, complete suppression provenance, semantic-conflict
+  rejection, response validation, and incompatible-wallet rejection.
 - Credential/prohibited-brand scans are clean and README has no diff.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.23.8` on the merge commit.
+  a ready PR, then create annotated tag `v0.23.9` on the merge commit.
 
 ## Rollback
 

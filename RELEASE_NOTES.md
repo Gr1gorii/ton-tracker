@@ -1,3 +1,15 @@
+# TON Wallet Intelligence Dashboard — v0.23.9 CROSS-RUN NATIVE ACTIVITY DEDUP
+
+v0.23.9 adds explicit POST
+`/api/wallets/ingest/{target_run_id}/native-activity-dedup` on top of the
+unchanged v0.23.8 deterministic merge. Repeated content-addressed activity
+identities collapse to the first canonical merge occurrence while every source
+occurrence and suppression decision remains visible and digest-bound. A reused
+identity with different verified semantics fails closed. The selected runs are
+still bounded evidence, so complete history, cost basis, and PnL remain locked.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.8 MULTI-RUN NATIVE ACTIVITY MERGE
 
 v0.23.8 adds explicit POST
