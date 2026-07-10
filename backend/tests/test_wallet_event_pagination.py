@@ -191,6 +191,10 @@ def test_terminal_shared_chain_is_complete_but_derived_surfaces_stay_partial(
     assert len(result.swaps) == 1
     assert result.transfers[0].direction == "out"
     assert result.swaps[0].dex == "stonfi"
+    assert result.transfers[0].raw["action_index"] == 0
+    assert result.transfers[0].raw["action_type"] == "TonTransfer"
+    assert result.swaps[0].raw["action_index"] == 1
+    assert result.swaps[0].raw["action_type"] == "JettonSwap"
     assert stream.stream_key == "account_events"
     assert stream.contract_version == TONAPI_EVENT_ACQUISITION_CONTRACT
     assert stream.scope_kind == "provider_display_events"

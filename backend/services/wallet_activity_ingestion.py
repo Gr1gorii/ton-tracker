@@ -32,6 +32,10 @@ from services.ton_address_identity import (
     TonAddressIdentity,
     derive_ton_wallet_identity,
 )
+from services.ton_event_action_identity import (
+    TonEventActionIdentity,
+    derive_ton_event_action_identity,
+)
 from services.ton_transaction_identity import derive_ton_transaction_identity
 from services.wallet_acquisition_bounds import (
     WalletAcquisitionBounds,
@@ -124,9 +128,22 @@ def persist_mock_wallet_ingestion(
     )
 
     priced_balances = _price_balances(result.balances, settings)
-    run.transfers.extend(_transfer_models(result.transfers))
+    event_action_identity_keys: set[str] = set()
+    run.transfers.extend(
+        _transfer_models(
+            result.transfers,
+            run,
+            event_action_identity_keys,
+        )
+    )
     run.transactions.extend(_transaction_models(result.transactions, run))
-    run.swaps.extend(_swap_models(result.swaps))
+    run.swaps.extend(
+        _swap_models(
+            result.swaps,
+            run,
+            event_action_identity_keys,
+        )
+    )
     run.balance_snapshots.extend(_balance_snapshot_models(priced_balances))
     run.warnings.extend(_warning_models(result.warnings))
     run.acquisition_streams.extend(
@@ -676,24 +693,101 @@ def _isoformat(value: datetime | None) -> str | None:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _derive_event_action_identity(
+    *,
+    run: WalletIngestionRun,
+    event_id: Any,
+    logical_time: Any,
+    provider: Any,
+    source_status: Any,
+    raw: Any,
+    surface: str,
+) -> TonEventActionIdentity:
+    raw_dict = raw if isinstance(raw, dict) else {}
+    return derive_ton_event_action_identity(
+        network=run.wallet_network,
+        account_address_canonical=run.wallet_address_canonical,
+        account_identity_status=run.wallet_identity_status,
+        account_identity_version=run.wallet_identity_version,
+        account_workchain_id=run.wallet_workchain_id,
+        account_id_hex=run.wallet_account_id_hex,
+        event_id=event_id,
+        logical_time=logical_time,
+        action_index=raw_dict.get("action_index"),
+        action_type=raw_dict.get("action_type"),
+        surface=surface,
+        data_mode=run.data_mode,
+        source_status=source_status,
+        provider=provider,
+        raw=raw,
+    )
+
+
+def _claim_event_action_identity(
+    identity_key: str | None,
+    seen_identity_keys: set[str],
+) -> None:
+    if identity_key is None:
+        return
+    if identity_key in seen_identity_keys:
+        raise ValueError(
+            "Wallet activity ingestion returned a duplicate provider event-"
+            "action observation identity within one run."
+        )
+    seen_identity_keys.add(identity_key)
+
+
+def _event_action_identity_model_values(
+    identity: TonEventActionIdentity,
+) -> dict[str, Any]:
+    return {
+        "event_action_identity_status": identity.status,
+        "event_action_identity_version": identity.version,
+        "event_action_network": identity.network,
+        "event_action_account_canonical": identity.account_canonical,
+        "event_action_event_id_canonical": identity.event_id_canonical,
+        "event_action_logical_time_canonical": (
+            identity.logical_time_canonical
+        ),
+        "event_action_index": identity.action_index,
+        "event_action_type": identity.action_type,
+        "event_action_identity_key": identity.key,
+    }
+
+
 def _transfer_models(
     transfers: list[WalletActivityTransfer],
+    run: WalletIngestionRun,
+    seen_identity_keys: set[str],
 ) -> list[WalletTransfer]:
-    return [
-        WalletTransfer(
-            tx_hash=item.tx_hash,
+    models: list[WalletTransfer] = []
+    for item in transfers:
+        identity = _derive_event_action_identity(
+            run=run,
+            event_id=item.tx_hash,
             logical_time=item.logical_time,
-            timestamp=_parse_datetime(item.timestamp),
-            asset=item.asset,
-            amount=_decimal(item.amount),
-            direction=item.direction,
-            counterparty=item.counterparty,
             provider=item.provider,
             source_status=item.source_status,
-            raw_json=_json_dumps(item.raw),
+            raw=item.raw,
+            surface="transfers",
         )
-        for item in transfers
-    ]
+        _claim_event_action_identity(identity.key, seen_identity_keys)
+        models.append(
+            WalletTransfer(
+                tx_hash=item.tx_hash,
+                logical_time=item.logical_time,
+                timestamp=_parse_datetime(item.timestamp),
+                asset=item.asset,
+                amount=_decimal(item.amount),
+                direction=item.direction,
+                counterparty=item.counterparty,
+                provider=item.provider,
+                source_status=item.source_status,
+                raw_json=_json_dumps(item.raw),
+                **_event_action_identity_model_values(identity),
+            )
+        )
+    return models
 
 
 def _transaction_models(
@@ -748,23 +842,41 @@ def _transaction_models(
     return models
 
 
-def _swap_models(swaps: list[WalletActivitySwap]) -> list[WalletSwap]:
-    return [
-        WalletSwap(
-            tx_hash=item.tx_hash,
-            timestamp=_parse_datetime(item.timestamp),
-            dex=item.dex,
-            token_in=item.token_in,
-            amount_in=_decimal(item.amount_in),
-            token_out=item.token_out,
-            amount_out=_decimal(item.amount_out),
-            estimated_usd=_decimal(item.estimated_usd),
+def _swap_models(
+    swaps: list[WalletActivitySwap],
+    run: WalletIngestionRun,
+    seen_identity_keys: set[str],
+) -> list[WalletSwap]:
+    models: list[WalletSwap] = []
+    for item in swaps:
+        raw = item.raw if isinstance(item.raw, dict) else {}
+        identity = _derive_event_action_identity(
+            run=run,
+            event_id=item.tx_hash,
+            logical_time=raw.get("lt"),
             provider=item.provider,
             source_status=item.source_status,
-            raw_json=_json_dumps(item.raw),
+            raw=item.raw,
+            surface="swaps",
         )
-        for item in swaps
-    ]
+        _claim_event_action_identity(identity.key, seen_identity_keys)
+        models.append(
+            WalletSwap(
+                tx_hash=item.tx_hash,
+                timestamp=_parse_datetime(item.timestamp),
+                dex=item.dex,
+                token_in=item.token_in,
+                amount_in=_decimal(item.amount_in),
+                token_out=item.token_out,
+                amount_out=_decimal(item.amount_out),
+                estimated_usd=_decimal(item.estimated_usd),
+                provider=item.provider,
+                source_status=item.source_status,
+                raw_json=_json_dumps(item.raw),
+                **_event_action_identity_model_values(identity),
+            )
+        )
+    return models
 
 
 def _balance_snapshot_models(
@@ -800,6 +912,7 @@ def _warning_models(
 
 def _transfer_record(item: WalletTransfer) -> dict[str, Any]:
     raw = _json_loads(item.raw_json)
+    raw_dict = raw if isinstance(raw, dict) else None
     return {
         "tx_hash": item.tx_hash,
         "logical_time": item.logical_time,
@@ -811,7 +924,74 @@ def _transfer_record(item: WalletTransfer) -> dict[str, Any]:
         "counterparty": item.counterparty,
         "provider": item.provider,
         "source_status": item.source_status,
+        "event_action_identity": _event_action_identity_record(
+            item,
+            raw_dict,
+            surface="transfers",
+        ),
         "raw": raw,
+    }
+
+
+def _event_action_identity_record(
+    item: WalletTransfer | WalletSwap,
+    raw: dict[str, Any] | None,
+    *,
+    surface: str,
+) -> dict[str, Any]:
+    logical_time = (
+        item.logical_time
+        if isinstance(item, WalletTransfer)
+        else raw.get("lt") if isinstance(raw, dict) else None
+    )
+    derived = _derive_event_action_identity(
+        run=item.run,
+        event_id=item.tx_hash,
+        logical_time=logical_time,
+        provider=item.provider,
+        source_status=item.source_status,
+        raw=raw,
+        surface=surface,
+    )
+    persisted_matches = (
+        item.event_action_identity_status == derived.status
+        and item.event_action_identity_version == derived.version
+        and item.event_action_network == derived.network
+        and item.event_action_account_canonical == derived.account_canonical
+        and item.event_action_event_id_canonical == derived.event_id_canonical
+        and item.event_action_logical_time_canonical
+        == derived.logical_time_canonical
+        and item.event_action_index == derived.action_index
+        and item.event_action_type == derived.action_type
+        and item.event_action_identity_key == derived.key
+    )
+    is_provider_scoped = (
+        persisted_matches and derived.is_provider_observation_identity
+    )
+    return {
+        "status": item.event_action_identity_status,
+        "version": item.event_action_identity_version,
+        "provider": (
+            item.provider
+            if item.event_action_identity_status == "provider_scoped"
+            else None
+        ),
+        "network": item.event_action_network,
+        "account_canonical": item.event_action_account_canonical,
+        "event_id_canonical": item.event_action_event_id_canonical,
+        "logical_time_canonical": (
+            item.event_action_logical_time_canonical
+        ),
+        "action_index": item.event_action_index,
+        "action_type": item.event_action_type,
+        "key": item.event_action_identity_key,
+        "is_provider_observation_identity": is_provider_scoped,
+        "is_blockchain_proof_verified": False,
+        "is_authoritative_activity_identity": False,
+        "is_ownership_proof": False,
+        "eligible_for_cost_basis": False,
+        "deduplication_applied": False,
+        "used_by_pnl": False,
     }
 
 
@@ -897,6 +1077,11 @@ def _swap_record(item: WalletSwap) -> dict[str, Any]:
         "estimated_usd": _decimal_string(item.estimated_usd),
         "provider": item.provider,
         "source_status": item.source_status,
+        "event_action_identity": _event_action_identity_record(
+            item,
+            raw_dict if isinstance(raw, dict) else None,
+            surface="swaps",
+        ),
         "raw": raw,
     }
 

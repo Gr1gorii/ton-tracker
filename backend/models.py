@@ -302,6 +302,27 @@ class WalletAcquisitionPage(Base):
 
 class WalletTransfer(Base):
     __tablename__ = "wallet_transfers"
+    __table_args__ = (
+        Index(
+            "uq_wallet_transfers_run_event_action_identity",
+            "run_id",
+            "event_action_identity_key",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_transfers_event_action_identity_key",
+            "event_action_identity_key",
+        ),
+        Index(
+            "ix_wallet_transfers_event_action_identity_tuple",
+            "provider",
+            "event_action_network",
+            "event_action_account_canonical",
+            "event_action_event_id_canonical",
+            "event_action_logical_time_canonical",
+            "event_action_index",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(
@@ -320,6 +341,30 @@ class WalletTransfer(Base):
     provider = Column(String, nullable=False)
     source_status = Column(String, nullable=False)
     raw_json = Column(Text, nullable=True)
+    event_action_identity_status = Column(
+        String(20),
+        nullable=False,
+        default="unavailable",
+        server_default="unavailable",
+    )
+    event_action_identity_version = Column(
+        String(32),
+        nullable=False,
+        default="unavailable",
+        server_default="unavailable",
+    )
+    event_action_network = Column(
+        String(16),
+        nullable=False,
+        default="ton-unknown",
+        server_default="ton-unknown",
+    )
+    event_action_account_canonical = Column(String(76), nullable=True)
+    event_action_event_id_canonical = Column(String(64), nullable=True)
+    event_action_logical_time_canonical = Column(String(20), nullable=True)
+    event_action_index = Column(Integer, nullable=True)
+    event_action_type = Column(String(32), nullable=True)
+    event_action_identity_key = Column(String(256), nullable=True)
 
     run = relationship("WalletIngestionRun", back_populates="transfers")
 
@@ -389,6 +434,27 @@ class WalletTransaction(Base):
 
 class WalletSwap(Base):
     __tablename__ = "wallet_swaps"
+    __table_args__ = (
+        Index(
+            "uq_wallet_swaps_run_event_action_identity",
+            "run_id",
+            "event_action_identity_key",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_swaps_event_action_identity_key",
+            "event_action_identity_key",
+        ),
+        Index(
+            "ix_wallet_swaps_event_action_identity_tuple",
+            "provider",
+            "event_action_network",
+            "event_action_account_canonical",
+            "event_action_event_id_canonical",
+            "event_action_logical_time_canonical",
+            "event_action_index",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(
@@ -408,6 +474,30 @@ class WalletSwap(Base):
     provider = Column(String, nullable=False)
     source_status = Column(String, nullable=False)
     raw_json = Column(Text, nullable=True)
+    event_action_identity_status = Column(
+        String(20),
+        nullable=False,
+        default="unavailable",
+        server_default="unavailable",
+    )
+    event_action_identity_version = Column(
+        String(32),
+        nullable=False,
+        default="unavailable",
+        server_default="unavailable",
+    )
+    event_action_network = Column(
+        String(16),
+        nullable=False,
+        default="ton-unknown",
+        server_default="ton-unknown",
+    )
+    event_action_account_canonical = Column(String(76), nullable=True)
+    event_action_event_id_canonical = Column(String(64), nullable=True)
+    event_action_logical_time_canonical = Column(String(20), nullable=True)
+    event_action_index = Column(Integer, nullable=True)
+    event_action_type = Column(String(32), nullable=True)
+    event_action_identity_key = Column(String(256), nullable=True)
 
     run = relationship("WalletIngestionRun", back_populates="swaps")
 

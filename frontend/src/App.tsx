@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.5 EVENT PAGINATION";
+const RELEASE_LABEL = "v0.22.6 ACTION IDENTITY";
 
 const navItems = [
   "DASHBOARD",
@@ -981,7 +981,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Transaction identity is not locally verified against blockchain proof and does not prove ownership. Cluster comparison stays probabilistic; realized and unrealized PnL behavior is unchanged."
+            text="Low-level transaction identity and provider event-action observation identity are explicit, but neither proves ownership. Event actions remain mutable, non-authoritative, and unused as a PnL identity key."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -991,12 +991,12 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="History readiness"
-            text="v0.22.5 records bounded pagination for low-level transactions and the shared TonAPI account-event display stream. A complete event page chain does not make derived transfers or swaps authoritative, so full wallet history and cost basis remain blocked."
+            text="v0.22.6 can compare provider-scoped event-action coordinates and surface changed payloads as conflicts. It still does not make derived transfers or swaps authoritative, so full wallet history and cost basis remain blocked."
           />
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Retry-safe migration 0004 adds stream/page acquisition evidence with strict parent-child identity, cascade behavior, and no fabricated evidence for legacy runs."
+            text="Retry-safe migration 0005 adds strict transfer/swap observation identity columns and indexes. Legacy rows without the original provider action index stay explicitly unavailable."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1050,8 +1050,8 @@ function EvidenceColumn({
         />
         <EvidenceItem
           tone="warning"
-          title="No exact high-level action identity"
-          text="Provider-derived event actions, including swaps, can change and remain weak evidence; no exact swap identity is claimed."
+          title="No authoritative high-level action identity"
+          text="A provider-scoped event/LT/action-index coordinate can identify an observation and expose conflicts. The provider action can still change and is not authoritative transfer or swap identity."
         />
         <EvidenceItem
           tone="warning"

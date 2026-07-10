@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.5 EVENT PAGINATION
+# TON Wallet Intelligence Dashboard — v0.22.6 ACTION IDENTITY
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.5 EVENT PAGINATION status — guarded real/live TonAPI ingestion now persists two bounded cursor contracts: the authoritative low-level transaction acquisition stream and one shared account-event provider-display stream for derived transfers and swaps. Both use exact half-open UTC bounds, strict descending LT pagination, durable page evidence, terminal/start-cross completion, and fail-closed caps or protocol/provider errors. Transfer and swap actions remain mutable TonAPI display interpretations even when their provider page chain is complete, so those surfaces stay explicitly incomplete. Full wallet history, cross-run merging, acquisition cost basis, and PnL guarantees remain unchanged.**
+> **v0.22.6 ACTION IDENTITY status — guarded real/live TonAPI transfer and swap rows now preserve a strict provider-scoped event/action observation coordinate: network, canonical run account, canonical event id, canonical event LT, and the original zero-based action index before filtering. The coordinate is not blockchain proof, ownership proof, or authoritative semantic activity identity, and it is not used for deduplication, cost basis, or PnL. The bounded low-level transaction and shared account-event cursor contracts from v0.22.5 remain unchanged; derived surfaces stay explicitly incomplete even when the provider page chain terminates.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -44,11 +44,12 @@ executable ingestion path.
 >   and data mode. When canonical identity is unavailable, only an exact
 >   submitted-address match is accepted as a legacy diagnostic fallback. It
 >   groups transactions as exact only when a coherent persisted v0.22.3 tuple
->   is present; legacy raw transaction hashes remain weak evidence. TonAPI
->   high-level event actions, including swaps, also stay weak because their
->   provider-derived structure can change. No exact swap identity is claimed.
->   The report also exposes observed timestamp bounds, asset-address and fee
->   hash-match coverage, conflicts, and blockers.
+>   is present; legacy raw transaction hashes remain weak evidence. Under
+>   `wallet_history_readiness_v0.22.6`, coherent TonAPI event/action coordinates
+>   are grouped separately as provider-scoped observations with explicit
+>   coverage and conflicts. They remain non-authoritative and cannot establish
+>   semantic transfer/swap equivalence. The report also exposes observed
+>   timestamp bounds, asset-address and fee hash-match coverage, and blockers.
 >   Every report remains diagnostic (`is_cost_basis: false`,
 >   `eligible_for_cost_basis: false`, `used_by_pnl: false`) and is never passed
 >   into PnL.
@@ -56,8 +57,10 @@ executable ingestion path.
 >   ingestion run. For valid inputs the response exposes the persisted
 >   canonical identity and contract metadata; invalid or legacy placeholder
 >   values never receive an inferred identity. Low-level real/live account
->   transactions use the separate contract below; transfer, swap-action,
->   jetton-asset, and counterparty identity remain outside this release.
+>   transactions use the separate contract below. Transfer and swap rows can
+>   carry the narrower provider observation identity described below;
+>   authoritative transfer/swap, jetton-asset, and counterparty identity remain
+>   outside this release.
 > - The transaction identity contract is narrower: only low-level real/live
 >   TonAPI account-transaction rows with a coherent network, canonical run
 >   account, LT, 32-byte hash, and matching provider provenance receive an
@@ -77,6 +80,9 @@ executable ingestion path.
 >   `wallet_acquisition_pages` evidence tables with cascading foreign keys and
 >   unique stream/page identities. Existing runs receive zero fabricated
 >   acquisition rows.
+>   Revision 0005 adds retry-safe provider event/action observation fields and
+>   indexes to transfers and swaps. v0.22.5 rows lack the original action index,
+>   so they remain explicitly unavailable instead of receiving a guessed key.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -144,7 +150,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.5 EVENT PAGINATION` product label
+> - User-facing UI copy uses the `v0.22.6 ACTION IDENTITY` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -152,8 +158,8 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.5 EVENT
->   PAGINATION` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.6 ACTION
+>   IDENTITY` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -198,6 +204,8 @@ backend/
                        Retry-safe low-level transaction identity fields + indexes
       20260710_0004_acquisition_evidence.py
                        Durable acquisition stream/page evidence foundation
+      20260710_0005_event_action_identity.py
+                       Provider-scoped event/action observation identity
   routers/
     tonapi.py          TonAPI account jettons + wallet intelligence previews
     stonfi.py          STON.fi pools preview
@@ -213,6 +221,8 @@ backend/
                        Strict TON address parsing + canonical run-wallet identity
     ton_transaction_identity.py
                        Strict low-level TON account-transaction tuple
+    ton_event_action_identity.py
+                       Strict TonAPI event/action observation coordinate
     wallet_acquisition_bounds.py
                        Immutable half-open UTC interval resolution
     pnl.py             Decimal-based PnL calculations
@@ -345,7 +355,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.5 EVENT PAGINATION)
+## Data modes & providers (v0.22.6 ACTION IDENTITY)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -390,7 +400,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Wallet transfers/history/swaps/balances | mock-normalized | mock by default; the explicit TonAPI live guard paginates bounded low-level transactions plus one shared account-event display stream, while native/jetton balances remain snapshots and derived transfer/swap actions remain semantically incomplete; persisted rows can feed run-scoped diagnostics and existing evidence-gated PnL |
+| Wallet transfers/history/swaps/balances | mock-normalized | mock by default; the explicit TonAPI live guard paginates bounded low-level transactions plus one shared account-event display stream, and coherent derived transfer/swap rows preserve provider-scoped event/action coordinates; balances remain snapshots, derived actions remain semantically incomplete, and the observation identity is not consumed by PnL |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -407,7 +417,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.5 EVENT PAGINATION` is the current
+API-version field, while `v0.22.6 ACTION IDENTITY` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -453,7 +463,7 @@ Returns provider coverage for a wallet activity ingestion request. The default
 mock path is deterministic. Since v0.12.0 the explicit TonAPI live guard can
 call TonAPI for native TON balance, account jetton balance, account
 transaction-history, TON/jetton transfer, and DEX swap coverage. This coverage
-preview does not calculate PnL. In v0.22.5 every request resolves one immutable
+preview does not calculate PnL. Every request resolves one immutable
 half-open UTC interval `[start, end)`. A live transaction or shared account-event
 preview fetches exactly one page and reports `completion_state: preview_only`;
 it does not follow the cursor or persist a run and cannot verify interval
@@ -494,6 +504,22 @@ remain in `incomplete_surfaces` and the run remains partial/limited. The event
 chain does not establish authoritative transfer history, full DEX history,
 ownership, cost basis, or PnL. Jettons and balances remain snapshot surfaces.
 
+For coherent guarded real/live actions, each transfer or swap also exposes
+`event_action_identity` under contract `tonapi_event_action_obs_v1`. Its key is
+the provider + TON network + canonical run account + canonical event id +
+canonical event LT + original zero-based action index from the full provider
+action array. Surface and action type are not key fields, so retyping one
+coordinate is a conflict instead of a second identity. This is provider
+observation identity only: `is_blockchain_proof_verified`,
+`is_authoritative_activity_identity`, `is_ownership_proof`,
+`eligible_for_cost_basis`, `deduplication_applied`, and `used_by_pnl` remain
+false. Mock or incoherent rows expose `unavailable`.
+
+TonAPI response handling is bounded to 16 MiB, JSON depth 64, 200,000 parsed
+nodes, and 128 characters per numeric token. Oversized, excessively nested,
+malformed, non-finite, or invalidly encoded JSON is reported as sanitized
+provider protocol evidence rather than an uncaught parser/resource failure.
+
 ### `GET /api/wallets/ingest/{run_id}`
 Returns one persisted wallet activity run by id, including provider evidence,
 unavailable surfaces, normalized rows, warnings, the original submitted
@@ -509,8 +535,14 @@ false. Pre-v0.22.3 live rows are backfilled only when their stored provenance
 passes the same strict contract; mock, malformed, or inconsistent transaction
 rows stay explicitly `unavailable`.
 
+Each transfer and swap includes its persisted `event_action_identity`. Rows
+written before migration 0005 do not contain the original action index, so
+readback leaves them `unavailable`; it never derives an index from row order,
+payload, timestamp, or type. Persisted identity fields are validated against the
+run and raw provider observation before the public validity flag can be true.
+
 The run response also returns persisted `acquisition_streams` and per-page
-evidence for low-level transaction pagination and the shared v0.22.5 account-
+evidence for low-level transaction pagination and the shared account-
 event display stream. Runs created before migration 0004 have no synthesized
 stream or page records; their pagination state remains unavailable rather than
 inferred.
@@ -519,7 +551,9 @@ inferred.
 Download one persisted run as JSON, or as flattened one-row-per-activity CSV.
 Transaction exports preserve original hash/LT fields and include the persisted
 identity status, version, canonical tuple fields, and identity key. Export does
-not apply deduplication or change PnL.
+not apply deduplication or change PnL. Transfer and swap exports likewise carry
+the provider event/action coordinate and all non-authoritative proof/use flags;
+exporting the key does not make it a cost-basis or PnL input.
 
 ### `GET /api/wallets/ingest/{run_id}/signals`
 Returns rule-based evidence signals for one persisted run: signal codes,
@@ -595,17 +629,18 @@ complete canonical identity, all runs must use the exact same submitted
 The response preserves each submitted address, exposes wallet identity at the
 target and per-run scope, and reports observed bounds, transaction identity
 coverage, overlaps, conflicts, asset-address and fee hash-match coverage, and
-blockers under `analysis_version: wallet_history_readiness_v0.22.5`. An exact
+blockers under `analysis_version: wallet_history_readiness_v0.22.6`. An exact
 transaction group requires a coherent persisted network + canonical account +
 LT + 32-byte-hash tuple and matching real/live TonAPI provenance. A legacy raw
-transaction hash is classified only as weak evidence. High-level TonAPI event
-actions and swaps also remain weak because provider-derived actions can change;
-there is no exact swap identity. The v0.22.5 diagnostic can report validated
-per-run bounded transaction pagination and separately validate the persisted
-`account_events` provider chain. Even `provider_stream_complete` describes only
-TonAPI display acquisition; derived transfers/swaps, jettons, balances,
-interval continuity across runs, and wallet history before the selected runs
-remain unverified.
+transaction hash is classified only as weak evidence. Coherent transfer and
+swap event/action coordinates are grouped as `provider_scoped` observations,
+with explicit coverage and changed-payload/conflicting-coordinate blockers.
+They are not exact semantic swap or transfer identity. The diagnostic reports
+validated per-run bounded transaction pagination and separately validates the
+persisted `account_events` provider chain. Even `provider_stream_complete`
+describes only TonAPI display acquisition; derived transfers/swaps, jettons,
+balances, interval continuity across runs, and wallet history before the
+selected runs remain unverified.
 Diagnostic only: the endpoint does not apply cross-run deduplication, merge
 activity, prove complete wallet history, establish cost basis, or change any
 PnL result; `history_complete`,
@@ -732,17 +767,20 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.5 EVENT PAGINATION`).
+  tracks the current release (`v0.22.6 ACTION IDENTITY`).
 
-## Roadmap beyond v0.22.5 EVENT PAGINATION
+## Roadmap beyond v0.22.6 ACTION IDENTITY
 
 - Add authoritative low-level transfer/trade acquisition or trace-backed
   reconstruction before treating derived transfer or swap actions as complete.
-  The v0.22.5 TonAPI event chain remains display-oriented provider evidence.
+  The TonAPI event chain and v0.22.6 action coordinates remain provider
+  observation evidence.
 - Define appropriate temporal evidence contracts for jetton-balance and native-
   balance snapshots without mislabeling point-in-time state as history.
-- Add canonical transfer, swap-action, jetton-asset, and counterparty identity
-  contracts, then explicit cross-run interval continuity and deduplication.
+- Add authoritative semantic transfer/trade reconstruction plus jetton-asset
+  and counterparty identity contracts, then explicit cross-run interval
+  continuity and deduplication. The provider observation coordinate is not a
+  substitute for semantic identity.
   One bounded low-level transaction stream cannot make multi-run data complete
   wallet history or a cost-basis source.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)

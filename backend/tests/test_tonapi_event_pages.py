@@ -41,8 +41,8 @@ class _Response:
     def __exit__(self, exc_type, exc, tb):
         return None
 
-    def read(self):
-        return self.body
+    def read(self, amount=-1):
+        return self.body if amount < 0 else self.body[:amount]
 
 
 def _event(lt: int, timestamp: int, suffix: int = 1, *, in_progress=False):

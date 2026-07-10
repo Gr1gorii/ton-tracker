@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -47,8 +48,8 @@ class _FakeResponse:
     def __exit__(self, exc_type, exc, tb) -> None:
         return None
 
-    def read(self) -> bytes:
-        return self.body
+    def read(self, amount: int = -1) -> bytes:
+        return self.body if amount < 0 else self.body[:amount]
 
 
 def _json_response(payload: dict | list) -> _FakeResponse:
@@ -399,7 +400,30 @@ def test_get_account_jettons_preview_network_error_redacts_api_key(monkeypatch):
     assert "secret-key" not in str(result.to_dict())
 
 
-def test_get_account_jettons_preview_invalid_json_returns_provider_error(
+def test_fetch_json_contains_incomplete_http_read_as_provider_error(monkeypatch):
+    class IncompleteResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, amount=-1):
+            raise http.client.IncompleteRead(b'{"partial":', 32)
+
+    def fake_urlopen(request, timeout):
+        return IncompleteResponse()
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).fetch_json("/v2/test")
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_ERROR
+    assert "network error" in (result.message or "").lower()
+
+
+def test_get_account_jettons_preview_invalid_json_returns_protocol_error(
     monkeypatch,
 ):
     def fake_urlopen(request, timeout):
@@ -412,7 +436,79 @@ def test_get_account_jettons_preview_invalid_json_returns_provider_error(
     )
 
     assert result.ok is False
-    assert result.error == ERROR_PROVIDER_ERROR
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "invalid json" in (result.message or "").lower()
+
+
+def test_fetch_json_rejects_response_over_byte_limit(monkeypatch):
+    monkeypatch.setattr(tonapi_module, "_MAX_RESPONSE_BYTES", 32)
+
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(b'{"payload":"' + b"x" * 64 + b'"}')
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).fetch_json("/v2/test")
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "byte limit" in (result.message or "").lower()
+
+
+def test_fetch_json_rejects_deep_provider_json_without_uncaught_recursion(
+    monkeypatch,
+):
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(b"[" * 2000 + b"0" + b"]" * 2000)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).fetch_json("/v2/test")
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "invalid json" in (result.message or "").lower()
+
+
+def test_fetch_json_rejects_structurally_oversized_json(monkeypatch):
+    monkeypatch.setattr(tonapi_module, "_MAX_JSON_NODES", 3)
+
+    def fake_urlopen(request, timeout):
+        return _json_response([1, 2, 3])
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).fetch_json("/v2/test")
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "structural" in (result.message or "").lower()
+
+
+@pytest.mark.parametrize(
+    "body",
+    (
+        b'{"value":NaN}',
+        b'{"value":Infinity}',
+        b'{"value":1e9999}',
+        b'{"value":123456789}',
+    ),
+)
+def test_fetch_json_rejects_nonstandard_or_oversized_numbers(
+    monkeypatch,
+    body,
+):
+    monkeypatch.setattr(tonapi_module, "_MAX_JSON_NUMBER_CHARS", 8)
+
+    def fake_urlopen(request, timeout):
+        return _FakeResponse(body)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).fetch_json("/v2/test")
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
     assert "invalid json" in (result.message or "").lower()
 
 
@@ -874,6 +970,10 @@ def test_get_account_events_preview_normalizes_ton_and_jetton_transfers(monkeypa
                         },
                     },
                     {
+                        "type": "ContractDeploy",
+                        "status": "ok",
+                    },
+                    {
                         "type": "JettonTransfer",
                         "status": "ok",
                         "JettonTransfer": {
@@ -887,7 +987,6 @@ def test_get_account_events_preview_normalizes_ton_and_jetton_transfers(monkeypa
                             },
                         },
                     },
-                    {"type": "ContractDeploy", "status": "ok"},
                 ],
             }
         ],
@@ -914,12 +1013,14 @@ def test_get_account_events_preview_normalizes_ton_and_jetton_transfers(monkeypa
     assert result.data["total_transfers"] == 2
     transfers = result.data["transfers"]
     assert transfers[0]["action_type"] == "TonTransfer"
+    assert transfers[0]["action_index"] == 0
     assert transfers[0]["asset"] == "TON"
     assert transfers[0]["direction"] == "out"
     assert transfers[0]["counterparty"] == "EQdest"
     assert transfers[0]["raw_amount"] == "2500000000"
     assert transfers[0]["decimals"] == 9
     assert transfers[1]["action_type"] == "JettonTransfer"
+    assert transfers[1]["action_index"] == 2
     assert transfers[1]["asset"] == "EJT"
     assert transfers[1]["direction"] == "in"
     assert transfers[1]["counterparty"] == "EQsource"
@@ -971,6 +1072,7 @@ def test_get_account_swaps_preview_normalizes_jetton_swap(monkeypatch):
                 "lt": "46000000000002",
                 "in_progress": False,
                 "actions": [
+                    {"type": "ContractDeploy", "status": "ok"},
                     {
                         "type": "JettonSwap",
                         "status": "ok",
@@ -1020,6 +1122,8 @@ def test_get_account_swaps_preview_normalizes_jetton_swap(monkeypatch):
     assert result.data["total_events"] == 1
     assert result.data["total_swaps"] == 1
     swap = result.data["swaps"][0]
+    assert swap["action_type"] == "JettonSwap"
+    assert swap["action_index"] == 1
     assert swap["dex"] == "stonfi"
     assert swap["token_in"] == "TON"
     assert swap["token_in_address"] is None  # native TON has no master

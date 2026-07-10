@@ -557,6 +557,26 @@ export interface WalletIngestionPreviewResponse {
   message: string;
 }
 
+export interface WalletEventActionIdentityRecord {
+  status: "provider_scoped" | "unavailable";
+  version: string;
+  provider?: string | null;
+  network: "ton-mainnet" | "ton-testnet" | "ton-unknown";
+  account_canonical?: string | null;
+  event_id_canonical?: string | null;
+  logical_time_canonical?: string | null;
+  action_index?: number | null;
+  action_type?: string | null;
+  key?: string | null;
+  is_provider_observation_identity: boolean;
+  is_blockchain_proof_verified: false;
+  is_authoritative_activity_identity: false;
+  is_ownership_proof: false;
+  eligible_for_cost_basis: false;
+  deduplication_applied: false;
+  used_by_pnl: false;
+}
+
 export interface WalletTransferRecord {
   tx_hash?: string | null;
   logical_time?: string | null;
@@ -567,6 +587,7 @@ export interface WalletTransferRecord {
   counterparty?: string | null;
   provider: string;
   source_status: WalletSourceStatus;
+  event_action_identity: WalletEventActionIdentityRecord;
   raw?: Record<string, unknown> | null;
 }
 
@@ -610,6 +631,7 @@ export interface WalletSwapRecord {
   estimated_usd?: string | null;
   provider: string;
   source_status: WalletSourceStatus;
+  event_action_identity: WalletEventActionIdentityRecord;
   raw?: Record<string, unknown> | null;
 }
 
