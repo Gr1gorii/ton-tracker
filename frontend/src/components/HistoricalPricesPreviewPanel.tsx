@@ -9,7 +9,7 @@ const SAMPLE_REQUEST = {
 };
 
 const HONESTY_NOTE =
-  "Historical price preview only. Points are provider-reported (or deterministic mock) chart samples; they are not wired into cost-basis or PnL math, so Real PnL stays locked.";
+  "Standalone inspection only: this panel does not alter a stored run. The PnL preview requests the same provider-reported (or deterministic mock) rate source only when historical enrichment is explicitly enabled; match coverage and failures remain visible.";
 
 const DISPLAY_LIMIT = 50;
 

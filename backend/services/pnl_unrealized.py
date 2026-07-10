@@ -1,11 +1,11 @@
 """Optional unrealized valuation of remaining in-window holdings.
 
 Spot-based and informational only: the remaining quantity of tokens whose
-in-window cost basis was computed is valued at the current provider-reported
-spot price. Unrealized figures never feed the Real-PnL requirement checklist
-or the realized results; spot prices may be stale and every record names the
-source that priced it. No hidden fallback: tokens without a recorded jetton
-master address or without a provider price stay visible as unavailable.
+in-window cost basis was computed is valued with a deterministic fixture in
+mock mode or a current provider-reported spot price in real mode. Unrealized
+figures never feed the Real-PnL checklist or realized results; every computed
+record names its source. No hidden fallback: derived candidates without a
+recorded jetton master address or usable provider price remain unavailable.
 """
 
 from __future__ import annotations
@@ -17,11 +17,17 @@ from config import get_settings
 from services.pnl_usd_valuation import derive_run_pnl_preview_with_historical
 from services.pricing import price_assets
 
-UNREALIZED_NOTE = (
+PROVIDER_UNREALIZED_NOTE = (
     "Unrealized figures value remaining in-window holdings at current "
     "provider-reported spot prices, which may be stale. They are "
     "informational only: excluded from realized figures and from the "
     "Real-PnL evidence checklist."
+)
+
+MOCK_UNREALIZED_NOTE = (
+    "Unrealized figures use a deterministic mock spot-price fixture; no "
+    "provider spot price was queried. They are informational only: excluded "
+    "from realized figures and from the Real-PnL evidence checklist."
 )
 
 ZERO = Decimal("0")
@@ -154,5 +160,11 @@ def derive_run_pnl_preview_with_unrealized(
     preview["total_unrealized_pnl_usd"] = (
         _money(total_unrealized) if computed_any else None
     )
-    preview["unrealized_note"] = UNREALIZED_NOTE if records else None
+    preview["unrealized_note"] = None
+    if records:
+        preview["unrealized_note"] = (
+            MOCK_UNREALIZED_NOTE
+            if settings.is_mock
+            else PROVIDER_UNREALIZED_NOTE
+        )
     return preview

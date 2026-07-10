@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.20.1 SWAP ADDRESSES
+# TON Wallet Intelligence Dashboard — v0.21.2 UNREALIZED
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -13,10 +13,13 @@ optional USD valuation of TON-side swap legs, recorded transaction fees are
 netted into after-fee figures, and an in-window average-cost pass computes
 realized PnL per token. Real PnL unlocks per run only when all five evidence
 requirements are met, covers in-window realized swaps only, and partial
-calculations are never labeled Real PnL. Deterministic mock data remains the
-default executable ingestion path.
+calculations are never labeled Real PnL. An optional spot snapshot uses a
+deterministic fixture in mock mode or current provider-reported prices in real
+mode, values remaining in-window holdings separately from realized figures,
+and names the price source. Deterministic mock data remains the default
+executable ingestion path.
 
-> **v0.20.1 SWAP ADDRESSES status — swap records carry jetton master addresses end-to-end, on top of PnL exports, cost basis, fee handling, USD valuation, historical price preview, cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
+> **v0.21.2 UNREALIZED status — persisted runs expose optional spot-based unrealized valuation with price-source attribution, explicit unavailable records, and a separate informational UI, on top of realized PnL, exports, cluster comparison, evidence signals, and guarded TonAPI activity ingestion.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -30,8 +33,9 @@ default executable ingestion path.
 >   `WALLET_ACTIVITY_LIVE_ENABLED=true` enable the only live wallet activity
 >   path in this release: TonAPI native TON balance snapshots, account jetton
 >   balance snapshots, an ordered account transaction-history timeline,
->   TON/jetton transfer history, and DEX swaps from account events. PnL
->   remains unavailable.
+>   TON/jetton transfer history, and DEX swaps from account events. Persisted
+>   transactions and swaps feed the run-scoped PnL preview; Real PnL remains
+>   evidence-gated and in-window only.
 > - Persisted ingestion runs can be compared pairwise (2-25 runs) as a
 >   probabilistic behavioral-similarity signal with JSON/CSV export — never
 >   proof of common ownership.
@@ -41,16 +45,18 @@ default executable ingestion path.
 >   risk score.
 > - Each persisted run exposes an estimated PnL preview (`pnl_mode`:
 >   `imported_pnl` / `estimated_onchain_pnl` / `real_pnl_locked` /
->   `insufficient_data`, confidence `high`/`medium`/`low`/`unavailable`):
+>   `insufficient_data` / `real_pnl`, confidence
+>   `high`/`medium`/`low`/`unavailable`):
 >   TON-denominated realized swap flows only, never labeled Real PnL. Real
 >   PnL stays locked until transaction history, swap evidence, historical
 >   prices, cost basis, and fee handling are all available; missing evidence
 >   is listed explicitly.
 > - Historical rate points can be previewed per token (`"ton"` or a jetton
 >   master address) from the guarded TonAPI rates chart, with a deterministic
->   mock default and no hidden fallback on provider failure. The preview is
->   explicitly not a cost-basis source (`is_cost_basis_source: false`), so
->   Real PnL stays locked.
+>   mock default and no hidden fallback on provider failure. The standalone
+>   preview does not mutate a run (`is_cost_basis_source: false`); the PnL
+>   endpoint requests the same source separately when historical enrichment
+>   is explicitly enabled.
 > - The PnL preview accepts `include_historical=true` to value TON-side swap
 >   legs in USD at the nearest historical TON/USD point (6h tolerance). The
 >   `historical_prices` requirement becomes available only when every leg
@@ -73,10 +79,14 @@ default executable ingestion path.
 > - PnL preview JSON/CSV exports accept `include_historical=true` and then
 >   carry the USD-valued flows and realized cost-basis rows alongside the
 >   requirement checklist; the default export stays offline and unchanged.
-> - Swap records carry jetton master addresses (`token_in_address` /
->   `token_out_address`; native TON has none) from TonAPI normalization
->   through persistence to the API, groundwork for honest spot-price
->   valuation. No unrealized valuation is computed yet.
+> - `include_unrealized=true` implies historical enrichment, derives remaining
+>   in-window holdings from the cost-basis pass, and values them with a
+>   deterministic mock fixture or real provider-reported spot prices. Derived
+>   candidates name `priced_by`; candidates missing an address or usable price
+>   stay visible as unavailable. If prerequisite enrichment yields no
+>   candidates, the response can be empty and the UI does not claim that no
+>   holdings exist. Unrealized figures never change realized PnL or the
+>   five-item Real-PnL evidence checklist.
 > - `ton_provider`, `stonfi`, `bitquery`, and TonAPI without the live guard
 >   remain scaffold/limited coverage paths. They do not fetch or persist live
 >   wallet activity rows.
@@ -93,7 +103,7 @@ default executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.20.1 SWAP ADDRESSES` product label
+> - User-facing UI copy uses the `v0.21.2 UNREALIZED` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -101,8 +111,8 @@ default executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.20.1 SWAP
->   ADDRESSES` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.21.2
+>   UNREALIZED` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -139,8 +149,8 @@ backend/
     stonfi.py          STON.fi pools preview
     bitquery.py        Bitquery token trades preview/analysis
     import_trades.py   CSV/JSON trade import preview/analysis
-    wallet_activity.py Mock-normalized wallet activity ingestion endpoints
-    prices.py          Historical price preview endpoint (not cost basis)
+    wallet_activity.py Adapter-backed wallet activity and run intelligence endpoints
+    prices.py          Standalone historical price inspection endpoint
   services/
     analysis.py        Orchestration + data_quality + provider status
     pnl.py             Decimal-based PnL calculations
@@ -157,10 +167,11 @@ backend/
                          Pairwise run comparison (probabilistic similarity)
     wallet_activity_signals.py
                          Rule-based evidence signals with confidence levels
-    pnl_preview.py       Estimated PnL preview (Real PnL stays locked)
+    pnl_preview.py       Evidence-gated run-scoped PnL preview
     pnl_usd_valuation.py USD valuation of swap legs via historical prices
+    pnl_unrealized.py    Optional spot valuation of remaining in-window holdings
     historical_pricing.py
-                         Historical rate point preview (not a cost-basis source)
+                         Historical rate source for preview and PnL enrichment
   adapters/
     geckoterminal.py   Pool/token data — mock or real GeckoTerminal API
     wallet_activity.py Wallet activity contract + mock/scaffold adapters
@@ -251,7 +262,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.20.1 SWAP ADDRESSES)
+## Data modes & providers (v0.21.2 UNREALIZED)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -286,7 +297,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns native TON balance, jetton balance snapshots, an ordered transaction-history timeline, TON/jetton transfer history, and DEX swaps (all from TonAPI); PnL remains unavailable; cluster comparison and evidence signals run separately over persisted runs |
+| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns native TON balance, jetton balance snapshots, an ordered transaction-history timeline, TON/jetton transfer history, and DEX swaps (all from TonAPI); persisted runs feed evidence signals, cluster comparison, and evidence-gated PnL |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -303,8 +314,8 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.20.1 SWAP ADDRESSES` is the current
-user-facing product release label.
+API-version field, while `v0.21.2 UNREALIZED` is the current user-facing
+product release label.
 
 ### `GET /api/providers/status`
 Returns `data_mode` plus provider status for GeckoTerminal, legacy TON
@@ -348,8 +359,9 @@ only, not all TON DeFi.
 Returns provider coverage for a wallet activity ingestion request. The default
 mock path is deterministic. Since v0.12.0 the explicit TonAPI live guard can
 call TonAPI for native TON balance, account jetton balance, account
-transaction-history, TON/jetton transfer, and DEX swap coverage; PnL remains
-unavailable.
+transaction-history, TON/jetton transfer, and DEX swap coverage. This coverage
+preview does not calculate PnL; after persistence, the run-scoped PnL endpoint
+can evaluate the stored evidence.
 
 ### `POST /api/wallets/ingest`
 Persists one adapter-backed wallet activity run and returns run id, status,
@@ -405,13 +417,25 @@ quantity, or an explicit unavailable status with the reason) plus
 response switches to `pnl_mode: real_pnl` with `is_real_pnl: true` —
 in-window realized only; otherwise Real PnL stays locked.
 
+With `include_unrealized=true` the endpoint also derives remaining in-window
+holdings and values them with a deterministic mock fixture or current
+provider-reported spot prices in real mode (`include_historical` is implied).
+Each derived `unrealized` record reports its status, remaining quantity and
+cost, spot price, `priced_by`, market value, and unrealized PnL, or an explicit
+reason why that candidate is unavailable. If prerequisite enrichment produces
+no candidates, the array can be empty. `total_unrealized_pnl_usd` is a subtotal
+of computed records only; unavailable records are excluded. Spot figures are
+informational and never affect realized results, `pnl_mode`, confidence, or the
+Real-PnL evidence checklist.
+
 ### `GET /api/wallets/ingest/{run_id}/pnl-preview/export.json` and `.../export.csv`
 Download the PnL preview as JSON, or as flattened CSV with one row per token
 flow, USD flow, realized cost-basis record, or Real-PnL requirement record
 (tagged by `record_type`). Both accept `include_historical=true` to include
 the USD-valued flows and realized rows; the default export stays offline.
 Whether the figures amount to Real PnL is decided solely by the requirement
-rows.
+rows. Spot-based unrealized rows are currently view-only and are not included
+in these JSON/CSV exports.
 
 ### `GET /api/prices/historical/preview`
 Returns provider-reported historical rate points for one `token` (`"ton"` or
@@ -419,7 +443,9 @@ a jetton master address) between `start` and `end` (ISO datetimes, window
 capped at 90 days). Mock mode returns deterministic points without querying
 TonAPI; real mode queries the TonAPI rates chart. Provider failures are
 reported as `source_status: unavailable` with no hidden fallback. Preview
-only — `is_cost_basis_source` stays `false` and Real PnL stays locked.
+only — `is_cost_basis_source` stays `false` because this standalone request
+does not alter a run. The PnL endpoint performs its own explicitly requested
+historical enrichment against the same source.
 
 ### `POST /api/wallets/cluster/compare`
 Compares 2-25 persisted runs pairwise and returns a probabilistic
@@ -512,7 +538,7 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
   and `WALLET_ACTIVITY_LIVE_ENABLED=true` can fetch and persist TonAPI native
   TON balance snapshots, account jetton balance snapshots, ordered
   transaction-history rows, TON/jetton transfer rows, and DEX swap rows only;
-  PnL and clustering remain unavailable;
+  PnL and clustering were not yet available at that milestone;
 - the Wallet Activity Ingestion Workspace can preview coverage, run mock
   ingestion, refresh a stored run, and render transfers, transactions, swaps,
   balances, warnings, and provider evidence;
@@ -531,13 +557,12 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.20.1 SWAP ADDRESSES`).
+  tracks the current release (`v0.21.2 UNREALIZED`).
 
-## Roadmap beyond v0.20.1 SWAP ADDRESSES
+## Roadmap beyond v0.21.2 UNREALIZED
 
-- Add optional unrealized valuation of remaining in-window holdings with
-  explicit spot-price labeling, separate from realized figures (unblocked by
-  jetton master addresses in swap records).
+- Add spot-based unrealized records to the PnL JSON/CSV exports while keeping
+  source attribution, unavailable holdings, and priced-subtotal semantics.
 - Extend acquisition history beyond a single run window (multi-run or
   full-history ingestion) so cost basis can also cover sells of holdings
   acquired before the window.

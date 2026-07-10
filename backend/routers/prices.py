@@ -25,9 +25,9 @@ def read_historical_prices_preview(
 ) -> dict:
     """Preview provider-reported historical rate points for one token.
 
-    Preview only -- points are not wired into cost-basis or PnL math, so
-    Real PnL stays locked. Provider failures are reported as unavailable
-    with no hidden fallback.
+    This standalone request does not mutate a stored run. Run-scoped PnL
+    requests the same rate source separately when historical enrichment is
+    enabled. Provider failures are unavailable with no hidden fallback.
     """
     try:
         return build_historical_prices_preview(token=token, start=start, end=end)

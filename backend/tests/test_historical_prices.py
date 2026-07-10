@@ -76,7 +76,7 @@ def test_mock_mode_returns_deterministic_points_without_network(monkeypatch):
         "price_usd": "2.50",
     }
     assert body["points"][1]["price_usd"] == "2.51"
-    assert "not wired into cost-basis" in body["note"]
+    assert "does not alter a stored run" in body["note"]
     assert "mock" in body["message"].lower()
 
 

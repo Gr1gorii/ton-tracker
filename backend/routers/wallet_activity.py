@@ -104,9 +104,10 @@ def read_wallet_ingestion_run_pnl_preview(
     include_unrealized: bool = Query(
         False,
         description=(
-            "Also value remaining in-window holdings at current spot prices "
-            "(implies include_historical). Informational only; never part "
-            "of realized figures or the Real-PnL checklist."
+            "Also value remaining in-window holdings with deterministic mock "
+            "pricing or real provider-reported spot prices (implies "
+            "include_historical). Informational only; never part of realized "
+            "figures or the Real-PnL checklist."
         ),
     ),
     session: Session = Depends(get_session),

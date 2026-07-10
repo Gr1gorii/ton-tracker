@@ -72,6 +72,7 @@ def test_mock_mode_values_remaining_holdings_deterministically(monkeypatch):
     assert Decimal(record["unrealized_pnl_usd"]) == Decimal("-19.10")
     assert Decimal(result["total_unrealized_pnl_usd"]) == Decimal("-19.10")
     assert "informational only" in result["unrealized_note"]
+    assert "deterministic mock" in result["unrealized_note"]
     # Unrealized never touches the requirement checklist.
     assert result["real_pnl_locked"] is True
 
@@ -149,6 +150,7 @@ def test_real_mode_uses_provider_prices_and_reports_unpriced(monkeypatch):
     record = result["unrealized"][0]
     assert record["status"] == "computed"
     assert record["priced_by"] == "tonapi"
+    assert "provider-reported spot" in result["unrealized_note"]
     # Remaining 100 at spot 0.5 = 50; cost 10 TON @ 2.0 = 20 -> +30.
     assert Decimal(record["unrealized_pnl_usd"]) == Decimal("30")
     assert any("TonAPI rates warning" in w for w in result["warnings"])

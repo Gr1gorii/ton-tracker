@@ -1,10 +1,10 @@
 """Wallet activity ingestion adapter contracts, mock provider, and live guards.
 
-v0.12.0 keeps deterministic mock data as the default executable adapter, keeps
-provider-specific scaffold adapters behind explicit configuration, and runs a
-guarded TonAPI live path for native TON balance snapshots, account jetton
-balance snapshots, an ordered account transaction-history timeline, TON/jetton
-transfer history, and DEX swaps parsed from account events.
+Deterministic mock data remains the default executable adapter. Provider-
+specific scaffold adapters stay behind explicit configuration, while the
+guarded TonAPI live path covers native TON balance snapshots, account jetton
+balance snapshots, ordered transaction history, TON/jetton transfers, and DEX
+swaps parsed from account events.
 """
 
 from __future__ import annotations
@@ -66,8 +66,8 @@ WALLET_ACTIVITY_PROVIDER_CHOICES = {
 
 MOCK_ACTIVITY_WARNINGS = [
     "Mock-normalized wallet activity ingestion uses deterministic fixtures only.",
-    "No real transfers, swaps, balances, or transaction history are fetched by the default mock adapter in v0.12.0.",
-    "Legacy buyers, PnL, clustering, and exports are not wired to this ingestion run yet.",
+    "The default mock adapter makes no provider calls; its transfers, swaps, balances, and transactions are not real on-chain rows.",
+    "Stored mock runs feed run-scoped signals, PnL preview, cluster comparison, and exports; legacy buyers and the top-level report remain separate.",
 ]
 
 BALANCE_QUANT = Decimal("0.000000000000000001")
@@ -386,7 +386,7 @@ class MockWalletActivityAdapter:
             message=(
                 "Mock-normalized wallet activity coverage is available. "
                 "No real provider calls are performed by the default mock "
-                "adapter in v0.12.0."
+                "adapter."
             ),
         )
 
@@ -470,7 +470,7 @@ class ProviderScaffoldWalletActivityAdapter:
             message=(
                 f"{self.spec.label} scaffold returned {action} metadata only. "
                 "No real wallet activity provider calls are performed in "
-                "this scaffold path in v0.12.0."
+                "this scaffold path."
             ),
         )
 
@@ -487,9 +487,9 @@ class ProviderScaffoldWalletActivityAdapter:
             ),
             (
                 "Provider-specific wallet activity adapters are scaffold-only "
-                "unless an explicit v0.12.0 live guard is enabled; scaffold "
-                "paths expose status and coverage limits but do not fetch or "
-                "persist real provider rows."
+                "unless an explicitly implemented live path is enabled; "
+                "scaffold paths expose status and coverage limits but do not "
+                "fetch or persist real provider rows."
             ),
             (
                 f"Planned surface coverage for this scaffold: {planned}. "
@@ -527,10 +527,10 @@ TONAPI_LIVE_SUPPORTED_SURFACES: tuple[WalletIngestionSurface, ...] = (
 class TonapiWalletActivityLiveAdapter:
     """Guarded live TonAPI adapter for the full account activity surface set.
 
-    v0.12.0 expands the guard to also fetch DEX swaps parsed from account events
-    (`JettonSwap` actions), alongside balance snapshots, the transaction-history
-    timeline, and TON/jetton transfers. All five activity surfaces can be live;
-    PnL, clustering, and ownership proof remain unavailable.
+    DEX swaps parsed from account events (``JettonSwap`` actions) are fetched
+    alongside balance snapshots, transaction history, and TON/jetton transfers.
+    Persisted rows can feed scoped signals, PnL, and clustering; full-history
+    cost basis and ownership proof remain unavailable.
     """
 
     provider_name = "tonapi_wallet_activity_live"
@@ -801,7 +801,8 @@ class TonapiWalletActivityLiveAdapter:
                 "Guarded TonAPI live activity fetched. Scope is native TON "
                 "balance, account jetton balances, account transaction "
                 "history, TON/jetton transfer history, and DEX swaps from "
-                "events only; PnL and clustering remain unavailable."
+                "events only. Persisted rows can feed run-scoped signals, "
+                "evidence-gated PnL, and probabilistic clustering."
             )
 
         return self._live_result(
@@ -987,7 +988,8 @@ def get_wallet_activity_provider_status(settings=None) -> dict[str, Any]:
                 "Real mode: guarded live TonAPI wallet activity is enabled. "
                 "Native TON balance, account jetton balance snapshots, account "
                 "transaction history, TON/jetton transfers, and DEX swaps from "
-                "events can be fetched; PnL and clustering remain unavailable."
+                "events can be fetched. Persisted rows can feed run-scoped "
+                "signals, evidence-gated PnL, and probabilistic clustering."
             ),
         }
 
@@ -997,8 +999,7 @@ def get_wallet_activity_provider_status(settings=None) -> dict[str, Any]:
         "message": (
             f"Real mode: {spec.label} scaffold is selected. Configuration is "
             "present, but live wallet activity calls are disabled in this "
-            "v0.12.0 scaffold path; "
-            "preview/run return limited coverage metadata only."
+            "scaffold path; preview/run return limited coverage metadata only."
         ),
     }
 
@@ -1332,7 +1333,7 @@ def _warnings_for_request(request: WalletActivityAdapterRequest) -> list[str]:
         warnings.append(
             "DATA_MODE=real is active, but wallet activity ingestion remains "
             "mock-normalized unless WALLET_ACTIVITY_PROVIDER selects a "
-            "v0.12.0 scaffold or explicit live guard."
+            "scaffold or the explicit TonAPI live guard."
         )
     if "jettons" in request.surfaces:
         warnings.append(MOCK_JETTON_SURFACE_WARNING)

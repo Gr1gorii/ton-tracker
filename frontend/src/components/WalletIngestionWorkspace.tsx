@@ -87,12 +87,13 @@ const CAN_SHOW = [
   "Swaps",
   "Balances",
   "Provider evidence",
+  "Evidence signals and run-scoped PnL",
   "Wallet-pair similarity (probabilistic, not proof)",
 ];
 
 const CANNOT_SHOW = [
-  "Real provider fetch",
-  "Real wallet PnL",
+  "Full-history acquisition cost basis",
+  "Legacy buyers/report wiring",
   "Ownership proof",
 ];
 
@@ -423,8 +424,8 @@ export default function WalletIngestionWorkspace({
       <div className="tonapi-wallet-note wallet-ingestion-note">
         <div>
           {runResult?.data_mode === "real"
-            ? "This run used the guarded live TonAPI path. Rows are real on-chain account data, persisted and source-labeled; they do not feed PnL or clustering yet."
-            : "The ingestion workspace uses deterministic fixtures from the backend. Rows are persisted and source-labeled, but they are not real on-chain wallet activity and do not feed PnL or clustering yet."}
+            ? "This run used the guarded live TonAPI path. Rows are real on-chain account data, persisted and source-labeled. Stored activity feeds signals; swaps and balances feed cluster comparison; swaps and transaction evidence feed the PnL preview below."
+            : "The ingestion workspace uses deterministic backend fixtures. Rows are persisted and source-labeled. Stored activity feeds signals; swaps and balances feed cluster comparison; swaps and transaction evidence feed the PnL preview below. These are not real on-chain rows."}
         </div>
       </div>
 
@@ -1308,7 +1309,7 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
           {includeUnrealized && (
             <p className="muted small">
               JSON/CSV exports include historical and realized enrichment;
-              the current spot snapshot is view-only.
+              the displayed spot snapshot is view-only.
             </p>
           )}
 
@@ -1474,12 +1475,13 @@ function WalletPnlPreviewCard({ runId }: { runId: number }) {
               <div className="table-toolbar">
                 <div className="table-toolbar-main">
                   <span className="section-eyebrow">
-                    Unrealized PnL — current spot snapshot (USD)
+                    Unrealized PnL — spot valuation evidence (USD)
                   </span>
                   <p>
-                    Remaining in-window holdings only. Spot prices may be
-                    stale and do not change realized PnL or its evidence
-                    checklist.
+                    Remaining in-window holdings only. Row-level sources
+                    distinguish deterministic mock pricing from real provider
+                    pricing; these figures do not change realized PnL or its
+                    evidence checklist.
                   </p>
                 </div>
                 <div className="table-meta">

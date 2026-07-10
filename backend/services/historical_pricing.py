@@ -1,11 +1,10 @@
-"""Historical price preview service.
+"""Historical rate points for standalone inspection and PnL enrichment.
 
-Preview-only historical rate points, the first stage of the historical-prices
-track. Points are provider-reported (TonAPI rates chart) or deterministic
-mock samples and exist for display and export only -- they are NOT wired into
-cost-basis math, so Real PnL stays locked. No hidden fallback: a provider
-failure is reported as ``unavailable`` instead of silently substituting mock
-points.
+Points are provider-reported (TonAPI rates chart) or deterministic mock
+samples. A standalone preview does not mutate a stored run; run-scoped PnL
+reuses this source only when historical enrichment is explicitly requested.
+No hidden fallback: provider failure is reported as ``unavailable`` instead
+of silently substituting mock points.
 """
 
 from __future__ import annotations
@@ -18,10 +17,10 @@ from adapters.tonapi import TonapiAdapter
 from config import get_settings
 
 HISTORICAL_PRICING_NOTE = (
-    "Historical price preview only. Points are provider-reported (or "
-    "deterministic mock) chart samples; they are not wired into cost-basis "
-    "or PnL math, so Real PnL stays locked. Coverage may be sparse or "
-    "stale; missing coverage stays visible instead of being inferred."
+    "This standalone preview does not alter a stored run. Run-scoped PnL "
+    "requests the same provider-reported (or deterministic mock) rate source "
+    "only when historical enrichment is explicitly enabled. Coverage may be "
+    "sparse or stale; missing coverage stays visible instead of being inferred."
 )
 
 MAX_WINDOW_DAYS = 90

@@ -7,10 +7,10 @@ PnL stays locked until transaction history, swap evidence, historical prices,
 cost basis, and fee handling are all available; a partial calculation is never
 labeled as Real PnL.
 
-Confidence reflects evidence volume and is capped at "medium" for on-chain
-estimates by design: the estimate excludes fees, non-TON swap legs, transfers,
-and unrealized valuation, so it can never earn "high" confidence. Every rule
-is a pure function of the public run-response dict.
+Confidence reflects evidence volume and is capped at "medium" for the base
+on-chain estimate: non-TON swap legs and transfers are excluded, while
+historical cost basis and spot valuation require explicit enrichment. Every
+base rule is a pure function of the public run-response dict.
 """
 
 from __future__ import annotations
@@ -46,9 +46,9 @@ def _money(value: Decimal) -> str:
 def build_real_pnl_requirements(run: dict) -> list[dict[str, Any]]:
     """Return the Real-PnL evidence checklist for one run.
 
-    Real PnL unlocks only when every requirement is available. Historical
-    prices, cost basis, and fee handling are currently unavailable in the
-    project, so Real PnL stays locked regardless of run contents.
+    Real PnL unlocks only when every requirement is available. This base
+    checklist starts without historical enrichment or cost basis; downstream
+    enrichment updates those entries when explicitly requested and complete.
     """
     has_transactions = bool(run.get("transactions"))
     has_swaps = bool(run.get("swaps"))
@@ -70,17 +70,14 @@ def build_real_pnl_requirements(run: dict) -> list[dict[str, Any]]:
         {
             "code": "historical_prices",
             "available": False,
-            "reason": (
-                "Historical prices are preview-only and not wired into "
-                "cost-basis math."
-            ),
+            "reason": "Historical enrichment was not requested for this preview.",
         },
         {
             "code": "cost_basis",
             "available": False,
             "reason": (
-                "Cost basis needs acquisition-time prices, which require "
-                "historical prices."
+                "Cost basis requires historical enrichment and sufficient "
+                "in-window acquisition evidence."
             ),
         },
         {
@@ -213,8 +210,8 @@ def derive_run_pnl_preview(run: dict) -> dict[str, Any]:
 
     if swaps_used > 0:
         pnl_mode = "estimated_onchain_pnl"
-        # Capped at medium: the estimate excludes fees, non-TON legs, and
-        # unrealized valuation, so it can never earn high confidence.
+        # Capped at medium: the base estimate excludes non-TON legs and has no
+        # historical cost basis or spot valuation.
         confidence = "low" if swaps_used < 5 else "medium"
     elif swaps:
         pnl_mode = "real_pnl_locked"
