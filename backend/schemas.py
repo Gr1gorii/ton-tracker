@@ -972,6 +972,80 @@ class WalletNativeActivityLedgerResponse(BaseModel):
         return self
 
 
+class WalletNativeActivityMergeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_ids: list[Annotated[int, Field(strict=True, ge=1, le=2**63 - 1)]] = Field(
+        min_length=2, max_length=50
+    )
+
+    @field_validator("run_ids")
+    @classmethod
+    def _merge_run_ids_must_be_unique(cls, value: list[int]) -> list[int]:
+        if len(set(value)) != len(value):
+            raise ValueError("run_ids must be unique")
+        return value
+
+
+class WalletNativeActivityMergeSourceRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: int
+    ledger_id: str
+    capture_id: str
+    activity_count: int
+    evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class WalletMergedNativeActivityRecord(WalletNativeActivityRecord):
+    source_run_id: int
+    source_ledger_id: str
+    merge_index: int
+
+
+class WalletNativeActivityDuplicateGroupRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    activity_identity_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    occurrence_count: Annotated[int, Field(strict=True, ge=2, le=50)]
+    source_run_ids: list[int]
+    merge_indexes: list[int]
+
+
+class WalletNativeActivityMergeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contract_version: Literal["ton_native_activity_merge_v1"]
+    target_run_id: int
+    selected_run_ids: list[int]
+    sources: list[WalletNativeActivityMergeSourceRecord]
+    activities: list[WalletMergedNativeActivityRecord]
+    duplicate_groups: list[WalletNativeActivityDuplicateGroupRecord]
+    network: str
+    wallet_account_canonical: str
+    source_ledger_count: int
+    merged_activity_count: int
+    duplicate_group_count: int
+    merge_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    activity_merge_applied: Literal[True]
+    chronological_order_applied: Literal[True]
+    cross_run_deduplication_applied: Literal[False] = False
+    duplicates_retained: Literal[True]
+    establishes_complete_wallet_history: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    message: str
+
+    @model_validator(mode="after")
+    def _merge_counts_must_match(self):
+        if self.source_ledger_count != len(self.sources):
+            raise ValueError("source ledger count changed")
+        if self.merged_activity_count != len(self.activities):
+            raise ValueError("merged activity count changed")
+        if self.duplicate_group_count != len(self.duplicate_groups):
+            raise ValueError("duplicate group count changed")
+        if [row.merge_index for row in self.activities] != list(range(len(self.activities))):
+            raise ValueError("merge indexes are not canonical")
+        return self
+
+
 class WalletSwapRecord(BaseModel):
     tx_hash: str | None = None
     timestamp: str | None = None

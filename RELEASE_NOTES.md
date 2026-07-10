@@ -1,3 +1,16 @@
+# TON Wallet Intelligence Dashboard — v0.23.8 MULTI-RUN NATIVE ACTIVITY MERGE
+
+v0.23.8 adds explicit POST
+`/api/wallets/ingest/{target_run_id}/native-activity-merge` for 2–50 unique
+selected run ids. Every selected run must share the target wallet/network and
+contain at least one fully revalidated v0.23.7 ledger. Source rows are merged in
+deterministic chronological order with canonical merge indexes and a digest.
+Repeated activity identities are reported as duplicate groups but every
+occurrence remains present. The merge therefore does not deduplicate, establish
+complete wallet history, unlock cost basis, or feed PnL.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.7 IMMUTABLE NATIVE ACTIVITY LEDGER
 
 v0.23.7 adds forward-only Alembic revision `20260710_0008`, capture-bound

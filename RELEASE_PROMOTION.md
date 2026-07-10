@@ -1,13 +1,13 @@
-# TON Wallet Intelligence Dashboard — v0.23.7 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.23.8 Promotion Checklist
 
-Operational gates for the immutable native TON activity ledger.
+Operational gates for explicit multi-run native activity merge.
 
 ## Version and migration
 
-- Product label is `v0.23.7 IMMUTABLE NATIVE ACTIVITY LEDGER`; backend API version stays
+- Product label is `v0.23.8 MULTI-RUN NATIVE ACTIVITY MERGE`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is `ton_native_activity_ledger_v1`; all prior evidence,
-  flow, asset, and counterparty contracts remain unchanged.
+- New public contract is `ton_native_activity_merge_v1`; the persisted ledger
+  and all lower evidence contracts remain unchanged.
 - Alembic head is `20260710_0008`, adding native activity ledgers and rows on
   top of the unchanged 0007 BOC tables.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
@@ -42,6 +42,12 @@ Operational gates for the immutable native TON activity ledger.
 
 ## Endpoint and UI
 
+- POST `.../{target_run_id}/native-activity-merge` accepts 2–50 unique selected
+  ids including the target; every run must share wallet/network identity.
+- Every source ledger is fully revalidated. Rows receive deterministic
+  chronological merge indexes and the full result is digest-bound.
+- Duplicate identity groups are reported and retained; deduplication and
+  completeness/cost-basis/PnL claims remain false.
 - GET/POST `.../native-activity-ledger` are provider-free. First POST creates
   one immutable capture-bound ledger; repeated POST and GET perform no writes.
 - Every read re-derives source flows, asset/counterparty keys, rows, totals, and
@@ -79,11 +85,11 @@ Operational gates for the immutable native TON activity ledger.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Live run 32 materializes one outgoing 3 TON semantic row, then provider-free
-  readback returns the same digest and relational counts.
+- Deterministic two-run fixtures prove ordering, duplicate grouping, retained
+  occurrences, response validation, and incompatible-wallet rejection.
 - Credential/prohibited-brand scans are clean and README has no diff.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.23.7` on the merge commit.
+  a ready PR, then create annotated tag `v0.23.8` on the merge commit.
 
 ## Rollback
 

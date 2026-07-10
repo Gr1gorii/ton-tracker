@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.7 IMMUTABLE NATIVE ACTIVITY LEDGER";
+const RELEASE_LABEL = "v0.23.8 MULTI-RUN NATIVE ACTIVITY MERGE";
 
 const navItems = [
   "DASHBOARD",
@@ -942,16 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Immutable native TON activity ledger</strong>
+            <strong>Explicit multi-run native activity merge</strong>
             <p>
-              Materialize verified native flows as capture-bound semantic rows
-              with canonical asset and counterparty observation keys. Every read
-              re-derives the source and digest; the ledger is still scoped and
-              non-authoritative, with merge, cost basis, and PnL disabled.
+              Select 2–50 compatible persisted runs and merge their fully
+              revalidated native ledgers in deterministic chronological order.
+              Duplicate identities remain visible and retained until the
+              separate v0.23.9 deduplication contract.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Multi-run native activity merge"
+            text="An explicit selected-run contract revalidates every source ledger and creates one deterministic chronological view. Duplicate groups remain visible and all duplicate rows are retained; the merge does not establish complete history or cost-basis eligibility."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Immutable native activity ledger"
