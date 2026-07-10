@@ -42,11 +42,13 @@ import {
   requestSignature,
   restoreStoredRunControls,
 } from "../walletRunLoader";
+import { useWalletRunCatalog } from "../useWalletRunCatalog";
 import PreviewFreshnessStrip from "./PreviewFreshnessStrip";
 import PreviewReadinessStrip, {
   type PreviewReadinessTone,
 } from "./PreviewReadinessStrip";
 import WalletHistoryIntervalCoverageCard from "./WalletHistoryIntervalCoverageCard";
+import WalletRunCatalog from "./WalletRunCatalog";
 import {
   type ProviderPreviewRunUpdate,
   displayPreviewValue,
@@ -92,6 +94,7 @@ const CAN_SHOW = [
   "Coverage preview",
   "Persisted source-labeled run",
   "Read-only stored-run resume by ID",
+  "Privacy-bounded recent persisted-run catalog",
   "Transfers",
   "Transactions",
   "Network-scoped transaction identity",
@@ -184,11 +187,24 @@ export default function WalletIngestionWorkspace({
   );
   const [runResultOrigin, setRunResultOrigin] =
     useState<RunResultOrigin | null>(null);
+  const [openingStoredRunId, setOpeningStoredRunId] = useState<number | null>(
+    null,
+  );
   const [resultSnapshot, setResultSnapshot] = useState<RequestSnapshot | null>(
     null,
   );
   const activeRequestId = useRef(0);
+  const openingRequestId = useRef<number | null>(null);
   const loadedRunHeadingRef = useRef<HTMLDivElement>(null);
+  const recentRunCatalog = useWalletRunCatalog();
+
+  useEffect(
+    () => () => {
+      activeRequestId.current += 1;
+      openingRequestId.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     setRequestError(null);
@@ -359,6 +375,7 @@ export default function WalletIngestionWorkspace({
   }
 
   async function handlePreview() {
+    clearOpeningStoredRun();
     setRequestError(null);
     setStoredRunError(null);
     const request = makePayload();
@@ -417,6 +434,7 @@ export default function WalletIngestionWorkspace({
   }
 
   async function handleRun() {
+    clearOpeningStoredRun();
     setRequestError(null);
     setStoredRunError(null);
     const request = makePayload();
@@ -445,6 +463,7 @@ export default function WalletIngestionWorkspace({
       if (data.run_id != null) setStoredRunId(String(data.run_id));
       preservePayloadCustomBounds(request.payload);
       setResultSnapshot(snapshotForPayload(request.payload));
+      void recentRunCatalog.refresh();
       onPreviewRunStateChange?.({
         status: "success",
         message: `${data.data_mode === "real" ? "Live" : "Mock"} ingestion run #${data.run_id ?? "-"} stored ${activityCount(data)} normalized rows.`,
@@ -467,18 +486,22 @@ export default function WalletIngestionWorkspace({
     }
   }
 
-  async function handleLoadStoredRun() {
+  async function handleLoadStoredRun(explicitRunId?: number) {
     setRequestError(null);
     setStoredRunError(null);
-    const runId = parseStoredRunId(storedRunId);
+    const runId = explicitRunId ?? parseStoredRunId(storedRunId);
     if (runId === null) {
       setStoredRunError("Stored run ID must be a positive safe integer.");
+      setOpeningStoredRunId(null);
       return;
     }
+    if (explicitRunId !== undefined) setStoredRunId(String(explicitRunId));
 
     const requestId = activeRequestId.current + 1;
     activeRequestId.current = requestId;
     setLoadingAction("load");
+    openingRequestId.current = requestId;
+    setOpeningStoredRunId(runId);
     onPreviewRunStateChange?.({
       status: "running",
       message: `Loading persisted wallet ingestion run #${runId} without creating a new run.`,
@@ -544,12 +567,19 @@ export default function WalletIngestionWorkspace({
         limit: `Run #${runId}`,
       });
     } finally {
-      if (activeRequestId.current === requestId) setLoadingAction(null);
+      if (openingRequestId.current === requestId) {
+        openingRequestId.current = null;
+        setOpeningStoredRunId(null);
+      }
+      if (activeRequestId.current === requestId) {
+        setLoadingAction(null);
+      }
     }
   }
 
   async function handleRefreshRun() {
     if (!runResult?.run_id) return;
+    clearOpeningStoredRun();
     setRequestError(null);
     setStoredRunError(null);
     const requestId = activeRequestId.current + 1;
@@ -570,6 +600,8 @@ export default function WalletIngestionWorkspace({
   }
 
   function clearPanel() {
+    activeRequestId.current += 1;
+    clearOpeningStoredRun();
     setTimeWindow("24h");
     setCustomStart("");
     setCustomEnd("");
@@ -589,6 +621,11 @@ export default function WalletIngestionWorkspace({
       accountAddress: currentAccount,
       limit: "All surfaces",
     });
+  }
+
+  function clearOpeningStoredRun() {
+    openingRequestId.current = null;
+    setOpeningStoredRunId(null);
   }
 
   return (
@@ -695,6 +732,7 @@ export default function WalletIngestionWorkspace({
             type="text"
             inputMode="numeric"
             autoComplete="off"
+            maxLength={19}
             value={storedRunId}
             disabled={busy}
             aria-invalid={storedRunIdIsInvalid}
@@ -707,7 +745,7 @@ export default function WalletIngestionWorkspace({
             className={storedRunIdIsInvalid ? "field-help field-help-error" : "field-help"}
           >
             {storedRunIdIsInvalid
-              ? "Use digits only and a value greater than zero."
+              ? "Use canonical digits from 1 through 9007199254740991."
               : "The main run uses GET; related cards may issue additional read-only GETs. No writes."}
           </small>
         </div>
@@ -729,6 +767,17 @@ export default function WalletIngestionWorkspace({
             <span>{storedRunError}</span>
           </div>
         )}
+        <WalletRunCatalog
+          runs={recentRunCatalog.runs}
+          truncated={recentRunCatalog.truncated}
+          loading={recentRunCatalog.loading}
+          error={recentRunCatalog.error}
+          activeRunId={runResult?.run_id ?? null}
+          openingRunId={openingStoredRunId}
+          workspaceBusy={busy}
+          onRefresh={() => void recentRunCatalog.refresh()}
+          onOpen={(runId) => void handleLoadStoredRun(runId)}
+        />
       </form>
 
       <div className="wallet-ingestion-form wallet-query-card">
@@ -740,6 +789,7 @@ export default function WalletIngestionWorkspace({
             id="wallet-ingestion-address"
             className="text-input"
             type="text"
+            maxLength={128}
             value={accountAddress}
             disabled={busy}
             placeholder="EQ..."

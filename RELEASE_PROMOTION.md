@@ -1,12 +1,13 @@
-# TON Wallet Intelligence Dashboard — v0.22.8 PERSISTED RUN LOADER Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.22.9 RECENT RUN CATALOG Promotion Checklist
 
-Operational gates for promoting read-only persisted-run loading while
-preserving strict acquisition evidence, deterministic selected-run interval
-coverage, and non-authoritative provider semantics.
+Operational gates for promoting privacy-bounded recent-run discovery and
+read-only persisted-run loading while preserving strict acquisition evidence,
+deterministic selected-run interval coverage, and non-authoritative provider
+semantics.
 
 ## Version contract
 
-- Product label is `v0.22.8 PERSISTED RUN LOADER`.
+- Product label is `v0.22.9 RECENT RUN CATALOG`.
 - Backend `VERSION=0.2.1` remains the independent API-version field.
 - `wallet_history_readiness_v0.22.7` is the diagnostic analysis contract.
 - `wallet_multi_run_interval_coverage_v1` is the bounded multi-run coverage
@@ -16,7 +17,7 @@ coverage, and non-authoritative provider semantics.
 
 ## Schema and migration gates
 
-- v0.22.8 adds no database migration.
+- v0.22.9 adds no database migration.
 - Alembic head remains `20260710_0005`.
 - Fresh, exact legacy, and versioned databases follow the existing baseline
   through revisions 0002-0005 without `create_all()` repair.
@@ -26,6 +27,36 @@ coverage, and non-authoritative provider semantics.
   legacy runs.
 - Existing uniqueness, foreign-key cascade, retry, integrity, and unsupported-
   downgrade behavior remains intact.
+
+## Recent-run catalog gates
+
+- `GET /api/wallets/ingest` coexists with the existing POST collection route
+  and defaults to canonical `limit=8`.
+- An explicit `limit` is one ASCII decimal integer from `1` through `50`.
+  Leading zeros, signs, whitespace, decimals, booleans, empty values, duplicate
+  parameters, unknown parameters, case aliases, and out-of-range values return
+  422.
+- The response has exactly `runs`, `limit`, and `truncated`. Every run has
+  exactly `run_id`, `wallet_hint`, `time_window`, `created_at`, `status`, and
+  `data_mode`.
+- `run_id` is a canonical positive signed-64-bit decimal string and never a
+  JSON number. Catalog and frontend validation accept values only through
+  `9223372036854775807`.
+- `wallet_hint` uses the first six and last four submitted-address characters
+  separated by one ellipsis for values at least 16 characters, while shorter
+  legacy values use `stored…run`; maximum response length is 11. The
+  full address, canonical identity, custom bounds, requested surfaces,
+  provider metadata, activity rows/counts, warnings, and messages are absent.
+- New wallet submissions are bounded to 128 characters by both backend request
+  validation and the browser input.
+- Ordering is fixed to descending persisted run id. The endpoint returns only
+  the newest page, reads at most `limit + 1`, and uses `truncated` instead of an
+  offset, cursor, total count, filter, or client-selected sort.
+- Catalog acquisition is exactly one projected SELECT from
+  `wallet_ingestion_runs`. It does not query child activity tables, deserialize
+  provider metadata, load settings, construct/call a provider, or perform DML,
+  DDL, commit, or mutation.
+- The server response and browser request both use `no-store`.
 
 ## Persisted-run read gates
 
@@ -172,6 +203,32 @@ git status --short
 Do not insert a test total into release documents. Record the actual command
 results in promotion evidence at execution time.
 
+## Focused recent-run catalog verification
+
+- An empty database returns 200 with `runs: []`, `limit: 8`,
+  `truncated: false`, and `Cache-Control: no-store`.
+- Limits `1` and `50` succeed. Every malformed, noncanonical, duplicate,
+  unknown, or out-of-range query case described above returns 422.
+- Nine stored runs requested with `limit=8` return the newest eight in strict
+  descending decimal-string id order and set `truncated: true`.
+- Every item has the exact six-field allowlist, the full submitted wallet does
+  not occur in the payload, and the hint is bounded to 11 characters.
+- Repeated reads issue one SELECT each against `wallet_ingestion_runs`, never
+  reference child activity tables, never load settings/build an adapter, and
+  leave every wallet table count unchanged.
+- The browser rejects responses with extra/missing fields, invalid dates,
+  invalid or overflowing ids, long hints, duplicate/non-descending ids, a
+  mismatched limit, or incoherent truncation.
+- Catalog requests use their own abort controller and sequence guard. Stale or
+  aborted responses cannot overwrite a newer refresh or interfere with
+  preview, ingestion, full-run load, or run refresh.
+- The UI requests eight rows, initially shows three, expands/collapses without
+  refetching, preserves the last successful list on refresh failure, supports
+  retry, and refreshes after a successful ingestion commit.
+- Selecting a safe catalog id opens that run through the existing full stored-
+  run GET. An unsafe JavaScript id remains visible but disabled, and a failed
+  open preserves the previous current run.
+
 ## Focused persisted-run verification
 
 - Existing and missing canonical ids return 200 and 404 respectively.
@@ -229,7 +286,14 @@ and verify:
 
 ## UI and documentation gates
 
-- Dashboard label reads `v0.22.8 PERSISTED RUN LOADER` on desktop and mobile.
+- Dashboard label reads `v0.22.9 RECENT RUN CATALOG` on desktop and mobile.
+- The recent-run catalog exposes only bounded hints and five other summary
+  fields, initially renders three of eight rows, expands to all eight, and has
+  accessible loading, empty, truncated, current, opening, refresh, retry,
+  error, and unsafe-id states.
+- Catalog refresh failure keeps the last successful list visible; stale
+  responses and Strict Mode remounts do not replace newer state or interfere
+  with the workspace request lifecycle.
 - The stored-run loader accepts one positive safe integer, restores exact stored
   controls only on success, and leaves the previous run visible on failure.
 - Loading a different run remounts run-scoped cards without console errors,
@@ -254,19 +318,20 @@ and verify:
 After every gate passes:
 
 ```bash
+release_branch="$(git branch --show-current)"
 git checkout main
-git merge --no-ff codex/v0.22.8-persisted-run-loader
-git tag -a v0.22.8 -m "v0.22.8 PERSISTED RUN LOADER"
+git merge --no-ff "$release_branch"
+git tag -a v0.22.9 -m "v0.22.9 RECENT RUN CATALOG"
 git push origin main
-git push origin v0.22.8
+git push origin v0.22.9
 ```
 
 ## Rollback
 
 - Before push, patch the release branch and rerun all gates.
 - After push, use a follow-up revert commit; do not rewrite published history.
-- v0.22.8 has no schema migration. Reverting its code removes the stored-run
-  loader without a database downgrade or data rewrite; the existing persisted
-  runs and interval diagnostics remain intact.
+- v0.22.9 has no schema migration. Reverting its code removes the recent-run
+  catalog without a database downgrade or data rewrite; the existing full-run
+  loader, persisted runs, and interval diagnostics remain intact.
 - The existing revision 0005 backup/restore policy remains applicable only to
   older schema changes.

@@ -1,28 +1,72 @@
-# TON Wallet Intelligence Dashboard — v0.22.8 PERSISTED RUN LOADER
+# TON Wallet Intelligence Dashboard — v0.22.9 RECENT RUN CATALOG
 
-This release adds a read-only **Load stored run** control to the wallet
-workspace. It reuses the existing persisted-run GET endpoint, restores the
-stored request context only after the complete response is validated, and does
-not re-run ingestion or contact a provider.
+This release adds a privacy-bounded recent persisted-run catalog to the wallet
+workspace. It discovers the newest stored runs through one projected read-only
+query, then delegates selection to the existing full stored-run GET introduced
+in v0.22.8. Discovery and loading never re-run ingestion or contact a provider.
 
 ## Release scope
 
-- `GET /api/wallets/ingest/{run_id}` remains the single stored-run read
-  endpoint; no duplicate loader endpoint is introduced.
-- URL run ids must be canonical positive decimal strings matching
-  `[1-9][0-9]*` and no greater than the signed-64-bit maximum
-  `9223372036854775807`.
-- An existing run returns 200, a canonical but absent run returns 404, and a
-  malformed, noncanonical, zero, negative, or out-of-range id returns 422.
-- Readback queries existing persistence only. It makes no provider or ingestion
-  adapter call and performs no database write, commit, or mutation.
-- The stored-run response now exposes exact persisted `custom_start`,
-  `custom_end`, and `created_at` timestamps. Non-custom runs return null custom
-  bounds; custom runs return both saved bounds.
-- The frontend applies its narrower positive JavaScript safe-integer validation
-  before issuing the request.
+- `GET /api/wallets/ingest?limit=8` returns the newest persisted-run summaries;
+  the default catalog limit is `8`.
+- `limit` must be one canonical ASCII positive decimal from `1` through `50`.
+  Leading zeros, signs, whitespace, decimals, booleans, empty values, duplicate
+  `limit` parameters, unknown parameters, and out-of-range values return 422.
+- The catalog is fixed to descending persisted run id. It exposes no offset,
+  cursor, filter, client-selected sort, or total count; `truncated` reports only
+  whether an older run exists beyond the returned newest page.
+- Catalog run ids are canonical positive signed-64-bit decimal strings, up to
+  `9223372036854775807`, so transport does not round them through a JSON number.
+- `GET /api/wallets/ingest/{run_id}` remains the only full stored-run read
+  endpoint. Existing, missing, and invalid path ids retain the v0.22.8
+  200/404/422 behavior and exact stored timestamp restoration.
+- Wallet input is now bounded to 128 characters in backend validation and the
+  browser control.
 
-## Atomic workspace state
+## Minimal catalog response
+
+The top-level response contains exactly `runs`, `limit`, and `truncated`. Each
+run summary contains exactly six fields:
+
+1. `run_id`;
+2. `wallet_hint`;
+3. `time_window`;
+4. `created_at`;
+5. `status`;
+6. `data_mode`.
+
+`wallet_hint` is bounded to at most 11 characters: values at least 16 characters
+use the first six and last four submitted characters separated by one ellipsis,
+while shorter legacy values use the non-reconstructing `stored…run` sentinel. The full
+submitted address, canonical account identity, custom bounds, requested
+surfaces, provider evidence, activity rows and counts, warnings, and messages
+are deliberately absent.
+
+The backend issues one projected SELECT against `wallet_ingestion_runs`, orders
+by id descending, and reads at most `limit + 1` rows. It does not load child
+tables, parse stored provider metadata, load settings, construct an adapter,
+contact a provider, insert, update, delete, commit, or otherwise mutate the
+database. The response sends `Cache-Control: no-store`; the browser request also
+uses `no-store`.
+
+## Catalog UI and request races
+
+- The workspace requests eight recent summaries and shows the newest three in
+  its collapsed state; the user can expand to all eight.
+- Initial load, manual refresh, and retry use a catalog-specific abort
+  controller and monotonic request sequence. A stale or aborted request cannot
+  overwrite a newer catalog or interfere with preview, ingestion, refresh, or
+  full stored-run loading.
+- A refresh error keeps the last successful catalog visible and presents a
+  retry action. An empty successful catalog remains distinct from an error.
+- Successful ingestion refreshes the catalog after the new run is committed.
+- Selecting a catalog row passes its id directly to the existing full-run
+  loader. A failed row open keeps the prior selected run and catalog current.
+- Signed-64-bit ids outside the JavaScript safe-integer range remain visible as
+  exact decimal strings, but their open action is disabled rather than rounded
+  to another run.
+
+## Atomic full-run workspace state
 
 - A successful load validates the response id and stored request metadata, then
   restores wallet, time window, exact custom bounds, requested surfaces,
@@ -39,9 +83,8 @@ not re-run ingestion or contact a provider.
   local datetime while the API stores UTC.
 - Loaded custom bounds keep the exact canonical UTC values for signatures and
   subsequent preview/run payloads until the corresponding date input is edited.
-  Local
-  `datetime-local` presentation therefore cannot shift a DST-fold instant or
-  truncate persisted microseconds behind a fresh-state label.
+  Local `datetime-local` presentation therefore cannot shift a DST-fold
+  instant or truncate persisted microseconds behind a fresh-state label.
 
 ## Retained interval-coverage contract
 
@@ -116,17 +159,18 @@ about time outside it.
 
 ## UI
 
-The wallet workspace accepts a stored run id independently of the ingestion
-form. A successful read restores the saved controls and makes that run the
-current run; a failed read reports its own error without hiding or replacing
-the previous run. When the id changes, run-scoped cards remount against the new
-target. The selected-run history-readiness card still accepts the remaining run
-ids for a total of 2-50 distinct runs and keeps transaction and provider-display
-interval summaries separate.
+The wallet workspace presents the recent catalog inside the stored-run loader,
+with independent loading, refresh, retry, empty, truncated, expanded, current,
+opening, and unsafe-id states. A successful full read restores the saved
+controls and makes that run current; a failed read reports its own error without
+hiding or replacing the previous run. When the id changes, run-scoped cards
+remount against the new target. The selected-run history-readiness card still
+accepts the remaining run ids for a total of 2-50 distinct runs and keeps
+transaction and provider-display interval summaries separate.
 
 ## Migration and compatibility
 
-v0.22.8 adds no database migration. Alembic head remains
+v0.22.9 adds no database migration. Alembic head remains
 `20260710_0005`. The v0.22.6 provider event/action observation identity
 contract `tonapi_event_action_obs_v1`, transaction identity, and persisted
 acquisition evidence remain unchanged. Backend `VERSION=0.2.1` remains the
@@ -146,8 +190,8 @@ It is represented through explicit per-layer exclusion or not-requested state.
   `is_global_history_coverage`, `is_authoritative_activity_coverage`,
   `activity_rows_merged`, `deduplication_applied`, `is_cost_basis`,
   `eligible_for_cost_basis`, and `used_by_pnl` remain false.
-- Backend `VERSION=0.2.1` remains the API-version field; `v0.22.8 PERSISTED RUN
-  LOADER` is the product label.
+- Backend `VERSION=0.2.1` remains the API-version field; `v0.22.9 RECENT RUN
+  CATALOG` is the product label.
 
 ## Verification
 
@@ -163,14 +207,18 @@ npm audit
 
 The frontend test/build toolchain is Vitest 4 with Vite 8, and the checked-in
 dependency graph reports zero `npm audit` vulnerabilities. Verification covers
-canonical positive signed-64-bit API ids, the frontend safe-integer gate,
-200/404/422 behavior, exact persisted timestamp restoration, provider-free and
-mutation-free reads, atomic state replacement, failed-load preservation,
-run-card remounting, and normalized datetime signatures. Existing verification
-continues to cover strict stream/page revalidation, 2-50 selected runs, exact
-interval math, independent layers, and unchanged false merge/history/cost/PnL
-flags. No credential may appear in logs, warnings, persisted evidence, errors,
-exports, or UI copy.
+canonical `limit` values and rejection of duplicate or unknown query input,
+exact six-field summaries, masked bounded wallet hints, decimal-string signed-
+64-bit ids, newest-first ordering and truncation, one projected SELECT,
+provider-free and mutation-free reads, no-store behavior, the collapsed three-
+of-eight UI, refresh/retry preservation, stale-request suppression, and unsafe-
+id disabling. Existing verification continues to cover the full-run frontend
+safe-integer gate, 200/404/422 behavior, exact persisted timestamp restoration,
+atomic state replacement, failed-load preservation, run-card remounting,
+strict stream/page revalidation, 2-50 selected runs, exact interval math,
+independent layers, and unchanged false merge/history/cost/PnL flags. No
+credential may appear in logs, warnings, persisted evidence, errors, exports,
+or UI copy.
 
 Vite 8 and the React plugin require Node.js `^20.19.0 || >=22.12.0`; npm 10 or
 newer is required. These prerequisites are declared in `frontend/package.json`

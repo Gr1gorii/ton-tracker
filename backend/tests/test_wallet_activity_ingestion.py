@@ -132,6 +132,19 @@ def test_wallet_ingestion_preview_returns_mock_coverage(client, monkeypatch):
     assert evidence["normalized_count"] == 6
 
 
+def test_wallet_ingestion_rejects_oversized_wallet_address(client):
+    response = client.post(
+        "/api/wallets/ingest/preview",
+        json={
+            "wallet_address": "E" * 129,
+            "time_window": "24h",
+            "surfaces": ["transactions"],
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_wallet_ingestion_persists_network_scoped_identity_variants(
     client,
     monkeypatch,
@@ -1513,3 +1526,267 @@ def test_wallet_ingestion_read_accepts_max_int64_as_canonical_missing_id(client)
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Wallet ingestion run not found"
+
+
+def test_wallet_ingestion_catalog_empty_contract_is_private_and_terminal(client):
+    response = client.get("/api/wallets/ingest")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "runs": [],
+        "limit": 8,
+        "truncated": False,
+    }
+
+
+def test_wallet_ingestion_catalog_returns_bounded_newest_first_metadata(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    created = []
+    for _index in range(9):
+        response = client.post(
+            "/api/wallets/ingest",
+            json={
+                "wallet_address": VALID_MAINNET_WALLET,
+                "time_window": "24h",
+                "surfaces": ["transactions"],
+            },
+        )
+        assert response.status_code == 200
+        created.append(response.json())
+
+    response = client.get("/api/wallets/ingest?limit=8")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["limit"] == 8
+    assert body["truncated"] is True
+    assert [item["run_id"] for item in body["runs"]] == [
+        str(item["run_id"]) for item in reversed(created[-8:])
+    ]
+    expected_keys = {
+        "run_id",
+        "wallet_hint",
+        "time_window",
+        "created_at",
+        "status",
+        "data_mode",
+    }
+    assert all(set(item) == expected_keys for item in body["runs"])
+    latest = body["runs"][0]
+    assert latest["wallet_hint"] == (
+        f"{VALID_MAINNET_WALLET[:6]}…{VALID_MAINNET_WALLET[-4:]}"
+    )
+    assert latest["time_window"] == "24h"
+    assert latest["created_at"] == created[-1]["created_at"]
+    assert latest["status"] == created[-1]["status"]
+    assert latest["data_mode"] == "mock"
+    assert VALID_MAINNET_WALLET not in response.text
+
+
+def test_wallet_ingestion_catalog_never_reconstructs_a_short_legacy_address(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    created = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": "EQshort",
+            "time_window": "24h",
+            "surfaces": ["transactions"],
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.get("/api/wallets/ingest?limit=1")
+
+    assert response.status_code == 200
+    assert response.json()["runs"][0]["wallet_hint"] == "stored…run"
+    assert "EQshort" not in response.text
+
+
+def test_wallet_ingestion_catalog_mask_threshold_and_exact_limit(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    for address in ("A" * 15, "B" * 16):
+        response = client.post(
+            "/api/wallets/ingest",
+            json={
+                "wallet_address": address,
+                "time_window": "24h",
+                "surfaces": ["transactions"],
+            },
+        )
+        assert response.status_code == 200
+
+    response = client.get("/api/wallets/ingest?limit=2")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["truncated"] is False
+    assert [item["wallet_hint"] for item in body["runs"]] == [
+        "BBBBBB…BBBB",
+        "stored…run",
+    ]
+
+
+def test_wallet_ingestion_catalog_preserves_id_above_javascript_safe_range(
+    client,
+):
+    from models import WalletIngestionRun
+
+    engine = app.state.wallet_ingestion_test_engine
+    session = sessionmaker(bind=engine)()
+    try:
+        session.add(
+            WalletIngestionRun(
+                id=9_007_199_254_740_993,
+                wallet_address=VALID_MAINNET_WALLET,
+                time_window="24h",
+                data_mode="mock",
+                status="success",
+                requested_surfaces_json='["transactions"]',
+                provider_summary_json="{}",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get("/api/wallets/ingest?limit=1")
+
+    assert response.status_code == 200
+    assert response.json()["runs"][0]["run_id"] == "9007199254740993"
+
+
+def test_wallet_ingestion_catalog_is_one_select_and_never_calls_provider(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    for _index in range(3):
+        created = client.post(
+            "/api/wallets/ingest",
+            json={
+                "wallet_address": VALID_MAINNET_WALLET,
+                "time_window": "24h",
+                "surfaces": ["transfers", "transactions", "swaps", "balances"],
+            },
+        )
+        assert created.status_code == 200
+
+    engine = app.state.wallet_ingestion_test_engine
+    counts_before = _wallet_table_counts(engine)
+    statements: list[str] = []
+
+    def capture_statement(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement.strip().upper())
+
+    def forbidden_call(*_args, **_kwargs):
+        pytest.fail("catalog reads must not build providers or load settings")
+
+    monkeypatch.setattr(
+        "services.wallet_activity_ingestion.build_wallet_activity_adapter",
+        forbidden_call,
+    )
+    monkeypatch.setattr(
+        "services.wallet_activity_ingestion.get_settings",
+        forbidden_call,
+    )
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        first = client.get("/api/wallets/ingest?limit=2")
+        second = client.get("/api/wallets/ingest?limit=2")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    assert _wallet_table_counts(engine) == counts_before
+    assert len(statements) == 2
+    assert all(statement.startswith("SELECT") for statement in statements)
+    assert all("WALLET_INGESTION_RUNS" in statement for statement in statements)
+    assert all(
+        child_table not in statement
+        for statement in statements
+        for child_table in (
+            "WALLET_TRANSFERS",
+            "WALLET_TRANSACTIONS",
+            "WALLET_SWAPS",
+            "WALLET_BALANCE_SNAPSHOTS",
+            "WALLET_INGESTION_WARNINGS",
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "limit=0",
+        "limit=-1",
+        "limit=01",
+        "limit=%2B1",
+        "limit=1.0",
+        "limit=true",
+        "limit=%201",
+        "limit=51",
+        "limit=999",
+        "limit=",
+        "limit=1&limit=2",
+        "unknown=1",
+        "limit=8&unknown=1",
+        "LIMIT=8",
+    ],
+)
+def test_wallet_ingestion_catalog_rejects_noncanonical_or_unknown_query(
+    client,
+    query,
+):
+    response = client.get(f"/api/wallets/ingest?{query}")
+
+    assert response.status_code == 422
+
+
+def test_wallet_ingestion_catalog_rejects_query_before_service_or_sql(
+    client,
+    monkeypatch,
+):
+    engine = app.state.wallet_ingestion_test_engine
+    statements: list[str] = []
+
+    def capture_statement(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement)
+
+    monkeypatch.setattr(
+        "routers.wallet_activity.list_wallet_ingestion_runs",
+        lambda **_kwargs: pytest.fail("invalid catalog query reached the service"),
+    )
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        for query in ("limit=0", "limit=8&limit=7", "unknown=1"):
+            response = client.get(f"/api/wallets/ingest?{query}")
+            assert response.status_code == 422
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    assert statements == []
+
+
+@pytest.mark.parametrize("limit", [1, 50])
+def test_wallet_ingestion_catalog_accepts_limit_boundaries(client, limit):
+    response = client.get(f"/api/wallets/ingest?limit={limit}")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "runs": [],
+        "limit": limit,
+        "truncated": False,
+    }

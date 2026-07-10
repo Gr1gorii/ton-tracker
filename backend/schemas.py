@@ -83,6 +83,7 @@ class WalletIngestionPreviewRequest(BaseModel):
     wallet_address: str = Field(
         ...,
         description="TON wallet address to inspect before ingestion.",
+        max_length=128,
     )
     time_window: Literal["24h", "3d", "7d", "custom"] = Field(
         default="24h",
@@ -326,6 +327,46 @@ class WalletIdentityRecord(BaseModel):
     testnet_only: bool | None = None
     is_account_existence_proof: Literal[False] = False
     is_ownership_proof: Literal[False] = False
+
+
+class WalletIngestionRunCatalogItem(BaseModel):
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    wallet_hint: str = Field(min_length=1, max_length=11)
+    time_window: Literal["24h", "3d", "7d", "custom"]
+    created_at: str
+    status: WalletIngestionStatus
+    data_mode: Literal["mock", "real"]
+
+    @field_validator("run_id")
+    @classmethod
+    def _catalog_run_id_must_fit_sqlite(cls, value: str) -> str:
+        if int(value, 10) > 2**63 - 1:
+            raise ValueError("catalog run_id exceeds signed 64-bit range")
+        return value
+
+    @field_validator("wallet_hint")
+    @classmethod
+    def _catalog_wallet_hint_must_stay_masked(cls, value: str) -> str:
+        if value == "stored…run" or (len(value) == 11 and value[6] == "…"):
+            return value
+        raise ValueError("catalog wallet_hint must use the bounded masked shape")
+
+
+class WalletIngestionRunCatalogResponse(BaseModel):
+    runs: list[WalletIngestionRunCatalogItem]
+    limit: Annotated[int, Field(strict=True, ge=1, le=50)]
+    truncated: Annotated[bool, Field(strict=True)]
+
+    @model_validator(mode="after")
+    def _catalog_page_must_be_canonical(self):
+        if len(self.runs) > self.limit:
+            raise ValueError("catalog page cannot exceed its requested limit")
+        run_ids = [int(run.run_id, 10) for run in self.runs]
+        if any(left <= right for left, right in zip(run_ids, run_ids[1:])):
+            raise ValueError("catalog runs must use unique descending run ids")
+        if self.truncated and len(self.runs) != self.limit:
+            raise ValueError("a truncated catalog must fill its requested limit")
+        return self
 
 
 class WalletIngestionRunResponse(BaseModel):

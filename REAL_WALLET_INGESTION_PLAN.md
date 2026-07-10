@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.8 PERSISTED RUN LOADER
+# TON Wallet Intelligence Dashboard — v0.22.9 RECENT RUN CATALOG
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -6,8 +6,9 @@ retain their bounded evidence contracts, and v0.22.6 provider event/action
 observation identity remains unchanged. v0.22.7 added deterministic interval
 coverage across 2-50 explicitly selected runs without promoting a selected
 span, provider display events, or derived actions to complete wallet history.
-v0.22.8 adds read-only selection of an existing persisted run in the wallet
-workspace without changing any acquisition, identity, readiness, or interval
+v0.22.8 added read-only selection of an existing persisted run. v0.22.9 adds a
+privacy-bounded newest-run catalog that discovers stored ids without loading
+full activity or changing any acquisition, identity, readiness, or interval
 contract.
 
 ## Objective
@@ -18,6 +19,8 @@ caps, excluded runs, not-requested streams, overlaps, internal gaps, and legacy
 evidence limits must remain visible; no missing interval or activity is
 inferred. A user must also be able to reopen one exact stored run without
 creating another run, contacting a provider, or mutating persisted evidence.
+Recent-run discovery must expose only bounded metadata, preserve signed-64-bit
+ids exactly, and remain one provider-free, mutation-free database read.
 
 ## Frozen interval contract
 
@@ -175,9 +178,9 @@ coordinate as another surface is a conflict, not a new observation.
 
 ## Persisted run loader contract
 
-The wallet workspace reuses `GET /api/wallets/ingest/{run_id}`; v0.22.8 does
-not add a parallel endpoint or run-creation path. URL ids are canonical positive
-signed-64-bit decimal strings: `[1-9][0-9]*`, with maximum
+The wallet workspace reuses `GET /api/wallets/ingest/{run_id}`; the v0.22.8
+loader did not add a parallel full-run endpoint or run-creation path. URL ids
+are canonical positive signed-64-bit decimal strings: `[1-9][0-9]*`, with maximum
 `9223372036854775807`.
 
 - an existing canonical id returns 200 with the persisted run;
@@ -208,6 +211,57 @@ control is edited; this preserves DST-fold instants and sub-millisecond precisio
 This loader requires no schema change. Alembic head remains
 `20260710_0005` and backend `VERSION=0.2.1` remains the independent API-version
 field.
+
+## Recent persisted-run catalog contract
+
+`GET /api/wallets/ingest?limit=8` is a separate minimal collection read that
+does not replace `GET /api/wallets/ingest/{run_id}`. The default limit is `8`.
+An explicit limit must be a canonical ASCII positive decimal integer from `1`
+through `50`. Leading zeros, signs, whitespace, decimals, booleans, empty
+values, repeated `limit` keys, unknown query parameters, case aliases, and
+out-of-range values return 422.
+
+The response has exactly three top-level fields: `runs`, `limit`, and
+`truncated`. Every item in `runs` has exactly six fields:
+
+| Field | Contract |
+| --- | --- |
+| `run_id` | Canonical positive signed-64-bit decimal string, never a JSON number |
+| `wallet_hint` | At least 16 characters: bounded first six + ellipsis + last four; shorter legacy values: `stored…run`; maximum length 11 |
+| `time_window` | Persisted `24h`, `3d`, `7d`, or `custom` label |
+| `created_at` | Persisted run creation time serialized in UTC |
+| `status` | Persisted ingestion status |
+| `data_mode` | Persisted `mock` or `real` mode |
+
+The catalog never returns the full submitted address, canonical account
+identity, custom bounds, requested surfaces, provider evidence or messages,
+activity rows or counts, warnings, or raw payloads. Backend request validation
+and the browser wallet input both cap a newly submitted wallet value at 128
+characters. The database projection bounds the hint without materializing the
+full address into the public response.
+
+Recent means fixed descending `wallet_ingestion_runs.id`. The service executes
+one projected SELECT against that table, requests at most `limit + 1` rows,
+returns at most `limit`, and sets `truncated` when an older row exists. There is
+no offset, cursor, client-selected sort, filter, total count, relationship load,
+child-table query, settings load, provider construction/call, insert, update,
+delete, commit, or other mutation. Server and browser both use `no-store`.
+
+The browser requests eight summaries, renders the newest three while collapsed,
+and can expand to all eight. Catalog state has its own abort controller and
+monotonic request sequence, separate from preview, ingestion, full-run load,
+and run refresh state. Initial load, refresh, retry, successful-ingestion
+refresh, empty success, refresh failure with last-success preservation, and
+stale-response suppression remain distinct. Selecting a safe item calls the
+existing full-run loader with that explicit id. Signed-64-bit ids above the
+JavaScript safe-integer maximum stay visible as exact strings, but their open
+action is disabled rather than rounded. A failed item open preserves the prior
+current run and the catalog selection state.
+
+v0.22.9 adds no persistence fields or migration. Alembic head remains
+`20260710_0005`; backend `VERSION=0.2.1`,
+`wallet_history_readiness_v0.22.7`, and
+`wallet_multi_run_interval_coverage_v1` are unchanged.
 
 ## Multi-run interval coverage
 
@@ -286,7 +340,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.22.8
+## Surface status in v0.22.9
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -295,6 +349,7 @@ intervals are contiguous.
 | Swaps | Same shared chain, `JettonSwap` interpretation, and shared observation-identity namespace | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
 | Jettons | Account jetton balance snapshot | Point-in-time snapshot, not history |
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
+| Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
 
@@ -340,6 +395,10 @@ or a PnL/deduplication key. The public flags state those limits explicitly.
 - `POST /api/wallets/ingest` persists accepted transaction rows, derived event
   rows, and both stream/page contracts. Partial or display-only surfaces remain
   visible through `incomplete_surfaces`.
+- `GET /api/wallets/ingest?limit=8` returns the bounded six-field newest-run
+  catalog under the canonical `1..50` limit, decimal-string signed-64-bit id,
+  masked hint, one-SELECT, truncation, no-store, provider-free, and mutation-
+  free contract above.
 - `GET /api/wallets/ingest/{run_id}` accepts only canonical positive signed-
   64-bit ids, returns 200/404/422 as defined above, and reads persisted evidence
   plus exact custom bounds and creation time without provider access, mutation,
@@ -391,6 +450,11 @@ surfaces do not convert an incomplete transaction stream into complete history.
   noncanonical and overflow rejection, exact 200/404/422 behavior, exact
   `custom_start`/`custom_end`/`created_at` readback, repeatability, no provider
   construction or call, and no database mutation.
+- Catalog schema and endpoint tests cover default `limit=8`, canonical `1..50`
+  boundaries, rejection of duplicate and unknown parameters, the exact six-
+  field summary allowlist, bounded masked wallet hints, decimal-string signed-
+  64-bit ids, strict ID-descending order, `truncated`, one projected SELECT, no
+  child-table read, no-store, no provider/settings call, and no mutation.
 - Keyed requests require HTTPS and never forward authorization through a
   redirect; lossy terminal cursor types fail closed.
 - Response tests cover the 16 MiB body limit, JSON depth 64, 200,000-node
@@ -406,16 +470,19 @@ surfaces do not convert an incomplete transaction stream into complete history.
 - Schema and endpoint tests keep `cross_stream_union_applied`, global-history,
   authoritative-coverage, activity-merge, deduplication, cost-basis, and PnL
   flags false.
-- Frontend Vitest 4 tests cover the positive safe-integer gate, response
-  restoration, preview/run exclusivity, failed-load preservation, run-card
-  remounting, and normalized datetime signatures.
+- Frontend Vitest 4 tests cover the three-of-eight collapsed catalog, expansion,
+  exact response validation, independent abort/sequence races, refresh and
+  retry, last-success preservation, safe selection through the full loader,
+  unsafe-id disabling, post-ingestion refresh, the positive safe-integer gate,
+  response restoration, preview/run exclusivity, failed-load preservation,
+  run-card remounting, and normalized datetime signatures.
 - Full backend tests, frontend Vitest 4 tests, and the Vite 8 build pass; the
   checked-in frontend dependency graph reports zero `npm audit`
   vulnerabilities.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.22.8
+## Roadmap beyond v0.22.9
 
 1. Acquire authoritative low-level transfer/trade evidence or reconstruct it
    from validated traces without treating provider display actions as immutable
