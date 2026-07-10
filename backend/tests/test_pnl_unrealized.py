@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from decimal import Decimal
 
 import pytest
@@ -13,6 +15,7 @@ from sqlalchemy.pool import StaticPool
 import services.pnl_unrealized as pnl_unrealized_module
 from database import Base, get_session
 from main import app
+from services.export import wallet_pnl_preview_to_csv
 from services.pnl_unrealized import derive_run_pnl_preview_with_unrealized
 
 
@@ -107,6 +110,17 @@ def test_zero_remaining_holdings_are_skipped(monkeypatch):
     assert result["unrealized"] == []
     assert result["total_unrealized_pnl_usd"] is None
     assert result["unrealized_note"] is None
+    rows = list(csv.DictReader(io.StringIO(wallet_pnl_preview_to_csv(result))))
+    coverage = next(
+        row for row in rows if row["record_type"] == "unrealized_coverage"
+    )
+    assert coverage["priced_record_count"] == "0"
+    assert coverage["unavailable_record_count"] == "0"
+    assert "does not prove" in coverage["note"]
+    assert not any(row["record_type"] == "unrealized" for row in rows)
+    assert not any(
+        row["record_type"] == "unrealized_subtotal" for row in rows
+    )
 
 
 def test_real_mode_uses_provider_prices_and_reports_unpriced(monkeypatch):
@@ -250,3 +264,139 @@ def test_endpoint_default_has_no_unrealized_fields(client, monkeypatch):
     assert body["unrealized"] == []
     assert body["total_unrealized_pnl_usd"] is None
     assert body["unrealized_note"] is None
+
+
+@pytest.mark.parametrize("include_historical", [False, True])
+def test_json_export_include_unrealized_carries_spot_records(
+    client, monkeypatch, include_historical
+):
+    run = _ingest_mock_run(client, monkeypatch)
+
+    response = client.get(
+        f"/api/wallets/ingest/{run['run_id']}/pnl-preview/export.json",
+        params={
+            "include_historical": str(include_historical).lower(),
+            "include_unrealized": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["historical_pricing"]["source_status"] == "mock"
+    assert body["unrealized"][0]["token"] == "JETTON_ALPHA"
+    assert body["unrealized"][0]["priced_by"] == "mock"
+    assert Decimal(body["total_unrealized_pnl_usd"]) == Decimal("153.15")
+    assert "deterministic mock" in body["unrealized_note"]
+
+
+@pytest.mark.parametrize("include_historical", [False, True])
+def test_csv_export_include_unrealized_has_record_and_summary(
+    client, monkeypatch, include_historical
+):
+    run = _ingest_mock_run(client, monkeypatch)
+
+    response = client.get(
+        f"/api/wallets/ingest/{run['run_id']}/pnl-preview/export.csv",
+        params={
+            "include_historical": str(include_historical).lower(),
+            "include_unrealized": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    unrealized = next(row for row in rows if row["record_type"] == "unrealized")
+    coverage = next(
+        row for row in rows if row["record_type"] == "unrealized_coverage"
+    )
+    subtotal = next(
+        row for row in rows if row["record_type"] == "unrealized_subtotal"
+    )
+    assert unrealized["token"] == "JETTON_ALPHA"
+    assert unrealized["status"] == "computed"
+    assert unrealized["priced_by"] == "mock"
+    assert Decimal(unrealized["unrealized_pnl_usd"]) == Decimal("153.15")
+    assert coverage["priced_record_count"] == "1"
+    assert coverage["unavailable_record_count"] == "0"
+    assert "deterministic mock" in coverage["note"]
+    assert Decimal(subtotal["total_unrealized_pnl_usd"]) == Decimal("153.15")
+    assert "computed unrealized records only" in subtotal["note"]
+
+
+def test_csv_unrealized_unavailable_record_is_not_dropped(monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    result = derive_run_pnl_preview_with_unrealized(
+        _buy_run(token_out_address=None)
+    )
+
+    rows = list(csv.DictReader(io.StringIO(wallet_pnl_preview_to_csv(result))))
+    unrealized = next(row for row in rows if row["record_type"] == "unrealized")
+    coverage = next(
+        row for row in rows if row["record_type"] == "unrealized_coverage"
+    )
+    assert unrealized["status"] == "unavailable"
+    assert "No jetton master address" in unrealized["reason"]
+    assert coverage["priced_record_count"] == "0"
+    assert coverage["unavailable_record_count"] == "1"
+    assert not any(
+        row["record_type"] == "unrealized_subtotal" for row in rows
+    )
+
+
+def test_csv_unrealized_mixed_coverage_subtotal_excludes_unavailable(monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    run = _buy_run()
+    run["swaps"].append(
+        {
+            "token_in": "TON",
+            "amount_in": "5",
+            "token_out": "JETB",
+            "token_out_address": None,
+            "amount_out": "50",
+            "timestamp": "2026-06-02T10:00:00Z",
+        }
+    )
+    result = derive_run_pnl_preview_with_unrealized(run)
+
+    rows = list(csv.DictReader(io.StringIO(wallet_pnl_preview_to_csv(result))))
+    unrealized = [row for row in rows if row["record_type"] == "unrealized"]
+    coverage = next(
+        row for row in rows if row["record_type"] == "unrealized_coverage"
+    )
+    subtotal = next(
+        row for row in rows if row["record_type"] == "unrealized_subtotal"
+    )
+    assert {row["status"] for row in unrealized} == {"computed", "unavailable"}
+    assert coverage["priced_record_count"] == "1"
+    assert coverage["unavailable_record_count"] == "1"
+    computed = next(row for row in unrealized if row["status"] == "computed")
+    assert Decimal(subtotal["total_unrealized_pnl_usd"]) == Decimal(
+        computed["unrealized_pnl_usd"]
+    )
+
+
+def test_csv_unrealized_zero_subtotal_is_preserved():
+    rows = list(
+        csv.DictReader(
+            io.StringIO(
+                wallet_pnl_preview_to_csv(
+                    {
+                        "unrealized": [
+                            {
+                                "token": "JETA",
+                                "status": "computed",
+                                "unrealized_pnl_usd": "0",
+                            }
+                        ],
+                        "total_unrealized_pnl_usd": "0",
+                        "unrealized_note": "Informational only.",
+                        "requirements": [],
+                    }
+                )
+            )
+        )
+    )
+    subtotal = next(
+        row for row in rows if row["record_type"] == "unrealized_subtotal"
+    )
+    assert subtotal["total_unrealized_pnl_usd"] == "0"

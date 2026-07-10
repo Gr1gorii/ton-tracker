@@ -195,10 +195,10 @@ RUN_SIGNALS_CSV_COLUMNS = [
 ]
 
 
-# One row per record: estimated token flows, optional USD-valued flows and
-# in-window realized results (historical enrichment), then the Real-PnL
-# evidence requirement checklist, tagged by record_type. Blank cells mean the
-# column does not apply to that record type.
+# One row per record: estimated token flows, optional USD-valued flows,
+# in-window realized results, spot-based unrealized records plus their coverage
+# summary, then the Real-PnL evidence checklist. Blank cells mean the column
+# does not apply to that record type.
 PNL_PREVIEW_CSV_COLUMNS = [
     "record_type",
     "token",
@@ -224,15 +224,24 @@ PNL_PREVIEW_CSV_COLUMNS = [
     "code",
     "available",
     "reason",
+    "remaining_cost_usd",
+    "spot_price_usd",
+    "priced_by",
+    "market_value_usd",
+    "unrealized_pnl_usd",
+    "total_unrealized_pnl_usd",
+    "priced_record_count",
+    "unavailable_record_count",
+    "note",
 ]
 
 
 def wallet_pnl_preview_to_csv(result: dict) -> str:
     """Serialize an estimated PnL preview into flattened CSV text.
 
-    One row per token flow, USD-valued flow, realized cost-basis result, or
-    Real-PnL requirement record. Whether the figures amount to Real PnL is
-    decided solely by the requirement rows.
+    One row per token flow, USD-valued flow, realized cost-basis result,
+    unrealized result, unrealized coverage/subtotal summary, or Real-PnL
+    requirement. Real PnL is decided solely by requirement rows.
     """
     buffer = io.StringIO()
     writer = csv.DictWriter(
@@ -252,6 +261,43 @@ def wallet_pnl_preview_to_csv(result: dict) -> str:
         row["record_type"] = "realized"
         row["reason"] = record.get("reason") or ""
         writer.writerow(row)
+    unrealized_records = result.get("unrealized", [])
+    for record in unrealized_records:
+        row = dict(record)
+        row["record_type"] = "unrealized"
+        row["reason"] = record.get("reason") or ""
+        writer.writerow(row)
+    if "unrealized" in result:
+        writer.writerow(
+            {
+                "record_type": "unrealized_coverage",
+                "priced_record_count": sum(
+                    record.get("status") == "computed"
+                    for record in unrealized_records
+                ),
+                "unavailable_record_count": sum(
+                    record.get("status") == "unavailable"
+                    for record in unrealized_records
+                ),
+                "note": result.get("unrealized_note") or (
+                    "No unrealized candidate records were derived; 0/0 "
+                    "coverage does not prove that the wallet has no holdings."
+                ),
+            }
+        )
+    if result.get("total_unrealized_pnl_usd") is not None:
+        writer.writerow(
+            {
+                "record_type": "unrealized_subtotal",
+                "total_unrealized_pnl_usd": result[
+                    "total_unrealized_pnl_usd"
+                ],
+                "note": (
+                    "Priced subtotal sums computed unrealized records only; "
+                    "unavailable records are excluded."
+                ),
+            }
+        )
     for requirement in result.get("requirements", []):
         writer.writerow(
             {

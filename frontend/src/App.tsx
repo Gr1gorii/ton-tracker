@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.21.2 UNREALIZED";
+const RELEASE_LABEL = "v0.21.3 UNREALIZED EXPORTS";
 
 const navItems = [
   "DASHBOARD",
