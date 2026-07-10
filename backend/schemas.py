@@ -1745,10 +1745,33 @@ class WalletMultiAssetOperationCountRecord(BaseModel):
     count: Annotated[int, Field(strict=True, ge=1, le=10000)]
 
 
+class WalletMultiAssetLotReadinessSummaryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_row_count: Annotated[int, Field(strict=True, ge=0, le=10000)]
+    proof_bound_asset_row_count: Annotated[int, Field(strict=True, ge=0, le=10000)]
+    exact_fee_row_count: Annotated[int, Field(strict=True, ge=0, le=10000)]
+    authoritative_trade_row_count: Literal[0] = 0
+    historical_price_eligible_row_count: Literal[0] = 0
+    fee_allocated_row_count: Literal[0] = 0
+    lot_eligible_row_count: Literal[0] = 0
+    blocked_row_count: Annotated[int, Field(strict=True, ge=0, le=10000)]
+
+    @model_validator(mode="after")
+    def _lot_readiness_counts_must_stay_blocked(self):
+        if (
+            self.proof_bound_asset_row_count > self.evidence_row_count
+            or self.exact_fee_row_count > self.evidence_row_count
+            or self.blocked_row_count != self.evidence_row_count
+        ):
+            raise ValueError("multi-asset lot readiness counts changed")
+        return self
+
+
 class WalletMultiAssetPnlReadinessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contract_version: Literal["ton_multi_asset_pnl_readiness_v2"]
+    contract_version: Literal["ton_multi_asset_pnl_readiness_v3"]
     target_run_id: PositiveStrictRunId
     selected_run_ids: list[PositiveStrictRunId] = Field(min_length=2, max_length=50)
     network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
@@ -1760,6 +1783,7 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
     evidence: list[WalletJettonAssetFeeEvidenceRecord]
     requirements: list[WalletMultiAssetPnlRequirementRecord]
     blocked_requirement_codes: list[MultiAssetPnlRequirementCode]
+    lot_readiness_summary: WalletMultiAssetLotReadinessSummaryRecord
     analysis_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     analysis_status: Literal["blocked_missing_evidence"]
     calculation_mode: Literal["evidence_reconciliation_only"]
@@ -1776,6 +1800,9 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
     provider_snapshot_asset_identity_is_authoritative: Literal[False] = False
     verified_contract_asset_identity_is_authoritative: bool
     transaction_fee_allocation_applied: Literal[False] = False
+    historical_price_requests_performed: Literal[False] = False
+    acquisition_lot_construction_applied: Literal[False] = False
+    disposal_lot_construction_applied: Literal[False] = False
     provider_requests_performed: Literal[False] = False
     message_bodies_returned: Literal[False] = False
     used_by_pnl_calculation: Literal[False] = False
@@ -1789,6 +1816,7 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
     @model_validator(mode="after")
     def _multi_asset_readiness_must_stay_coherent(self):
         summary = self.jetton_evidence_summary
+        lots = self.lot_readiness_summary
         if summary.verified_capture_count > summary.selected_capture_count:
             raise ValueError("verified capture count changed")
         if summary.source_message_count != (
@@ -1803,6 +1831,13 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
             raise ValueError("jetton observation dedup count changed")
         if summary.deduplicated_payload_observation_count != len(self.evidence):
             raise ValueError("jetton evidence row count changed")
+        if (
+            lots.evidence_row_count != len(self.evidence)
+            or lots.proof_bound_asset_row_count
+            != summary.asset_matched_observation_count
+            or lots.exact_fee_row_count != summary.fee_linked_observation_count
+        ):
+            raise ValueError("lot readiness source counts changed")
         if (
             summary.asset_matched_observation_count
             + summary.asset_unmatched_observation_count

@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.28.0 PROOF-BOUND ASSET RECONCILIATION";
+const RELEASE_LABEL = "v0.29.0 VALUATION AND LOT READINESS";
 
 const navItems = [
   "DASHBOARD",
@@ -942,15 +942,20 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Proof-bound multi-asset reconciliation</strong>
+            <strong>Valuation, fee, and lot readiness</strong>
             <p>
-              Verified TEP-74 observations now bind to locally revalidated
-              wallet/master proofs; provider snapshots supply metadata only.
-              Trade semantics, lots, and PnL remain locked.
+              Every proof-bound row now exposes whether trade semantics,
+              historical pricing, fee allocation, and lots are actually safe.
+              Unsupported rows remain blocked before calculation.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Valuation and lot readiness matrix"
+            text="The evidence gate separately counts proof-bound assets, exact fees, authoritative trades, price-eligible rows, allocated fees, and lot-eligible rows. It performs no price requests and constructs no lots while trade semantics or history are missing."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Proof-bound asset reconciliation"

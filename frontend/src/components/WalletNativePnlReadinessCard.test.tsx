@@ -16,7 +16,7 @@ import WalletNativePnlReadinessCard from "./WalletNativePnlReadinessCard";
 
 function response(): WalletMultiAssetPnlReadinessResponse {
   return {
-    contract_version: "ton_multi_asset_pnl_readiness_v2",
+    contract_version: "ton_multi_asset_pnl_readiness_v3",
     target_run_id: 33,
     selected_run_ids: [32, 33],
     network: "ton-mainnet",
@@ -150,6 +150,16 @@ function response(): WalletMultiAssetPnlReadinessResponse {
       "transaction_fee_allocation",
       "acquisition_lots_and_cost_basis",
     ],
+    lot_readiness_summary: {
+      evidence_row_count: 1,
+      proof_bound_asset_row_count: 1,
+      exact_fee_row_count: 1,
+      authoritative_trade_row_count: 0,
+      historical_price_eligible_row_count: 0,
+      fee_allocated_row_count: 0,
+      lot_eligible_row_count: 0,
+      blocked_row_count: 1,
+    },
     analysis_digest_sha256: "33".repeat(32),
     analysis_status: "blocked_missing_evidence",
     calculation_mode: "evidence_reconciliation_only",
@@ -166,6 +176,9 @@ function response(): WalletMultiAssetPnlReadinessResponse {
     provider_snapshot_asset_identity_is_authoritative: false,
     verified_contract_asset_identity_is_authoritative: true,
     transaction_fee_allocation_applied: false,
+    historical_price_requests_performed: false,
+    acquisition_lot_construction_applied: false,
+    disposal_lot_construction_applied: false,
     provider_requests_performed: false,
     message_bodies_returned: false,
     used_by_pnl_calculation: false,
@@ -208,6 +221,9 @@ describe("WalletNativePnlReadinessCard", () => {
     expect(screen.getByText("Acquisition lots and cost basis")).toBeTruthy();
     expect(screen.getByText("JET · contract proof")).toBeTruthy();
     expect(screen.getByText("0.000468567 TON · unallocated")).toBeTruthy();
+    expect(screen.getByText("Trade-qualified rows")).toBeTruthy();
+    expect(screen.getByText("Lot-eligible rows")).toBeTruthy();
+    expect(screen.getByText("1 rows blocked fail-closed")).toBeTruthy();
   });
 
   it("rejects a selection that contains only the target", async () => {
