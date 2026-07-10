@@ -2,6 +2,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.7
 SQLAlchemy>=2.0
+alembic>=1.18,<2.0
 
 # Dev / test
 pytest>=8.0

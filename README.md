@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.0 HISTORY READINESS
+# TON Wallet Intelligence Dashboard — v0.22.1 MIGRATION FOUNDATION
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.0 HISTORY READINESS status — persisted runs can be inspected together through a diagnostic-only readiness report that surfaces overlap, identity strength, observed bounds, coverage, conflicts, and blockers. It does not merge history, establish cost basis, or change PnL semantics.**
+> **v0.22.1 MIGRATION FOUNDATION status — database schema evolution now has a checked-in, versioned migration path. This infrastructure release adds no canonical identity, broader history, cost-basis, or PnL capability.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -46,6 +46,11 @@ executable ingestion path.
 >   Every report remains diagnostic (`is_cost_basis: false`,
 >   `eligible_for_cost_basis: false`, `used_by_pnl: false`) and is never passed
 >   into PnL.
+> - Versioned Alembic revisions now provide a reviewable upgrade path for the
+>   existing SQLAlchemy schema. Startup creates fresh databases from the
+>   baseline, adopts only an exact frozen v0.22.0 legacy schema, and fails
+>   closed on partial, drifted, corrupt, or unknown revisions. Application
+>   payloads, history-readiness diagnostics, and PnL semantics are unchanged.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -113,7 +118,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.0 HISTORY READINESS` product label
+> - User-facing UI copy uses the `v0.22.1 MIGRATION FOUNDATION` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -121,8 +126,8 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.0 HISTORY
->   READINESS` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.1 MIGRATION
+>   FOUNDATION` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -132,7 +137,7 @@ executable ingestion path.
 
 | Layer    | Stack                                   |
 | -------- | --------------------------------------- |
-| Backend  | FastAPI (Python), SQLite, SQLAlchemy    |
+| Backend  | FastAPI (Python), SQLite, SQLAlchemy, Alembic |
 | Frontend | React + Vite + TypeScript               |
 | Money    | `decimal.Decimal` for PnL math          |
 
@@ -149,11 +154,16 @@ backend/
   main.py              FastAPI app + endpoints
   config.py            Settings (DATA_MODE + providers) + ProviderResult
   .env.example         Provider configuration template
+  alembic.ini          Alembic configuration
   requirements.txt
   models.py            SQLAlchemy models (AnalysisRun + wallet activity tables)
   schemas.py           Pydantic request/response schemas
-  database.py          SQLite engine + session
+  database.py          SQLAlchemy engine + session + migration startup
   conftest.py          Test path setup
+  migrations/
+    env.py             Metadata, URL, and shared-connection wiring
+    legacy_baseline.py Frozen v0.22.0 schema compatibility manifest
+    versions/          Versioned schema revisions
   routers/
     tonapi.py          TonAPI account jettons + wallet intelligence previews
     stonfi.py          STON.fi pools preview
@@ -163,6 +173,8 @@ backend/
     prices.py          Standalone historical price inspection endpoint
   services/
     analysis.py        Orchestration + data_quality + provider status
+    database_migrations.py
+                       Fail-closed fresh/legacy migration runner
     pnl.py             Decimal-based PnL calculations
     clustering.py      Probabilistic wallet similarity / grouping
     mock_data.py       Hand-crafted mock token/pool/wallet fixtures
@@ -191,8 +203,8 @@ backend/
     stonfi.py          STON.fi pools preview adapter
     bitquery.py        DEX trades — mock/provider-limited Bitquery
     ton_provider.py    Legacy TON provider status/scaffold
-  tests/               pytest suite (parser, config, data_quality, PnL,
-                       clustering, wallet activity, evidence signals)
+  tests/               pytest suite (parser, config, data_quality, migrations,
+                       PnL, wallet activity, readiness, evidence signals)
 
 frontend/
   package.json
@@ -255,6 +267,25 @@ uvicorn main:app --reload
 ```
 
 The API serves on `http://localhost:8000`. Interactive docs: `http://localhost:8000/docs`.
+Startup automatically runs the checked-in migration path. A fresh database is
+built from the baseline. An unversioned database is adopted only when its full
+domain schema exactly matches the frozen v0.22.0 manifest and SQLite integrity
+checks pass; otherwise startup stops without guessing or calling
+`create_all()`. Existing application rows are preserved.
+
+Manual verification from `backend/`:
+
+```bash
+python -m services.database_migrations
+alembic -c alembic.ini current
+```
+
+The Python command uses the same safe fresh/legacy state machine as startup.
+Use raw Alembic commands only after the database has a revision marker; they
+do not perform frozen legacy-schema adoption on their own.
+
+Baseline downgrade is intentionally blocked because it would destroy persisted
+data. Restore a verified database backup instead of downgrading the baseline.
 
 ### Frontend
 
@@ -274,7 +305,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.0 HISTORY READINESS)
+## Data modes & providers (v0.22.1 MIGRATION FOUNDATION)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -282,6 +313,7 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | Variable                 | Purpose                                            |
 | ------------------------ | -------------------------------------------------- |
 | `DATA_MODE`              | `mock` (default) or `real`                         |
+| `TON_CHECK_DB_URL`       | Optional SQLite SQLAlchemy URL; defaults locally  |
 | `GECKOTERMINAL_BASE_URL` | GeckoTerminal v2 API base (public, no key)         |
 | `TON_API_BASE_URL`       | TON indexer base URL (real TON data)               |
 | `TON_API_KEY`            | TON indexer API key                                |
@@ -326,7 +358,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.0 HISTORY READINESS` is the current
+API-version field, while `v0.22.1 MIGRATION FOUNDATION` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -583,12 +615,13 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.0 HISTORY READINESS`).
+  tracks the current release (`v0.22.1 MIGRATION FOUNDATION`).
 
-## Roadmap beyond v0.22.0 HISTORY READINESS
+## Roadmap beyond v0.22.1 MIGRATION FOUNDATION
 
-- Build canonical, paginated history ingestion and a migration-backed identity
-  contract before any multi-run data can become a cost-basis source.
+- Build canonical, paginated history ingestion and a persisted identity
+  contract on top of the migration foundation before any multi-run data can
+  become a cost-basis source.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
   into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.

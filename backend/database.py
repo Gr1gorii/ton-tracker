@@ -1,16 +1,21 @@
-"""SQLite database setup for v0.1.
+"""SQLAlchemy engine, sessions, and versioned schema initialization.
 
-A single local SQLite file is used to persist analysis runs so they can be
-listed / re-exported later. The engine + session factory live here; models
-live in ``models.py``.
+The default database is a local SQLite file. ``TON_CHECK_DB_URL`` can select
+an alternative SQLite SQLAlchemy URL. Runtime startup delegates schema changes
+to the checked-in migration runner; it never repairs drift with
+``create_all()``.
 """
 
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+if TYPE_CHECKING:
+    from services.database_migrations import MigrationReport
 
 # Store the SQLite file next to the backend package.
 _DB_PATH = os.path.join(os.path.dirname(__file__), "ton_check.db")
@@ -29,11 +34,11 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
-def init_db() -> None:
-    """Create tables. Import models for side-effect registration first."""
-    import models  # noqa: F401
+def init_db() -> MigrationReport:
+    """Upgrade the configured database to the checked-in migration head."""
+    from services.database_migrations import run_database_migrations
 
-    Base.metadata.create_all(bind=engine)
+    return run_database_migrations(engine)
 
 
 def get_session():
