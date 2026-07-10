@@ -657,6 +657,52 @@ export interface WalletTransactionTraceEvidenceResponse {
   message: string;
 }
 
+export interface WalletPersistedTransactionTraceEvidenceSummary {
+  root_transaction_hash: string;
+  transaction_count: number;
+  max_depth: number;
+  message_count: number;
+  root_inbound_message_count: number;
+  child_internal_message_count: number;
+  remaining_out_message_count: number;
+  internal_message_count: number;
+  external_in_message_count: number;
+  external_out_message_count: number;
+  successful_transaction_count: number;
+  failed_transaction_count: number;
+  aborted_transaction_count: number;
+  unique_account_count: number;
+}
+
+export interface WalletPersistedTransactionTraceEvidenceResponse {
+  contract_version: "tonapi_low_level_trace_evidence_v1";
+  capture_id: string;
+  run_id: string;
+  provider: "tonapi";
+  source_status: "live";
+  network: "ton-mainnet" | "ton-testnet";
+  trace_state: "finalized";
+  captured_at: string;
+  anchor: WalletTransactionTraceEvidenceAnchor;
+  summary: WalletPersistedTransactionTraceEvidenceSummary;
+  evidence_digest_sha256: string;
+  is_provider_indexed_low_level_trace: true;
+  provider_structure_validated: true;
+  persisted_graph_revalidated: true;
+  is_immutable_record: true;
+  raw_boc_persisted: false;
+  message_body_persisted: false;
+  is_blockchain_proof_verified: false;
+  is_authoritative_activity_identity: false;
+  semantic_reconstruction_applied: false;
+  activity_merge_applied: false;
+  deduplication_applied: false;
+  eligible_for_cost_basis: false;
+  used_by_pnl: false;
+  is_ownership_proof: false;
+  message: string;
+}
+
 export interface WalletSwapRecord {
   tx_hash?: string | null;
   timestamp?: string | null;

@@ -6,14 +6,21 @@ import {
   type FormEvent,
 } from "react";
 
-import { getWalletTransactionTraceEvidence } from "../api";
+import {
+  getPersistedWalletTransactionTraceEvidence,
+  getWalletTransactionTraceEvidence,
+  persistWalletTransactionTraceEvidence,
+} from "../api";
 import type {
+  WalletPersistedTransactionTraceEvidenceResponse,
   WalletTransactionRecord,
   WalletTransactionTraceEvidenceResponse,
 } from "../types";
 import {
   eligibleTraceTransactions,
+  validatePersistedWalletTransactionTraceEvidenceResponse,
   validateWalletTransactionTraceEvidenceResponse,
+  type WalletPersistedTraceEvidenceExpectedAnchor,
   type WalletTraceEligibleTransaction,
 } from "../walletTraceEvidence";
 import PreviewReadinessStrip, {
@@ -26,10 +33,20 @@ interface WalletTransactionTraceEvidenceCardProps {
   transactions: WalletTransactionRecord[];
 }
 
+type PersistedReadState = "idle" | "loading" | "empty" | "ready" | "error";
+
 const FALSE_INVARIANTS = [
   {
+    field: "raw_boc_persisted",
+    meaning: "Raw BOC bytes are never stored in this evidence record.",
+  },
+  {
+    field: "message_body_persisted",
+    meaning: "Message bodies and decoded payloads are never stored.",
+  },
+  {
     field: "is_blockchain_proof_verified",
-    meaning: "The provider response is not a locally verified blockchain proof.",
+    meaning: "Stored provider structure is not locally verified blockchain proof.",
   },
   {
     field: "is_authoritative_activity_identity",
@@ -49,7 +66,7 @@ const FALSE_INVARIANTS = [
   },
   {
     field: "eligible_for_cost_basis",
-    meaning: "This preview cannot establish acquisition cost basis.",
+    meaning: "Persisted trace evidence cannot establish acquisition cost basis.",
   },
   {
     field: "used_by_pnl",
@@ -73,72 +90,210 @@ export default function WalletTransactionTraceEvidenceCard({
   const [selectedHash, setSelectedHash] = useState(
     () => eligibleTransactions[0]?.transactionHash ?? "",
   );
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] =
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewResult, setPreviewResult] =
     useState<WalletTransactionTraceEvidenceResponse | null>(null);
-  const requestSequence = useRef(0);
-  const controller = useRef<AbortController | null>(null);
+  const [persistedReadState, setPersistedReadState] =
+    useState<PersistedReadState>("idle");
+  const [persistedReadError, setPersistedReadError] = useState<string | null>(
+    null,
+  );
+  const [persistedResult, setPersistedResult] =
+    useState<WalletPersistedTransactionTraceEvidenceResponse | null>(null);
+  const [captureLoading, setCaptureLoading] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
+  const previewSequence = useRef(0);
+  const persistedSequence = useRef(0);
+  const previewController = useRef<AbortController | null>(null);
+  const persistedController = useRef<AbortController | null>(null);
 
   const selectedTransaction =
     eligibleTransactions.find(
       (transaction) => transaction.transactionHash === selectedHash,
     ) ?? eligibleTransactions[0] ?? null;
+  const scopeKey = traceScopeKey(runId, dataMode, selectedTransaction);
+  const activeScopeKey = useRef(scopeKey);
+  activeScopeKey.current = scopeKey;
+  const visiblePreviewResult =
+    previewResult &&
+    traceResultMatchesScope(previewResult, runId, selectedTransaction)
+      ? previewResult
+      : null;
+  const visiblePersistedResult =
+    persistedResult &&
+    persistedResultMatchesScope(persistedResult, runId, selectedTransaction)
+      ? persistedResult
+      : null;
+  const busy =
+    previewLoading || persistedReadState === "loading" || captureLoading;
   const canInspect =
-    dataMode === "real" && selectedTransaction !== null && !loading;
+    dataMode === "real" &&
+    selectedTransaction !== null &&
+    persistedReadState !== "loading" &&
+    !previewLoading &&
+    !captureLoading;
+  const canCapture =
+    dataMode === "real" &&
+    selectedTransaction !== null &&
+    visiblePreviewResult?.trace_state === "finalized" &&
+    persistedReadState === "empty" &&
+    visiblePersistedResult === null &&
+    !previewLoading &&
+    !captureLoading;
   const titleId = `transaction-trace-evidence-title-${runId}`;
   const selectId = `transaction-trace-evidence-anchor-${runId}`;
   const helpId = `${selectId}-help`;
-  const readiness = traceReadiness({
+  const readiness = persistedReadiness({
     dataMode,
     eligibleCount: eligibleTransactions.length,
-    loading,
-    error,
-    result,
+    readState: persistedReadState,
+    readError: persistedReadError,
+    captureLoading,
+    captureError,
+    result: visiblePersistedResult,
   });
 
   useEffect(() => {
     const nextHash = selectedTransaction?.transactionHash ?? "";
     if (selectedHash === nextHash) return;
-    invalidateRequest();
+    invalidateAllRequests();
     setSelectedHash(nextHash);
-    setError(null);
-    setResult(null);
+    resetScopedState();
   }, [selectedHash, selectedTransaction?.transactionHash]);
+
+  useEffect(() => {
+    invalidateAllRequests();
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setPreviewResult(null);
+    setPersistedReadError(null);
+    setPersistedResult(null);
+    setCaptureLoading(false);
+    setCaptureError(null);
+
+    if (dataMode !== "real" || selectedTransaction === null) {
+      setPersistedReadState("idle");
+      return;
+    }
+
+    const expected = expectedAnchor(runId, selectedTransaction);
+    void readPersistedEvidence(expected, scopeKey);
+  }, [scopeKey]);
 
   useEffect(
     () => () => {
-      requestSequence.current += 1;
-      controller.current?.abort();
+      invalidateAllRequests();
     },
     [],
   );
 
-  function invalidateRequest() {
-    requestSequence.current += 1;
-    controller.current?.abort();
-    controller.current = null;
-    setLoading(false);
+  function invalidateAllRequests() {
+    previewSequence.current += 1;
+    persistedSequence.current += 1;
+    previewController.current?.abort();
+    persistedController.current?.abort();
+    previewController.current = null;
+    persistedController.current = null;
+  }
+
+  function resetScopedState() {
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setPreviewResult(null);
+    setPersistedReadState("idle");
+    setPersistedReadError(null);
+    setPersistedResult(null);
+    setCaptureLoading(false);
+    setCaptureError(null);
+  }
+
+  async function readPersistedEvidence(
+    expected: WalletPersistedTraceEvidenceExpectedAnchor,
+    expectedScopeKey: string,
+  ) {
+    const sequence = persistedSequence.current + 1;
+    persistedSequence.current = sequence;
+    persistedController.current?.abort();
+    const nextController = new AbortController();
+    persistedController.current = nextController;
+    setPersistedReadState("loading");
+    setPersistedReadError(null);
+    setCaptureError(null);
+
+    try {
+      const response = await getPersistedWalletTransactionTraceEvidence(
+        expected.runId,
+        expected.transactionHash,
+        nextController.signal,
+      );
+      if (
+        nextController.signal.aborted ||
+        persistedSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      if (response === null) {
+        setPersistedResult(null);
+        setPersistedReadState("empty");
+        return;
+      }
+      const validated = validatePersistedWalletTransactionTraceEvidenceResponse(
+        response,
+        expected,
+      );
+      if (
+        persistedSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setPersistedResult(validated);
+      setPersistedReadState("ready");
+    } catch (caught) {
+      if (
+        nextController.signal.aborted ||
+        persistedSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setPersistedReadError(errorMessage(caught, "Unknown saved evidence read error."));
+      setPersistedReadState("error");
+    } finally {
+      if (persistedSequence.current === sequence) {
+        persistedController.current = null;
+      }
+    }
   }
 
   function handleAnchorChange(nextHash: string) {
-    invalidateRequest();
+    invalidateAllRequests();
     setSelectedHash(nextHash);
-    setError(null);
-    setResult(null);
+    resetScopedState();
+  }
+
+  function handleReadRetry() {
+    if (dataMode !== "real" || selectedTransaction === null) return;
+    void readPersistedEvidence(
+      expectedAnchor(runId, selectedTransaction),
+      scopeKey,
+    );
   }
 
   async function handleInspect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (dataMode !== "real" || selectedTransaction === null) return;
+    if (!canInspect || selectedTransaction === null) return;
 
-    const sequence = requestSequence.current + 1;
-    requestSequence.current = sequence;
-    controller.current?.abort();
+    const sequence = previewSequence.current + 1;
+    previewSequence.current = sequence;
+    previewController.current?.abort();
     const nextController = new AbortController();
-    controller.current = nextController;
-    setLoading(true);
-    setError(null);
+    previewController.current = nextController;
+    const expectedScopeKey = scopeKey;
+    setPreviewLoading(true);
+    setPreviewError(null);
 
     try {
       const response = await getWalletTransactionTraceEvidence(
@@ -146,33 +301,80 @@ export default function WalletTransactionTraceEvidenceCard({
         selectedTransaction.transactionHash,
         nextController.signal,
       );
-      const validated = validateWalletTransactionTraceEvidenceResponse(
-        response,
-        {
-          runId,
-          transactionHash: selectedTransaction.transactionHash,
-          logicalTime: selectedTransaction.logicalTime,
-          accountCanonical: selectedTransaction.accountCanonical,
-        },
-      );
-      if (requestSequence.current !== sequence) return;
-      setResult(validated);
-    } catch (caught) {
+      const validated = validateWalletTransactionTraceEvidenceResponse(response, {
+        runId,
+        transactionHash: selectedTransaction.transactionHash,
+        logicalTime: selectedTransaction.logicalTime,
+        accountCanonical: selectedTransaction.accountCanonical,
+      });
       if (
-        nextController.signal.aborted ||
-        requestSequence.current !== sequence
+        previewSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
       ) {
         return;
       }
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Unknown transaction trace evidence error.",
-      );
+      setPreviewResult(validated);
+    } catch (caught) {
+      if (
+        nextController.signal.aborted ||
+        previewSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setPreviewError(errorMessage(caught, "Unknown transaction trace preview error."));
     } finally {
-      if (requestSequence.current === sequence) {
-        controller.current = null;
-        setLoading(false);
+      if (previewSequence.current === sequence) {
+        previewController.current = null;
+        setPreviewLoading(false);
+      }
+    }
+  }
+
+  async function handleCapture() {
+    if (!canCapture || selectedTransaction === null) return;
+
+    const sequence = persistedSequence.current + 1;
+    persistedSequence.current = sequence;
+    persistedController.current?.abort();
+    const nextController = new AbortController();
+    persistedController.current = nextController;
+    const expectedScopeKey = scopeKey;
+    const expected = expectedAnchor(runId, selectedTransaction);
+    setCaptureLoading(true);
+    setCaptureError(null);
+
+    try {
+      const response = await persistWalletTransactionTraceEvidence(
+        runId,
+        selectedTransaction.transactionHash,
+        nextController.signal,
+      );
+      const validated = validatePersistedWalletTransactionTraceEvidenceResponse(
+        response,
+        expected,
+      );
+      if (
+        persistedSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setPersistedResult(validated);
+      setPersistedReadState("ready");
+    } catch (caught) {
+      if (
+        nextController.signal.aborted ||
+        persistedSequence.current !== sequence ||
+        activeScopeKey.current !== expectedScopeKey
+      ) {
+        return;
+      }
+      setCaptureError(errorMessage(caught, "Unknown trace evidence capture error."));
+    } finally {
+      if (persistedSequence.current === sequence) {
+        persistedController.current = null;
+        setCaptureLoading(false);
       }
     }
   }
@@ -181,20 +383,20 @@ export default function WalletTransactionTraceEvidenceCard({
     <section
       className="intelligence-table-block trace-evidence-card"
       aria-labelledby={titleId}
-      aria-busy={loading}
+      aria-busy={busy}
     >
       <div className="table-toolbar trace-evidence-toolbar">
         <div className="table-toolbar-main">
-          <span className="section-eyebrow">Explicit provider preview</span>
+          <span className="section-eyebrow">Persisted low-level trace evidence</span>
           <h2 id={titleId}>Transaction trace evidence</h2>
           <p>
-            Choose one stored low-level transaction from run #{runId}, then
-            explicitly request a provider-indexed trace summary. Nothing is
-            fetched automatically, persisted, merged, reconstructed, or sent to
-            PnL.
+            Saved evidence is read automatically from local storage without a
+            provider call. Live preview and immutable capture remain separate,
+            explicit actions and never feed activity reconstruction or PnL.
           </p>
         </div>
         <div className="table-meta" aria-label="Permanent trace limitations">
+          <span className="badge badge-mock">STORED ≠ VERIFIED</span>
           <span className="badge badge-mock">NON-AUTHORITATIVE</span>
           <span className="badge badge-mock">NOT PNL</span>
           <span className="badge badge-mock">NO OWNERSHIP PROOF</span>
@@ -202,11 +404,11 @@ export default function WalletTransactionTraceEvidenceCard({
       </div>
 
       <div className="trace-evidence-safety" role="note">
-        <strong>Trace match is provider evidence only.</strong>
+        <strong>Persistence is not blockchain verification.</strong>
         <span>
-          Even an exact stored-anchor match does not prove chain state locally,
-          reconstruct transfer or swap semantics, establish full history, or
-          authorize cost-basis use.
+          Local graph revalidation checks the stored structural contract only.
+          It does not prove chain state, reconstruct transfer or swap semantics,
+          establish full history, ownership, or cost-basis eligibility.
         </span>
       </div>
 
@@ -219,9 +421,7 @@ export default function WalletTransactionTraceEvidenceCard({
             id={selectId}
             className="text-input"
             value={selectedTransaction?.transactionHash ?? ""}
-            disabled={
-              dataMode !== "real" || eligibleTransactions.length === 0
-            }
+            disabled={dataMode !== "real" || eligibleTransactions.length === 0}
             aria-describedby={helpId}
             onChange={(event) => handleAnchorChange(event.target.value)}
           >
@@ -251,15 +451,30 @@ export default function WalletTransactionTraceEvidenceCard({
             </code>
           )}
         </div>
-        <button className="btn btn-primary" type="submit" disabled={!canInspect}>
-          {loading
-            ? "Inspecting trace evidence"
-            : error
-              ? "Retry trace evidence"
-              : result
-                ? "Inspect again"
-                : "Inspect trace evidence"}
-        </button>
+        <div className="trace-evidence-actions">
+          <button className="btn btn-primary" type="submit" disabled={!canInspect}>
+            {previewLoading
+              ? "Reading live trace preview"
+              : previewError
+                ? "Retry live trace preview"
+                : previewResult
+                  ? "Refresh live trace preview"
+                  : "Preview live trace"}
+          </button>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            disabled={!canCapture}
+            onClick={handleCapture}
+          >
+            {captureButtonLabel({
+              captureLoading,
+              persistedResult: visiblePersistedResult,
+              previewResult: visiblePreviewResult,
+              readState: persistedReadState,
+            })}
+          </button>
+        </div>
       </form>
 
       <PreviewReadinessStrip
@@ -269,37 +484,170 @@ export default function WalletTransactionTraceEvidenceCard({
         items={[
           { label: "Run", value: `#${runId}` },
           {
-            label: "Eligible anchors",
-            value: `${eligibleTransactions.length}/${transactions.length}`,
+            label: "Saved record",
+            value: visiblePersistedResult
+              ? `#${visiblePersistedResult.capture_id}`
+              : savedStateLabel(persistedReadState),
           },
-          { label: "Provider read", value: "Manual only" },
+          { label: "Provider actions", value: "Manual only" },
         ]}
       />
 
-      {error && (
+      {persistedReadError && (
         <div className="trace-evidence-error" role="alert">
-          <strong>Trace evidence preview failed.</strong>
-          <span>{error}</span>
-          {result && <small>The last successful result remains visible.</small>}
+          <strong>Saved trace evidence read failed.</strong>
+          <span>{persistedReadError}</span>
+          <button className="btn btn-secondary" type="button" onClick={handleReadRetry}>
+            Retry saved evidence read
+          </button>
         </div>
       )}
 
-      {result && <TraceEvidenceResult result={result} />}
+      {captureError && (
+        <div className="trace-evidence-error" role="alert">
+          <strong>Trace evidence was not saved.</strong>
+          <span>{captureError}</span>
+          {visiblePersistedResult && (
+            <small>The last confirmed immutable record remains visible.</small>
+          )}
+        </div>
+      )}
+
+      {visiblePersistedResult && (
+        <PersistedTraceEvidenceResult result={visiblePersistedResult} />
+      )}
+
+      {previewLoading && (
+        <div className="trace-evidence-operation-status" role="status">
+          Reading one provider-indexed preview. Nothing is stored by this action.
+        </div>
+      )}
+
+      {previewError && (
+        <div className="trace-evidence-error" role="alert">
+          <strong>Live trace preview failed.</strong>
+          <span>{previewError}</span>
+          {visiblePreviewResult && (
+            <small>The last live preview remains visible.</small>
+          )}
+          {visiblePersistedResult && (
+            <small>The saved immutable record is unchanged.</small>
+          )}
+        </div>
+      )}
+
+      {visiblePreviewResult && (
+        <TraceEvidencePreviewResult result={visiblePreviewResult} />
+      )}
 
       <TraceInvariantTable />
     </section>
   );
 }
 
-function TraceEvidenceResult({
+function PersistedTraceEvidenceResult({
+  result,
+}: {
+  result: WalletPersistedTransactionTraceEvidenceResponse;
+}) {
+  const summary = result.summary;
+  return (
+    <div className="trace-evidence-results trace-evidence-persisted-results">
+      <div className="trace-evidence-result-heading">
+        <div>
+          <span className="section-eyebrow">Saved immutable evidence record</span>
+          <h3>Finalized at capture</h3>
+        </div>
+        <div className="trace-evidence-validation-badges">
+          <span className="source-badge source-real">PROVIDER STRUCTURE VALIDATED</span>
+          <span className="source-badge source-real">LOCAL GRAPH REVALIDATED</span>
+          <span className="source-badge source-real">IMMUTABLE RECORD</span>
+        </div>
+      </div>
+
+      <div className="trace-evidence-contract-strip trace-evidence-persisted-strip">
+        <div>
+          <span>Contract</span>
+          <strong>{result.contract_version}</strong>
+        </div>
+        <div>
+          <span>Capture ID</span>
+          <strong>#{result.capture_id}</strong>
+        </div>
+        <div>
+          <span>Trace state</span>
+          <strong><span className="source-badge source-real">FINALIZED AT CAPTURE</span></strong>
+        </div>
+        <div>
+          <span>Captured</span>
+          <strong><time dateTime={result.captured_at}>{result.captured_at}</time></strong>
+        </div>
+      </div>
+
+      <p className="trace-evidence-message">{result.message}</p>
+
+      <div className="trace-evidence-metrics" aria-label="Persisted trace graph counts">
+        <TraceMetric label="Transactions" value={summary.transaction_count} />
+        <TraceMetric label="Messages" value={summary.message_count} />
+        <TraceMetric label="Unique accounts" value={summary.unique_account_count} />
+        <TraceMetric label="Maximum depth" value={summary.max_depth} />
+        <TraceMetric label="Remaining out" value={summary.remaining_out_message_count} />
+        <TraceMetric label="Successful" value={summary.successful_transaction_count} />
+        <TraceMetric label="Failed" value={summary.failed_transaction_count} />
+        <TraceMetric label="Aborted" value={summary.aborted_transaction_count} />
+      </div>
+
+      <details className="trace-evidence-details">
+        <summary>
+          <span>Stored anchor, message graph, and evidence digest</span>
+          <span>REVALIDATED</span>
+        </summary>
+        <div className="table-wrap trace-evidence-table-wrap">
+          <table className="data-table trace-evidence-table">
+            <caption>
+              Sanitized immutable trace evidence for stored run #{result.run_id} on {result.network}.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Field</th>
+                <th scope="col">Stored value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <TraceDetailRow label="Transaction hash" value={result.anchor.transaction_hash} mono />
+              <TraceDetailRow label="Logical time" value={result.anchor.logical_time} mono />
+              <TraceDetailRow label="Canonical account" value={result.anchor.account_canonical} mono />
+              <TraceDetailRow label="Trace root hash" value={summary.root_transaction_hash} mono />
+              <TraceDetailRow label="Evidence SHA-256" value={result.evidence_digest_sha256} mono />
+              <TraceDetailRow label="Root inbound messages" value={String(summary.root_inbound_message_count)} />
+              <TraceDetailRow label="Child internal messages" value={String(summary.child_internal_message_count)} />
+              <TraceDetailRow label="Remaining outbound messages" value={String(summary.remaining_out_message_count)} />
+              <TraceDetailRow label="Internal messages" value={String(summary.internal_message_count)} />
+              <TraceDetailRow label="External-in messages" value={String(summary.external_in_message_count)} />
+              <TraceDetailRow label="External-out messages" value={String(summary.external_out_message_count)} />
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function TraceEvidencePreviewResult({
   result,
 }: {
   result: WalletTransactionTraceEvidenceResponse;
 }) {
   const summary = result.summary;
   return (
-    <div className="trace-evidence-results">
-      <div className="trace-evidence-contract-strip" role="status">
+    <div className="trace-evidence-results trace-evidence-preview-results">
+      <div className="trace-evidence-result-heading">
+        <div>
+          <span className="section-eyebrow">Live provider preview · not stored</span>
+          <h3>{result.trace_state === "finalized" ? "Finalized preview" : "Pending preview"}</h3>
+        </div>
+      </div>
+      <div className="trace-evidence-contract-strip">
         <div>
           <span>Contract</span>
           <strong>{result.contract_version}</strong>
@@ -307,13 +655,7 @@ function TraceEvidenceResult({
         <div>
           <span>Trace state</span>
           <strong>
-            <span
-              className={`source-badge ${
-                result.trace_state === "finalized"
-                  ? "source-real"
-                  : "source-mock"
-              }`}
-            >
+            <span className={`source-badge ${result.trace_state === "finalized" ? "source-real" : "source-mock"}`}>
               {result.trace_state.toUpperCase()}
             </span>
           </strong>
@@ -326,19 +668,13 @@ function TraceEvidenceResult({
 
       <p className="trace-evidence-message">{result.message}</p>
 
-      <div className="trace-evidence-metrics" aria-label="Trace summary counts">
+      <div className="trace-evidence-metrics" aria-label="Trace preview summary counts">
         <TraceMetric label="Transactions" value={summary.transaction_count} />
         <TraceMetric label="Unique accounts" value={summary.unique_account_count} />
         <TraceMetric label="Maximum depth" value={summary.max_depth} />
         <TraceMetric label="Out messages" value={summary.out_message_count} />
-        <TraceMetric
-          label="Pending internal"
-          value={summary.pending_internal_message_count}
-        />
-        <TraceMetric
-          label="Successful"
-          value={summary.successful_transaction_count}
-        />
+        <TraceMetric label="Pending internal" value={summary.pending_internal_message_count} />
+        <TraceMetric label="Successful" value={summary.successful_transaction_count} />
         <TraceMetric label="Failed" value={summary.failed_transaction_count} />
         <TraceMetric label="Aborted" value={summary.aborted_transaction_count} />
       </div>
@@ -350,9 +686,7 @@ function TraceEvidenceResult({
         </summary>
         <div className="table-wrap trace-evidence-table-wrap">
           <table className="data-table trace-evidence-table">
-            <caption>
-              Exact provider-indexed trace anchor for stored run #{result.run_id}.
-            </caption>
+            <caption>Exact provider-indexed preview anchor for stored run #{result.run_id}.</caption>
             <thead>
               <tr>
                 <th scope="col">Field</th>
@@ -360,30 +694,11 @@ function TraceEvidenceResult({
               </tr>
             </thead>
             <tbody>
-              <TraceDetailRow
-                label="Stored transaction hash"
-                value={result.anchor.transaction_hash}
-                mono
-              />
-              <TraceDetailRow
-                label="Stored logical time"
-                value={result.anchor.logical_time}
-                mono
-              />
-              <TraceDetailRow
-                label="Stored canonical account"
-                value={result.anchor.account_canonical}
-                mono
-              />
-              <TraceDetailRow
-                label="Provider trace root hash"
-                value={summary.root_transaction_hash}
-                mono
-              />
-              <TraceDetailRow
-                label="Matches stored transaction"
-                value="TRUE"
-              />
+              <TraceDetailRow label="Stored transaction hash" value={result.anchor.transaction_hash} mono />
+              <TraceDetailRow label="Stored logical time" value={result.anchor.logical_time} mono />
+              <TraceDetailRow label="Stored canonical account" value={result.anchor.account_canonical} mono />
+              <TraceDetailRow label="Provider trace root hash" value={summary.root_transaction_hash} mono />
+              <TraceDetailRow label="Matches stored transaction" value="TRUE" />
             </tbody>
           </table>
         </div>
@@ -397,8 +712,8 @@ function TraceInvariantTable() {
     <div className="table-wrap trace-invariant-table-wrap">
       <table className="data-table trace-invariant-table">
         <caption>
-          Permanent safety invariants. Counts and a matching provider trace can
-          never change these v0.23.0 values.
+          Permanent safety invariants. Preview, persistence, and local graph
+          revalidation can never change these v0.23.1 values.
         </caption>
         <thead>
           <tr>
@@ -410,12 +725,8 @@ function TraceInvariantTable() {
         <tbody>
           {FALSE_INVARIANTS.map((invariant) => (
             <tr key={invariant.field}>
-              <th scope="row">
-                <code>{invariant.field}</code>
-              </th>
-              <td>
-                <span className="source-badge source-mock">FALSE</span>
-              </td>
+              <th scope="row"><code>{invariant.field}</code></th>
+              <td><span className="source-badge source-mock">FALSE</span></td>
               <td>{invariant.meaning}</td>
             </tr>
           ))}
@@ -426,12 +737,7 @@ function TraceInvariantTable() {
 }
 
 function TraceMetric({ label, value }: { label: string; value: number }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
+  return <div><span>{label}</span><strong>{value}</strong></div>;
 }
 
 function TraceDetailRow({
@@ -443,77 +749,77 @@ function TraceDetailRow({
   value: string;
   mono?: boolean;
 }) {
-  return (
-    <tr>
-      <th scope="row">{label}</th>
-      <td className={mono ? "mono" : undefined}>{value}</td>
-    </tr>
-  );
+  return <tr><th scope="row">{label}</th><td className={mono ? "mono" : undefined}>{value}</td></tr>;
 }
 
-function traceReadiness({
+function persistedReadiness({
   dataMode,
   eligibleCount,
-  loading,
-  error,
+  readState,
+  readError,
+  captureLoading,
+  captureError,
   result,
 }: {
   dataMode: "mock" | "real";
   eligibleCount: number;
-  loading: boolean;
-  error: string | null;
-  result: WalletTransactionTraceEvidenceResponse | null;
+  readState: PersistedReadState;
+  readError: string | null;
+  captureLoading: boolean;
+  captureError: string | null;
+  result: WalletPersistedTransactionTraceEvidenceResponse | null;
 }): { tone: PreviewReadinessTone; label: string; message: string } {
   if (dataMode === "mock") {
-    return {
-      tone: "warning",
-      label: "REAL STORED RUN REQUIRED",
-      message: "Mock runs never trigger a transaction trace provider request.",
-    };
+    return { tone: "warning", label: "REAL STORED RUN REQUIRED", message: "Mock runs never read, capture, or persist transaction trace evidence." };
   }
   if (eligibleCount === 0) {
-    return {
-      tone: "warning",
-      label: "NO ELIGIBLE TRACE ANCHOR",
-      message: "No coherent live TonAPI transaction identity can be inspected.",
-    };
+    return { tone: "warning", label: "NO ELIGIBLE TRACE ANCHOR", message: "No coherent live TonAPI transaction identity can be inspected or captured." };
   }
-  if (loading) {
-    return {
-      tone: "running",
-      label: result ? "REFRESHING TRACE EVIDENCE" : "INSPECTING TRACE EVIDENCE",
-      message: result
-        ? "The last successful response remains visible during this explicit refresh."
-        : "Reading one provider-indexed trace summary without persistence.",
-    };
+  if (captureLoading) {
+    return { tone: "running", label: "CAPTURING AND SAVING", message: "One explicit provider capture is being validated and committed as an immutable record." };
   }
-  if (error) {
-    return {
-      tone: "warning",
-      label: result ? "LAST TRACE RESULT PRESERVED" : "TRACE RESULT UNAVAILABLE",
-      message: result
-        ? "The explicit retry failed; the prior successful result remains scoped to this anchor."
-        : "The explicit provider request failed and produced no trace result.",
-    };
+  if (readState === "loading" || readState === "idle") {
+    return { tone: "running", label: "READING SAVED EVIDENCE", message: "Checking local storage only. No provider request is made by this readback." };
+  }
+  if (readError) {
+    return { tone: "warning", label: "SAVED EVIDENCE READ FAILED", message: "Stored state is unknown. Retry the database-only read before capture." };
+  }
+  if (captureError) {
+    return result
+      ? { tone: "warning", label: "LAST SAVED RECORD PRESERVED", message: "The capture failed; the prior immutable record remains unchanged." }
+      : { tone: "warning", label: "EVIDENCE NOT SAVED", message: "The explicit capture failed. No immutable record was accepted." };
   }
   if (result) {
-    return {
-      tone: result.trace_state === "finalized" ? "fresh" : "warning",
-      label:
-        result.trace_state === "finalized"
-          ? "FINALIZED PROVIDER TRACE"
-          : "PENDING PROVIDER TRACE",
-      message:
-        result.trace_state === "finalized"
-          ? "The sanitized provider trace matches this stored transaction anchor. Safety flags remain false."
-          : "The provider trace still has pending internal messages. Safety flags remain false.",
-    };
+    return { tone: "ready", label: "SAVED IMMUTABLE TRACE EVIDENCE", message: "The finalized-at-capture graph passed local contract revalidation. All authority and PnL flags remain false." };
   }
-  return {
-    tone: "ready",
-    label: "EXPLICIT REQUEST REQUIRED",
-    message: "No trace request has been sent. Choose an anchor and inspect it manually.",
-  };
+  return { tone: "ready", label: "NO SAVED TRACE EVIDENCE", message: "The database read completed. Preview first, then explicitly capture only a finalized provider trace." };
+}
+
+function captureButtonLabel({
+  captureLoading,
+  persistedResult,
+  previewResult,
+  readState,
+}: {
+  captureLoading: boolean;
+  persistedResult: WalletPersistedTransactionTraceEvidenceResponse | null;
+  previewResult: WalletTransactionTraceEvidenceResponse | null;
+  readState: PersistedReadState;
+}): string {
+  if (captureLoading) return "Capturing and saving evidence";
+  if (persistedResult) return "Immutable evidence saved";
+  if (readState === "loading" || readState === "idle") return "Checking saved evidence";
+  if (readState === "error") return "Saved state unavailable";
+  if (!previewResult) return "Preview finalized trace to save";
+  if (previewResult.trace_state === "pending") return "Finalized trace required to save";
+  return "Capture and store evidence";
+}
+
+function savedStateLabel(readState: PersistedReadState): string {
+  if (readState === "loading" || readState === "idle") return "Checking";
+  if (readState === "empty") return "None";
+  if (readState === "error") return "Unavailable";
+  return "Available";
 }
 
 function traceSelectionHelp(
@@ -521,16 +827,69 @@ function traceSelectionHelp(
   transactionCount: number,
   eligibleCount: number,
 ): string {
-  if (dataMode === "mock") {
-    return "Mock mode is non-networked here; the inspect action stays disabled.";
-  }
-  if (transactionCount === 0) {
-    return "This run contains no stored low-level transaction rows.";
-  }
-  if (eligibleCount === 0) {
-    return "Stored rows lack a coherent live TonAPI account + LT + hash anchor.";
-  }
-  return `${eligibleCount} of ${transactionCount} stored transactions can be selected. No request is sent until Inspect.`;
+  if (dataMode === "mock") return "Mock mode is non-networked here; both provider actions stay disabled.";
+  if (transactionCount === 0) return "This run contains no stored low-level transaction rows.";
+  if (eligibleCount === 0) return "Stored rows lack a coherent live TonAPI network + account + LT + hash anchor.";
+  return `${eligibleCount} of ${transactionCount} stored transactions can be selected. Saved evidence is read locally; provider actions remain explicit.`;
+}
+
+function expectedAnchor(
+  runId: number,
+  transaction: WalletTraceEligibleTransaction,
+): WalletPersistedTraceEvidenceExpectedAnchor {
+  return {
+    runId,
+    transactionHash: transaction.transactionHash,
+    logicalTime: transaction.logicalTime,
+    accountCanonical: transaction.accountCanonical,
+    network: transaction.network,
+  };
+}
+
+function traceScopeKey(
+  runId: number,
+  dataMode: "mock" | "real",
+  transaction: WalletTraceEligibleTransaction | null,
+): string {
+  if (transaction === null) return `${runId}|${dataMode}|none`;
+  return [runId, dataMode, transaction.network, transaction.accountCanonical, transaction.logicalTime, transaction.transactionHash].join("|");
+}
+
+function traceResultMatchesScope(
+  result: {
+    run_id: string;
+    anchor: {
+      transaction_hash: string;
+      logical_time: string;
+      account_canonical: string;
+    };
+  },
+  runId: number,
+  transaction: WalletTraceEligibleTransaction | null,
+): boolean {
+  return (
+    transaction !== null &&
+    result.run_id === String(runId) &&
+    result.anchor.transaction_hash === transaction.transactionHash &&
+    result.anchor.logical_time === transaction.logicalTime &&
+    result.anchor.account_canonical === transaction.accountCanonical
+  );
+}
+
+function persistedResultMatchesScope(
+  result: WalletPersistedTransactionTraceEvidenceResponse,
+  runId: number,
+  transaction: WalletTraceEligibleTransaction | null,
+): boolean {
+  return (
+    traceResultMatchesScope(result, runId, transaction) &&
+    transaction !== null &&
+    result.network === transaction.network
+  );
+}
+
+function errorMessage(caught: unknown, fallback: string): string {
+  return caught instanceof Error ? caught.message : fallback;
 }
 
 function shortHash(value: string): string {

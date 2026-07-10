@@ -298,6 +298,64 @@ export async function getWalletTransactionTraceEvidence(
   return await res.json();
 }
 
+export async function getPersistedWalletTransactionTraceEvidence(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<unknown | null> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence/persisted`,
+    {
+      cache: "no-store",
+      signal,
+    },
+  );
+
+  if (res.status === 404) {
+    let detail = "Persisted transaction trace evidence read failed (404)";
+    try {
+      const body = await res.json();
+      if (body?.detail === "Persisted trace evidence not found") return null;
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // A missing-resource response without the exact absence contract is an error.
+    }
+    throw new Error(detail);
+  }
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Persisted transaction trace evidence read failed"),
+    );
+  }
+
+  return await res.json();
+}
+
+export async function persistWalletTransactionTraceEvidence(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence/persisted`,
+    {
+      method: "POST",
+      cache: "no-store",
+      signal,
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Transaction trace evidence capture failed"),
+    );
+  }
+
+  return await res.json();
+}
+
 export async function getWalletRunSignals(
   runId: number,
 ): Promise<WalletRunSignalsResponse> {

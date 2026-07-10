@@ -8,6 +8,7 @@ for OpenAPI via a permissive model.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -391,6 +392,121 @@ class WalletTransactionTraceEvidenceResponse(BaseModel):
         if self.trace_state == "pending" and pending == 0:
             raise ValueError("pending trace requires an internal outgoing message")
         return self
+
+
+class WalletPersistedTraceSummaryRecord(BaseModel):
+    """Counts recomputed from one immutable persisted trace graph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    root_transaction_hash: CanonicalTraceTransactionHash
+    transaction_count: Annotated[int, Field(strict=True, ge=1, le=256)]
+    max_depth: Annotated[int, Field(strict=True, ge=0, le=32)]
+    message_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    root_inbound_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=1),
+    ]
+    child_internal_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=255),
+    ]
+    remaining_out_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=2048),
+    ]
+    internal_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=2304),
+    ]
+    external_in_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=2304),
+    ]
+    external_out_message_count: Annotated[
+        int,
+        Field(strict=True, ge=0, le=2304),
+    ]
+    successful_transaction_count: StrictTraceCount
+    failed_transaction_count: StrictTraceCount
+    aborted_transaction_count: StrictTraceCount
+    unique_account_count: Annotated[int, Field(strict=True, ge=1, le=256)]
+
+    @model_validator(mode="after")
+    def _persisted_trace_counts_must_be_coherent(self):
+        if self.child_internal_message_count != self.transaction_count - 1:
+            raise ValueError(
+                "every non-root transaction requires one child inbound message"
+            )
+        if (
+            self.root_inbound_message_count
+            + self.child_internal_message_count
+            + self.remaining_out_message_count
+            != self.message_count
+        ):
+            raise ValueError("persisted trace message roles do not cover all messages")
+        if (
+            self.internal_message_count
+            + self.external_in_message_count
+            + self.external_out_message_count
+            != self.message_count
+        ):
+            raise ValueError("persisted trace message types do not cover all messages")
+        if (
+            self.successful_transaction_count
+            + self.failed_transaction_count
+            != self.transaction_count
+        ):
+            raise ValueError(
+                "persisted trace success and failure counts must cover every transaction"
+            )
+        if self.aborted_transaction_count > self.transaction_count:
+            raise ValueError("persisted trace aborted count exceeds transaction count")
+        if self.unique_account_count > self.transaction_count:
+            raise ValueError("persisted trace account count exceeds transaction count")
+        if self.transaction_count > 1 and self.max_depth == 0:
+            raise ValueError("multi-transaction persisted trace requires positive depth")
+        return self
+
+
+class WalletPersistedTraceEvidenceResponse(BaseModel):
+    """Locally revalidated summary of one stored provider trace graph."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["tonapi_low_level_trace_evidence_v1"]
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    provider: Literal["tonapi"]
+    source_status: Literal["live"]
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$", max_length=16)
+    trace_state: Literal["finalized"]
+    captured_at: datetime
+    anchor: WalletTransactionTraceAnchorRecord
+    summary: WalletPersistedTraceSummaryRecord
+    evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    is_provider_indexed_low_level_trace: Literal[True]
+    provider_structure_validated: Literal[True]
+    persisted_graph_revalidated: Literal[True]
+    is_immutable_record: Literal[True]
+    raw_boc_persisted: Literal[False] = False
+    message_body_persisted: Literal[False] = False
+    is_blockchain_proof_verified: Literal[False] = False
+    is_authoritative_activity_identity: Literal[False] = False
+    semantic_reconstruction_applied: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=500)
+
+    @field_validator("capture_id", "run_id")
+    @classmethod
+    def _persisted_trace_ids_must_fit_sqlite(cls, value: str) -> str:
+        if int(value, 10) > 2**63 - 1:
+            raise ValueError("persisted trace id exceeds signed 64-bit range")
+        return value
 
 
 class WalletSwapRecord(BaseModel):

@@ -4925,7 +4925,7 @@ input {
   }
 }
 
-/* Explicit transaction trace evidence preview v0.23.0 ---------------- */
+/* Persisted low-level transaction trace evidence v0.23.1 ------------- */
 .trace-evidence-card {
   width: 100%;
   max-width: 100%;
@@ -4979,6 +4979,12 @@ input {
   min-height: 40px;
 }
 
+.trace-evidence-actions {
+  display: grid;
+  gap: 7px;
+  min-width: 230px;
+}
+
 .trace-evidence-help,
 .trace-evidence-selected-hash {
   display: block;
@@ -5013,10 +5019,59 @@ input {
   color: var(--muted);
 }
 
+.trace-evidence-error .btn {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.trace-evidence-operation-status {
+  padding: 9px 10px;
+  border: 1px solid rgba(91, 141, 239, 0.36);
+  border-radius: 7px;
+  background: rgba(91, 141, 239, 0.075);
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .trace-evidence-results {
   display: grid;
   gap: 11px;
   min-width: 0;
+}
+
+.trace-evidence-persisted-results {
+  padding: 11px;
+  border: 1px solid rgba(0, 230, 118, 0.26);
+  border-radius: 8px;
+  background: rgba(0, 230, 118, 0.025);
+}
+
+.trace-evidence-preview-results {
+  padding-top: 3px;
+}
+
+.trace-evidence-result-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.trace-evidence-result-heading > div:first-child {
+  margin-right: auto;
+}
+
+.trace-evidence-result-heading h3 {
+  margin: 3px 0 0;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.trace-evidence-validation-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
 }
 
 .trace-evidence-contract-strip,
@@ -5027,6 +5082,10 @@ input {
 
 .trace-evidence-contract-strip {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.trace-evidence-contract-strip.trace-evidence-persisted-strip {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .trace-evidence-metrics {
@@ -5165,6 +5224,7 @@ input {
 
 @media (max-width: 900px) {
   .trace-evidence-contract-strip,
+  .trace-evidence-contract-strip.trace-evidence-persisted-strip,
   .trace-evidence-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5184,6 +5244,19 @@ input {
 
   .trace-evidence-form .btn {
     width: 100%;
+  }
+
+  .trace-evidence-actions {
+    min-width: 0;
+  }
+
+  .trace-evidence-result-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .trace-evidence-validation-badges {
+    justify-content: flex-start;
   }
 
   .trace-evidence-table,

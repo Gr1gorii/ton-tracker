@@ -38,42 +38,11 @@ def get_wallet_transaction_trace_evidence(
     settings: Settings | None = None,
 ) -> dict[str, Any]:
     """Fetch one sanitized trace summary without mutating persisted evidence."""
-    if (
-        isinstance(run_id, bool)
-        or not isinstance(run_id, int)
-        or not 1 <= run_id <= 2**63 - 1
-    ):
-        raise WalletTraceEvidenceNotFound("Wallet ingestion run not found")
-    if (
-        not isinstance(transaction_hash, str)
-        or _TRANSACTION_HASH_RE.fullmatch(transaction_hash) is None
-    ):
-        raise WalletTraceEvidenceNotFound("Wallet transaction not found")
-
-    with session.no_autoflush:
-        run = session.get(WalletIngestionRun, run_id)
-        if run is None:
-            raise WalletTraceEvidenceNotFound(
-                "Wallet ingestion run not found"
-            )
-        transactions = list(
-            session.scalars(
-                select(WalletTransaction)
-                .where(WalletTransaction.run_id == run_id)
-                .where(
-                    func.lower(WalletTransaction.tx_hash)
-                    == transaction_hash
-                )
-                .limit(2)
-            )
-        )
-    if not transactions:
-        raise WalletTraceEvidenceNotFound("Wallet transaction not found")
-    if len(transactions) != 1:
-        raise WalletTraceEvidenceIneligible(
-            "Stored transaction identity is ambiguous."
-        )
-    transaction = transactions[0]
+    run, transaction = resolve_wallet_transaction_trace_anchor(
+        run_id,
+        transaction_hash,
+        session,
+    )
 
     settings = settings or get_settings()
     _require_guarded_live_tonapi(settings, run)
@@ -142,6 +111,50 @@ def get_wallet_transaction_trace_evidence(
             "semantic activity reconstruction was applied."
         ),
     }
+
+
+def resolve_wallet_transaction_trace_anchor(
+    run_id: int,
+    transaction_hash: str,
+    session: Session,
+) -> tuple[WalletIngestionRun, WalletTransaction]:
+    """Resolve one exact persisted run/transaction pair without provider access."""
+    if (
+        isinstance(run_id, bool)
+        or not isinstance(run_id, int)
+        or not 1 <= run_id <= 2**63 - 1
+    ):
+        raise WalletTraceEvidenceNotFound("Wallet ingestion run not found")
+    if (
+        not isinstance(transaction_hash, str)
+        or _TRANSACTION_HASH_RE.fullmatch(transaction_hash) is None
+    ):
+        raise WalletTraceEvidenceNotFound("Wallet transaction not found")
+
+    with session.no_autoflush:
+        run = session.get(WalletIngestionRun, run_id)
+        if run is None:
+            raise WalletTraceEvidenceNotFound(
+                "Wallet ingestion run not found"
+            )
+        transactions = list(
+            session.scalars(
+                select(WalletTransaction)
+                .where(WalletTransaction.run_id == run_id)
+                .where(
+                    func.lower(WalletTransaction.tx_hash)
+                    == transaction_hash
+                )
+                .limit(2)
+            )
+        )
+    if not transactions:
+        raise WalletTraceEvidenceNotFound("Wallet transaction not found")
+    if len(transactions) != 1:
+        raise WalletTraceEvidenceIneligible(
+            "Stored transaction identity is ambiguous."
+        )
+    return run, transactions[0]
 
 
 def _require_guarded_live_tonapi(

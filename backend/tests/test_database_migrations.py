@@ -36,10 +36,14 @@ WALLET_IDENTITY_REVISION = "20260710_0002"
 TRANSACTION_IDENTITY_REVISION = "20260710_0003"
 ACQUISITION_EVIDENCE_REVISION = "20260710_0004"
 EVENT_ACTION_IDENTITY_REVISION = "20260710_0005"
-CURRENT_REVISION = EVENT_ACTION_IDENTITY_REVISION
+TRACE_EVIDENCE_REVISION = "20260710_0006"
+CURRENT_REVISION = TRACE_EVIDENCE_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
+TRACE_CAPTURES_TABLE = "wallet_trace_evidence_captures"
+TRACE_NODES_TABLE = "wallet_trace_evidence_nodes"
+TRACE_MESSAGES_TABLE = "wallet_trace_evidence_messages"
 
 ACCOUNT_ID = "ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 RAW_ADDRESS = f"0:{ACCOUNT_ID}"
@@ -295,6 +299,22 @@ def _acquisition_evidence_counts(engine: Engine) -> tuple[int, int]:
             f"SELECT COUNT(*) FROM {ACQUISITION_PAGES_TABLE}"
         ).scalar_one()
     return int(stream_count), int(page_count)
+
+
+def _trace_evidence_counts(engine: Engine) -> tuple[int, int, int]:
+    with engine.connect() as connection:
+        return tuple(
+            int(
+                connection.exec_driver_sql(
+                    f"SELECT COUNT(*) FROM {_quote(table_name)}"
+                ).scalar_one()
+            )
+            for table_name in (
+                TRACE_CAPTURES_TABLE,
+                TRACE_NODES_TABLE,
+                TRACE_MESSAGES_TABLE,
+            )
+        )
 
 
 def _identity_snapshot(engine: Engine) -> dict[int, tuple[Any, ...]]:
@@ -804,6 +824,125 @@ def _assert_acquisition_evidence_schema(engine: Engine) -> None:
     assert page_foreign_keys[0]["options"] == {"ondelete": "CASCADE"}
 
 
+def _assert_trace_evidence_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    assert {
+        TRACE_CAPTURES_TABLE,
+        TRACE_NODES_TABLE,
+        TRACE_MESSAGES_TABLE,
+    }.issubset(inspector.get_table_names())
+
+    def indexes(table_name: str):
+        return {
+            (
+                index["name"],
+                tuple(index.get("column_names") or ()),
+                bool(index.get("unique")),
+            )
+            for index in inspector.get_indexes(table_name)
+        }
+
+    assert indexes(TRACE_CAPTURES_TABLE) == {
+        (
+            "uq_wallet_trace_captures_run_root",
+            (
+                "run_id",
+                "provider",
+                "contract_version",
+                "root_transaction_hash",
+            ),
+            True,
+        ),
+        (
+            "uq_wallet_trace_captures_run_anchor",
+            ("run_id", "captured_via_transaction_id", "contract_version"),
+            True,
+        ),
+        (
+            "uq_wallet_trace_captures_run_slot",
+            ("run_id", "capture_slot"),
+            True,
+        ),
+    }
+    assert indexes(TRACE_NODES_TABLE) == {
+        (
+            "uq_wallet_trace_nodes_capture_preorder",
+            ("capture_id", "preorder_index"),
+            True,
+        ),
+        (
+            "uq_wallet_trace_nodes_capture_hash",
+            ("capture_id", "transaction_hash"),
+            True,
+        ),
+        (
+            "uq_wallet_trace_nodes_capture_coordinate",
+            ("capture_id", "account_canonical", "logical_time"),
+            True,
+        ),
+    }
+    assert indexes(TRACE_MESSAGES_TABLE) == {
+        (
+            "uq_wallet_trace_messages_node_role_ordinal",
+            ("node_id", "role", "ordinal"),
+            True,
+        ),
+        (
+            "ix_wallet_trace_messages_observation",
+            ("observation_identity_key",),
+            False,
+        ),
+        (
+            "ix_wallet_trace_messages_hash",
+            ("message_hash",),
+            False,
+        ),
+    }
+
+    assert _reflected_foreign_key_signature(
+        inspector, TRACE_CAPTURES_TABLE
+    ) == {
+        (
+            ("run_id",),
+            "wallet_ingestion_runs",
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        ),
+        (
+            ("captured_via_transaction_id",),
+            "wallet_transactions",
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        ),
+    }
+    assert _reflected_foreign_key_signature(
+        inspector, TRACE_NODES_TABLE
+    ) == {
+        (
+            ("capture_id",),
+            TRACE_CAPTURES_TABLE,
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        ),
+        (
+            ("parent_node_id",),
+            TRACE_NODES_TABLE,
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        ),
+    }
+    assert _reflected_foreign_key_signature(
+        inspector, TRACE_MESSAGES_TABLE
+    ) == {
+        (
+            ("node_id",),
+            TRACE_NODES_TABLE,
+            ("id",),
+            (("ondelete", "CASCADE"),),
+        )
+    }
+
+
 def _expected_event_action_identity_indexes(
     table_name: str,
 ) -> set[tuple[str, tuple[str, ...], bool]]:
@@ -1021,13 +1160,16 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
     _assert_transaction_identity_schema(engine)
     _assert_acquisition_evidence_schema(engine)
     _assert_event_action_identity_schema(engine)
+    _assert_trace_evidence_schema(engine)
     assert _acquisition_evidence_counts(engine) == (0, 0)
+    assert _trace_evidence_counts(engine) == (0, 0, 0)
 
     engine.dispose()
     reopened = _engine(tmp_path / "fresh.db")
@@ -1053,6 +1195,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1060,7 +1203,9 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
     _assert_transaction_identity_schema(engine)
     _assert_acquisition_evidence_schema(engine)
     _assert_event_action_identity_schema(engine)
+    _assert_trace_evidence_schema(engine)
     assert _acquisition_evidence_counts(engine) == (0, 0)
+    assert _trace_evidence_counts(engine) == (0, 0, 0)
     _assert_legacy_identity_backfill(engine)
     _assert_legacy_transaction_identity_backfill(engine)
     _assert_legacy_event_action_identity_backfill(engine)
@@ -1089,6 +1234,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1115,6 +1261,7 @@ def test_runner_is_idempotent_at_head(tmp_path):
         engine, "wallet_swaps"
     )
     acquisition_counts_after_first = _acquisition_evidence_counts(engine)
+    trace_counts_after_first = _trace_evidence_counts(engine)
 
     second = run_database_migrations(engine)
 
@@ -1139,8 +1286,10 @@ def test_runner_is_idempotent_at_head(tmp_path):
         == swap_identities_after_first
     )
     assert _acquisition_evidence_counts(engine) == acquisition_counts_after_first
+    assert _trace_evidence_counts(engine) == trace_counts_after_first
     _assert_acquisition_evidence_schema(engine)
     _assert_event_action_identity_schema(engine)
+    _assert_trace_evidence_schema(engine)
     _assert_legacy_identity_backfill(engine)
     _assert_legacy_transaction_identity_backfill(engine)
     _assert_legacy_event_action_identity_backfill(engine)
@@ -1217,6 +1366,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1356,6 +1506,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1499,6 +1650,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -1920,8 +2072,11 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
 
     assert report.action == "upgraded"
     assert report.revision_before == ACQUISITION_EVIDENCE_REVISION
-    assert report.revision_after == EVENT_ACTION_IDENTITY_REVISION
-    assert report.applied_revisions == (EVENT_ACTION_IDENTITY_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
+    )
     assert _data_snapshot(engine) == source_before
 
     mainnet_key = (
@@ -2002,8 +2157,11 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
 
     assert report.action == "upgraded"
     assert report.revision_before == ACQUISITION_EVIDENCE_REVISION
-    assert report.revision_after == EVENT_ACTION_IDENTITY_REVISION
-    assert report.applied_revisions == (EVENT_ACTION_IDENTITY_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
+    )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
         engine, "wallet_transfers"
@@ -2170,12 +2328,260 @@ def test_event_action_identity_migration_is_forward_only(tmp_path):
                 ACQUISITION_EVIDENCE_REVISION,
             )
 
-    _assert_schema_matches_models(engine)
     _assert_event_action_identity_schema(engine)
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
         ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "trace-evidence-upgrade.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_transaction(connection, transaction_id=1, run_id=1)
+    before = _data_snapshot(engine)
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == EVENT_ACTION_IDENTITY_REVISION
+    assert report.revision_after == TRACE_EVIDENCE_REVISION
+    assert report.applied_revisions == (TRACE_EVIDENCE_REVISION,)
+    assert _data_snapshot(engine) == before
+    assert _trace_evidence_counts(engine) == (0, 0, 0)
+    _assert_schema_matches_models(engine)
+    _assert_trace_evidence_schema(engine)
+    engine.dispose()
+
+
+def test_trace_evidence_migration_repairs_exact_empty_partial_sqlite_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "partial-trace-evidence.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(connection, TRACE_CAPTURES_TABLE)
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX uq_wallet_trace_captures_run_root "
+            "ON wallet_trace_evidence_captures "
+            "(run_id, provider, contract_version, root_transaction_hash)"
+        )
+        _create_model_table_without_indexes(connection, TRACE_NODES_TABLE)
+        _create_model_table_without_indexes(connection, TRACE_MESSAGES_TABLE)
+
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    _assert_trace_evidence_schema(engine)
+    assert _trace_evidence_counts(engine) == (0, 0, 0)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRACE_EVIDENCE_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_orphan_partial_child_table_fails_before_more_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "orphan-partial-trace-node.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(connection, TRACE_NODES_TABLE)
+
+    with pytest.raises(RuntimeError, match="without its capture table"):
+        _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    tables = set(inspect(engine).get_table_names())
+    assert TRACE_CAPTURES_TABLE not in tables
+    assert TRACE_MESSAGES_TABLE not in tables
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_message_without_node_table_fails_closed(tmp_path):
+    engine = _engine(tmp_path / "orphan-partial-trace-message.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(connection, TRACE_CAPTURES_TABLE)
+        _create_model_table_without_indexes(connection, TRACE_MESSAGES_TABLE)
+
+    with pytest.raises(RuntimeError, match="without its node table"):
+        _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    assert TRACE_NODES_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_malformed_partial_columns_fail_before_child_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "malformed-partial-trace-columns.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(connection, TRACE_CAPTURES_TABLE)
+    _rewrite_table_sql(
+        engine,
+        TRACE_CAPTURES_TABLE,
+        "provider VARCHAR(32)",
+        "provider VARCHAR(64)",
+    )
+
+    with pytest.raises(RuntimeError, match="columns do not match revision 0006"):
+        _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    tables = set(inspect(engine).get_table_names())
+    assert TRACE_NODES_TABLE not in tables
+    assert TRACE_MESSAGES_TABLE not in tables
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_wrong_partial_index_fails_before_child_tables(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "wrong-partial-trace-index.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(connection, TRACE_CAPTURES_TABLE)
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX uq_wallet_trace_captures_run_root "
+            "ON wallet_trace_evidence_captures "
+            "(run_id, provider, root_transaction_hash, contract_version)"
+        )
+
+    with pytest.raises(RuntimeError, match="index does not match revision 0006"):
+        _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    tables = set(inspect(engine).get_table_names())
+    assert TRACE_NODES_TABLE not in tables
+    assert TRACE_MESSAGES_TABLE not in tables
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_wrong_partial_foreign_key_fails_closed(tmp_path):
+    engine = _engine(tmp_path / "wrong-partial-trace-fk.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(connection, TRACE_CAPTURES_TABLE)
+    _rewrite_table_sql(
+        engine,
+        TRACE_CAPTURES_TABLE,
+        " ON DELETE CASCADE",
+        "",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="foreign keys do not match revision 0006",
+    ):
+        _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    assert TRACE_NODES_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_pre_revision_rows_are_never_adopted(tmp_path):
+    engine = _engine(tmp_path / "unexpected-trace-evidence-data.db")
+    _upgrade_to_revision(engine, EVENT_ACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_transaction(connection, transaction_id=1, run_id=1)
+        _create_model_table_without_indexes(connection, TRACE_CAPTURES_TABLE)
+        connection.exec_driver_sql(
+            "INSERT INTO wallet_trace_evidence_captures ("
+            "id, run_id, captured_via_transaction_id, capture_slot, provider, "
+            "contract_version, network, root_transaction_hash, trace_state, "
+            "transaction_count, max_depth, message_count, "
+            "root_inbound_message_count, child_internal_message_count, "
+            "remaining_out_message_count, internal_message_count, "
+            "external_in_message_count, external_out_message_count, "
+            "successful_transaction_count, failed_transaction_count, "
+            "aborted_transaction_count, unique_account_count, "
+            "evidence_digest_sha256, captured_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                1,
+                1,
+                0,
+                "tonapi",
+                "tonapi_low_level_trace_evidence_v1",
+                "ton-mainnet",
+                TRANSACTION_HASH,
+                "finalized",
+                1,
+                0,
+                1,
+                1,
+                0,
+                0,
+                1,
+                0,
+                0,
+                1,
+                0,
+                0,
+                1,
+                "ab" * 32,
+                "2026-07-10 12:00:00.000000",
+            ),
+        )
+
+    with pytest.raises(RuntimeError, match="unexpected pre-revision data"):
+        _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    assert TRACE_NODES_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == EVENT_ACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_trace_evidence_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "trace-evidence-forward-only.db")
+    _upgrade_to_revision(engine, TRACE_EVIDENCE_REVISION)
+
+    with engine.begin() as connection:
+        with pytest.raises(
+            RuntimeError,
+            match="Trace evidence downgrade would discard",
+        ):
+            command.downgrade(
+                migration_config(connection),
+                EVENT_ACTION_IDENTITY_REVISION,
+            )
+
+    _assert_schema_matches_models(engine)
+    _assert_trace_evidence_schema(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRACE_EVIDENCE_REVISION
     engine.dispose()
 
 
@@ -2374,6 +2780,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         TRANSACTION_IDENTITY_REVISION,
         ACQUISITION_EVIDENCE_REVISION,
         EVENT_ACTION_IDENTITY_REVISION,
+        TRACE_EVIDENCE_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()
