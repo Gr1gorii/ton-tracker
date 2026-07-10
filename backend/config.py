@@ -71,8 +71,8 @@ class Settings:
     wallet_activity_live_jetton_limit: int = 100
     wallet_activity_live_tx_limit: int = 100
     wallet_activity_live_tx_max_pages: int = 10
-    wallet_activity_live_transfer_limit: int = 100
-    wallet_activity_live_swap_limit: int = 100
+    wallet_activity_live_event_limit: int = 100
+    wallet_activity_live_event_max_pages: int = 10
     ton_network: str = "mainnet"
 
     @property
@@ -166,17 +166,17 @@ def get_settings() -> Settings:
             minimum=1,
             maximum=100,
         ),
-        wallet_activity_live_transfer_limit=_env_int(
-            "WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT",
+        wallet_activity_live_event_limit=_env_int(
+            "WALLET_ACTIVITY_LIVE_EVENT_LIMIT",
             default=100,
             minimum=1,
-            maximum=1000,
+            maximum=100,
         ),
-        wallet_activity_live_swap_limit=_env_int(
-            "WALLET_ACTIVITY_LIVE_SWAP_LIMIT",
-            default=100,
+        wallet_activity_live_event_max_pages=_env_int(
+            "WALLET_ACTIVITY_LIVE_EVENT_MAX_PAGES",
+            default=10,
             minimum=1,
-            maximum=1000,
+            maximum=100,
         ),
         ton_network=ton_network,
     )

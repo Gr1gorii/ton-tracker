@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -26,10 +27,12 @@ _SWAP_ORDINAL_KEYS = ("action_id", "action_index", "action_ordinal")
 _TRANSACTION_IDENTITY_VERSION = "ton_account_tx_v1"
 _TRANSACTION_IDENTITY_UNAVAILABLE = "unavailable"
 _TRANSACTION_ACQUISITION_VERSION = "tonapi_account_transactions_v1"
+_EVENT_ACQUISITION_VERSION = "tonapi_account_events_display_v1"
 _TRANSACTION_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 _SUBMITTED_TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _LOGICAL_TIME_RE = re.compile(r"^(?:0|[1-9][0-9]*)$")
 _MAX_LOGICAL_TIME = 2**64 - 1
+_MAX_EVENT_DATE = 2_114_380_800
 _MAX_IDENTITY_GROUPS = 200
 _UNAVAILABLE_WALLET_IDENTITY = {
     "status": "unavailable",
@@ -600,6 +603,367 @@ def _transaction_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
+def _event_action_row_identity(
+    row: Any,
+    *,
+    surface: str,
+    start: datetime,
+    end: datetime,
+) -> tuple[str, str] | None:
+    """Validate one persisted display-action row and return its event key."""
+    if not isinstance(row, dict):
+        return None
+    timestamp = _parse_timestamp(row.get("timestamp"))
+    raw = row.get("raw")
+    if (
+        row.get("provider") != "tonapi"
+        or row.get("source_status") != "live"
+        or timestamp is None
+        or not start <= timestamp < end
+        or not isinstance(raw, dict)
+        or raw.get("provider") != "tonapi"
+        or raw.get("surface") != surface
+    ):
+        return None
+    event_id = raw.get("event_id")
+    logical_time = raw.get("lt")
+    if (
+        not isinstance(event_id, str)
+        or _SUBMITTED_TRANSACTION_HASH_RE.fullmatch(event_id) is None
+        or row.get("tx_hash") != event_id
+        or _canonical_logical_time(logical_time) != logical_time
+    ):
+        return None
+    if surface == "transfers" and row.get("logical_time") != logical_time:
+        return None
+    return logical_time, event_id.lower()
+
+
+def _event_pagination_evidence(run: dict[str, Any]) -> dict[str, Any]:
+    """Validate bounded TonAPI event evidence without promoting its actions."""
+    run_id = run["run_id"]
+    requested_surfaces = list(run.get("requested_surfaces") or [])
+    requested_event_surfaces = [
+        surface
+        for surface in ("transfers", "swaps")
+        if surface in requested_surfaces
+    ]
+    if not requested_event_surfaces:
+        return {"run_id": run_id, "state": "not_requested"}
+
+    streams = run.get("acquisition_streams")
+    if not isinstance(streams, list):
+        streams = []
+    candidates = [
+        stream
+        for stream in streams
+        if isinstance(stream, dict)
+        and stream.get("stream_key") == "account_events"
+    ]
+    if len(candidates) != 1:
+        return {
+            "run_id": run_id,
+            "state": "missing" if not candidates else "ambiguous",
+            "requested_surfaces": requested_event_surfaces,
+            "provider_semantics": "display_only_actions",
+        }
+
+    stream = candidates[0]
+    base = {
+        "run_id": run_id,
+        "state": "incomplete",
+        "requested_surfaces": requested_event_surfaces,
+        "provider_semantics": "display_only_actions",
+        "completion_state": stream.get("completion_state"),
+        "termination_reason": stream.get("termination_reason"),
+        "bounds_verified": stream.get("bounds_verified") is True,
+        "page_count": stream.get("page_count"),
+    }
+    start = _parse_timestamp(stream.get("requested_start"))
+    end = _parse_timestamp(stream.get("requested_end"))
+    pages = stream.get("pages")
+    if not isinstance(pages, list):
+        pages = []
+    page_count = stream.get("page_count")
+    pages_succeeded = stream.get("pages_succeeded")
+    page_size = stream.get("page_size")
+    page_cap = stream.get("page_cap")
+    query_filters = stream.get("query_filters")
+    expected_query_start = (
+        math.floor(start.timestamp()) if start is not None else None
+    )
+    expected_query_end = math.ceil(end.timestamp()) if end is not None else None
+    valid_query_filters = (
+        isinstance(query_filters, dict)
+        and query_filters.get("endpoint") == "account_events"
+        and query_filters.get("cursor") == "before_lt"
+        and query_filters.get("limit") == page_size
+        and query_filters.get("sort_order") == "logical_time_desc"
+        and query_filters.get("provider_semantics") == "display_only_actions"
+        and isinstance(query_filters.get("start_date"), int)
+        and not isinstance(query_filters.get("start_date"), bool)
+        and isinstance(query_filters.get("end_date"), int)
+        and not isinstance(query_filters.get("end_date"), bool)
+        and query_filters.get("start_date") == expected_query_start
+        and query_filters.get("end_date") == expected_query_end
+        and 0 <= query_filters["start_date"] <= _MAX_EVENT_DATE
+        and 0 <= query_filters["end_date"] <= _MAX_EVENT_DATE
+    )
+    valid_stream_contract = (
+        stream.get("provider") == "tonapi"
+        and stream.get("contract_version") == _EVENT_ACQUISITION_VERSION
+        and stream.get("scope_kind") == "provider_display_events"
+        and stream.get("sort_order") == "logical_time_desc"
+        and isinstance(page_size, int)
+        and not isinstance(page_size, bool)
+        and 1 <= page_size <= 100
+        and isinstance(page_cap, int)
+        and not isinstance(page_cap, bool)
+        and 1 <= page_cap <= 100
+        and stream.get("first_cursor") is None
+        and start is not None
+        and end is not None
+        and start < end
+        and valid_query_filters
+    )
+    valid_page_envelope = (
+        isinstance(page_count, int)
+        and not isinstance(page_count, bool)
+        and page_count >= 1
+        and isinstance(page_cap, int)
+        and page_count <= page_cap
+        and page_count == len(pages)
+        and isinstance(pages_succeeded, int)
+        and not isinstance(pages_succeeded, bool)
+        and pages_succeeded == page_count
+        and all(isinstance(page, dict) for page in pages)
+        and [page.get("page_index") for page in pages]
+        == list(range(1, page_count + 1))
+    )
+    valid_page_rows = valid_stream_contract and valid_page_envelope and all(
+        page.get("requested_limit") == page_size
+        and page.get("error_code") is None
+        and isinstance(page.get("attempt_count"), int)
+        and not isinstance(page.get("attempt_count"), bool)
+        and page["attempt_count"] >= 1
+        and _parse_timestamp(page.get("fetched_at")) is not None
+        and isinstance(page.get("raw_count"), int)
+        and not isinstance(page.get("raw_count"), bool)
+        and 0 <= page["raw_count"] <= page_size
+        and isinstance(page.get("normalized_count"), int)
+        and not isinstance(page.get("normalized_count"), bool)
+        and 0 <= page["normalized_count"] <= page["raw_count"]
+        and isinstance(page.get("duplicate_count"), int)
+        and not isinstance(page.get("duplicate_count"), bool)
+        and 0 <= page["duplicate_count"] <= page["raw_count"]
+        and page["normalized_count"] + page["duplicate_count"]
+        <= page["raw_count"]
+        and isinstance(page.get("response_digest"), str)
+        and _TRANSACTION_HASH_RE.fullmatch(page["response_digest"])
+        is not None
+        for page in pages
+    )
+    valid_aggregate_counts = valid_page_rows and all(
+        isinstance(stream.get(field), int)
+        and not isinstance(stream.get(field), bool)
+        and stream[field] >= 0
+        for field in ("raw_count", "normalized_count", "duplicate_count")
+    )
+    if valid_aggregate_counts:
+        valid_aggregate_counts = (
+            stream["raw_count"] == sum(page["raw_count"] for page in pages)
+            and stream["raw_count"] <= page_size * page_cap
+            and stream["normalized_count"]
+            == sum(page["normalized_count"] for page in pages)
+            and stream["duplicate_count"]
+            == sum(page["duplicate_count"] for page in pages)
+        )
+
+    valid_cursor_chain = (
+        valid_page_rows and pages[0].get("request_cursor") is None
+    )
+    previous_response_cursor: str | None = None
+    previous_minimum_lt: str | None = None
+    previous_oldest_timestamp: datetime | None = None
+    if valid_cursor_chain:
+        for index, page in enumerate(pages):
+            request_cursor = page.get("request_cursor")
+            if index > 0 and request_cursor != previous_response_cursor:
+                valid_cursor_chain = False
+                break
+            if request_cursor is not None and _canonical_logical_time(
+                request_cursor
+            ) is None:
+                valid_cursor_chain = False
+                break
+
+            raw_count = page["raw_count"]
+            response_cursor = page.get("response_cursor")
+            minimum_lt = page.get("min_logical_time")
+            maximum_lt = page.get("max_logical_time")
+            minimum_timestamp = _parse_timestamp(page.get("min_timestamp"))
+            maximum_timestamp = _parse_timestamp(page.get("max_timestamp"))
+            if raw_count == 0:
+                if (
+                    index != len(pages) - 1
+                    or response_cursor is not None
+                    or minimum_lt is not None
+                    or maximum_lt is not None
+                    or minimum_timestamp is not None
+                    or maximum_timestamp is not None
+                    or page["normalized_count"] != 0
+                    or page["duplicate_count"] != 0
+                ):
+                    valid_cursor_chain = False
+                    break
+            else:
+                canonical_minimum = _canonical_logical_time(minimum_lt)
+                canonical_maximum = _canonical_logical_time(maximum_lt)
+                if (
+                    canonical_minimum is None
+                    or canonical_maximum is None
+                    or int(canonical_minimum, 10) > int(canonical_maximum, 10)
+                    or response_cursor != canonical_minimum
+                    or minimum_timestamp is None
+                    or maximum_timestamp is None
+                    or minimum_timestamp > maximum_timestamp
+                    or (
+                        request_cursor is not None
+                        and int(canonical_maximum, 10)
+                        >= int(request_cursor, 10)
+                    )
+                    or (
+                        previous_minimum_lt is not None
+                        and int(canonical_maximum, 10)
+                        >= int(previous_minimum_lt, 10)
+                    )
+                    or (
+                        previous_oldest_timestamp is not None
+                        and maximum_timestamp > previous_oldest_timestamp
+                    )
+                ):
+                    valid_cursor_chain = False
+                    break
+                previous_minimum_lt = canonical_minimum
+                previous_oldest_timestamp = minimum_timestamp
+            previous_response_cursor = response_cursor
+
+    termination_reason = stream.get("termination_reason")
+    valid_termination = False
+    if valid_page_rows:
+        terminal_page = pages[-1]
+        if termination_reason == "provider_terminal":
+            valid_termination = (
+                terminal_page.get("raw_count") == 0
+                and terminal_page.get("response_cursor") is None
+                and stream.get("terminal_cursor") is None
+            )
+        elif termination_reason == "requested_start_crossed":
+            oldest_timestamp = _parse_timestamp(
+                terminal_page.get("min_timestamp")
+            )
+            valid_termination = (
+                oldest_timestamp is not None
+                and start is not None
+                and oldest_timestamp < start
+                and stream.get("terminal_cursor")
+                == terminal_page.get("response_cursor")
+            )
+
+    time_window = run.get("time_window")
+    expected_rolling_windows = {
+        "24h": timedelta(hours=24),
+        "3d": timedelta(days=3),
+        "7d": timedelta(days=7),
+    }
+    if time_window == "custom":
+        valid_window_bounds = (
+            _parse_timestamp(run.get("_custom_start")) == start
+            and _parse_timestamp(run.get("_custom_end")) == end
+        )
+    elif time_window in expected_rolling_windows:
+        valid_window_bounds = (
+            start is not None
+            and end is not None
+            and end - start == expected_rolling_windows[time_window]
+        )
+    else:
+        valid_window_bounds = False
+    created_at = _parse_timestamp(run.get("_created_at"))
+    if created_at is not None:
+        valid_window_bounds = (
+            valid_window_bounds and end is not None and end <= created_at
+        )
+
+    valid_action_rows = start is not None and end is not None
+    action_event_identities: set[tuple[str, str]] = set()
+    if valid_action_rows:
+        assert start is not None and end is not None
+        for surface in requested_event_surfaces:
+            rows = run.get(surface)
+            if not isinstance(rows, list):
+                valid_action_rows = False
+                break
+            for row in rows:
+                identity = _event_action_row_identity(
+                    row,
+                    surface=surface,
+                    start=start,
+                    end=end,
+                )
+                if identity is None:
+                    valid_action_rows = False
+                    break
+                action_event_identities.add(identity)
+            if not valid_action_rows:
+                break
+    if valid_action_rows and valid_aggregate_counts:
+        valid_action_rows = (
+            len(action_event_identities) <= stream["normalized_count"]
+        )
+
+    unavailable_surfaces = run.get("unavailable_surfaces")
+    incomplete_surfaces = run.get("incomplete_surfaces")
+    valid_run_scope = (
+        run.get("data_mode") == "real"
+        and isinstance(unavailable_surfaces, list)
+        and all(
+            surface not in unavailable_surfaces
+            for surface in requested_event_surfaces
+        )
+        and isinstance(incomplete_surfaces, list)
+        and all(
+            surface in incomplete_surfaces
+            for surface in requested_event_surfaces
+        )
+        and valid_action_rows
+        and valid_window_bounds
+    )
+    started_at = _parse_timestamp(stream.get("started_at"))
+    finished_at = _parse_timestamp(stream.get("finished_at"))
+    valid_capture_times = (
+        started_at is not None
+        and finished_at is not None
+        and started_at <= finished_at
+    )
+    if (
+        stream.get("completion_state") == "complete"
+        and stream.get("bounds_verified") is True
+        and termination_reason in {"provider_terminal", "requested_start_crossed"}
+        and valid_stream_contract
+        and valid_page_rows
+        and valid_aggregate_counts
+        and valid_cursor_chain
+        and valid_termination
+        and valid_run_scope
+        and valid_capture_times
+        and stream.get("error_code") is None
+        and stream.get("error_message") is None
+    ):
+        return {**base, "state": "provider_stream_complete"}
+    return base
+
+
 def _identity_groups(
     observations: dict[
         tuple[str, str],
@@ -888,6 +1252,7 @@ def _build_blockers(
     transaction_pagination = [
         _transaction_pagination_evidence(run) for run in runs
     ]
+    event_pagination = [_event_pagination_evidence(run) for run in runs]
     requested_transaction_pagination = [
         item
         for item in transaction_pagination
@@ -898,6 +1263,14 @@ def _build_blockers(
         for item in requested_transaction_pagination
         if item["state"] != "complete"
     ]
+    requested_event_pagination = [
+        item for item in event_pagination if item["state"] != "not_requested"
+    ]
+    incomplete_event_run_ids = [
+        item["run_id"]
+        for item in requested_event_pagination
+        if item["state"] != "provider_stream_complete"
+    ]
     blockers = [
         _blocker(
             "requested_bounds_unverified",
@@ -907,10 +1280,13 @@ def _build_blockers(
         _blocker(
             "pagination_completeness_unverified",
             (
-                "Only the bounded low-level transaction stream has a persisted pagination contract; transfers, swaps, balances, and jettons do not yet provide equivalent complete acquisition evidence."
+                "Bounded transaction and provider-display event streams can expose persisted pagination evidence, but derived transfer/swap actions are non-authoritative and balances and jettons do not provide equivalent complete acquisition evidence."
             ),
             run_ids=run_ids,
-            evidence={"transaction_streams_by_run": transaction_pagination},
+            evidence={
+                "transaction_streams_by_run": transaction_pagination,
+                "event_streams_by_run": event_pagination,
+            },
         ),
         _blocker(
             "canonical_activity_identity_unavailable",
@@ -948,6 +1324,16 @@ def _build_blockers(
                 evidence={
                     "transaction_streams_by_run": requested_transaction_pagination
                 },
+            )
+        )
+
+    if incomplete_event_run_ids:
+        blockers.append(
+            _blocker(
+                "provider_event_pagination_evidence_incomplete",
+                "At least one selected run that requested transfers or swaps lacks valid bounded completion evidence for its shared TonAPI provider-display event stream.",
+                run_ids=incomplete_event_run_ids,
+                evidence={"event_streams_by_run": requested_event_pagination},
             )
         )
 
@@ -1227,7 +1613,7 @@ def assess_wallet_history_readiness(
     ]
 
     return {
-        "analysis_version": "wallet_history_readiness_v0.22.4",
+        "analysis_version": "wallet_history_readiness_v0.22.5",
         "target_run_id": target_run_id,
         "run_ids": run_ids,
         "wallet_address": target_run["wallet_address"],

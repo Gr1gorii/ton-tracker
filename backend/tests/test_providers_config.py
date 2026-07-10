@@ -51,6 +51,8 @@ def test_wallet_activity_live_guard_env(monkeypatch):
     monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
     monkeypatch.setenv("WALLET_ACTIVITY_LIVE_JETTON_LIMIT", "999")
     monkeypatch.setenv("WALLET_ACTIVITY_LIVE_TX_MAX_PAGES", "999")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_EVENT_LIMIT", "999")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_EVENT_MAX_PAGES", "999")
 
     settings = get_settings()
 
@@ -58,6 +60,8 @@ def test_wallet_activity_live_guard_env(monkeypatch):
     assert settings.wallet_activity_live_enabled is True
     assert settings.wallet_activity_live_jetton_limit == 500
     assert settings.wallet_activity_live_tx_max_pages == 100
+    assert settings.wallet_activity_live_event_limit == 100
+    assert settings.wallet_activity_live_event_max_pages == 100
 
 
 def test_ton_network_scope_from_env(monkeypatch):

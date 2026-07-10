@@ -1076,10 +1076,10 @@ function AcquisitionEvidenceCard({
           <span className="section-eyebrow">Acquisition contract</span>
           <h2>Stream and pagination evidence</h2>
           <p>
-            Transaction stream evidence is scoped only to its recorded stream
-            and exact half-open UTC interval. It does not prove completeness of
-            transfers, swaps, balances, or jettons, and it is not PnL or
-            acquisition cost basis.
+            Each stream is scoped only to its recorded cursor chain and exact
+            half-open UTC interval. A complete account-events chain verifies
+            provider page traversal only: its derived transfer and swap actions
+            remain mutable display data, not PnL or acquisition cost basis.
           </p>
         </div>
         <div className="table-meta" aria-label="Acquisition evidence summary">
@@ -1188,6 +1188,17 @@ function AcquisitionStreamEvidence({
           {stream.completion_state}
         </span>
       </div>
+
+      {stream.scope_kind === "provider_display_events" && (
+        <div className="acquisition-display-note" role="note">
+          <strong>Provider display stream</strong>
+          <span>
+            Completion applies only to this TonAPI event page chain. Derived
+            transfer and swap actions can change and remain incomplete,
+            non-authoritative evidence.
+          </span>
+        </div>
+      )}
 
       <div className="acquisition-stream-grid">
         <div className="acquisition-stream-bound">

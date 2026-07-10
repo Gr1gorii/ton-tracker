@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.request
 
 import pytest
 
@@ -155,6 +156,47 @@ def test_status_real_mode_valid_base_url_with_api_key(monkeypatch):
     assert "TONAPI_API_KEY is configured" in status["message"]
     assert "native TON balance and jetton" in status["message"]
     assert "secret-key" not in status["message"]
+
+
+def test_keyed_tonapi_rejects_plaintext_base_url():
+    adapter = TonapiAdapter(
+        _settings(
+            "real",
+            tonapi_base_url="http://tonapi.internal.example",
+            tonapi_api_key="secret-key",
+        )
+    )
+
+    assert adapter.is_configured() is False
+
+
+def test_authorization_is_not_forwarded_to_redirect_request(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        redirected = urllib.request.HTTPRedirectHandler().redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://different-origin.example/v2/accounts/EQwallet",
+        )
+        captured["initial"] = request.get_header("Authorization")
+        captured["redirected"] = redirected.get_header("Authorization")
+        return _json_response({"balance": "0"})
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(
+        _settings("real", tonapi_api_key="redirect-secret")
+    ).get_account_balance_preview("EQwallet")
+
+    assert result.ok is True
+    assert captured == {
+        "initial": "Bearer redirect-secret",
+        "redirected": None,
+    }
 
 
 @pytest.mark.parametrize(
@@ -817,9 +859,10 @@ def test_get_account_events_preview_normalizes_ton_and_jetton_transfers(monkeypa
     payload = {
         "events": [
             {
-                "event_id": "evt1",
+                "event_id": "e1" * 32,
                 "timestamp": 1717236000,
                 "lt": "46000000000001",
+                "in_progress": False,
                 "actions": [
                     {
                         "type": "TonTransfer",
@@ -847,7 +890,8 @@ def test_get_account_events_preview_normalizes_ton_and_jetton_transfers(monkeypa
                     {"type": "ContractDeploy", "status": "ok"},
                 ],
             }
-        ]
+        ],
+        "next_from": 46000000000001,
     }
 
     def fake_urlopen(request, timeout):
@@ -863,7 +907,8 @@ def test_get_account_events_preview_normalizes_ton_and_jetton_transfers(monkeypa
     assert result.ok is True
     assert result.source == "real"
     assert captured["url"] == (
-        f"{DEFAULT_TONAPI_BASE_URL}/v2/accounts/EQwallet/events?limit=2"
+        f"{DEFAULT_TONAPI_BASE_URL}/v2/accounts/EQwallet/events"
+        "?limit=2&sort_order=desc"
     )
     assert result.data["total_events"] == 1
     assert result.data["total_transfers"] == 2
@@ -894,7 +939,7 @@ def test_get_account_events_preview_unexpected_shape_returns_error(monkeypatch):
     )
 
     assert result.ok is False
-    assert result.error == ERROR_PROVIDER_ERROR
+    assert result.error == ERROR_PROVIDER_PROTOCOL
     assert "unexpected structure" in (result.message or "").lower()
 
 
@@ -921,9 +966,10 @@ def test_get_account_swaps_preview_normalizes_jetton_swap(monkeypatch):
     payload = {
         "events": [
             {
-                "event_id": "evtswap",
+                "event_id": "e2" * 32,
                 "timestamp": 1717236000,
                 "lt": "46000000000002",
+                "in_progress": False,
                 "actions": [
                     {
                         "type": "JettonSwap",
@@ -951,7 +997,8 @@ def test_get_account_swaps_preview_normalizes_jetton_swap(monkeypatch):
                     },
                 ],
             }
-        ]
+        ],
+        "next_from": 46000000000002,
     }
 
     def fake_urlopen(request, timeout):
@@ -967,7 +1014,8 @@ def test_get_account_swaps_preview_normalizes_jetton_swap(monkeypatch):
     assert result.ok is True
     assert result.source == "real"
     assert captured["url"] == (
-        f"{DEFAULT_TONAPI_BASE_URL}/v2/accounts/EQwallet/events?limit=3"
+        f"{DEFAULT_TONAPI_BASE_URL}/v2/accounts/EQwallet/events"
+        "?limit=3&sort_order=desc"
     )
     assert result.data["total_events"] == 1
     assert result.data["total_swaps"] == 1
