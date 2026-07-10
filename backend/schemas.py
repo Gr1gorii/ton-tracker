@@ -172,6 +172,21 @@ class WalletTransferRecord(BaseModel):
     raw: dict[str, Any] | None = None
 
 
+class WalletTransactionIdentityRecord(BaseModel):
+    status: Literal["network_scoped", "unavailable"]
+    version: str
+    network: Literal["ton-mainnet", "ton-testnet", "ton-unknown"]
+    account_canonical: str | None = None
+    logical_time_canonical: str | None = None
+    hash_canonical: str | None = None
+    key: str | None = None
+    is_deduplication_identity: bool
+    is_blockchain_proof_verified: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+
+
 class WalletTransactionRecord(BaseModel):
     tx_hash: str
     logical_time: str | None = None
@@ -180,6 +195,7 @@ class WalletTransactionRecord(BaseModel):
     success: Literal["success", "failed", "unknown"]
     provider: str
     source_status: WalletSourceStatus
+    transaction_identity: WalletTransactionIdentityRecord
     raw: dict[str, Any] | None = None
 
 
@@ -349,6 +365,7 @@ class WalletHistoryRunScopeRecord(BaseModel):
 class WalletHistoryIdentityGroupRecord(BaseModel):
     identity: str
     identity_type: Literal[
+        "account_transaction",
         "transaction_hash",
         "event_action",
         "event_reference",
@@ -366,6 +383,13 @@ class WalletHistoryCoverageRecord(BaseModel):
     timestamped_activity_observations: int = Field(ge=0)
     transaction_observations: int = Field(ge=0)
     transaction_observations_with_hash: int = Field(ge=0)
+    transaction_observations_with_exact_identity: int = Field(ge=0)
+    transaction_observations_with_weak_identity: int = Field(ge=0)
+    transaction_observations_with_unavailable_identity: int = Field(ge=0)
+    transaction_observations_with_invalid_identity_contract: int = Field(ge=0)
+    transaction_identity_coverage_state: Literal[
+        "not_observed", "complete", "incomplete"
+    ]
     overlapping_transaction_identity_groups: int = Field(ge=0)
     conflicting_transaction_identity_groups: int = Field(ge=0)
     swap_observations: int = Field(ge=0)
@@ -392,7 +416,7 @@ class WalletHistoryBlockerRecord(BaseModel):
 
 
 class WalletHistoryReadinessResponse(BaseModel):
-    analysis_version: Literal["wallet_history_readiness_v0.22.0"]
+    analysis_version: Literal["wallet_history_readiness_v0.22.3"]
     target_run_id: int
     run_ids: list[int]
     wallet_address: str

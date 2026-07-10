@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.2 WALLET IDENTITY";
+const RELEASE_LABEL = "v0.22.3 TRANSACTION IDENTITY";
 
 const navItems = [
   "DASHBOARD",
@@ -942,13 +942,13 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Canonical TON wallet identity</strong>
+            <strong>Low-level TON transaction identity</strong>
             <p>
-              Valid TON wallet inputs can resolve to a persisted,
-              migration-backed run-wallet identity while the submitted
-              representation remains visible. Activity-row identity,
-              pagination, history completeness, cost basis, and PnL are
-              unchanged.
+              Guarded real/live TonAPI transaction rows can persist a strict,
+              migration-backed tuple: network, canonical run account, LT, and
+              32-byte hash. Original tx_hash and LT remain visible. The tuple
+              is deduplication evidence only; no deduplication is applied and
+              PnL is unchanged.
             </p>
           </div>
         </div>
@@ -981,22 +981,22 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="Data contract"
-            text="Ownership proof remains unavailable; cluster comparison stays probabilistic; unlocked Real PnL covers in-window realized swaps only, while spot-based unrealized valuation remains separate and informational."
+            text="Transaction identity is not locally verified against blockchain proof and does not prove ownership. Cluster comparison stays probabilistic; realized and unrealized PnL behavior is unchanged."
           />
           <ReleaseReadinessItem
             tone="ready"
-            label="Wallet identity"
-            text="The canonical contract covers only the run wallet address. Invalid or legacy placeholders stay explicit; transaction, swap-action, jetton, and counterparty identities are not inferred."
+            label="Transaction identity"
+            text="Only coherent low-level real/live TonAPI rows receive the exact network + account + LT + hash tuple. Legacy live rows are backfilled only with matching stored provenance; mock or malformed rows stay unavailable."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="History readiness"
-            text="Explicit stored-run sets can be inspected against a target run. Results stay diagnostic: is_cost_basis and eligible_for_cost_basis remain false and no readiness output enters PnL."
+            text="v0.22.3 groups only coherent persisted tuples as exact transaction identity; legacy raw hashes and high-level event actions remain weak, and no exact swap identity is claimed."
           />
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Versioned revisions make database upgrades explicit and testable; additive wallet identity fields are persisted and backfilled through the migration path."
+            text="Retry-safe migration 0003 adds and verifies the low-level transaction identity fields and indexes without changing analytics semantics."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1046,12 +1046,17 @@ function EvidenceColumn({
         <EvidenceItem
           tone="warning"
           title="No canonical full-history cost basis"
-          text="History readiness exposes overlap and coverage blockers only. It does not merge runs, prove complete history, or supply acquisition cost basis."
+          text="Exact low-level transaction tuples do not merge runs, prove paginated history completeness, or supply acquisition cost basis."
         />
         <EvidenceItem
           tone="warning"
-          title="No ownership or intent proof"
-          text="Signals and cluster similarity are probabilistic evidence, never identity, intent, or ownership facts."
+          title="No exact high-level action identity"
+          text="Provider-derived event actions, including swaps, can change and remain weak evidence; no exact swap identity is claimed."
+        />
+        <EvidenceItem
+          tone="warning"
+          title="No ownership or blockchain proof"
+          text="The transaction tuple is deduplication evidence only. It is not locally blockchain-proof verified and never proves account ownership or actor intent."
         />
         <EvidenceItem
           tone="warning"

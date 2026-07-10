@@ -31,6 +31,57 @@ NONBOUNCEABLE_WALLET = "UQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPuwA"
 CANONICAL_WALLET = (
     "0:ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 )
+TRANSACTION_HASH = "ab" * 32
+TRANSACTION_LOGICAL_TIME = "46000000000001"
+
+
+def _scoped_wallet_identity(
+    *,
+    network: str = "ton-mainnet",
+    account: str = CANONICAL_WALLET,
+) -> dict[str, Any]:
+    return {
+        "status": "network_scoped",
+        "version": "ton_std_address_v1",
+        "network": network,
+        "canonical_address": account,
+        "workchain_id": int(account.split(":", 1)[0]),
+        "account_id_hex": account.split(":", 1)[1],
+        "submitted_format": "user_friendly",
+        "bounceable": True,
+        "testnet_only": network == "ton-testnet",
+        "is_account_existence_proof": False,
+        "is_ownership_proof": False,
+    }
+
+
+def _exact_transaction_identity(
+    *,
+    tx_hash: str = TRANSACTION_HASH,
+    logical_time: str = TRANSACTION_LOGICAL_TIME,
+    network: str = "ton-mainnet",
+    account: str = CANONICAL_WALLET,
+) -> dict[str, Any]:
+    canonical_hash = tx_hash.lower()
+    key = "|".join(
+        (
+            "ton_account_tx_v1",
+            network,
+            account,
+            logical_time,
+            canonical_hash,
+        )
+    )
+    return {
+        "status": "network_scoped",
+        "version": "ton_account_tx_v1",
+        "network": network,
+        "account_canonical": account,
+        "logical_time_canonical": logical_time,
+        "hash_canonical": canonical_hash,
+        "key": key,
+        "is_deduplication_identity": True,
+    }
 
 
 @pytest.fixture
@@ -71,8 +122,15 @@ def _transaction(
     provider: str = "tonapi",
     source_status: str = "live",
     raw: dict[str, Any] | None = None,
+    transaction_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    if transaction_identity is not None:
+        raw = dict(raw or {})
+        raw.setdefault("provider", "tonapi")
+        raw.setdefault("surface", "transactions")
+        raw.setdefault("tx_hash", tx_hash)
+        raw.setdefault("logical_time", logical_time)
+    record = {
         "tx_hash": tx_hash,
         "logical_time": logical_time,
         "timestamp": timestamp,
@@ -82,6 +140,9 @@ def _transaction(
         "source_status": source_status,
         "raw": raw,
     }
+    if transaction_identity is not None:
+        record["transaction_identity"] = transaction_identity
+    return record
 
 
 def _swap(
@@ -132,8 +193,9 @@ def _run(
     created_at: str = "2026-06-02T00:00:00Z",
     requested_surfaces: list[str] | None = None,
     unavailable_surfaces: list[str] | None = None,
+    wallet_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    response = {
         "run_id": run_id,
         "wallet_address": wallet_address,
         "data_mode": data_mode,
@@ -151,6 +213,9 @@ def _run(
         "_custom_start": custom_start,
         "_custom_end": custom_end,
     }
+    if wallet_identity is not None:
+        response["wallet_identity"] = wallet_identity
+    return response
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -276,25 +341,33 @@ def _blocker_codes(result: dict[str, Any]) -> set[str]:
 
 
 def test_transaction_semantics_ignore_raw_and_normalize_decimals_and_timestamps():
+    transaction_identity = _exact_transaction_identity()
+    wallet_identity = _scoped_wallet_identity()
     first = _run(
         1,
+        wallet_identity=wallet_identity,
         transactions=[
             _transaction(
-                "shared-hash",
+                TRANSACTION_HASH,
+                logical_time=TRANSACTION_LOGICAL_TIME,
                 fee_ton="1.000000000000000000",
                 timestamp="2026-06-01T10:00:00Z",
                 raw={"capture": "first", "provider_only": 1},
+                transaction_identity=transaction_identity,
             )
         ],
     )
     equivalent = _run(
         2,
+        wallet_identity=wallet_identity,
         transactions=[
             _transaction(
-                "shared-hash",
+                TRANSACTION_HASH.upper(),
+                logical_time=TRANSACTION_LOGICAL_TIME,
                 fee_ton="1.0",
                 timestamp="2026-06-01T10:00:00+00:00",
                 raw={"capture": "second", "provider_only": 999},
+                transaction_identity=transaction_identity,
             )
         ],
     )
@@ -305,26 +378,52 @@ def test_transaction_semantics_ignore_raw_and_normalize_decimals_and_timestamps(
     assert result["transaction_identity_groups_total"] == 1
     group = result["transaction_identity_groups"][0]
     assert group == {
-        "identity": "shared-hash",
-        "identity_type": "transaction_hash",
+        "identity": transaction_identity["key"],
+        "identity_type": "account_transaction",
         "identity_strength": "exact",
         "run_ids": [1, 2],
         "observation_count": 2,
         "distinct_payload_count": 1,
         "has_conflict": False,
     }
+    assert result["coverage"]["transaction_observations_with_exact_identity"] == 2
+    assert result["coverage"]["transaction_observations_with_weak_identity"] == 0
+    assert result["coverage"][
+        "transaction_observations_with_unavailable_identity"
+    ] == 0
+    assert result["coverage"]["transaction_identity_coverage_state"] == "complete"
+    assert "transaction_identity_coverage_incomplete" not in _blocker_codes(result)
+    assert "legacy_transaction_identity_fallback" not in _blocker_codes(result)
     assert result["coverage"]["conflicting_transaction_identity_groups"] == 0
     assert "transaction_payload_conflicts" not in _blocker_codes(result)
 
 
 def test_transaction_semantic_difference_is_reported_as_conflict():
+    transaction_identity = _exact_transaction_identity()
+    wallet_identity = _scoped_wallet_identity()
     first = _run(
         1,
-        transactions=[_transaction("shared-hash", fee_ton="1.0")],
+        wallet_identity=wallet_identity,
+        transactions=[
+            _transaction(
+                TRANSACTION_HASH,
+                logical_time=TRANSACTION_LOGICAL_TIME,
+                fee_ton="1.0",
+                transaction_identity=transaction_identity,
+            )
+        ],
     )
     conflicting = _run(
         2,
-        transactions=[_transaction("shared-hash", fee_ton="1.0001")],
+        wallet_identity=wallet_identity,
+        transactions=[
+            _transaction(
+                TRANSACTION_HASH,
+                logical_time=TRANSACTION_LOGICAL_TIME,
+                fee_ton="1.0001",
+                transaction_identity=transaction_identity,
+            )
+        ],
     )
 
     result = assess_wallet_history_readiness([first, conflicting], target_run_id=2)
@@ -339,7 +438,185 @@ def test_transaction_semantic_difference_is_reported_as_conflict():
     assert "transaction_payload_conflicts" in _blocker_codes(result)
 
 
-def test_swap_identity_distinguishes_weak_event_reference_and_exact_action():
+def test_transaction_identity_network_mismatch_is_never_exact():
+    wallet_identity = _scoped_wallet_identity(network="ton-mainnet")
+    first = _run(
+        1,
+        wallet_identity=wallet_identity,
+        transactions=[
+            _transaction(
+                TRANSACTION_HASH,
+                logical_time=TRANSACTION_LOGICAL_TIME,
+                transaction_identity=_exact_transaction_identity(
+                    network="ton-mainnet"
+                ),
+            )
+        ],
+    )
+    mismatched = _run(
+        2,
+        wallet_identity=wallet_identity,
+        transactions=[
+            _transaction(
+                TRANSACTION_HASH,
+                logical_time=TRANSACTION_LOGICAL_TIME,
+                transaction_identity=_exact_transaction_identity(
+                    network="ton-testnet"
+                ),
+            )
+        ],
+    )
+
+    result = assess_wallet_history_readiness([first, mismatched], target_run_id=2)
+
+    assert result["transaction_identity_groups_total"] == 1
+    group = result["transaction_identity_groups"][0]
+    assert group["identity_type"] == "transaction_hash"
+    assert group["identity_strength"] == "weak"
+    assert result["coverage"]["overlapping_transaction_identity_groups"] == 0
+    assert result["coverage"]["transaction_observations_with_exact_identity"] == 1
+    assert result["coverage"]["transaction_observations_with_weak_identity"] == 1
+    assert result["coverage"][
+        "transaction_observations_with_invalid_identity_contract"
+    ] == 1
+    assert "transaction_identity_contract_invalid" in _blocker_codes(result)
+    assert "transaction_identity_coverage_incomplete" in _blocker_codes(result)
+    assert "legacy_transaction_identity_fallback" in _blocker_codes(result)
+
+
+def test_malformed_claimed_transaction_key_falls_back_to_weak_diagnostic():
+    malformed = _exact_transaction_identity()
+    malformed["key"] = f"{malformed['key']}|tampered"
+    wallet_identity = _scoped_wallet_identity()
+    runs = [
+        _run(
+            run_id,
+            wallet_identity=wallet_identity,
+            transactions=[
+                _transaction(
+                    TRANSACTION_HASH,
+                    logical_time=TRANSACTION_LOGICAL_TIME,
+                    fee_ton=fee,
+                    transaction_identity=malformed,
+                )
+            ],
+        )
+        for run_id, fee in ((1, "1"), (2, "2"))
+    ]
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+
+    group = result["transaction_identity_groups"][0]
+    assert group["identity"] == TRANSACTION_HASH
+    assert group["identity_strength"] == "weak"
+    assert group["distinct_payload_count"] == 2
+    assert group["has_conflict"] is False
+    assert result["coverage"]["transaction_observations_with_exact_identity"] == 0
+    assert result["coverage"]["transaction_observations_with_weak_identity"] == 2
+    assert result["coverage"][
+        "transaction_observations_with_invalid_identity_contract"
+    ] == 2
+    assert result["coverage"]["conflicting_transaction_identity_groups"] == 0
+    assert "transaction_identity_contract_invalid" in _blocker_codes(result)
+    assert "transaction_payload_conflicts" not in _blocker_codes(result)
+
+
+def test_missing_transaction_contract_is_legacy_weak_never_exact():
+    result = assess_wallet_history_readiness(
+        [
+            _run(1, transactions=[_transaction("legacy-shared", fee_ton="1")]),
+            _run(2, transactions=[_transaction("legacy-shared", fee_ton="2")]),
+        ],
+        target_run_id=2,
+    )
+
+    group = result["transaction_identity_groups"][0]
+    assert group["identity"] == "legacy-shared"
+    assert group["identity_type"] == "transaction_hash"
+    assert group["identity_strength"] == "weak"
+    assert group["distinct_payload_count"] == 2
+    assert group["has_conflict"] is False
+    assert result["coverage"]["transaction_observations_with_exact_identity"] == 0
+    assert result["coverage"]["transaction_observations_with_weak_identity"] == 2
+    assert result["coverage"][
+        "transaction_observations_with_unavailable_identity"
+    ] == 0
+    assert result["coverage"]["transaction_identity_coverage_state"] == "incomplete"
+    assert "transaction_identity_coverage_incomplete" in _blocker_codes(result)
+    assert "legacy_transaction_identity_fallback" in _blocker_codes(result)
+    assert "transaction_identity_contract_invalid" not in _blocker_codes(result)
+    assert "overlapping_transaction_history" not in _blocker_codes(result)
+    assert "transaction_payload_conflicts" not in _blocker_codes(result)
+
+
+def test_exact_and_legacy_observations_emit_one_weak_hash_candidate_group():
+    scoped_wallet = _scoped_wallet_identity()
+    exact_identity = _exact_transaction_identity()
+    result = assess_wallet_history_readiness(
+        [
+            _run(
+                1,
+                wallet_identity=scoped_wallet,
+                transactions=[
+                    _transaction(
+                        TRANSACTION_HASH,
+                        transaction_identity=exact_identity,
+                    )
+                ],
+            ),
+            _run(
+                2,
+                wallet_identity=scoped_wallet,
+                transactions=[_transaction(TRANSACTION_HASH.upper())],
+            ),
+        ],
+        target_run_id=2,
+    )
+
+    assert result["transaction_identity_groups_total"] == 1
+    group = result["transaction_identity_groups"][0]
+    assert group["identity"] == TRANSACTION_HASH
+    assert group["identity_type"] == "transaction_hash"
+    assert group["identity_strength"] == "weak"
+    assert group["run_ids"] == [1, 2]
+    assert group["has_conflict"] is False
+    assert result["coverage"]["transaction_observations_with_exact_identity"] == 1
+    assert result["coverage"]["transaction_observations_with_weak_identity"] == 1
+
+
+def test_legacy_hex_hash_candidates_are_case_normalized_only_when_strict():
+    result = assess_wallet_history_readiness(
+        [
+            _run(1, transactions=[_transaction(TRANSACTION_HASH.upper())]),
+            _run(2, transactions=[_transaction(TRANSACTION_HASH)]),
+        ],
+        target_run_id=2,
+    )
+
+    assert result["transaction_identity_groups_total"] == 1
+    group = result["transaction_identity_groups"][0]
+    assert group["identity"] == TRANSACTION_HASH
+    assert group["identity_type"] == "transaction_hash"
+    assert group["identity_strength"] == "weak"
+
+
+def test_transaction_identity_coverage_counts_unavailable_rows():
+    result = assess_wallet_history_readiness(
+        [
+            _run(1, transactions=[_transaction("")]),
+            _run(2, transactions=[_transaction("legacy-only")]),
+        ],
+        target_run_id=2,
+    )
+
+    coverage = result["coverage"]
+    assert coverage["transaction_observations_with_exact_identity"] == 0
+    assert coverage["transaction_observations_with_weak_identity"] == 1
+    assert coverage["transaction_observations_with_unavailable_identity"] == 1
+    assert coverage["transaction_identity_coverage_state"] == "incomplete"
+
+
+def test_swap_raw_action_ordinal_and_event_reference_both_remain_weak():
     first = _run(
         1,
         swaps=[
@@ -378,19 +655,19 @@ def test_swap_identity_distinguishes_weak_event_reference_and_exact_action():
     result = assess_wallet_history_readiness([first, second], target_run_id=2)
 
     groups = {group["identity_type"]: group for group in result["swap_identity_groups"]}
-    exact = groups["event_action"]
+    action = groups["event_action"]
     weak = groups["event_reference"]
-    assert exact["identity"] == "tonapi:evt-exact:action_index:0"
-    assert exact["identity_strength"] == "exact"
-    assert exact["distinct_payload_count"] == 1
-    assert exact["has_conflict"] is False
+    assert action["identity"] == "tonapi:evt-exact:action_index:0"
+    assert action["identity_strength"] == "weak"
+    assert action["distinct_payload_count"] == 1
+    assert action["has_conflict"] is False
     assert weak["identity"] == "tonapi:evt-weak"
     assert weak["identity_strength"] == "weak"
     assert weak["distinct_payload_count"] == 1
     assert result["coverage"]["swap_observations"] == 4
-    assert result["coverage"]["swap_observations_with_exact_identity"] == 2
-    assert result["coverage"]["overlapping_exact_swap_identity_groups"] == 1
-    assert result["coverage"]["overlapping_weak_swap_identity_groups"] == 1
+    assert result["coverage"]["swap_observations_with_exact_identity"] == 0
+    assert result["coverage"]["overlapping_exact_swap_identity_groups"] == 0
+    assert result["coverage"]["overlapping_weak_swap_identity_groups"] == 2
     assert "weak_swap_identity" in _blocker_codes(result)
 
 
@@ -528,7 +805,7 @@ def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["analysis_version"] == "wallet_history_readiness_v0.22.0"
+    assert body["analysis_version"] == "wallet_history_readiness_v0.22.3"
     assert body["run_ids"] == [first_id, target_id]
     assert body["target_run_id"] == target_id
     assert next(scope for scope in body["runs"] if scope["is_target"])[

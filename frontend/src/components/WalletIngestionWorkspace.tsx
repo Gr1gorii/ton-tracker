@@ -85,6 +85,7 @@ const CAN_SHOW = [
   "Persisted source-labeled run",
   "Transfers",
   "Transactions",
+  "Network-scoped transaction identity",
   "Swaps",
   "Balances",
   "Provider evidence",
@@ -94,7 +95,7 @@ const CAN_SHOW = [
 
 const CANNOT_SHOW = [
   "Full-history acquisition cost basis",
-  "Canonical activity-row identity",
+  "Canonical transfer, swap-action, asset, and counterparty identity",
   "Legacy buyers/report wiring",
   "Ownership proof",
 ];
@@ -2076,17 +2077,18 @@ function TransactionsTable({
   return (
     <TableBlock
       title="Transactions"
-      description="Transaction rows preserve fees, status, provider, and source status."
+      description="Live low-level rows can expose a network-scoped account + LT + hash identity. The tuple is useful for deduplication evidence but is not locally proof-verified."
       count={transactions.length}
     >
       {transactions.length === 0 ? (
-        <EmptyTable message="Transactions were not requested or no mock rows were returned." />
+        <EmptyTable message="Transactions were not requested or no rows were returned." />
       ) : (
         <div className="table-wrap">
           <table className="data-table intelligence-table wallet-ingestion-table">
             <thead>
               <tr>
                 <th>Tx</th>
+                <th>Identity</th>
                 <th>Time</th>
                 <th className="num">Fee TON</th>
                 <th>Status</th>
@@ -2094,23 +2096,39 @@ function TransactionsTable({
               </tr>
             </thead>
             <tbody>
-              {transactions.map((item, index) => (
-                <tr key={`${item.tx_hash}:${index}`}>
-                  <td className="mono">{item.tx_hash}</td>
-                  <td>{dateLabel(item.timestamp)}</td>
-                  <td className="num">{displayPreviewValue(item.fee_ton)}</td>
-                  <td>
-                    <span className="source-badge source-real">
-                      {item.success}
-                    </span>
-                  </td>
-                  <td>
-                    <span className={sourceClass(item.source_status)}>
-                      {item.source_status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {transactions.map((item, index) => {
+                const identity = item.transaction_identity;
+                const scoped =
+                  identity?.status === "network_scoped" &&
+                  identity.is_deduplication_identity;
+                return (
+                  <tr key={`${item.tx_hash}:${index}`}>
+                    <td className="mono">{item.tx_hash}</td>
+                    <td title={identity?.key ?? "No persisted transaction identity"}>
+                      <span
+                        className={`source-badge ${scoped ? "source-real" : "source-unknown"}`}
+                      >
+                        {scoped ? "SCOPED TX ID" : "ID UNAVAILABLE"}
+                      </span>
+                      <div className="muted small">
+                        {identity?.network ?? "ton-unknown"} · proof not verified
+                      </div>
+                    </td>
+                    <td>{dateLabel(item.timestamp)}</td>
+                    <td className="num">{displayPreviewValue(item.fee_ton)}</td>
+                    <td>
+                      <span className="source-badge source-real">
+                        {item.success}
+                      </span>
+                    </td>
+                    <td>
+                      <span className={sourceClass(item.source_status)}>
+                        {item.source_status}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

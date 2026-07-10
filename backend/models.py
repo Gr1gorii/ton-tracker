@@ -146,6 +146,25 @@ class WalletTransfer(Base):
 
 class WalletTransaction(Base):
     __tablename__ = "wallet_transactions"
+    __table_args__ = (
+        Index(
+            "uq_wallet_transactions_run_identity",
+            "run_id",
+            "transaction_identity_key",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_transactions_identity_key",
+            "transaction_identity_key",
+        ),
+        Index(
+            "ix_wallet_transactions_identity_tuple",
+            "transaction_network",
+            "transaction_account_canonical",
+            "transaction_logical_time_canonical",
+            "transaction_hash_canonical",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     run_id = Column(
@@ -162,6 +181,28 @@ class WalletTransaction(Base):
     provider = Column(String, nullable=False)
     source_status = Column(String, nullable=False)
     raw_json = Column(Text, nullable=True)
+    transaction_identity_status = Column(
+        String(20),
+        nullable=False,
+        default="unavailable",
+        server_default="unavailable",
+    )
+    transaction_identity_version = Column(
+        String(24),
+        nullable=False,
+        default="unavailable",
+        server_default="unavailable",
+    )
+    transaction_network = Column(
+        String(16),
+        nullable=False,
+        default="ton-unknown",
+        server_default="ton-unknown",
+    )
+    transaction_account_canonical = Column(String(76), nullable=True)
+    transaction_logical_time_canonical = Column(String(20), nullable=True)
+    transaction_hash_canonical = Column(String(64), nullable=True)
+    transaction_identity_key = Column(String(192), nullable=True)
 
     run = relationship("WalletIngestionRun", back_populates="transactions")
 

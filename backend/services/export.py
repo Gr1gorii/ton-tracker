@@ -79,6 +79,13 @@ ACTIVITY_CSV_COLUMNS = [
     "balance_usd",
     "provider",
     "source_status",
+    "transaction_identity_status",
+    "transaction_identity_version",
+    "transaction_network",
+    "transaction_account_canonical",
+    "transaction_logical_time_canonical",
+    "transaction_hash_canonical",
+    "transaction_identity_key",
 ]
 
 
@@ -109,6 +116,7 @@ def wallet_ingestion_run_to_csv(run: dict) -> str:
             }
         )
     for item in run.get("transactions", []):
+        identity = item.get("transaction_identity") or {}
         writer.writerow(
             {
                 "surface": "transaction",
@@ -118,6 +126,17 @@ def wallet_ingestion_run_to_csv(run: dict) -> str:
                 "success": item.get("success"),
                 "provider": item.get("provider"),
                 "source_status": item.get("source_status"),
+                "transaction_identity_status": identity.get("status"),
+                "transaction_identity_version": identity.get("version"),
+                "transaction_network": identity.get("network"),
+                "transaction_account_canonical": identity.get(
+                    "account_canonical"
+                ),
+                "transaction_logical_time_canonical": identity.get(
+                    "logical_time_canonical"
+                ),
+                "transaction_hash_canonical": identity.get("hash_canonical"),
+                "transaction_identity_key": identity.get("key"),
             }
         )
     for item in run.get("swaps", []):
