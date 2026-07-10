@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.7 INTERVAL COVERAGE";
+const RELEASE_LABEL = "v0.22.8 PERSISTED RUN LOADER";
 
 const navItems = [
   "DASHBOARD",
@@ -942,17 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Selected-run bounded interval coverage</strong>
+            <strong>Read-only persisted-run resume</strong>
             <p>
-              Validated low-level transaction intervals and provider-display
-              event intervals now expose separate server-computed unions, gaps,
-              and overlaps across selected runs. Coverage is limited to the
-              validated selected span; time outside it remains unknown and PnL
-              is unchanged.
+              Open any canonical stored run ID without executing ingestion or
+              mutating the database. The workspace restores its exact request
+              scope and remounts run-scoped diagnostics while failed loads keep
+              the current result visible.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Stored run resume"
+            text="Canonical positive run IDs load through the persisted-run GET path; related signal and PnL cards may issue their own read-only GETs. No loader action writes data or calls ingestion providers."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="TonAPI live guard"
@@ -991,7 +995,7 @@ function EvidenceColumn({
           <ReleaseReadinessItem
             tone="scoped"
             label="History readiness"
-            text="v0.22.7 reports selected-run interval unions, internal gaps, overlaps, and excluded evidence separately for low-level transactions and provider-display events. It does not merge rows, prove global history, establish cost basis, or feed PnL."
+            text="The v0.22.7 readiness contract remains unchanged: selected-run interval unions, gaps, overlaps, and excluded evidence stay separate by stream and do not merge rows, prove global history, establish cost basis, or feed PnL."
           />
           <ReleaseReadinessItem
             tone="ready"

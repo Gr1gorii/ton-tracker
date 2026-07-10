@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.7 INTERVAL COVERAGE
+# TON Wallet Intelligence Dashboard — v0.22.8 PERSISTED RUN LOADER
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,13 +19,22 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.7 INTERVAL COVERAGE status — multi-run history readiness now strictly revalidates persisted transaction and account-event page evidence for 2-50 explicitly selected runs, then computes two independent half-open interval layers under `wallet_multi_run_interval_coverage_v1`. Exact integer-microsecond sweep results expose adjacency, overlaps, internal gaps, included/excluded/not-requested runs, and unknown time outside each earliest/latest eligible span. Microsecond totals are serialized as canonical decimal strings so browsers cannot round 64-bit values. The transaction and provider-display layers are never combined; TonAPI events remain display-only and non-authoritative. No activity merge, deduplication, global history, cost basis, or PnL claim is introduced.**
+> **v0.22.8 PERSISTED RUN LOADER status — the wallet workspace can load a previously persisted ingestion run through the existing `GET /api/wallets/ingest/{run_id}` endpoint. The backend accepts only canonical positive signed-64-bit URL ids (`[1-9][0-9]*`, at most `9223372036854775807`): an existing run returns 200, a canonical missing run returns 404, and malformed, noncanonical, zero, negative, or out-of-range input returns 422. Readback is database-only: it performs no ingestion, provider call, or database mutation. The response includes exact persisted `custom_start`, `custom_end`, and `created_at` values. The browser applies the narrower positive JavaScript safe-integer gate, restores stored controls only after a coherent response, atomically replaces preview/run state, preserves the prior run after a failed load, and remounts run-scoped cards when the selected run id changes. Datetime request signatures are normalized before stale-state comparison. The `wallet_history_readiness_v0.22.7` analysis and `wallet_multi_run_interval_coverage_v1` contract remain unchanged; no activity merge, deduplication, global history, cost basis, or PnL claim is introduced.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
 > - Wallet activity ingestion now has a dashboard workspace for coverage
 >   preview, persisted source-labeled runs, run refresh, evidence, warnings, and
 >   normalized activity tables.
+> - A dedicated **Load stored run** control validates a canonical positive
+>   JavaScript safe integer before issuing the existing read request. Successful
+>   readback restores the run's wallet, window, exact custom bounds, and
+>   requested surfaces as one state transition. A rejected or failed read keeps
+>   the previously displayed run and its run-scoped diagnostics intact.
+>   Custom bounds retain their canonical UTC strings for signatures and any
+>   immediate preview/run action until the corresponding field is edited, so
+>   DST folds and
+>   sub-millisecond precision are not silently changed by `datetime-local`.
 > - Wallet activity preview/run orchestration now goes through
 >   `backend/adapters/wallet_activity.py`.
 > - `WALLET_ACTIVITY_PROVIDER=mock` remains the default. Explicit
@@ -82,9 +91,9 @@ executable ingestion path.
 >   Revision 0005 adds retry-safe provider event/action observation fields and
 >   indexes to transfers and swaps. v0.22.5 rows lack the original action index,
 >   so they remain explicitly unavailable instead of receiving a guessed key.
->   v0.22.7 adds no database migration; Alembic head remains
->   `20260710_0005`. Interval coverage is recomputed read-only from validated
->   persisted acquisition evidence.
+>   v0.22.7 added no database migration, and v0.22.8 also adds none; Alembic
+>   head remains `20260710_0005`. Interval coverage and persisted-run readback
+>   remain read-only over existing evidence.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -152,7 +161,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.7 INTERVAL COVERAGE` product label
+> - User-facing UI copy uses the `v0.22.8 PERSISTED RUN LOADER` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -160,8 +169,10 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.7 INTERVAL
->   COVERAGE` is the product release label.
+> - The frontend uses Vite 8 and Vitest 4 for its build/test toolchain; the
+>   checked-in dependency graph reports zero `npm audit` vulnerabilities.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.8 PERSISTED
+>   RUN LOADER` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -172,7 +183,7 @@ executable ingestion path.
 | Layer    | Stack                                   |
 | -------- | --------------------------------------- |
 | Backend  | FastAPI (Python), SQLite, SQLAlchemy, Alembic |
-| Frontend | React + Vite + TypeScript               |
+| Frontend | React + Vite 8 + TypeScript; Vitest 4 tests |
 | Money    | `decimal.Decimal` for PnL math          |
 
 The code is intentionally modular: all network-specific logic lives behind
@@ -343,6 +354,10 @@ data. Restore a verified database backup instead of downgrading the baseline.
 
 ### Frontend
 
+Vite 8 and its React plugin require Node.js `^20.19.0 || >=22.12.0`; the
+checked-in package also requires npm 10 or newer. `frontend/package.json`
+declares the same engine contract so unsupported Node releases fail visibly.
+
 ```bash
 cd frontend
 npm install
@@ -359,7 +374,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.7 INTERVAL COVERAGE)
+## Data modes & providers (v0.22.8 PERSISTED RUN LOADER)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -421,7 +436,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.7 INTERVAL COVERAGE` is the current
+API-version field, while `v0.22.8 PERSISTED RUN LOADER` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -550,6 +565,27 @@ evidence for low-level transaction pagination and the shared account-
 event display stream. Runs created before migration 0004 have no synthesized
 stream or page records; their pagination state remains unavailable rather than
 inferred.
+
+This is the existing persisted-run read endpoint reused by the v0.22.8 loader;
+loading does not create a second endpoint or a new run. The URL id must be a
+canonical positive decimal string matching `[1-9][0-9]*` and fit the positive
+signed-64-bit range (`1..9223372036854775807`). A stored run returns 200, a
+canonical but absent id returns 404, and malformed, noncanonical, zero,
+negative, or out-of-range input returns 422. Readback performs no provider or
+ingestion-adapter call and no database write, commit, or mutation.
+
+The response includes the exact persisted `custom_start`, `custom_end`, and
+`created_at` timestamps. Non-custom runs return null custom bounds; custom runs
+return both exact bounds, allowing the workspace to restore the original
+request controls without deriving them from observed activity. The UI accepts
+only positive JavaScript safe integers before calling the endpoint, validates
+that the returned run matches the requested id, and applies wallet, time
+window, custom bounds, surfaces, snapshot, and displayed run atomically. A
+failed or incoherent load leaves the prior run selected. Selecting another run
+changes the keyed run id, so run-scoped evidence, PnL, signal, and interval
+cards remount instead of leaking state from the previous run. Canonical UTC
+datetime signatures prevent restored custom bounds from being marked stale
+solely because the form uses a local datetime representation.
 
 ### `GET /api/wallets/ingest/{run_id}/export.json` and `.../export.csv`
 Download one persisted run as JSON, or as flattened one-row-per-activity CSV.
@@ -799,9 +835,9 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.7 INTERVAL COVERAGE`).
+  tracks the current release (`v0.22.8 PERSISTED RUN LOADER`).
 
-## Roadmap beyond v0.22.7 INTERVAL COVERAGE
+## Roadmap beyond v0.22.8 PERSISTED RUN LOADER
 
 - Add authoritative low-level transfer/trade acquisition or trace-backed
   reconstruction before treating derived transfer or swap actions as complete.

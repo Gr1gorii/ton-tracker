@@ -217,6 +217,9 @@ def test_wallet_ingestion_response_contract_preserves_provider_evidence():
         run_id=7,
         wallet_address="EQwallet",
         time_window="24h",
+        custom_start=None,
+        custom_end=None,
+        created_at="2026-07-10T00:00:00Z",
         status="planned",
         data_mode="mock",
         wallet_identity=WalletIdentityRecord(
@@ -264,6 +267,10 @@ def test_wallet_ingestion_response_contract_preserves_provider_evidence():
     )
 
     assert response.provider_evidence[0].source_status == "limited"
+    assert response.run_id == 7
+    assert response.custom_start is None
+    assert response.custom_end is None
+    assert response.created_at == "2026-07-10T00:00:00Z"
     assert response.wallet_identity.status == "unavailable"
     assert response.wallet_identity.is_ownership_proof is False
     assert response.transfers[0].asset == "TON"

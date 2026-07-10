@@ -1,12 +1,12 @@
-# TON Wallet Intelligence Dashboard — v0.22.7 INTERVAL COVERAGE Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.22.8 PERSISTED RUN LOADER Promotion Checklist
 
-Operational gates for promoting deterministic selected-run interval coverage
-while preserving strict acquisition evidence and non-authoritative provider
-semantics.
+Operational gates for promoting read-only persisted-run loading while
+preserving strict acquisition evidence, deterministic selected-run interval
+coverage, and non-authoritative provider semantics.
 
 ## Version contract
 
-- Product label is `v0.22.7 INTERVAL COVERAGE`.
+- Product label is `v0.22.8 PERSISTED RUN LOADER`.
 - Backend `VERSION=0.2.1` remains the independent API-version field.
 - `wallet_history_readiness_v0.22.7` is the diagnostic analysis contract.
 - `wallet_multi_run_interval_coverage_v1` is the bounded multi-run coverage
@@ -16,7 +16,7 @@ semantics.
 
 ## Schema and migration gates
 
-- v0.22.7 adds no database migration.
+- v0.22.8 adds no database migration.
 - Alembic head remains `20260710_0005`.
 - Fresh, exact legacy, and versioned databases follow the existing baseline
   through revisions 0002-0005 without `create_all()` repair.
@@ -26,6 +26,34 @@ semantics.
   legacy runs.
 - Existing uniqueness, foreign-key cascade, retry, integrity, and unsupported-
   downgrade behavior remains intact.
+
+## Persisted-run read gates
+
+- The workspace reuses `GET /api/wallets/ingest/{run_id}`; no parallel loader
+  endpoint and no new run-creation path is introduced.
+- Backend URL ids match `[1-9][0-9]*` and fit the positive signed-64-bit range
+  `1..9223372036854775807`.
+- An existing canonical id returns 200, a canonical missing id returns 404, and
+  malformed, noncanonical, zero, negative, or out-of-range input returns 422.
+- Readback returns exact persisted `custom_start`, `custom_end`, and `created_at`
+  fields. Rolling windows have null custom bounds; custom windows have both
+  saved bounds.
+- The GET path performs no provider or ingestion-adapter construction/call and
+  no insert, update, delete, commit, or other database mutation.
+- The frontend trims surrounding form whitespace, then rejects noncanonical,
+  nonpositive, and non-safe-integer input before issuing a request, even though
+  the backend contract spans the wider signed-64-bit range.
+- A coherent success atomically replaces wallet, window, exact custom bounds,
+  requested surfaces, snapshot, and current run while clearing preview state.
+- A 404, 422, transport failure, stale response, or incoherent response keeps
+  the previously selected run and its results visible.
+- Run-scoped evidence, PnL, signal, and interval cards remount when the selected
+  run id changes; no result or error from the prior id survives the remount.
+- Datetime request signatures are normalized to canonical UTC before stale-
+  state comparison.
+- Each loaded custom bound retains its exact canonical UTC value for signatures
+  and preview/run payloads until its date field is edited; DST folds and
+  persisted microseconds must round-trip unchanged.
 
 ## Selected-run request gates
 
@@ -124,8 +152,15 @@ Run from `backend/`:
 Run from `frontend/`:
 
 ```bash
+npm test
 npm run build
+npm audit
 ```
+
+The frontend release toolchain is Vitest 4 with Vite 8. The checked-in
+dependency graph must report zero `npm audit` vulnerabilities.
+Node.js must satisfy `^20.19.0 || >=22.12.0`, with npm 10 or newer, as declared
+in `frontend/package.json`.
 
 Run repository hygiene checks before staging:
 
@@ -136,6 +171,26 @@ git status --short
 
 Do not insert a test total into release documents. Record the actual command
 results in promotion evidence at execution time.
+
+## Focused persisted-run verification
+
+- Existing and missing canonical ids return 200 and 404 respectively.
+- Backend URL ids with zero, negatives, decimal aliases, leading-zero aliases,
+  signs, whitespace, non-digits, or values above `9223372036854775807` return
+  422 rather than resolving to another run or reaching the database as an
+  invalid integer. The UI may trim surrounding form whitespace before sending
+  the canonical decimal id.
+- Repeated reads return identical payloads, including exact persisted
+  `custom_start`, `custom_end`, and `created_at`, and produce no database DML.
+- A stored-run read cannot construct or call the configured provider adapter.
+- Frontend parsing issues no request for a noncanonical or unsafe id.
+- Successful loading restores exact stored controls and shows the selected run;
+  preview and run results never shadow one another.
+- Failed and out-of-order loads preserve the prior/current run respectively.
+- Loading another id remounts every run-scoped card, including selected-run
+  interval coverage, and resets state belonging to the prior target.
+- Equivalent local-form and UTC custom datetimes produce the same request
+  signature and do not create an immediate stale marker.
 
 ## Focused interval verification
 
@@ -174,7 +229,11 @@ and verify:
 
 ## UI and documentation gates
 
-- Dashboard label reads `v0.22.7 INTERVAL COVERAGE` on desktop and mobile.
+- Dashboard label reads `v0.22.8 PERSISTED RUN LOADER` on desktop and mobile.
+- The stored-run loader accepts one positive safe integer, restores exact stored
+  controls only on success, and leaves the previous run visible on failure.
+- Loading a different run remounts run-scoped cards without console errors,
+  focus loss, stale-state mislabeling, or horizontal overflow.
 - The selected-run history-readiness card identifies the current run as target
   and accepts enough additional distinct ids for a total of 2-50 selected runs.
 - The card separately renders low-level transaction and provider-display event
@@ -196,17 +255,18 @@ After every gate passes:
 
 ```bash
 git checkout main
-git merge --no-ff codex/v0.22.7-interval-coverage
-git tag -a v0.22.7 -m "v0.22.7 INTERVAL COVERAGE"
+git merge --no-ff codex/v0.22.8-persisted-run-loader
+git tag -a v0.22.8 -m "v0.22.8 PERSISTED RUN LOADER"
 git push origin main
-git push origin v0.22.7
+git push origin v0.22.8
 ```
 
 ## Rollback
 
 - Before push, patch the release branch and rerun all gates.
 - After push, use a follow-up revert commit; do not rewrite published history.
-- v0.22.7 has no schema migration. Reverting its code removes the computed
-  interval view without a database downgrade or data rewrite.
+- v0.22.8 has no schema migration. Reverting its code removes the stored-run
+  loader without a database downgrade or data rewrite; the existing persisted
+  runs and interval diagnostics remain intact.
 - The existing revision 0005 backup/restore policy remains applicable only to
   older schema changes.

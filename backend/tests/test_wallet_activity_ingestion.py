@@ -8,7 +8,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -27,6 +27,24 @@ VALID_MAINNET_CANONICAL = (
 )
 VALID_TRANSACTION_HASH = "ab" * 32
 EVENT_ACTION_IDENTITY_VERSION = "tonapi_event_action_obs_v1"
+WALLET_TABLES = (
+    "wallet_ingestion_runs",
+    "wallet_transfers",
+    "wallet_transactions",
+    "wallet_swaps",
+    "wallet_balance_snapshots",
+    "wallet_ingestion_warnings",
+    "wallet_acquisition_streams",
+    "wallet_acquisition_pages",
+)
+
+
+def _wallet_table_counts(engine) -> tuple[int, ...]:
+    with engine.connect() as connection:
+        return tuple(
+            connection.execute(text(f"SELECT COUNT(*) FROM {table_name}")).scalar_one()
+            for table_name in WALLET_TABLES
+        )
 
 
 def _event_page(
@@ -76,9 +94,11 @@ def client():
             session.close()
 
     app.dependency_overrides[get_session] = override_get_session
+    app.state.wallet_ingestion_test_engine = engine
     try:
         yield TestClient(app)
     finally:
+        del app.state.wallet_ingestion_test_engine
         app.dependency_overrides.clear()
 
 
@@ -1385,6 +1405,111 @@ def test_wallet_ingestion_rolling_window_rejects_custom_fields(client):
 
 def test_wallet_ingestion_missing_run_returns_404(client):
     response = client.get("/api/wallets/ingest/404")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Wallet ingestion run not found"
+
+
+def test_wallet_ingestion_read_restores_exact_stored_request_scope(client, monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    payload = {
+        "wallet_address": VALID_MAINNET_WALLET,
+        "time_window": "custom",
+        "custom_start": "2026-06-01T00:00:00Z",
+        "custom_end": "2026-06-02T00:00:00Z",
+        "surfaces": ["transactions", "swaps"],
+    }
+    created = client.post("/api/wallets/ingest", json=payload)
+    assert created.status_code == 200
+    run_id = created.json()["run_id"]
+
+    engine = app.state.wallet_ingestion_test_engine
+    counts_before = _wallet_table_counts(engine)
+    statements: list[str] = []
+
+    def capture_statement(_conn, _cursor, statement, _params, _context, _many):
+        statements.append(statement.strip().upper())
+
+    monkeypatch.setattr(
+        "services.wallet_activity_ingestion.build_wallet_activity_adapter",
+        lambda *_args, **_kwargs: pytest.fail(
+            "reading a stored run must not build or call an ingestion provider"
+        ),
+    )
+    event.listen(engine, "before_cursor_execute", capture_statement)
+    try:
+        first_read = client.get(f"/api/wallets/ingest/{run_id}")
+        second_read = client.get(f"/api/wallets/ingest/{run_id}")
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_statement)
+
+    assert first_read.status_code == 200
+    assert second_read.status_code == 200
+    assert second_read.json() == first_read.json()
+    assert _wallet_table_counts(engine) == counts_before
+    assert statements
+    assert all(
+        not statement.startswith(
+            ("INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "ALTER", "DROP")
+        )
+        for statement in statements
+    )
+    body = first_read.json()
+    assert body["run_id"] == run_id
+    assert body["wallet_address"] == payload["wallet_address"]
+    assert body["time_window"] == "custom"
+    assert body["custom_start"] == payload["custom_start"]
+    assert body["custom_end"] == payload["custom_end"]
+    assert body["requested_surfaces"] == payload["surfaces"]
+    assert body["created_at"].endswith("Z")
+
+
+def test_wallet_ingestion_read_reports_null_custom_bounds_for_rolling_run(
+    client,
+    monkeypatch,
+):
+    monkeypatch.setenv("DATA_MODE", "mock")
+    created = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": VALID_MAINNET_WALLET,
+            "time_window": "24h",
+            "surfaces": ["transactions"],
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.get(f"/api/wallets/ingest/{created.json()['run_id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["time_window"] == "24h"
+    assert body["custom_start"] is None
+    assert body["custom_end"] is None
+
+
+@pytest.mark.parametrize(
+    "run_path",
+    [
+        "0",
+        "-1",
+        "abc",
+        "true",
+        "1.0",
+        "01",
+        "+1",
+        "%201",
+        str(2**63),
+    ],
+)
+def test_wallet_ingestion_read_rejects_invalid_run_path(client, run_path):
+    response = client.get(f"/api/wallets/ingest/{run_path}")
+
+    assert response.status_code == 422
+
+
+def test_wallet_ingestion_read_accepts_max_int64_as_canonical_missing_id(client):
+    response = client.get(f"/api/wallets/ingest/{2**63 - 1}")
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Wallet ingestion run not found"
