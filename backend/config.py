@@ -15,10 +15,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 DEFAULT_GECKOTERMINAL_BASE_URL = "https://api.geckoterminal.com/api/v2"
 DEFAULT_STONFI_BASE_URL = "https://api.ston.fi"
 DEFAULT_TONAPI_BASE_URL = "https://tonapi.io"
+DEFAULT_TONAPI_TESTNET_BASE_URL = "https://testnet.tonapi.io"
 
 # Machine-readable provider error codes.
 ERROR_PROVIDER_NOT_CONFIGURED = "provider_not_configured"
@@ -69,6 +71,7 @@ class Settings:
     wallet_activity_live_tx_limit: int = 100
     wallet_activity_live_transfer_limit: int = 100
     wallet_activity_live_swap_limit: int = 100
+    ton_network: str = "mainnet"
 
     @property
     def is_mock(self) -> bool:
@@ -98,6 +101,16 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
 
+def tonapi_base_url_network(base_url: str) -> str | None:
+    """Return the network of an official TonAPI host, if recognizable."""
+    hostname = (urlparse(base_url).hostname or "").lower()
+    if hostname == "tonapi.io":
+        return "mainnet"
+    if hostname == "testnet.tonapi.io":
+        return "testnet"
+    return None
+
+
 def get_settings() -> Settings:
     """Read settings fresh from the environment.
 
@@ -106,6 +119,15 @@ def get_settings() -> Settings:
     mode = _env("DATA_MODE", "mock").lower()
     if mode not in ("mock", "real"):
         mode = "mock"
+    ton_network = _env("TON_NETWORK", "mainnet").lower()
+    if ton_network not in ("mainnet", "testnet"):
+        ton_network = "mainnet"
+    default_tonapi_base_url = (
+        DEFAULT_TONAPI_TESTNET_BASE_URL
+        if ton_network == "testnet"
+        else DEFAULT_TONAPI_BASE_URL
+    )
+    tonapi_base_url = _env("TONAPI_BASE_URL") or default_tonapi_base_url
 
     return Settings(
         data_mode=mode,
@@ -119,8 +141,7 @@ def get_settings() -> Settings:
         bitquery_api_key=_env("BITQUERY_API_KEY"),
         stonfi_base_url=_env("STONFI_BASE_URL", DEFAULT_STONFI_BASE_URL)
         or DEFAULT_STONFI_BASE_URL,
-        tonapi_base_url=_env("TONAPI_BASE_URL", DEFAULT_TONAPI_BASE_URL)
-        or DEFAULT_TONAPI_BASE_URL,
+        tonapi_base_url=tonapi_base_url,
         tonapi_api_key=_env("TONAPI_API_KEY"),
         wallet_activity_provider=_env("WALLET_ACTIVITY_PROVIDER", "mock").lower()
         or "mock",
@@ -149,6 +170,7 @@ def get_settings() -> Settings:
             minimum=1,
             maximum=1000,
         ),
+        ton_network=ton_network,
     )
 
 

@@ -11,6 +11,7 @@ import adapters.tonapi as tonapi_module
 from adapters.tonapi import TonapiAdapter
 from config import (
     DEFAULT_TONAPI_BASE_URL,
+    DEFAULT_TONAPI_TESTNET_BASE_URL,
     ERROR_PROVIDER_ERROR,
     ERROR_PROVIDER_NOT_CONFIGURED,
     Settings,
@@ -62,11 +63,43 @@ def _forbid_network(monkeypatch):
 def test_config_default_tonapi_base_url_exists(monkeypatch):
     monkeypatch.delenv("TONAPI_BASE_URL", raising=False)
     monkeypatch.delenv("TONAPI_API_KEY", raising=False)
+    monkeypatch.delenv("TON_NETWORK", raising=False)
 
     settings = get_settings()
 
     assert settings.tonapi_base_url == DEFAULT_TONAPI_BASE_URL
     assert settings.tonapi_api_key == ""
+
+
+def test_config_testnet_uses_official_testnet_base_url(monkeypatch):
+    monkeypatch.delenv("TONAPI_BASE_URL", raising=False)
+    monkeypatch.setenv("TON_NETWORK", "testnet")
+
+    settings = get_settings()
+
+    assert settings.tonapi_base_url == DEFAULT_TONAPI_TESTNET_BASE_URL
+
+
+def test_official_tonapi_host_must_match_configured_network(monkeypatch):
+    _forbid_network(monkeypatch)
+
+    mismatched = TonapiAdapter(
+        _settings(
+            "real",
+            ton_network="testnet",
+            tonapi_base_url=DEFAULT_TONAPI_BASE_URL,
+        )
+    )
+    matched = TonapiAdapter(
+        _settings(
+            "real",
+            ton_network="testnet",
+            tonapi_base_url=DEFAULT_TONAPI_TESTNET_BASE_URL,
+        )
+    )
+
+    assert mismatched.is_configured() is False
+    assert matched.is_configured() is True
 
 
 def test_status_mock_mode_does_not_probe_network(monkeypatch):

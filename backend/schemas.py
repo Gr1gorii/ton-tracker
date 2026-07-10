@@ -216,12 +216,27 @@ class WalletIngestionWarningRecord(BaseModel):
     evidence_key: str | None = None
 
 
+class WalletIdentityRecord(BaseModel):
+    status: Literal["network_scoped", "unscoped", "unavailable"]
+    version: str
+    network: Literal["ton-mainnet", "ton-testnet", "ton-unknown"]
+    canonical_address: str | None = None
+    workchain_id: int | None = None
+    account_id_hex: str | None = None
+    submitted_format: Literal["user_friendly", "raw", "unrecognized"]
+    bounceable: bool | None = None
+    testnet_only: bool | None = None
+    is_account_existence_proof: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+
+
 class WalletIngestionRunResponse(BaseModel):
     run_id: int | None = None
     wallet_address: str
     time_window: str
     status: WalletIngestionStatus
     data_mode: Literal["mock", "real"]
+    wallet_identity: WalletIdentityRecord
     requested_surfaces: list[WalletIngestionSurface]
     provider_evidence: list[WalletActivityProviderEvidence] = Field(
         default_factory=list
@@ -311,6 +326,8 @@ class WalletHistoryReadinessRequest(BaseModel):
 class WalletHistoryRunScopeRecord(BaseModel):
     run_id: int
     is_target: bool
+    wallet_address: str
+    wallet_identity: WalletIdentityRecord
     time_window: str
     status: WalletIngestionStatus
     created_at: str | None = None
@@ -379,6 +396,7 @@ class WalletHistoryReadinessResponse(BaseModel):
     target_run_id: int
     run_ids: list[int]
     wallet_address: str
+    wallet_identity: WalletIdentityRecord
     data_mode: Literal["mock", "real"]
     requested_bounds_verified: Literal[False] = False
     observed_activity_start: str | None = None

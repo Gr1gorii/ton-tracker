@@ -22,6 +22,19 @@ from services.wallet_activity_ingestion import wallet_ingestion_run_to_response
 
 _EXACT_SWAP_ORDINAL_KEYS = ("action_id", "action_index", "action_ordinal")
 _MAX_IDENTITY_GROUPS = 200
+_UNAVAILABLE_WALLET_IDENTITY = {
+    "status": "unavailable",
+    "version": "unavailable",
+    "network": "ton-unknown",
+    "canonical_address": None,
+    "workchain_id": None,
+    "account_id_hex": None,
+    "submitted_format": "unrecognized",
+    "bounceable": None,
+    "testnet_only": None,
+    "is_account_existence_proof": False,
+    "is_ownership_proof": False,
+}
 
 
 def _isoformat(value: datetime | None) -> str | None:
@@ -117,6 +130,26 @@ def _activity_timestamps(run: dict[str, Any]) -> list[datetime]:
     return timestamps
 
 
+def _wallet_identity(run: dict[str, Any]) -> dict[str, Any]:
+    identity = run.get("wallet_identity")
+    if not isinstance(identity, dict):
+        return dict(_UNAVAILABLE_WALLET_IDENTITY)
+    return {**_UNAVAILABLE_WALLET_IDENTITY, **identity}
+
+
+def _scoped_wallet_identity_key(run: dict[str, Any]) -> tuple[str, str] | None:
+    identity = _wallet_identity(run)
+    network = identity.get("network")
+    canonical_address = identity.get("canonical_address")
+    if identity.get("status") != "network_scoped":
+        return None
+    if network not in {"ton-mainnet", "ton-testnet"}:
+        return None
+    if not isinstance(canonical_address, str) or not canonical_address:
+        return None
+    return network, canonical_address
+
+
 def _run_scope(run: dict[str, Any], target_run_id: int) -> dict[str, Any]:
     transfers = run.get("transfers") or []
     transactions = run.get("transactions") or []
@@ -135,6 +168,8 @@ def _run_scope(run: dict[str, Any], target_run_id: int) -> dict[str, Any]:
     return {
         "run_id": run["run_id"],
         "is_target": run["run_id"] == target_run_id,
+        "wallet_address": run["wallet_address"],
+        "wallet_identity": _wallet_identity(run),
         "time_window": run["time_window"],
         "status": run["status"],
         "created_at": run.get("_created_at"),
@@ -380,8 +415,8 @@ def _build_blockers(
             run_ids=run_ids,
         ),
         _blocker(
-            "canonical_identity_unavailable",
-            "Legacy runs do not persist a canonical network/address revision contract, and swap actions usually lack a stable action ordinal.",
+            "canonical_activity_identity_unavailable",
+            "Transaction, transfer, swap-action, jetton-asset, and counterparty rows do not yet share a complete canonical identity contract.",
             run_ids=run_ids,
         ),
         _blocker(
@@ -412,6 +447,20 @@ def _build_blockers(
                 "mock_data_not_cost_basis",
                 "Deterministic mock fixtures are not on-chain history and cannot establish cost basis.",
                 run_ids=run_ids,
+            )
+        )
+
+    unscoped_wallet_runs = [
+        run["run_id"]
+        for run in runs
+        if _scoped_wallet_identity_key(run) is None
+    ]
+    if unscoped_wallet_runs:
+        blockers.append(
+            _blocker(
+                "wallet_identity_unavailable",
+                "At least one run wallet lacks a network-scoped canonical TON address; exact submitted strings are used only as a legacy diagnostic fallback.",
+                run_ids=unscoped_wallet_runs,
             )
         )
 
@@ -596,10 +645,21 @@ def assess_wallet_history_readiness(
     if target_run_id not in run_ids:
         raise ValueError("target_run_id must be included in run_ids.")
 
+    target_run = next(
+        run for run in run_responses if run.get("run_id") == target_run_id
+    )
     wallet_addresses = {run.get("wallet_address") for run in run_responses}
-    if len(wallet_addresses) != 1 or not next(iter(wallet_addresses), None):
+    scoped_identity_keys = [
+        _scoped_wallet_identity_key(run) for run in run_responses
+    ]
+    if all(key is not None for key in scoped_identity_keys):
+        if len(set(scoped_identity_keys)) != 1:
+            raise ValueError(
+                "All history-readiness runs must resolve to the same network-scoped canonical wallet identity."
+            )
+    elif len(wallet_addresses) != 1 or not next(iter(wallet_addresses), None):
         raise ValueError(
-            "All history-readiness runs must use the exact same wallet_address."
+            "Runs without complete canonical wallet identity must use the exact same wallet_address."
         )
     data_modes = {run.get("data_mode") for run in run_responses}
     if len(data_modes) != 1 or next(iter(data_modes), None) not in {"mock", "real"}:
@@ -621,7 +681,8 @@ def assess_wallet_history_readiness(
         "analysis_version": "wallet_history_readiness_v0.22.0",
         "target_run_id": target_run_id,
         "run_ids": run_ids,
-        "wallet_address": next(iter(wallet_addresses)),
+        "wallet_address": target_run["wallet_address"],
+        "wallet_identity": _wallet_identity(target_run),
         "data_mode": next(iter(data_modes)),
         "requested_bounds_verified": False,
         "observed_activity_start": (

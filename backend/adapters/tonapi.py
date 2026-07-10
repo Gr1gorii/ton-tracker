@@ -26,6 +26,7 @@ from config import (
     ProviderResult,
     Settings,
     get_settings,
+    tonapi_base_url_network,
 )
 
 _HTTP_TIMEOUT = 10
@@ -51,6 +52,12 @@ class TonapiAdapter:
         if not base_url or parsed.scheme not in ("http", "https"):
             return None
         if not parsed.netloc:
+            return None
+        provider_network = tonapi_base_url_network(base_url)
+        if (
+            provider_network is not None
+            and provider_network != self.settings.ton_network
+        ):
             return None
         return base_url
 

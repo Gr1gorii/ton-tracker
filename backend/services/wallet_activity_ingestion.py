@@ -25,8 +25,12 @@ from adapters.wallet_activity import (
     WalletActivityWarning,
     build_wallet_activity_adapter,
 )
-from config import get_settings
+from config import get_settings, tonapi_base_url_network
 from services.pricing import price_assets
+from services.ton_address_identity import (
+    TonAddressIdentity,
+    derive_ton_wallet_identity,
+)
 from models import (
     WalletBalanceSnapshot,
     WalletIngestionRun,
@@ -45,6 +49,7 @@ def build_wallet_ingestion_preview(
     """Return adapter coverage for a wallet ingestion request."""
     settings = settings or get_settings()
     _validate_window(payload)
+    _derive_request_wallet_identity(payload.wallet_address, settings)
     adapter = build_wallet_activity_adapter(settings)
     result = adapter.preview(_adapter_request(payload, settings))
 
@@ -68,11 +73,24 @@ def persist_mock_wallet_ingestion(
     """Persist one adapter-backed mock wallet ingestion run and return it."""
     settings = settings or get_settings()
     start, end = _validate_window(payload)
+    wallet_identity = _derive_request_wallet_identity(
+        payload.wallet_address,
+        settings,
+    )
     adapter = build_wallet_activity_adapter(settings)
     result = adapter.ingest(_adapter_request(payload, settings))
 
     run = WalletIngestionRun(
         wallet_address=payload.wallet_address,
+        wallet_identity_status=wallet_identity.status,
+        wallet_identity_version=wallet_identity.version,
+        wallet_network=wallet_identity.network,
+        wallet_address_canonical=wallet_identity.canonical_address,
+        wallet_workchain_id=wallet_identity.workchain_id,
+        wallet_account_id_hex=wallet_identity.account_id_hex,
+        wallet_address_format=wallet_identity.submitted_format,
+        wallet_address_bounceable=wallet_identity.bounceable,
+        wallet_address_testnet_only=wallet_identity.testnet_only,
         time_window=payload.time_window,
         custom_start=start,
         custom_end=end,
@@ -137,6 +155,7 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
     return {
         "run_id": run.id,
         "wallet_address": run.wallet_address,
+        "wallet_identity": _wallet_identity_record(run),
         "time_window": run.time_window,
         "status": run.status,
         "data_mode": run.data_mode,
@@ -152,6 +171,60 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
         "activity_summary": _activity_summary(
             transfers, transactions, swaps, balances
         ),
+    }
+
+
+def _derive_request_wallet_identity(
+    wallet_address: str,
+    settings,
+) -> TonAddressIdentity:
+    network_context = (
+        "ton-testnet" if settings.ton_network == "testnet" else "ton-mainnet"
+    )
+    identity = derive_ton_wallet_identity(
+        wallet_address,
+        network_context=network_context,
+    )
+    live_tonapi = (
+        settings.is_real
+        and settings.wallet_activity_provider == "tonapi"
+        and settings.wallet_activity_live_enabled
+    )
+    if not live_tonapi:
+        return identity
+    if identity.status != "network_scoped":
+        raise ValueError(
+            "Live TonAPI ingestion requires a valid standard TON wallet address."
+        )
+    if identity.network != network_context:
+        raise ValueError(
+            "Wallet address network scope does not match TON_NETWORK."
+        )
+    if identity.workchain_id not in (-1, 0):
+        raise ValueError(
+            "Live TonAPI ingestion supports standard workchains -1 and 0 only."
+        )
+    provider_network = tonapi_base_url_network(settings.tonapi_base_url)
+    if provider_network is not None and provider_network != settings.ton_network:
+        raise ValueError(
+            "Official TonAPI base URL network does not match TON_NETWORK."
+        )
+    return identity
+
+
+def _wallet_identity_record(run: WalletIngestionRun) -> dict[str, Any]:
+    return {
+        "status": run.wallet_identity_status,
+        "version": run.wallet_identity_version,
+        "network": run.wallet_network,
+        "canonical_address": run.wallet_address_canonical,
+        "workchain_id": run.wallet_workchain_id,
+        "account_id_hex": run.wallet_account_id_hex,
+        "submitted_format": run.wallet_address_format,
+        "bounceable": run.wallet_address_bounceable,
+        "testnet_only": run.wallet_address_testnet_only,
+        "is_account_existence_proof": False,
+        "is_ownership_proof": False,
     }
 
 

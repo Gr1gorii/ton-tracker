@@ -26,6 +26,13 @@ from models import (
 from services.wallet_history_readiness import assess_wallet_history_readiness
 
 
+BOUNCEABLE_WALLET = "EQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPrHF"
+NONBOUNCEABLE_WALLET = "UQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPuwA"
+CANONICAL_WALLET = (
+    "0:ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
+)
+
+
 @pytest.fixture
 def db_client():
     engine = create_engine(
@@ -539,6 +546,44 @@ def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
     pnl_after_response = client.get(f"/api/wallets/ingest/{target_id}/pnl-preview")
     assert pnl_after_response.status_code == 200
     assert pnl_after_response.json() == pnl_before
+
+
+def test_endpoint_groups_bounce_variants_by_scoped_wallet_identity(
+    db_client,
+    monkeypatch,
+):
+    client, _ = db_client
+    monkeypatch.setenv("DATA_MODE", "mock")
+    run_ids = []
+    for wallet_address in (BOUNCEABLE_WALLET, NONBOUNCEABLE_WALLET):
+        response = client.post(
+            "/api/wallets/ingest",
+            json={
+                "wallet_address": wallet_address,
+                "time_window": "24h",
+                "surfaces": ["transactions", "swaps"],
+            },
+        )
+        assert response.status_code == 200
+        run_ids.append(response.json()["run_id"])
+
+    response = client.post(
+        "/api/wallets/history/readiness",
+        json={"target_run_id": run_ids[1], "run_ids": run_ids},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["wallet_address"] == NONBOUNCEABLE_WALLET
+    assert body["wallet_identity"]["status"] == "network_scoped"
+    assert body["wallet_identity"]["network"] == "ton-mainnet"
+    assert body["wallet_identity"]["canonical_address"] == CANONICAL_WALLET
+    assert [scope["wallet_address"] for scope in body["runs"]] == [
+        BOUNCEABLE_WALLET,
+        NONBOUNCEABLE_WALLET,
+    ]
+    assert "wallet_identity_unavailable" not in _blocker_codes(body)
+    assert "canonical_activity_identity_unavailable" in _blocker_codes(body)
 
 
 @pytest.mark.parametrize(
