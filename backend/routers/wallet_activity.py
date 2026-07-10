@@ -29,6 +29,7 @@ from schemas import (
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
+    WalletJettonPayloadObservationsResponse,
     WalletTransactionTraceEvidenceResponse,
 )
 from schemas import WalletRunPnlPreviewResponse
@@ -63,6 +64,10 @@ from services.wallet_trace_boc_verification import (
     get_wallet_transaction_boc_message_evidence,
     get_wallet_transaction_trace_boc_verification,
     verify_wallet_transaction_trace_bocs,
+)
+from services.wallet_jetton_payload_observations import (
+    WalletJettonPayloadConflict,
+    get_wallet_transaction_jetton_payload_observations,
 )
 from services.wallet_native_ton_flow_observations import (
     get_wallet_counterparty_observation_binding,
@@ -646,6 +651,72 @@ def read_wallet_transaction_boc_message_evidence(
         raise HTTPException(
             status_code=503,
             detail="Local message BOC evidence storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/boc-verification/jetton-payloads",
+    response_model=WalletJettonPayloadObservationsResponse,
+)
+def read_wallet_transaction_jetton_payload_observations(
+    response: Response,
+    run_id: str = Path(..., description="Canonical positive persisted run id."),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Decode recognized TEP-74 payloads from fully revalidated BOCs."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result = get_wallet_transaction_jetton_payload_observations(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Locally verified jetton payload evidence not found",
+                headers=no_store_headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletTraceBocVerificationConflict,
+        WalletJettonPayloadConflict,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletPersistedTraceEvidenceFailure,
+        WalletTraceBocVerificationFailure,
+        SQLAlchemyError,
+    ) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Local jetton payload evidence storage is unavailable.",
             headers=no_store_headers,
         ) from exc
 

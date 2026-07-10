@@ -705,6 +705,171 @@ class WalletTraceBocMessageEvidenceResponse(BaseModel):
         return self
 
 
+JettonPayloadOperation = Literal[
+    "transfer",
+    "transfer_notification",
+    "excesses",
+    "burn",
+    "internal_transfer",
+    "burn_notification",
+]
+
+
+class WalletJettonPayloadOperationCountRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    operation: JettonPayloadOperation
+    count: Annotated[int, Field(strict=True, ge=1, le=2304)]
+
+
+class WalletJettonPayloadObservationRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ordinal: Annotated[int, Field(strict=True, ge=0, le=2303)]
+    payload_observation_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+    transaction_preorder_index: Annotated[int, Field(strict=True, ge=0, le=255)]
+    transaction_hash: CanonicalTraceTransactionHash
+    message_role: Literal["root_inbound", "child_inbound", "remaining_outbound"]
+    message_ordinal: Annotated[int, Field(strict=True, ge=0, le=2047)]
+    message_hash: CanonicalTraceTransactionHash
+    message_source_account_canonical: str | None = Field(default=None, max_length=76)
+    message_destination_account_canonical: str | None = Field(
+        default=None, max_length=76
+    )
+    message_native_value_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    body_hash: CanonicalTraceTransactionHash
+    opcode_hex: str = Field(pattern=r"^0x[0-9a-f]{8}$")
+    operation: JettonPayloadOperation
+    standard_status: Literal["active", "suggested"]
+    query_id: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$")
+    amount_base_units: str | None = Field(
+        default=None, pattern=r"^(?:0|[1-9][0-9]*)$"
+    )
+    destination_account_canonical: str | None = Field(default=None, max_length=76)
+    response_destination_account_canonical: str | None = Field(
+        default=None, max_length=76
+    )
+    sender_account_canonical: str | None = Field(default=None, max_length=76)
+    from_account_canonical: str | None = Field(default=None, max_length=76)
+    forward_ton_amount_nanoton: str | None = Field(
+        default=None, pattern=r"^(?:0|[1-9][0-9]*)$"
+    )
+    custom_payload_present: bool
+    custom_payload_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    forward_payload_in_ref: bool | None = None
+    forward_payload_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    forward_payload_bit_length: int | None = Field(default=None, ge=0, le=1023)
+    forward_payload_ref_count: int | None = Field(default=None, ge=0, le=4)
+    contract_account_role: Literal[
+        "destination_jetton_wallet_observed",
+        "source_jetton_wallet_observed",
+        "destination_jetton_master_observed",
+        "unresolved_contract_role",
+    ]
+
+    @model_validator(mode="after")
+    def _jetton_payload_shape_must_match_operation(self):
+        active = {"transfer", "transfer_notification", "excesses", "burn"}
+        if (self.operation in active) != (self.standard_status == "active"):
+            raise ValueError("jetton payload standard status changed")
+        if (self.operation == "excesses") != (self.amount_base_units is None):
+            raise ValueError("jetton payload amount shape changed")
+        has_forward_payload = self.operation in {
+            "transfer",
+            "transfer_notification",
+            "internal_transfer",
+        }
+        forward_values = (
+            self.forward_payload_in_ref,
+            self.forward_payload_hash,
+            self.forward_payload_bit_length,
+            self.forward_payload_ref_count,
+        )
+        if has_forward_payload != all(value is not None for value in forward_values):
+            raise ValueError("jetton forward payload evidence changed")
+        if not has_forward_payload and any(value is not None for value in forward_values):
+            raise ValueError("unexpected jetton forward payload evidence")
+        if self.custom_payload_present != (self.custom_payload_hash is not None):
+            raise ValueError("jetton custom payload evidence changed")
+        if self.operation not in {"transfer", "burn"} and (
+            self.custom_payload_present or self.custom_payload_hash is not None
+        ):
+            raise ValueError("unexpected jetton custom payload evidence")
+        has_forward_ton_amount = self.operation in {
+            "transfer",
+            "internal_transfer",
+        }
+        if has_forward_ton_amount != (
+            self.forward_ton_amount_nanoton is not None
+        ):
+            raise ValueError("jetton forward TON amount shape changed")
+        return self
+
+
+class WalletJettonPayloadObservationsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contract_version: Literal["ton_jetton_payload_observations_v1"]
+    identity_version: Literal["ton_jetton_payload_obs_v1"]
+    verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    capture_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    run_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
+    provider: Literal["tonapi"]
+    source_status: Literal["live"]
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$", max_length=16)
+    anchor: WalletTransactionTraceAnchorRecord
+    verification_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    message_evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    payload_observations_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_message_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    recognized_message_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    unrecognized_message_count: Annotated[int, Field(strict=True, ge=0, le=2304)]
+    operations: list[WalletJettonPayloadOperationCountRecord]
+    observations: list[WalletJettonPayloadObservationRecord]
+    tep74_decoder_applied: Literal[True]
+    recognized_payload_semantics_applied: bool
+    query_id_is_correlation_only: Literal[True]
+    message_bodies_returned: Literal[False] = False
+    jetton_wallet_contract_role_is_observation_only: Literal[True]
+    jetton_master_identity_applied: Literal[False] = False
+    jetton_asset_identity_applied: Literal[False] = False
+    is_authoritative_jetton_transfer_ledger: Literal[False] = False
+    activity_merge_applied: Literal[False] = False
+    deduplication_applied: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    used_by_pnl: Literal[False] = False
+    is_ownership_proof: Literal[False] = False
+    message: str = Field(min_length=1, max_length=600)
+
+    @model_validator(mode="after")
+    def _jetton_payload_counts_must_be_coherent(self):
+        if self.source_message_count != (
+            self.recognized_message_count + self.unrecognized_message_count
+        ):
+            raise ValueError("jetton payload source message count changed")
+        if self.recognized_message_count != len(self.observations):
+            raise ValueError("jetton payload observation count changed")
+        if self.recognized_payload_semantics_applied != bool(self.observations):
+            raise ValueError("jetton payload semantic flag changed")
+        if [row.ordinal for row in self.observations] != list(
+            range(len(self.observations))
+        ):
+            raise ValueError("jetton payload observation order changed")
+        counts = {row.operation: row.count for row in self.operations}
+        if len(counts) != len(self.operations) or sum(counts.values()) != len(
+            self.observations
+        ):
+            raise ValueError("jetton payload operation counts changed")
+        if any(
+            counts.get(operation) != sum(
+                row.operation == operation for row in self.observations
+            )
+            for operation in counts
+        ):
+            raise ValueError("jetton payload operation grouping changed")
+        return self
+
+
 class WalletNativeTonFlowObservationRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

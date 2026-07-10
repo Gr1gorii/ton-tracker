@@ -31,6 +31,7 @@ import {
 import PreviewReadinessStrip, {
   type PreviewReadinessTone,
 } from "./PreviewReadinessStrip";
+import WalletJettonPayloadObservationsPanel from "./WalletJettonPayloadObservationsPanel";
 
 interface WalletTransactionTraceEvidenceCardProps {
   runId: number;
@@ -715,7 +716,15 @@ export default function WalletTransactionTraceEvidenceCard({
       )}
 
       {visibleBocResult && (
-        <BocVerificationResult result={visibleBocResult} />
+        <>
+          <BocVerificationResult result={visibleBocResult} />
+          <WalletJettonPayloadObservationsPanel
+            key={`jetton-payload-${visibleBocResult.verification_id}`}
+            runId={runId}
+            transactionHash={visibleBocResult.anchor.transaction_hash}
+            verificationId={visibleBocResult.verification_id}
+          />
+        </>
       )}
 
       {previewLoading && (
