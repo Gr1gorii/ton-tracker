@@ -1419,8 +1419,19 @@ export interface WalletJettonEvidenceSummaryRecord {
   linked_fee_ton: string;
 }
 
+export interface WalletMultiAssetLotReadinessSummaryRecord {
+  evidence_row_count: number;
+  proof_bound_asset_row_count: number;
+  exact_fee_row_count: number;
+  authoritative_trade_row_count: 0;
+  historical_price_eligible_row_count: 0;
+  fee_allocated_row_count: 0;
+  lot_eligible_row_count: 0;
+  blocked_row_count: number;
+}
+
 export interface WalletMultiAssetPnlReadinessResponse {
-  contract_version: "ton_multi_asset_pnl_readiness_v2";
+  contract_version: "ton_multi_asset_pnl_readiness_v3";
   target_run_id: number;
   selected_run_ids: number[];
   network: string;
@@ -1432,6 +1443,7 @@ export interface WalletMultiAssetPnlReadinessResponse {
   evidence: WalletJettonAssetFeeEvidenceRecord[];
   requirements: WalletMultiAssetPnlRequirementRecord[];
   blocked_requirement_codes: WalletMultiAssetPnlRequirementCode[];
+  lot_readiness_summary: WalletMultiAssetLotReadinessSummaryRecord;
   analysis_digest_sha256: string;
   analysis_status: "blocked_missing_evidence";
   calculation_mode: "evidence_reconciliation_only";
@@ -1448,6 +1460,9 @@ export interface WalletMultiAssetPnlReadinessResponse {
   provider_snapshot_asset_identity_is_authoritative: false;
   verified_contract_asset_identity_is_authoritative: boolean;
   transaction_fee_allocation_applied: false;
+  historical_price_requests_performed: false;
+  acquisition_lot_construction_applied: false;
+  disposal_lot_construction_applied: false;
   provider_requests_performed: false;
   message_bodies_returned: false;
   used_by_pnl_calculation: false;

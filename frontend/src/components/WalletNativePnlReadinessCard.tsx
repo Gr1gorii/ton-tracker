@@ -205,6 +205,38 @@ export default function WalletNativePnlReadinessCard({
             />
           </div>
 
+          <div
+            className="native-pnl-flow-grid multi-asset-evidence-grid"
+            aria-label="Valuation and lot readiness"
+          >
+            <FlowMetric
+              label="Trade-qualified rows"
+              value={String(
+                result.lot_readiness_summary.authoritative_trade_row_count,
+              )}
+              detail="Transfer payloads alone do not prove a trade"
+            />
+            <FlowMetric
+              label="Price-eligible rows"
+              value={String(
+                result.lot_readiness_summary.historical_price_eligible_row_count,
+              )}
+              detail="No price request without a proven trade timestamp"
+            />
+            <FlowMetric
+              label="Allocated fee rows"
+              value={String(
+                result.lot_readiness_summary.fee_allocated_row_count,
+              )}
+              detail="Exact fees remain unallocated evidence"
+            />
+            <FlowMetric
+              label="Lot-eligible rows"
+              value={String(result.lot_readiness_summary.lot_eligible_row_count)}
+              detail={`${result.lot_readiness_summary.blocked_row_count} rows blocked fail-closed`}
+            />
+          </div>
+
           <div className="native-pnl-gate" role="note">
             <div>
               <span>Calculation state</span>

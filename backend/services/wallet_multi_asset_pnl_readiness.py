@@ -27,7 +27,7 @@ from services.wallet_native_activity_pnl_readiness import (
 from services.wallet_jetton_contract_verification import _record_response
 
 
-MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION = "ton_multi_asset_pnl_readiness_v2"
+MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION = "ton_multi_asset_pnl_readiness_v3"
 JETTON_PROVIDER_ASSET_OBSERVATION_VERSION = "tonapi_jetton_snapshot_v1"
 NANOTON_PER_TON = Decimal("1000000000")
 MAX_SELECTED_CAPTURES = 2500
@@ -110,6 +110,16 @@ def build_multi_asset_pnl_readiness(
     blocked_codes = [
         row["code"] for row in requirements if not row["available"]
     ]
+    lot_readiness = {
+        "evidence_row_count": unique_count,
+        "proof_bound_asset_row_count": matched_assets,
+        "exact_fee_row_count": linked_fees,
+        "authoritative_trade_row_count": 0,
+        "historical_price_eligible_row_count": 0,
+        "fee_allocated_row_count": 0,
+        "lot_eligible_row_count": 0,
+        "blocked_row_count": unique_count,
+    }
     document = {
         "contract_version": MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION,
         "target_run_id": target_run_id,
@@ -125,6 +135,7 @@ def build_multi_asset_pnl_readiness(
         "evidence": evidence_rows,
         "requirements": requirements,
         "blocked_requirement_codes": blocked_codes,
+        "lot_readiness_summary": lot_readiness,
     }
     return {
         **document,
@@ -146,6 +157,9 @@ def build_multi_asset_pnl_readiness(
         "provider_snapshot_asset_identity_is_authoritative": False,
         "verified_contract_asset_identity_is_authoritative": bool(matched_assets),
         "transaction_fee_allocation_applied": False,
+        "historical_price_requests_performed": False,
+        "acquisition_lot_construction_applied": False,
+        "disposal_lot_construction_applied": False,
         "provider_requests_performed": False,
         "message_bodies_returned": False,
         "used_by_pnl_calculation": False,
