@@ -1,13 +1,13 @@
-# TON Wallet Intelligence Dashboard — v0.23.2 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.23.3 Promotion Checklist
 
-Operational gates for capture-bound local transaction BOC verification.
+Operational gates for body-safe, provider-free message evidence.
 
 ## Version and migration
 
-- Product label is `v0.23.2 LOCAL BOC VERIFICATION`; backend API version stays
+- Product label is `v0.23.3 MESSAGE BODY EVIDENCE`; backend API version stays
   independently frozen at `0.2.1`.
-- Public contract is exactly `ton_boc_trace_verification_v1`; v0.23.0 preview
-  and v0.23.1 persisted graph contracts remain unchanged.
+- New public contract is exactly `ton_boc_message_evidence_v1`; v0.23.0 preview,
+  v0.23.1 graph, and v0.23.2 BOC verification contracts remain unchanged.
 - Alembic head is `20260710_0007`, adding only
   `wallet_trace_boc_verifications` and `wallet_trace_boc_transactions`.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
@@ -42,6 +42,12 @@ Operational gates for capture-bound local transaction BOC verification.
 
 ## Endpoint and UI
 
+- `GET .../boc-verification/messages` is provider-free and reparses every stored
+  BOC before returning message evidence.
+- Each row exposes only transaction binding, trace role, verified hashes and
+  header fields, body hash, bit/ref counts, and optional 32-bit opcode prefix.
+- The response digest is bound to the v0.23.2 verification digest and the exact
+  canonical message list. Raw BOCs and message bodies are absent.
 - GET/POST use canonical run/hash paths and `Cache-Control: no-store`.
 - Exact absence is 404; ineligible/corrupt state is 409; sanitized provider
   failure is 502; local verifier/storage unavailability is 503.
@@ -57,11 +63,11 @@ Operational gates for capture-bound local transaction BOC verification.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Live TonAPI first POST returns 201, repeat POST and GET return 200, the digest
-  is stable, and SQLite integrity/foreign-key checks are clean.
+- Live message evidence GET returns 200 with two locally re-derived rows and no
+  provider call; BOC verification digest binding is stable.
 - Credential/prohibited-brand scans are clean and README has no diff.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.23.2` on the merge commit.
+  a ready PR, then create annotated tag `v0.23.3` on the merge commit.
 
 ## Rollback
 
