@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -18,9 +19,16 @@ from typing import Any, Iterable
 from sqlalchemy.orm import Session
 
 from models import WalletIngestionRun
+from services.ton_address_identity import parse_ton_address
 from services.wallet_activity_ingestion import wallet_ingestion_run_to_response
 
-_EXACT_SWAP_ORDINAL_KEYS = ("action_id", "action_index", "action_ordinal")
+_SWAP_ORDINAL_KEYS = ("action_id", "action_index", "action_ordinal")
+_TRANSACTION_IDENTITY_VERSION = "ton_account_tx_v1"
+_TRANSACTION_IDENTITY_UNAVAILABLE = "unavailable"
+_TRANSACTION_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_SUBMITTED_TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_LOGICAL_TIME_RE = re.compile(r"^(?:0|[1-9][0-9]*)$")
+_MAX_LOGICAL_TIME = 2**64 - 1
 _MAX_IDENTITY_GROUPS = 200
 _UNAVAILABLE_WALLET_IDENTITY = {
     "status": "unavailable",
@@ -143,11 +151,156 @@ def _scoped_wallet_identity_key(run: dict[str, Any]) -> tuple[str, str] | None:
     canonical_address = identity.get("canonical_address")
     if identity.get("status") != "network_scoped":
         return None
+    if identity.get("version") not in {
+        "ton_std_address_v1",
+        "ton_raw_address_v1",
+    }:
+        return None
     if network not in {"ton-mainnet", "ton-testnet"}:
         return None
     if not isinstance(canonical_address, str) or not canonical_address:
         return None
+    parsed = parse_ton_address(canonical_address)
+    if (
+        parsed is None
+        or parsed.submitted_format != "raw"
+        or parsed.canonical_address != canonical_address
+        or parsed.workchain_id != identity.get("workchain_id")
+        or parsed.account_id_hex != identity.get("account_id_hex")
+    ):
+        return None
     return network, canonical_address
+
+
+def _canonical_logical_time(value: Any) -> str | None:
+    if not isinstance(value, str) or _LOGICAL_TIME_RE.fullmatch(value) is None:
+        return None
+    parsed = int(value, 10)
+    if parsed <= 0 or parsed > _MAX_LOGICAL_TIME:
+        return None
+    return value
+
+
+def _legacy_transaction_hash(transaction: dict[str, Any]) -> str | None:
+    tx_hash = transaction.get("tx_hash")
+    if not isinstance(tx_hash, str) or not tx_hash.strip():
+        return None
+    cleaned = tx_hash.strip()
+    if _SUBMITTED_TRANSACTION_HASH_RE.fullmatch(cleaned) is not None:
+        return cleaned.lower()
+    return cleaned
+
+
+def _is_explicit_unavailable_transaction_identity(identity: dict[str, Any]) -> bool:
+    return (
+        identity.get("status") == "unavailable"
+        and identity.get("version") == _TRANSACTION_IDENTITY_UNAVAILABLE
+        and identity.get("network") == "ton-unknown"
+        and identity.get("account_canonical") is None
+        and identity.get("logical_time_canonical") is None
+        and identity.get("hash_canonical") is None
+        and identity.get("key") is None
+        and identity.get("is_deduplication_identity") is False
+    )
+
+
+def _validated_transaction_identity_key(
+    run: dict[str, Any],
+    transaction: dict[str, Any],
+) -> str | None:
+    """Return a persisted exact key only when the full contract is coherent."""
+    identity = transaction.get("transaction_identity")
+    if not isinstance(identity, dict):
+        return None
+    if identity.get("status") != "network_scoped":
+        return None
+    if identity.get("version") != _TRANSACTION_IDENTITY_VERSION:
+        return None
+    if identity.get("is_deduplication_identity") is not True:
+        return None
+    if run.get("data_mode") != "real":
+        return None
+    if transaction.get("provider") != "tonapi":
+        return None
+    if transaction.get("source_status") != "live":
+        return None
+    raw = transaction.get("raw")
+    if not isinstance(raw, dict):
+        return None
+    if raw.get("provider") != "tonapi" or raw.get("surface") != "transactions":
+        return None
+    if raw.get("tx_hash") != transaction.get("tx_hash"):
+        return None
+    if raw.get("logical_time") != transaction.get("logical_time"):
+        return None
+
+    network = identity.get("network")
+    account = identity.get("account_canonical")
+    logical_time = identity.get("logical_time_canonical")
+    tx_hash = identity.get("hash_canonical")
+    if network not in {"ton-mainnet", "ton-testnet"}:
+        return None
+    wallet_key = _scoped_wallet_identity_key(run)
+    if wallet_key != (network, account):
+        return None
+
+    parsed_account = parse_ton_address(account)
+    if (
+        parsed_account is None
+        or parsed_account.submitted_format != "raw"
+        or parsed_account.canonical_address != account
+    ):
+        return None
+    if _canonical_logical_time(logical_time) != logical_time:
+        return None
+    if _canonical_logical_time(transaction.get("logical_time")) != logical_time:
+        return None
+    if not isinstance(tx_hash, str) or _TRANSACTION_HASH_RE.fullmatch(tx_hash) is None:
+        return None
+    submitted_hash = transaction.get("tx_hash")
+    if (
+        not isinstance(submitted_hash, str)
+        or _SUBMITTED_TRANSACTION_HASH_RE.fullmatch(submitted_hash) is None
+        or submitted_hash.lower() != tx_hash
+    ):
+        return None
+
+    expected_key = "|".join(
+        (
+            _TRANSACTION_IDENTITY_VERSION,
+            network,
+            account,
+            logical_time,
+            tx_hash,
+        )
+    )
+    if identity.get("key") != expected_key:
+        return None
+    return expected_key
+
+
+def _transaction_identity_classification(
+    run: dict[str, Any],
+    transaction: dict[str, Any],
+) -> tuple[str, str | None, bool]:
+    """Classify exact persisted identity or a weak legacy diagnostic fallback."""
+    identity = transaction.get("transaction_identity")
+    exact_key = _validated_transaction_identity_key(run, transaction)
+    if exact_key is not None:
+        return "exact", exact_key, False
+
+    invalid_contract = False
+    if isinstance(identity, dict):
+        invalid_contract = not _is_explicit_unavailable_transaction_identity(
+            identity
+        )
+    elif identity is not None:
+        invalid_contract = True
+
+    legacy_hash = _legacy_transaction_hash(transaction)
+    if legacy_hash is not None:
+        return "weak", legacy_hash, invalid_contract
+    return "unavailable", None, invalid_contract
 
 
 def _run_scope(run: dict[str, Any], target_run_id: int) -> dict[str, Any]:
@@ -202,41 +355,73 @@ def _identity_groups(
             continue
         payloads = {_fingerprint(row[1]) for row in rows}
         strengths = {row[2] for row in rows}
+        identity_strength = "exact" if strengths == {"exact"} else "weak"
         groups.append(
             {
                 "identity": identity,
                 "identity_type": identity_type,
-                "identity_strength": (
-                    "exact" if strengths == {"exact"} else "weak"
-                ),
+                "identity_strength": identity_strength,
                 "run_ids": run_ids,
                 "observation_count": len(rows),
                 "distinct_payload_count": len(payloads),
-                "has_conflict": len(payloads) > 1,
+                "has_conflict": (
+                    identity_strength == "exact" and len(payloads) > 1
+                ),
             }
         )
     return sorted(groups, key=lambda group: (group["identity_type"], group["identity"]))
 
 
 def _transaction_groups(runs: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    observations: dict[
+    exact_observations: dict[
         tuple[str, str],
         list[tuple[int, dict[str, Any], str]],
     ] = defaultdict(list)
+    hash_candidates: dict[
+        tuple[str, str],
+        list[tuple[int, dict[str, Any], str | None]],
+    ] = defaultdict(list)
     for run in runs:
         for transaction in run.get("transactions") or []:
-            tx_hash = transaction.get("tx_hash")
-            if not isinstance(tx_hash, str) or not tx_hash.strip():
-                continue
-            identity = tx_hash.strip()
-            observations[("transaction_hash", identity)].append(
-                (
-                    run["run_id"],
-                    _transaction_semantic_payload(transaction),
-                    "exact",
-                )
+            strength, identity, _ = _transaction_identity_classification(
+                run, transaction
             )
-    return _identity_groups(observations)
+            payload = _transaction_semantic_payload(transaction)
+            exact_key = identity if strength == "exact" else None
+            if exact_key is not None:
+                exact_observations[("account_transaction", exact_key)].append(
+                    (run["run_id"], payload, "exact")
+                )
+
+            hash_candidate = _legacy_transaction_hash(transaction)
+            if hash_candidate is not None:
+                hash_candidates[("transaction_hash", hash_candidate)].append(
+                    (run["run_id"], payload, exact_key)
+                )
+
+    candidate_observations: dict[
+        tuple[str, str],
+        list[tuple[int, dict[str, Any], str]],
+    ] = {}
+    for candidate_key, rows in hash_candidates.items():
+        exact_keys = {row[2] for row in rows if row[2] is not None}
+        all_rows_share_one_exact_key = (
+            len(exact_keys) == 1 and all(row[2] is not None for row in rows)
+        )
+        if all_rows_share_one_exact_key:
+            continue
+        candidate_observations[candidate_key] = [
+            (run_id, payload, "weak")
+            for run_id, payload, _ in rows
+        ]
+
+    return sorted(
+        [
+            *_identity_groups(exact_observations),
+            *_identity_groups(candidate_observations),
+        ],
+        key=lambda group: (group["identity_type"], group["identity"]),
+    )
 
 
 def _swap_identity(swap: dict[str, Any]) -> tuple[str, str, str]:
@@ -249,13 +434,13 @@ def _swap_identity(swap: dict[str, Any]) -> tuple[str, str, str]:
     event_id = event_id.strip() if isinstance(event_id, str) else None
 
     if event_id:
-        for key in _EXACT_SWAP_ORDINAL_KEYS:
+        for key in _SWAP_ORDINAL_KEYS:
             ordinal = raw.get(key)
             if ordinal is not None and str(ordinal).strip():
                 return (
                     f"{provider_key}:{event_id}:{key}:{str(ordinal).strip()}",
                     "event_action",
-                    "exact",
+                    "weak",
                 )
         return f"{provider_key}:{event_id}", "event_reference", "weak"
 
@@ -298,6 +483,28 @@ def _coverage(
     transactions = [row for run in runs for row in (run.get("transactions") or [])]
     swaps = [row for run in runs for row in (run.get("swaps") or [])]
     timestamped = sum(len(_activity_timestamps(run)) for run in runs)
+
+    transaction_identity_counts = {
+        "exact": 0,
+        "weak": 0,
+        "unavailable": 0,
+    }
+    invalid_transaction_identity_contracts = 0
+    for run in runs:
+        for transaction in run.get("transactions") or []:
+            strength, _, invalid_contract = _transaction_identity_classification(
+                run, transaction
+            )
+            transaction_identity_counts[strength] += 1
+            if invalid_contract:
+                invalid_transaction_identity_contracts += 1
+
+    if not transactions:
+        transaction_identity_coverage_state = "not_observed"
+    elif transaction_identity_counts["exact"] == len(transactions):
+        transaction_identity_coverage_state = "complete"
+    else:
+        transaction_identity_coverage_state = "incomplete"
 
     exact_swap_observations = 0
     non_ton_legs = 0
@@ -356,7 +563,24 @@ def _coverage(
             for row in transactions
             if isinstance(row.get("tx_hash"), str) and row["tx_hash"].strip()
         ),
-        "overlapping_transaction_identity_groups": len(transaction_groups),
+        "transaction_observations_with_exact_identity": (
+            transaction_identity_counts["exact"]
+        ),
+        "transaction_observations_with_weak_identity": (
+            transaction_identity_counts["weak"]
+        ),
+        "transaction_observations_with_unavailable_identity": (
+            transaction_identity_counts["unavailable"]
+        ),
+        "transaction_observations_with_invalid_identity_contract": (
+            invalid_transaction_identity_contracts
+        ),
+        "transaction_identity_coverage_state": transaction_identity_coverage_state,
+        "overlapping_transaction_identity_groups": sum(
+            1
+            for group in transaction_groups
+            if group["identity_strength"] == "exact"
+        ),
         "conflicting_transaction_identity_groups": sum(
             1 for group in transaction_groups if group["has_conflict"]
         ),
@@ -416,7 +640,7 @@ def _build_blockers(
         ),
         _blocker(
             "canonical_activity_identity_unavailable",
-            "Transaction, transfer, swap-action, jetton-asset, and counterparty rows do not yet share a complete canonical identity contract.",
+            "Transfer, swap-action, jetton-asset, and counterparty rows do not yet share a complete canonical identity contract.",
             run_ids=run_ids,
         ),
         _blocker(
@@ -511,18 +735,52 @@ def _build_blockers(
             )
         )
 
-    if coverage["transaction_observations_with_hash"] < coverage[
-        "transaction_observations"
-    ]:
+    transaction_observations = coverage["transaction_observations"]
+    exact_transaction_observations = coverage[
+        "transaction_observations_with_exact_identity"
+    ]
+    weak_transaction_observations = coverage[
+        "transaction_observations_with_weak_identity"
+    ]
+    unavailable_transaction_observations = coverage[
+        "transaction_observations_with_unavailable_identity"
+    ]
+    invalid_transaction_contracts = coverage[
+        "transaction_observations_with_invalid_identity_contract"
+    ]
+    if (
+        transaction_observations > 0
+        and exact_transaction_observations < transaction_observations
+    ):
         blockers.append(
             _blocker(
                 "transaction_identity_coverage_incomplete",
-                "Some transaction observations lack a nonblank transaction hash.",
+                "Some transaction observations lack a valid persisted, network-scoped TON account-transaction identity.",
                 run_ids=run_ids,
                 evidence={
-                    "with_hash": coverage["transaction_observations_with_hash"],
-                    "total": coverage["transaction_observations"],
+                    "exact": exact_transaction_observations,
+                    "weak": weak_transaction_observations,
+                    "unavailable": unavailable_transaction_observations,
+                    "total": transaction_observations,
                 },
+            )
+        )
+    if invalid_transaction_contracts:
+        blockers.append(
+            _blocker(
+                "transaction_identity_contract_invalid",
+                "At least one transaction claims an identity contract whose persisted components do not recompute to its stored key and row scope.",
+                run_ids=run_ids,
+                evidence={"invalid_observations": invalid_transaction_contracts},
+            )
+        )
+    if weak_transaction_observations:
+        blockers.append(
+            _blocker(
+                "legacy_transaction_identity_fallback",
+                "At least one transaction is grouped only by its submitted tx_hash as weak legacy diagnostic evidence.",
+                run_ids=run_ids,
+                evidence={"weak_observations": weak_transaction_observations},
             )
         )
 
@@ -541,13 +799,18 @@ def _build_blockers(
             )
         )
 
-    if transaction_groups:
+    exact_transaction_groups = [
+        group
+        for group in transaction_groups
+        if group["identity_strength"] == "exact"
+    ]
+    if exact_transaction_groups:
         blockers.append(
             _blocker(
                 "overlapping_transaction_history",
-                "Exact transaction hashes overlap across runs, so concatenating rows would double count activity.",
+                "Exact persisted TON account-transaction identities overlap across runs, so concatenating rows would double count activity.",
                 run_ids=run_ids,
-                evidence={"identity_group_count": len(transaction_groups)},
+                evidence={"identity_group_count": len(exact_transaction_groups)},
             )
         )
     transaction_conflicts = [
@@ -557,7 +820,7 @@ def _build_blockers(
         blockers.append(
             _blocker(
                 "transaction_payload_conflicts",
-                "The same exact transaction hash has differing persisted payloads across runs.",
+                "The same exact persisted TON account-transaction identity has differing semantic payloads across runs.",
                 run_ids=run_ids,
                 evidence={
                     "identity_count": len(transaction_conflicts),
@@ -570,7 +833,7 @@ def _build_blockers(
         blockers.append(
             _blocker(
                 "weak_swap_identity",
-                "At least one swap lacks the event-plus-action identity needed for exact cross-run deduplication.",
+                "TonAPI event references, including raw action ordinals, remain weak provider-derived evidence and are not exact cross-run swap identities.",
                 run_ids=run_ids,
                 evidence={
                     "swap_observations": coverage["swap_observations"],
@@ -678,7 +941,7 @@ def assess_wallet_history_readiness(
     ]
 
     return {
-        "analysis_version": "wallet_history_readiness_v0.22.0",
+        "analysis_version": "wallet_history_readiness_v0.22.3",
         "target_run_id": target_run_id,
         "run_ids": run_ids,
         "wallet_address": target_run["wallet_address"],

@@ -31,6 +31,7 @@ from services.ton_address_identity import (
     TonAddressIdentity,
     derive_ton_wallet_identity,
 )
+from services.ton_transaction_identity import derive_ton_transaction_identity
 from models import (
     WalletBalanceSnapshot,
     WalletIngestionRun,
@@ -109,7 +110,7 @@ def persist_mock_wallet_ingestion(
 
     priced_balances = _price_balances(result.balances, settings)
     run.transfers.extend(_transfer_models(result.transfers))
-    run.transactions.extend(_transaction_models(result.transactions))
+    run.transactions.extend(_transaction_models(result.transactions, run))
     run.swaps.extend(_swap_models(result.swaps))
     run.balance_snapshots.extend(_balance_snapshot_models(priced_balances))
     run.warnings.extend(_warning_models(result.warnings))
@@ -494,20 +495,54 @@ def _transfer_models(
 
 def _transaction_models(
     transactions: list[WalletActivityTransaction],
+    run: WalletIngestionRun,
 ) -> list[WalletTransaction]:
-    return [
-        WalletTransaction(
-            tx_hash=item.tx_hash,
+    models: list[WalletTransaction] = []
+    seen_identity_keys: set[str] = set()
+    for item in transactions:
+        identity = derive_ton_transaction_identity(
+            network=run.wallet_network,
+            account_address_canonical=run.wallet_address_canonical,
+            account_identity_status=run.wallet_identity_status,
+            account_identity_version=run.wallet_identity_version,
+            account_workchain_id=run.wallet_workchain_id,
+            account_id_hex=run.wallet_account_id_hex,
             logical_time=item.logical_time,
-            timestamp=_parse_datetime(item.timestamp),
-            fee_ton=_decimal(item.fee_ton),
-            success=item.success,
-            provider=item.provider,
+            transaction_hash=item.tx_hash,
+            data_mode=run.data_mode,
             source_status=item.source_status,
-            raw_json=_json_dumps(item.raw),
+            provider=item.provider,
+            raw=item.raw,
         )
-        for item in transactions
-    ]
+        if identity.key is not None:
+            if identity.key in seen_identity_keys:
+                raise ValueError(
+                    "Transaction ingestion returned a duplicate canonical "
+                    "identity within one run."
+                )
+            seen_identity_keys.add(identity.key)
+        models.append(
+            WalletTransaction(
+                tx_hash=item.tx_hash,
+                logical_time=item.logical_time,
+                timestamp=_parse_datetime(item.timestamp),
+                fee_ton=_decimal(item.fee_ton),
+                success=item.success,
+                provider=item.provider,
+                source_status=item.source_status,
+                raw_json=_json_dumps(item.raw),
+                transaction_identity_status=identity.status,
+                transaction_identity_version=identity.version,
+                transaction_network=identity.network,
+                transaction_account_canonical=identity.account_canonical,
+                transaction_logical_time_canonical=(
+                    identity.logical_time_canonical
+                ),
+                transaction_hash_canonical=identity.hash_canonical,
+                transaction_identity_key=identity.key,
+            )
+        )
+    return models
 
 
 def _swap_models(swaps: list[WalletActivitySwap]) -> list[WalletSwap]:
@@ -588,7 +623,56 @@ def _transaction_record(item: WalletTransaction) -> dict[str, Any]:
         "success": item.success,
         "provider": item.provider,
         "source_status": item.source_status,
+        "transaction_identity": _transaction_identity_record(
+            item,
+            raw if isinstance(raw, dict) else None,
+        ),
         "raw": raw,
+    }
+
+
+def _transaction_identity_record(
+    item: WalletTransaction,
+    raw: dict[str, Any] | None,
+) -> dict[str, Any]:
+    derived = derive_ton_transaction_identity(
+        network=item.run.wallet_network,
+        account_address_canonical=item.run.wallet_address_canonical,
+        account_identity_status=item.run.wallet_identity_status,
+        account_identity_version=item.run.wallet_identity_version,
+        account_workchain_id=item.run.wallet_workchain_id,
+        account_id_hex=item.run.wallet_account_id_hex,
+        logical_time=item.logical_time,
+        transaction_hash=item.tx_hash,
+        data_mode=item.run.data_mode,
+        source_status=item.source_status,
+        provider=item.provider,
+        raw=raw,
+    )
+    persisted_matches = (
+        item.transaction_identity_status == derived.status
+        and item.transaction_identity_version == derived.version
+        and item.transaction_network == derived.network
+        and item.transaction_account_canonical == derived.account_canonical
+        and item.transaction_logical_time_canonical
+        == derived.logical_time_canonical
+        and item.transaction_hash_canonical == derived.hash_canonical
+        and item.transaction_identity_key == derived.key
+    )
+    is_scoped = persisted_matches and derived.is_deduplication_identity
+    return {
+        "status": item.transaction_identity_status,
+        "version": item.transaction_identity_version,
+        "network": item.transaction_network,
+        "account_canonical": item.transaction_account_canonical,
+        "logical_time_canonical": item.transaction_logical_time_canonical,
+        "hash_canonical": item.transaction_hash_canonical,
+        "key": item.transaction_identity_key,
+        "is_deduplication_identity": is_scoped,
+        "is_blockchain_proof_verified": False,
+        "is_ownership_proof": False,
+        "deduplication_applied": False,
+        "used_by_pnl": False,
     }
 
 

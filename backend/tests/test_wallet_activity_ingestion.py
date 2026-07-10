@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from decimal import Decimal
 
 import pytest
@@ -23,6 +25,7 @@ VALID_TESTNET_WALLET = "kQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPgpP"
 VALID_MAINNET_CANONICAL = (
     "0:ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 )
+VALID_TRANSACTION_HASH = "ab" * 32
 
 
 @pytest.fixture
@@ -398,7 +401,7 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
                 "wallet_address": account_address,
                 "transactions": [
                     {
-                        "tx_hash": "abc123",
+                        "tx_hash": VALID_TRANSACTION_HASH.upper(),
                         "logical_time": "46000000000001",
                         "utime": 1717236000,
                         "total_fees": "4200000",
@@ -445,19 +448,88 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
     assert body["balances"] == []
     assert len(body["transactions"]) == 1
     tx = body["transactions"][0]
-    assert tx["tx_hash"] == "abc123"
+    assert tx["tx_hash"] == VALID_TRANSACTION_HASH.upper()
     assert tx["fee_ton"] == "0.004200000000000000"
     assert tx["success"] == "success"
     assert tx["provider"] == "tonapi"
     assert tx["source_status"] == "live"
     assert tx["raw"]["surface"] == "transactions"
+    assert tx["transaction_identity"] == {
+        "status": "network_scoped",
+        "version": "ton_account_tx_v1",
+        "network": "ton-mainnet",
+        "account_canonical": VALID_MAINNET_CANONICAL,
+        "logical_time_canonical": "46000000000001",
+        "hash_canonical": VALID_TRANSACTION_HASH,
+        "key": (
+            "ton_account_tx_v1|ton-mainnet|"
+            f"{VALID_MAINNET_CANONICAL}|46000000000001|"
+            f"{VALID_TRANSACTION_HASH}"
+        ),
+        "is_deduplication_identity": True,
+        "is_blockchain_proof_verified": False,
+        "is_ownership_proof": False,
+        "deduplication_applied": False,
+        "used_by_pnl": False,
+    }
 
     # The persisted run round-trips through GET with the live transaction row.
     read_back = client.get(f"/api/wallets/ingest/{run_id}")
     assert read_back.status_code == 200
     read_body = read_back.json()
     assert len(read_body["transactions"]) == 1
-    assert read_body["transactions"][0]["tx_hash"] == "abc123"
+    assert read_body["transactions"][0]["tx_hash"] == VALID_TRANSACTION_HASH.upper()
+    assert (
+        read_body["transactions"][0]["transaction_identity"]
+        == tx["transaction_identity"]
+    )
+
+
+def test_wallet_ingestion_rejects_duplicate_transaction_identity_within_run(
+    client,
+    monkeypatch,
+):
+    transaction = {
+        "tx_hash": VALID_TRANSACTION_HASH,
+        "logical_time": "46000000000001",
+        "utime": 1717236000,
+        "total_fees": "4200000",
+        "success": True,
+        "transaction_type": "TransOrd",
+        "source": "tonapi",
+    }
+
+    def fake_get_account_transactions_preview(self, account_address, limit):
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "transactions": [dict(transaction), dict(transaction)],
+                "preview_count": 2,
+                "total_transactions": 2,
+            },
+            source="real",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_transactions_preview",
+        fake_get_account_transactions_preview,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": VALID_MAINNET_WALLET,
+            "time_window": "24h",
+            "surfaces": ["transactions"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "duplicate canonical identity" in response.json()["detail"]
 
 
 def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
@@ -797,6 +869,16 @@ def test_wallet_ingestion_run_csv_export_download(client, monkeypatch):
     assert lines[0].split(",")[0] == "surface"
     assert any(line.startswith("transfer,") for line in lines[1:])
     assert any(line.startswith("swap,") for line in lines[1:])
+    rows = list(csv.DictReader(io.StringIO(res.text)))
+    transaction_rows = [row for row in rows if row["surface"] == "transaction"]
+    assert transaction_rows
+    assert all(
+        row["transaction_identity_status"] == "unavailable"
+        and row["transaction_identity_version"] == "unavailable"
+        and row["transaction_network"] == "ton-unknown"
+        and row["transaction_identity_key"] == ""
+        for row in transaction_rows
+    )
 
     missing = client.get("/api/wallets/ingest/99999/export.csv")
     assert missing.status_code == 404
@@ -839,6 +921,12 @@ def test_wallet_ingestion_persists_mock_activity_and_can_read_run(
     assert body["swaps"][0]["dex"] == "STON.fi"
     assert body["swaps"][0]["token_out_address"] == "EQjettonAlphaMasterMock"
     assert body["balances"][1]["asset"] == "JETTON_ALPHA"
+    assert all(
+        transaction["transaction_identity"]["status"] == "unavailable"
+        and transaction["transaction_identity"]["key"] is None
+        and transaction["transaction_identity"]["used_by_pnl"] is False
+        for transaction in body["transactions"]
+    )
 
     read_response = client.get(f"/api/wallets/ingest/{body['run_id']}")
 

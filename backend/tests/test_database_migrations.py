@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -31,6 +32,8 @@ from services.database_migrations import (
 LEGACY_FIXTURE = Path(__file__).parent / "fixtures" / "legacy_v0_22_0.sql"
 DOMAIN_TABLES = tuple(sorted(database.Base.metadata.tables))
 WALLET_IDENTITY_REVISION = "20260710_0002"
+TRANSACTION_IDENTITY_REVISION = "20260710_0003"
+CURRENT_REVISION = TRANSACTION_IDENTITY_REVISION
 
 ACCOUNT_ID = "ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 RAW_ADDRESS = f"0:{ACCOUNT_ID}"
@@ -134,6 +137,21 @@ IDENTITY_COLUMNS = (
     "wallet_address_bounceable",
     "wallet_address_testnet_only",
 )
+
+TRANSACTION_IDENTITY_COLUMNS = (
+    "transaction_identity_status",
+    "transaction_identity_version",
+    "transaction_network",
+    "transaction_account_canonical",
+    "transaction_logical_time_canonical",
+    "transaction_hash_canonical",
+    "transaction_identity_key",
+)
+
+TRANSACTION_HASH = "cd" * 32
+SECOND_TRANSACTION_HASH = "ef" * 32
+TRANSACTION_LT = "89089355000001"
+TRANSACTION_IDENTITY_VERSION = "ton_account_tx_v1"
 
 
 def _engine(path: Path) -> Engine:
@@ -240,6 +258,114 @@ def _identity_snapshot(engine: Engine) -> dict[int, tuple[Any, ...]]:
             f"SELECT {columns} FROM wallet_ingestion_runs ORDER BY id"
         ).fetchall()
     return {int(row[0]): tuple(row[1:]) for row in rows}
+
+
+def _transaction_identity_snapshot(engine: Engine) -> dict[int, tuple[Any, ...]]:
+    selected = (
+        "id",
+        "run_id",
+        "tx_hash",
+        "logical_time",
+        *TRANSACTION_IDENTITY_COLUMNS,
+    )
+    columns = ", ".join(_quote(column) for column in selected)
+    with engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            f"SELECT {columns} FROM wallet_transactions ORDER BY id"
+        ).fetchall()
+    return {int(row[0]): tuple(row[1:]) for row in rows}
+
+
+def _transaction_legacy_snapshot(engine: Engine) -> list[tuple[Any, ...]]:
+    columns = PRE_0002_COLUMNS["wallet_transactions"]
+    selected = ", ".join(_quote(column) for column in columns)
+    with engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            f"SELECT {selected} FROM wallet_transactions ORDER BY id"
+        ).fetchall()
+    return [tuple(row) for row in rows]
+
+
+def _insert_scoped_run(
+    connection,
+    *,
+    run_id: int,
+    network: str = "ton-mainnet",
+    data_mode: str = "real",
+) -> None:
+    wallet_address = (
+        BOUNCEABLE_TESTNET if network == "ton-testnet" else BOUNCEABLE_MAINNET
+    )
+    connection.exec_driver_sql(
+        "INSERT INTO wallet_ingestion_runs ("
+        "id, wallet_address, time_window, custom_start, custom_end, "
+        "data_mode, status, requested_surfaces_json, provider_summary_json, "
+        "created_at, updated_at, wallet_identity_status, "
+        "wallet_identity_version, wallet_network, wallet_address_canonical, "
+        "wallet_workchain_id, wallet_account_id_hex, wallet_address_format, "
+        "wallet_address_bounceable, wallet_address_testnet_only"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            run_id,
+            wallet_address,
+            "24h",
+            None,
+            None,
+            data_mode,
+            "success",
+            '["transactions"]',
+            '{"message":"transaction identity fixture"}',
+            "2026-07-10 10:00:00.000000",
+            "2026-07-10 10:01:00.000000",
+            "network_scoped",
+            "ton_std_address_v1",
+            network,
+            RAW_ADDRESS,
+            0,
+            ACCOUNT_ID,
+            "user_friendly",
+            1,
+            1 if network == "ton-testnet" else 0,
+        ),
+    )
+
+
+def _insert_transaction(
+    connection,
+    *,
+    transaction_id: int,
+    run_id: int,
+    tx_hash: str = TRANSACTION_HASH,
+    logical_time: str | None = TRANSACTION_LT,
+    provider: str = "tonapi",
+    source_status: str = "live",
+    raw: Any | None = None,
+) -> None:
+    if raw is None:
+        raw = {
+            "provider": "tonapi",
+            "surface": "transactions",
+            "tx_hash": tx_hash,
+            "logical_time": logical_time,
+        }
+    connection.exec_driver_sql(
+        "INSERT INTO wallet_transactions ("
+        "id, run_id, tx_hash, logical_time, timestamp, fee_ton, success, "
+        "provider, source_status, raw_json"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            transaction_id,
+            run_id,
+            tx_hash,
+            logical_time,
+            "2026-07-10 10:02:00.000000",
+            "0.0042",
+            "success",
+            provider,
+            source_status,
+            json.dumps(raw, separators=(",", ":"), sort_keys=True),
+        ),
+    )
 
 
 def _schema_snapshot(engine: Engine) -> list[tuple[Any, ...]]:
@@ -384,6 +510,45 @@ def _assert_wallet_identity_schema(engine: Engine) -> None:
     ) in indexes
 
 
+def _assert_transaction_identity_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    columns = {
+        column["name"]
+        for column in inspector.get_columns("wallet_transactions")
+    }
+    assert set(TRANSACTION_IDENTITY_COLUMNS).issubset(columns)
+    indexes = {
+        (
+            index["name"],
+            tuple(index.get("column_names") or ()),
+            bool(index.get("unique")),
+        )
+        for index in inspector.get_indexes("wallet_transactions")
+    }
+    assert {
+        (
+            "uq_wallet_transactions_run_identity",
+            ("run_id", "transaction_identity_key"),
+            True,
+        ),
+        (
+            "ix_wallet_transactions_identity_key",
+            ("transaction_identity_key",),
+            False,
+        ),
+        (
+            "ix_wallet_transactions_identity_tuple",
+            (
+                "transaction_network",
+                "transaction_account_canonical",
+                "transaction_logical_time_canonical",
+                "transaction_hash_canonical",
+            ),
+            False,
+        ),
+    }.issubset(indexes)
+
+
 def _assert_legacy_identity_backfill(engine: Engine) -> None:
     rows = _identity_snapshot(engine)
 
@@ -462,6 +627,22 @@ def _assert_legacy_identity_backfill(engine: Engine) -> None:
     )
 
 
+def _assert_legacy_transaction_identity_backfill(engine: Engine) -> None:
+    rows = _transaction_identity_snapshot(engine)
+    assert rows[102] == (
+        7,
+        "legacy-transaction-hash",
+        "46000000000002",
+        "unavailable",
+        "unavailable",
+        "ton-unknown",
+        None,
+        None,
+        None,
+        None,
+    )
+
+
 def _revision_cell(
     engine: Engine,
     expected_revision: str,
@@ -493,13 +674,15 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
     assert isinstance(report, MigrationReport)
     assert report.action == "created"
     assert report.revision_before is None
-    assert report.revision_after == WALLET_IDENTITY_REVISION
+    assert report.revision_after == CURRENT_REVISION
     assert report.applied_revisions == (
         BASELINE_REVISION,
         WALLET_IDENTITY_REVISION,
+        TRANSACTION_IDENTITY_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
+    _assert_transaction_identity_schema(engine)
 
     engine.dispose()
     reopened = _engine(tmp_path / "fresh.db")
@@ -519,12 +702,17 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
     assert isinstance(report, MigrationReport)
     assert report.action == "adopted_legacy"
     assert report.revision_before is None
-    assert report.revision_after == WALLET_IDENTITY_REVISION
-    assert report.applied_revisions == (WALLET_IDENTITY_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        WALLET_IDENTITY_REVISION,
+        TRANSACTION_IDENTITY_REVISION,
+    )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
+    _assert_transaction_identity_schema(engine)
     _assert_legacy_identity_backfill(engine)
+    _assert_legacy_transaction_identity_backfill(engine)
     engine.dispose()
 
 
@@ -544,8 +732,11 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
     report = run_database_migrations(engine)
 
     assert report.action == "adopted_legacy"
-    assert report.revision_after == WALLET_IDENTITY_REVISION
-    assert report.applied_revisions == (WALLET_IDENTITY_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        WALLET_IDENTITY_REVISION,
+        TRANSACTION_IDENTITY_REVISION,
+    )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
@@ -563,6 +754,7 @@ def test_runner_is_idempotent_at_head(tmp_path):
     schema_after_first = _schema_snapshot(engine)
     data_after_first = _data_snapshot(engine)
     identities_after_first = _identity_snapshot(engine)
+    transaction_identities_after_first = _transaction_identity_snapshot(engine)
 
     second = run_database_migrations(engine)
 
@@ -574,7 +766,12 @@ def test_runner_is_idempotent_at_head(tmp_path):
     assert _schema_snapshot(engine) == schema_after_first
     assert _data_snapshot(engine) == data_after_first
     assert _identity_snapshot(engine) == identities_after_first
+    assert (
+        _transaction_identity_snapshot(engine)
+        == transaction_identities_after_first
+    )
     _assert_legacy_identity_backfill(engine)
+    _assert_legacy_transaction_identity_backfill(engine)
     engine.dispose()
 
 
@@ -642,8 +839,11 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
 
     assert report.action == "upgraded"
     assert report.revision_before == BASELINE_REVISION
-    assert report.revision_after == WALLET_IDENTITY_REVISION
-    assert report.applied_revisions == (WALLET_IDENTITY_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        WALLET_IDENTITY_REVISION,
+        TRANSACTION_IDENTITY_REVISION,
+    )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
     assert identity[0] == BOUNCEABLE_MAINNET
@@ -655,6 +855,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
+    _assert_transaction_identity_schema(engine)
     engine.dispose()
 
 
@@ -679,6 +880,368 @@ def test_partial_identity_column_with_wrong_shape_fails_before_more_ddl(tmp_path
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
         ).scalar_one() == BASELINE_REVISION
+    engine.dispose()
+
+
+def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "transaction-identity-vectors.db")
+    _upgrade_to_revision(engine, WALLET_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_scoped_run(connection, run_id=2, network="ton-testnet")
+        _insert_scoped_run(connection, run_id=3, data_mode="mock")
+        _insert_scoped_run(connection, run_id=4)
+        _insert_scoped_run(connection, run_id=5)
+        connection.exec_driver_sql(
+            "UPDATE wallet_ingestion_runs SET "
+            "wallet_identity_status='unavailable', "
+            "wallet_identity_version='unavailable', "
+            "wallet_network='ton-unknown', "
+            "wallet_address_canonical=NULL, wallet_workchain_id=NULL, "
+            "wallet_account_id_hex=NULL, wallet_address_format='unrecognized', "
+            "wallet_address_bounceable=NULL, "
+            "wallet_address_testnet_only=NULL WHERE id=4"
+        )
+        connection.exec_driver_sql(
+            "UPDATE wallet_ingestion_runs SET "
+            "wallet_identity_version='unknown_wallet_identity_v9' "
+            "WHERE id=5"
+        )
+
+        # The same low-level tuple on different networks must remain distinct.
+        _insert_transaction(
+            connection,
+            transaction_id=1,
+            run_id=1,
+            tx_hash=TRANSACTION_HASH.upper(),
+        )
+        _insert_transaction(
+            connection,
+            transaction_id=2,
+            run_id=2,
+            tx_hash=TRANSACTION_HASH.upper(),
+        )
+        _insert_transaction(
+            connection,
+            transaction_id=3,
+            run_id=1,
+            tx_hash=SECOND_TRANSACTION_HASH,
+            logical_time="01",
+        )
+        _insert_transaction(
+            connection,
+            transaction_id=4,
+            run_id=1,
+            tx_hash=SECOND_TRANSACTION_HASH,
+            raw={
+                "provider": "tonapi",
+                "surface": "transactions",
+                "tx_hash": TRANSACTION_HASH,
+                "logical_time": TRANSACTION_LT,
+            },
+        )
+        _insert_transaction(connection, transaction_id=5, run_id=3)
+        _insert_transaction(
+            connection,
+            transaction_id=6,
+            run_id=1,
+            provider="stonfi",
+        )
+        _insert_transaction(
+            connection,
+            transaction_id=7,
+            run_id=1,
+            source_status="mock",
+        )
+        _insert_transaction(connection, transaction_id=8, run_id=4)
+        _insert_transaction(
+            connection,
+            transaction_id=9,
+            run_id=1,
+            tx_hash="g" * 64,
+        )
+        _insert_transaction(
+            connection,
+            transaction_id=10,
+            run_id=1,
+            raw=[],
+        )
+        _insert_transaction(connection, transaction_id=11, run_id=5)
+    source_before = _transaction_legacy_snapshot(engine)
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == WALLET_IDENTITY_REVISION
+    assert report.revision_after == TRANSACTION_IDENTITY_REVISION
+    assert report.applied_revisions == (TRANSACTION_IDENTITY_REVISION,)
+    assert _transaction_legacy_snapshot(engine) == source_before
+    rows = _transaction_identity_snapshot(engine)
+
+    mainnet_key = (
+        f"{TRANSACTION_IDENTITY_VERSION}|ton-mainnet|{RAW_ADDRESS}|"
+        f"{TRANSACTION_LT}|{TRANSACTION_HASH}"
+    )
+    testnet_key = (
+        f"{TRANSACTION_IDENTITY_VERSION}|ton-testnet|{RAW_ADDRESS}|"
+        f"{TRANSACTION_LT}|{TRANSACTION_HASH}"
+    )
+    assert rows[1] == (
+        1,
+        TRANSACTION_HASH.upper(),
+        TRANSACTION_LT,
+        "network_scoped",
+        TRANSACTION_IDENTITY_VERSION,
+        "ton-mainnet",
+        RAW_ADDRESS,
+        TRANSACTION_LT,
+        TRANSACTION_HASH,
+        mainnet_key,
+    )
+    assert rows[2] == (
+        2,
+        TRANSACTION_HASH.upper(),
+        TRANSACTION_LT,
+        "network_scoped",
+        TRANSACTION_IDENTITY_VERSION,
+        "ton-testnet",
+        RAW_ADDRESS,
+        TRANSACTION_LT,
+        TRANSACTION_HASH,
+        testnet_key,
+    )
+    unavailable_suffix = (
+        "unavailable",
+        "unavailable",
+        "ton-unknown",
+        None,
+        None,
+        None,
+        None,
+    )
+    assert all(
+        row[3:] == unavailable_suffix
+        for transaction_id, row in rows.items()
+        if transaction_id > 2
+    )
+    assert mainnet_key != testnet_key
+    with engine.connect() as connection:
+        statuses = connection.exec_driver_sql(
+            "SELECT transaction_identity_status, COUNT(*) "
+            "FROM wallet_transactions GROUP BY transaction_identity_status "
+            "ORDER BY transaction_identity_status"
+        ).fetchall()
+    assert statuses == [("network_scoped", 2), ("unavailable", 9)]
+    _assert_schema_matches_models(engine)
+    _assert_transaction_identity_schema(engine)
+    engine.dispose()
+
+
+def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "interrupted-transaction-identity.db")
+    _upgrade_to_revision(engine, WALLET_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_transaction(connection, transaction_id=1, run_id=1)
+        connection.exec_driver_sql(
+            "CREATE TRIGGER reject_transaction_identity_update "
+            "BEFORE UPDATE ON wallet_transactions "
+            "BEGIN SELECT RAISE(ABORT, 'forced transaction backfill failure'); END"
+        )
+    source_before = _transaction_legacy_snapshot(engine)
+
+    with pytest.raises(
+        IntegrityError,
+        match="forced transaction backfill failure",
+    ):
+        run_database_migrations(engine)
+
+    assert _transaction_legacy_snapshot(engine) == source_before
+    inspector = inspect(engine)
+    columns_after_failure = {
+        column["name"]
+        for column in inspector.get_columns("wallet_transactions")
+    }
+    assert set(TRANSACTION_IDENTITY_COLUMNS).issubset(columns_after_failure)
+    identity_index_names = {
+        name for name, _, _ in (
+            (
+                "uq_wallet_transactions_run_identity",
+                ("run_id", "transaction_identity_key"),
+                True,
+            ),
+            (
+                "ix_wallet_transactions_identity_key",
+                ("transaction_identity_key",),
+                False,
+            ),
+            (
+                "ix_wallet_transactions_identity_tuple",
+                (
+                    "transaction_network",
+                    "transaction_account_canonical",
+                    "transaction_logical_time_canonical",
+                    "transaction_hash_canonical",
+                ),
+                False,
+            ),
+        )
+    }
+    assert identity_index_names.isdisjoint(
+        {index["name"] for index in inspector.get_indexes("wallet_transactions")}
+    )
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == WALLET_IDENTITY_REVISION
+
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DROP TRIGGER reject_transaction_identity_update"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX ix_wallet_transactions_identity_key "
+            "ON wallet_transactions (transaction_identity_key)"
+        )
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == WALLET_IDENTITY_REVISION
+    assert report.revision_after == TRANSACTION_IDENTITY_REVISION
+    assert report.applied_revisions == (TRANSACTION_IDENTITY_REVISION,)
+    assert _transaction_legacy_snapshot(engine) == source_before
+    assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
+    _assert_schema_matches_models(engine)
+    _assert_transaction_identity_schema(engine)
+    engine.dispose()
+
+
+def test_partial_transaction_identity_column_with_wrong_shape_fails_closed(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "malformed-partial-transaction-identity.db")
+    _upgrade_to_revision(engine, WALLET_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE wallet_transactions ADD COLUMN "
+            "transaction_identity_status TEXT DEFAULT 'unavailable' NOT NULL"
+        )
+
+    with pytest.raises(RuntimeError, match="do not match revision 0003"):
+        run_database_migrations(engine)
+
+    columns = {
+        column["name"]
+        for column in inspect(engine).get_columns("wallet_transactions")
+    }
+    assert columns & set(TRANSACTION_IDENTITY_COLUMNS) == {
+        "transaction_identity_status"
+    }
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == WALLET_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_duplicate_transaction_identity_in_one_run_fails_before_indexes(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "duplicate-transaction-identity.db")
+    _upgrade_to_revision(engine, WALLET_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _insert_transaction(connection, transaction_id=1, run_id=1)
+        _insert_transaction(connection, transaction_id=2, run_id=1)
+    source_before = _transaction_legacy_snapshot(engine)
+
+    for _ in range(2):
+        with pytest.raises(
+            RuntimeError,
+            match="Duplicate canonical transaction identities",
+        ):
+            run_database_migrations(engine)
+        assert _transaction_legacy_snapshot(engine) == source_before
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql(
+                "SELECT version_num FROM alembic_version"
+            ).scalar_one() == WALLET_IDENTITY_REVISION
+
+    indexes = {
+        index["name"]
+        for index in inspect(engine).get_indexes("wallet_transactions")
+    }
+    assert "uq_wallet_transactions_run_identity" not in indexes
+    assert "ix_wallet_transactions_identity_key" not in indexes
+    assert "ix_wallet_transactions_identity_tuple" not in indexes
+    engine.dispose()
+
+
+def test_partial_unique_transaction_index_is_rejected_before_other_indexes(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "partial-transaction-identity-index.db")
+    _upgrade_to_revision(engine, WALLET_IDENTITY_REVISION)
+    column_definitions = (
+        "transaction_identity_status VARCHAR(20) DEFAULT 'unavailable' NOT NULL",
+        "transaction_identity_version VARCHAR(24) DEFAULT 'unavailable' NOT NULL",
+        "transaction_network VARCHAR(16) DEFAULT 'ton-unknown' NOT NULL",
+        "transaction_account_canonical VARCHAR(76)",
+        "transaction_logical_time_canonical VARCHAR(20)",
+        "transaction_hash_canonical VARCHAR(64)",
+        "transaction_identity_key VARCHAR(192)",
+    )
+    with engine.begin() as connection:
+        for definition in column_definitions:
+            connection.exec_driver_sql(
+                f"ALTER TABLE wallet_transactions ADD COLUMN {definition}"
+            )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX uq_wallet_transactions_run_identity "
+            "ON wallet_transactions (run_id, transaction_identity_key) "
+            "WHERE transaction_identity_key IS NULL"
+        )
+
+    with pytest.raises(RuntimeError, match="index does not match revision 0003"):
+        run_database_migrations(engine)
+
+    indexes = {
+        index["name"]: index
+        for index in inspect(engine).get_indexes("wallet_transactions")
+    }
+    assert indexes["uq_wallet_transactions_run_identity"][
+        "dialect_options"
+    ]
+    assert "ix_wallet_transactions_identity_key" not in indexes
+    assert "ix_wallet_transactions_identity_tuple" not in indexes
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == WALLET_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_current_schema_rejects_partial_unique_transaction_index(tmp_path):
+    engine = _engine(tmp_path / "current-partial-transaction-index.db")
+    run_database_migrations(engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DROP INDEX uq_wallet_transactions_run_identity"
+        )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX uq_wallet_transactions_run_identity "
+            "ON wallet_transactions (run_id, transaction_identity_key) "
+            "WHERE transaction_identity_key IS NULL"
+        )
+
+    with pytest.raises(MigrationBootstrapError, match="current indexes differ"):
+        run_database_migrations(engine)
+
     engine.dispose()
 
 
@@ -735,7 +1298,7 @@ def test_clean_process_current_head_missing_schema_fails_closed(tmp_path):
         )
         connection.execute(
             "INSERT INTO alembic_version (version_num) VALUES (?)",
-            (WALLET_IDENTITY_REVISION,),
+            (CURRENT_REVISION,),
         )
 
     environment = os.environ.copy()
@@ -870,10 +1433,11 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
 
     assert isinstance(report, MigrationReport)
     assert report.action == "created"
-    assert report.revision_after == WALLET_IDENTITY_REVISION
+    assert report.revision_after == CURRENT_REVISION
     assert report.applied_revisions == (
         BASELINE_REVISION,
         WALLET_IDENTITY_REVISION,
+        TRANSACTION_IDENTITY_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

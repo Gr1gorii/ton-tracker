@@ -228,6 +228,7 @@ def _assert_current_schema(connection: Connection) -> None:
                 index.name,
                 tuple(column.name for column in index.columns),
                 bool(index.unique),
+                _options_signature(dict(index.dialect_kwargs)),
             )
             for index in table.indexes
         }
@@ -236,6 +237,7 @@ def _assert_current_schema(connection: Connection) -> None:
                 index["name"],
                 tuple(index.get("column_names") or ()),
                 bool(index.get("unique")),
+                _options_signature(index.get("dialect_options")),
             )
             for index in schema_inspector.get_indexes(table_name)
         }
@@ -326,7 +328,7 @@ def run_database_migrations(target_engine: Engine) -> MigrationReport:
     """
     if target_engine.dialect.name != "sqlite":
         raise MigrationBootstrapError(
-            "v0.22.1 migration startup currently supports SQLite databases only."
+            "Database migration startup currently supports SQLite databases only."
         )
     with target_engine.begin() as connection:
         config = _config(connection)

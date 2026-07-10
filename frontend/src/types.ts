@@ -524,7 +524,23 @@ export interface WalletTransactionRecord {
   success: "success" | "failed" | "unknown";
   provider: string;
   source_status: WalletSourceStatus;
+  transaction_identity: WalletTransactionIdentityRecord;
   raw?: Record<string, unknown> | null;
+}
+
+export interface WalletTransactionIdentityRecord {
+  status: "network_scoped" | "unavailable";
+  version: string;
+  network: "ton-mainnet" | "ton-testnet" | "ton-unknown";
+  account_canonical?: string | null;
+  logical_time_canonical?: string | null;
+  hash_canonical?: string | null;
+  key?: string | null;
+  is_deduplication_identity: boolean;
+  is_blockchain_proof_verified: false;
+  is_ownership_proof: false;
+  deduplication_applied: false;
+  used_by_pnl: false;
 }
 
 export interface WalletSwapRecord {
