@@ -492,6 +492,58 @@ export interface WalletActivityProviderEvidence {
   normalized_count: number;
 }
 
+export interface WalletActivityAcquisitionPageEvidence {
+  page_index: number;
+  request_cursor: string | null;
+  response_cursor: string | null;
+  requested_limit: number;
+  raw_count: number;
+  normalized_count: number;
+  duplicate_count: number;
+  min_logical_time: string | null;
+  max_logical_time: string | null;
+  min_timestamp: string | null;
+  max_timestamp: string | null;
+  response_digest: string;
+  attempt_count: number;
+  error_code: string | null;
+  error_message: string | null;
+  fetched_at: string | null;
+}
+
+export interface WalletActivityAcquisitionStreamEvidence {
+  provider: string;
+  stream_key: string;
+  contract_version: string;
+  scope_kind: string;
+  requested_start: string | null;
+  requested_end: string | null;
+  query_filters: Record<string, unknown>;
+  sort_order: string;
+  page_size: number;
+  page_cap: number;
+  completion_state:
+    | "complete"
+    | "incomplete"
+    | "error"
+    | "preview_only"
+    | "legacy_unavailable";
+  termination_reason: string | null;
+  page_count: number;
+  pages_succeeded?: number;
+  raw_count: number;
+  normalized_count: number;
+  duplicate_count: number;
+  first_cursor: string | null;
+  terminal_cursor: string | null;
+  bounds_verified: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  pages: WalletActivityAcquisitionPageEvidence[];
+}
+
 export interface WalletIngestionPreviewResponse {
   success: boolean;
   wallet_address: string;
@@ -499,6 +551,8 @@ export interface WalletIngestionPreviewResponse {
   requested_surfaces: WalletIngestionSurface[];
   provider_coverage: WalletActivityProviderEvidence[];
   unavailable_surfaces: WalletIngestionSurface[];
+  incomplete_surfaces?: WalletIngestionSurface[];
+  acquisition_streams?: WalletActivityAcquisitionStreamEvidence[];
   warnings: string[];
   message: string;
 }
@@ -641,6 +695,8 @@ export interface WalletIngestionRunResponse {
   requested_surfaces: WalletIngestionSurface[];
   provider_evidence: WalletActivityProviderEvidence[];
   unavailable_surfaces: WalletIngestionSurface[];
+  incomplete_surfaces?: WalletIngestionSurface[];
+  acquisition_streams?: WalletActivityAcquisitionStreamEvidence[];
   transfers: WalletTransferRecord[];
   transactions: WalletTransactionRecord[];
   swaps: WalletSwapRecord[];

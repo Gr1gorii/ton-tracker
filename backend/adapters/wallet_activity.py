@@ -9,6 +9,8 @@ swaps parsed from account events.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation, localcontext
@@ -18,7 +20,7 @@ from adapters.bitquery import BitqueryAdapter
 from adapters.stonfi import StonfiAdapter
 from adapters.ton_provider import TonProviderAdapter
 from adapters.tonapi import TonapiAdapter
-from config import Settings, get_settings
+from config import ERROR_PROVIDER_PROTOCOL, Settings, get_settings
 
 WalletIngestionSurface = Literal[
     "transfers",
@@ -72,6 +74,8 @@ MOCK_ACTIVITY_WARNINGS = [
 
 BALANCE_QUANT = Decimal("0.000000000000000001")
 USD_QUANT = Decimal("0.00000001")
+
+TONAPI_TRANSACTION_ACQUISITION_CONTRACT = "tonapi_account_transactions_v1"
 
 MOCK_JETTON_SURFACE_WARNING = (
     "Jettons are represented as jetton balance snapshots until a dedicated "
@@ -199,6 +203,8 @@ class WalletActivityAdapterRequest:
     environment_data_mode: str
     custom_start: str | None = None
     custom_end: str | None = None
+    resolved_start: datetime | None = None
+    resolved_end: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +290,104 @@ class WalletActivityWarning:
 
 
 @dataclass(frozen=True)
+class WalletActivityAcquisitionPageEvidence:
+    page_index: int
+    request_cursor: str | None
+    response_cursor: str | None
+    requested_limit: int
+    raw_count: int
+    normalized_count: int
+    duplicate_count: int
+    min_logical_time: str | None
+    max_logical_time: str | None
+    min_timestamp: str | None
+    max_timestamp: str | None
+    response_digest: str
+    attempt_count: int
+    error_code: str | None
+    error_message: str | None
+    fetched_at: str
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "page_index": self.page_index,
+            "request_cursor": self.request_cursor,
+            "response_cursor": self.response_cursor,
+            "requested_limit": self.requested_limit,
+            "raw_count": self.raw_count,
+            "normalized_count": self.normalized_count,
+            "duplicate_count": self.duplicate_count,
+            "min_logical_time": self.min_logical_time,
+            "max_logical_time": self.max_logical_time,
+            "min_timestamp": self.min_timestamp,
+            "max_timestamp": self.max_timestamp,
+            "response_digest": self.response_digest,
+            "attempt_count": self.attempt_count,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "fetched_at": self.fetched_at,
+        }
+
+
+@dataclass(frozen=True)
+class WalletActivityAcquisitionStreamEvidence:
+    provider: str
+    stream_key: str
+    contract_version: str
+    scope_kind: str
+    requested_start: str
+    requested_end: str
+    query_filters: dict[str, Any]
+    sort_order: str
+    page_size: int
+    page_cap: int
+    completion_state: str
+    termination_reason: str
+    page_count: int
+    raw_count: int
+    normalized_count: int
+    duplicate_count: int
+    first_cursor: str | None
+    terminal_cursor: str | None
+    bounds_verified: bool
+    started_at: str
+    finished_at: str
+    error_code: str | None
+    error_message: str | None
+    pages: list[WalletActivityAcquisitionPageEvidence] = field(
+        default_factory=list
+    )
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "provider": self.provider,
+            "stream_key": self.stream_key,
+            "contract_version": self.contract_version,
+            "scope_kind": self.scope_kind,
+            "requested_start": self.requested_start,
+            "requested_end": self.requested_end,
+            "query_filters": self.query_filters,
+            "sort_order": self.sort_order,
+            "page_size": self.page_size,
+            "page_cap": self.page_cap,
+            "completion_state": self.completion_state,
+            "termination_reason": self.termination_reason,
+            "page_count": self.page_count,
+            "raw_count": self.raw_count,
+            "normalized_count": self.normalized_count,
+            "duplicate_count": self.duplicate_count,
+            "first_cursor": self.first_cursor,
+            "terminal_cursor": self.terminal_cursor,
+            "bounds_verified": self.bounds_verified,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            "error_code": self.error_code,
+            "error_message": self.error_message,
+            "pages": [page.to_public_dict() for page in self.pages],
+        }
+
+
+@dataclass(frozen=True)
 class WalletActivityAdapterResult:
     status: WalletIngestionStatus
     data_mode: WalletDataMode
@@ -292,6 +396,10 @@ class WalletActivityAdapterResult:
     unavailable_surfaces: list[WalletIngestionSurface]
     warnings: list[WalletActivityWarning]
     message: str
+    incomplete_surfaces: list[WalletIngestionSurface] = field(default_factory=list)
+    acquisition_streams: list[WalletActivityAcquisitionStreamEvidence] = field(
+        default_factory=list
+    )
     transfers: list[WalletActivityTransfer] = field(default_factory=list)
     transactions: list[WalletActivityTransaction] = field(default_factory=list)
     swaps: list[WalletActivitySwap] = field(default_factory=list)
@@ -300,6 +408,29 @@ class WalletActivityAdapterResult:
     @property
     def warning_messages(self) -> list[str]:
         return [warning.message for warning in self.warnings]
+
+
+@dataclass(frozen=True)
+class _TransactionAcquisitionOutcome:
+    raw_count: int
+    transactions: list[WalletActivityTransaction]
+    stream: WalletActivityAcquisitionStreamEvidence
+    warnings: list[str]
+    fatal: bool
+    incomplete: bool
+
+
+@dataclass(frozen=True)
+class _ValidatedTransactionPage:
+    rows: list[dict[str, Any]]
+    raw_count: int
+    response_cursor: str | None
+    min_logical_time: str | None
+    max_logical_time: str | None
+    timestamps: list[datetime | None]
+    min_timestamp: str | None
+    max_timestamp: str | None
+    response_digest: str
 
 
 class WalletActivityAdapter(Protocol):
@@ -551,6 +682,341 @@ class TonapiWalletActivityLiveAdapter:
     ) -> WalletActivityAdapterResult:
         return self._fetch_live_activity(request, mode="ingest")
 
+    def _fetch_transaction_acquisition(
+        self,
+        request: WalletActivityAdapterRequest,
+        mode: Literal["preview", "ingest"],
+    ) -> _TransactionAcquisitionOutcome:
+        started_at = _now_utc_iso()
+        page_size = max(
+            1,
+            min(1000, int(self.settings.wallet_activity_live_tx_limit)),
+        )
+        configured_page_cap = max(
+            1,
+            min(
+                100,
+                int(
+                    getattr(
+                        self.settings,
+                        "wallet_activity_live_tx_max_pages",
+                        1,
+                    )
+                ),
+            ),
+        )
+
+        try:
+            bounds = _resolved_transaction_bounds(request)
+        except ValueError as exc:
+            error_message = _sanitize_provider_message(str(exc), self.settings)
+            finished_at = _now_utc_iso()
+            stream = _transaction_stream_evidence(
+                request=request,
+                page_size=page_size,
+                page_cap=1,
+                completion_state="error",
+                termination_reason="protocol_error",
+                pages=[],
+                raw_count=0,
+                normalized_count=0,
+                duplicate_count=0,
+                terminal_cursor=None,
+                bounds_verified=False,
+                started_at=started_at,
+                finished_at=finished_at,
+                error_code="protocol_error",
+                error_message=error_message,
+                bounds=None,
+            )
+            return _TransactionAcquisitionOutcome(
+                raw_count=0,
+                transactions=[],
+                stream=stream,
+                warnings=[
+                    f"TonAPI transaction acquisition protocol error: {error_message}"
+                ],
+                fatal=True,
+                incomplete=True,
+            )
+
+        bounded = bounds is not None
+        page_cap = (
+            1
+            if mode == "preview" or not bounded
+            else configured_page_cap
+        )
+        pages: list[WalletActivityAcquisitionPageEvidence] = []
+        accepted_rows: list[dict[str, Any]] = []
+        transactions: list[WalletActivityTransaction] = []
+        seen: dict[tuple[str, str], datetime | None] = {}
+        total_raw = 0
+        total_duplicates = 0
+        cursor: str | None = None
+        last_unique_lt: int | None = None
+        last_unique_timestamp: datetime | None = None
+        completion_state = "incomplete"
+        termination_reason = "page_cap_reached"
+        error_code: str | None = None
+        error_message: str | None = None
+        fatal = False
+
+        for page_index in range(1, page_cap + 1):
+            fetched_at = _now_utc_iso()
+            if bounded:
+                provider_result = self.tonapi.get_account_transactions_page(
+                    request.wallet_address,
+                    limit=page_size,
+                    before_lt=cursor,
+                )
+            else:
+                provider_result = self.tonapi.get_account_transactions_preview(
+                    request.wallet_address,
+                    limit=page_size,
+                )
+
+            if not provider_result.ok:
+                provider_error_code = provider_result.error or "provider_error"
+                provider_protocol_error = (
+                    provider_error_code == ERROR_PROVIDER_PROTOCOL
+                )
+                error_code = (
+                    "protocol_error"
+                    if provider_protocol_error
+                    else provider_error_code
+                )
+                error_message = _sanitize_provider_message(
+                    provider_result.message or "TonAPI transaction request failed.",
+                    self.settings,
+                )
+                pages.append(
+                    _transaction_error_page_evidence(
+                        page_index=page_index,
+                        request_cursor=cursor,
+                        requested_limit=page_size,
+                        response=provider_result.data,
+                        error_code=error_code,
+                        error_message=error_message,
+                        fetched_at=fetched_at,
+                    )
+                )
+                fatal = not accepted_rows
+                completion_state = "error" if fatal else "incomplete"
+                termination_reason = (
+                    "protocol_error"
+                    if provider_protocol_error
+                    else "provider_error"
+                )
+                break
+
+            provider_data = provider_result.data
+            if not bounded:
+                provider_data = _legacy_transaction_page_data(
+                    provider_data,
+                    page_size=page_size,
+                )
+
+            try:
+                validated = _validate_transaction_page(
+                    provider_data,
+                    request_cursor=cursor,
+                    requested_limit=page_size,
+                    require_timestamps=bounded,
+                )
+
+                page_seen = dict(seen)
+                page_last_lt = last_unique_lt
+                page_last_timestamp = last_unique_timestamp
+                page_duplicates = 0
+                page_accepted: list[dict[str, Any]] = []
+                crossed_requested_start = False
+
+                for row, timestamp in zip(
+                    validated.rows,
+                    validated.timestamps,
+                ):
+                    logical_time = row["logical_time"]
+                    tx_hash = row["tx_hash"]
+                    identity = (logical_time, tx_hash.lower())
+                    prior_timestamp = page_seen.get(identity)
+                    if identity in page_seen:
+                        if bounded and prior_timestamp != timestamp:
+                            raise ValueError(
+                                "duplicate transaction identity changed timestamp"
+                            )
+                        page_duplicates += 1
+                        continue
+
+                    logical_time_value = int(logical_time, 10)
+                    if (
+                        page_last_lt is not None
+                        and logical_time_value >= page_last_lt
+                    ):
+                        raise ValueError(
+                            "transaction pages are not globally descending by "
+                            "logical time"
+                        )
+                    if (
+                        bounded
+                        and page_last_timestamp is not None
+                        and timestamp is not None
+                        and timestamp > page_last_timestamp
+                    ):
+                        raise ValueError(
+                            "transaction timestamps are not globally ordered"
+                        )
+
+                    page_seen[identity] = timestamp
+                    page_last_lt = logical_time_value
+                    if timestamp is not None:
+                        page_last_timestamp = timestamp
+
+                    if bounded:
+                        assert bounds is not None
+                        assert timestamp is not None
+                        if timestamp < bounds[0]:
+                            crossed_requested_start = True
+                            continue
+                        if timestamp >= bounds[1]:
+                            continue
+                    page_accepted.append(row)
+
+                page_evidence = WalletActivityAcquisitionPageEvidence(
+                    page_index=page_index,
+                    request_cursor=cursor,
+                    response_cursor=validated.response_cursor,
+                    requested_limit=page_size,
+                    raw_count=validated.raw_count,
+                    normalized_count=len(page_accepted),
+                    duplicate_count=page_duplicates,
+                    min_logical_time=validated.min_logical_time,
+                    max_logical_time=validated.max_logical_time,
+                    min_timestamp=validated.min_timestamp,
+                    max_timestamp=validated.max_timestamp,
+                    response_digest=validated.response_digest,
+                    attempt_count=1,
+                    error_code=None,
+                    error_message=None,
+                    fetched_at=fetched_at,
+                )
+            except (AssertionError, KeyError, TypeError, ValueError) as exc:
+                error_code = "protocol_error"
+                error_message = _sanitize_provider_message(str(exc), self.settings)
+                pages.append(
+                    _transaction_error_page_evidence(
+                        page_index=page_index,
+                        request_cursor=cursor,
+                        requested_limit=page_size,
+                        response=provider_data,
+                        error_code=error_code,
+                        error_message=error_message,
+                        fetched_at=fetched_at,
+                    )
+                )
+                fatal = not accepted_rows
+                completion_state = "error" if fatal else "incomplete"
+                termination_reason = "protocol_error"
+                break
+
+            pages.append(page_evidence)
+            total_raw += validated.raw_count
+            total_duplicates += page_duplicates
+            seen = page_seen
+            last_unique_lt = page_last_lt
+            last_unique_timestamp = page_last_timestamp
+            accepted_rows.extend(page_accepted)
+            if mode == "ingest":
+                transactions.extend(_tonapi_live_transactions(page_accepted))
+
+            if mode == "preview":
+                completion_state = "preview_only"
+                termination_reason = "preview_page_limit"
+                cursor = validated.response_cursor
+                break
+            if not bounded:
+                completion_state = "incomplete"
+                termination_reason = "legacy_unavailable"
+                cursor = validated.response_cursor
+                break
+            if validated.raw_count == 0:
+                completion_state = "complete"
+                termination_reason = "provider_terminal"
+                cursor = None
+                break
+            if crossed_requested_start:
+                completion_state = "complete"
+                termination_reason = "requested_start_crossed"
+                cursor = validated.response_cursor
+                break
+
+            cursor = validated.response_cursor
+        else:
+            completion_state = "incomplete"
+            termination_reason = "page_cap_reached"
+
+        finished_at = _now_utc_iso()
+        bounds_verified = bounded and completion_state == "complete"
+        stream = _transaction_stream_evidence(
+            request=request,
+            page_size=page_size,
+            page_cap=page_cap,
+            completion_state=completion_state,
+            termination_reason=termination_reason,
+            pages=pages,
+            raw_count=total_raw,
+            normalized_count=len(accepted_rows),
+            duplicate_count=total_duplicates,
+            terminal_cursor=cursor,
+            bounds_verified=bounds_verified,
+            started_at=started_at,
+            finished_at=finished_at,
+            error_code=error_code,
+            error_message=error_message,
+            bounds=bounds,
+        )
+
+        if completion_state == "preview_only":
+            outcome_warnings = [
+                "TonAPI transaction preview fetched exactly one page. It does "
+                "not verify interval completeness or pagination termination."
+            ]
+        elif termination_reason == "legacy_unavailable":
+            outcome_warnings = [
+                "TonAPI transaction ingestion used the legacy one-page path "
+                "because immutable resolved bounds were unavailable. History "
+                "completeness remains unverified."
+            ]
+        elif completion_state == "complete":
+            outcome_warnings = [
+                "TonAPI transaction pagination terminated within the resolved "
+                "interval contract. This does not establish cost basis or PnL."
+            ]
+        elif termination_reason in ("provider_error", "protocol_error"):
+            detail = error_message or termination_reason
+            outcome_warnings = [
+                f"TonAPI transaction-history warning: {detail}. "
+                "Pagination is incomplete and no full-history claim is made."
+            ]
+        else:
+            detail = error_message or termination_reason
+            outcome_warnings = [
+                "TonAPI transaction pagination is incomplete: "
+                f"{detail}. No full-history claim is made."
+            ]
+
+        return _TransactionAcquisitionOutcome(
+            raw_count=total_raw,
+            transactions=transactions,
+            stream=stream,
+            warnings=outcome_warnings,
+            fatal=fatal,
+            incomplete=completion_state in (
+                "preview_only",
+                "incomplete",
+                "error",
+            ),
+        )
+
     def _fetch_live_activity(
         self,
         request: WalletActivityAdapterRequest,
@@ -570,6 +1036,8 @@ class TonapiWalletActivityLiveAdapter:
         ]
         successful_supported_surfaces: list[WalletIngestionSurface] = []
         failed_supported_surfaces: list[WalletIngestionSurface] = []
+        incomplete_surfaces: list[WalletIngestionSurface] = []
+        acquisition_streams: list[WalletActivityAcquisitionStreamEvidence] = []
         raw_count = 0
         balances: list[WalletActivityBalanceSnapshot] = []
         transactions: list[WalletActivityTransaction] = []
@@ -663,44 +1131,27 @@ class TonapiWalletActivityLiveAdapter:
                     balances.extend(_tonapi_live_balance_snapshots(jettons))
 
         if "transactions" in requested_surfaces:
-            result = self.tonapi.get_account_transactions_preview(
-                request.wallet_address,
-                limit=self.settings.wallet_activity_live_tx_limit,
+            transaction_outcome = self._fetch_transaction_acquisition(
+                request,
+                mode,
             )
-            if not result.ok:
-                message = (
-                    result.message
-                    or "TonAPI live transaction-history request failed."
-                )
-                warnings.append(f"TonAPI transaction-history warning: {message}")
+            raw_count += transaction_outcome.raw_count
+            transactions.extend(transaction_outcome.transactions)
+            acquisition_streams.append(transaction_outcome.stream)
+            warnings.extend(transaction_outcome.warnings)
+            if transaction_outcome.incomplete:
+                incomplete_surfaces.append("transactions")
+            if transaction_outcome.fatal:
                 unavailable_surfaces.append("transactions")
                 failed_supported_surfaces.append("transactions")
             else:
-                data = result.data if isinstance(result.data, dict) else {}
-                tx_rows = (
-                    data.get("transactions")
-                    if isinstance(data.get("transactions"), list)
-                    else []
-                )
-                total_tx = _safe_int(
-                    data.get("total_transactions"), len(tx_rows)
-                )
-                preview_count = _safe_int(data.get("preview_count"), len(tx_rows))
-                raw_count += total_tx
                 successful_supported_surfaces.append("transactions")
-                if total_tx > preview_count:
-                    warnings.append(
-                        f"TonAPI returned {preview_count} of {total_tx} "
-                        "transactions within WALLET_ACTIVITY_LIVE_TX_LIMIT."
-                    )
-                if total_tx == 0:
+                if transaction_outcome.raw_count == 0:
                     warnings.append(
                         "TonAPI returned zero transactions for this guarded "
                         "fetch. This is not evidence that the wallet has no "
                         "activity."
                     )
-                if mode == "ingest":
-                    transactions.extend(_tonapi_live_transactions(tx_rows))
 
         if "transfers" in requested_surfaces:
             result = self.tonapi.get_account_events_preview(
@@ -786,6 +1237,12 @@ class TonapiWalletActivityLiveAdapter:
                     swaps.extend(_tonapi_live_swaps(swap_rows))
 
         unavailable_surfaces = list(dict.fromkeys(unavailable_surfaces))
+        incomplete_surfaces = list(dict.fromkeys(incomplete_surfaces))
+        limiting_incomplete = any(
+            stream.completion_state in ("incomplete", "error")
+            and stream.termination_reason != "legacy_unavailable"
+            for stream in acquisition_streams
+        )
         if failed_supported_surfaces and not successful_supported_surfaces:
             status: WalletIngestionStatus = "error"
             source_status: WalletSourceStatus = "error"
@@ -795,8 +1252,16 @@ class TonapiWalletActivityLiveAdapter:
                 "wallet activity rows were persisted."
             )
         else:
-            status = "partial" if unavailable_surfaces else "success"
-            source_status = "limited" if failed_supported_surfaces else "live"
+            status = (
+                "partial"
+                if unavailable_surfaces or limiting_incomplete
+                else "success"
+            )
+            source_status = (
+                "limited"
+                if failed_supported_surfaces or limiting_incomplete
+                else "live"
+            )
             message = (
                 "Guarded TonAPI live activity fetched. Scope is native TON "
                 "balance, account jetton balances, account transaction "
@@ -817,6 +1282,8 @@ class TonapiWalletActivityLiveAdapter:
             swaps=swaps,
             message=message,
             source_status=source_status,
+            incomplete_surfaces=incomplete_surfaces,
+            acquisition_streams=acquisition_streams,
         )
 
     def _live_result(
@@ -832,10 +1299,16 @@ class TonapiWalletActivityLiveAdapter:
         transfers: list[WalletActivityTransfer] | None = None,
         swaps: list[WalletActivitySwap] | None = None,
         source_status: WalletSourceStatus = "live",
+        incomplete_surfaces: list[WalletIngestionSurface] | None = None,
+        acquisition_streams: list[
+            WalletActivityAcquisitionStreamEvidence
+        ] | None = None,
     ) -> WalletActivityAdapterResult:
         transactions = transactions or []
         transfers = transfers or []
         swaps = swaps or []
+        incomplete_surfaces = incomplete_surfaces or []
+        acquisition_streams = acquisition_streams or []
         return WalletActivityAdapterResult(
             status=status,
             data_mode="real",
@@ -859,6 +1332,8 @@ class TonapiWalletActivityLiveAdapter:
             unavailable_surfaces=unavailable_surfaces,
             warnings=_warning_records_for_provider(warnings, self.provider_name),
             message=message,
+            incomplete_surfaces=incomplete_surfaces,
+            acquisition_streams=acquisition_streams,
             balances=balances,
             transactions=transactions,
             transfers=transfers,
@@ -1018,6 +1493,357 @@ def _provider_scaffold_configured(provider_key: str, settings: Settings) -> bool
     if provider_key == WALLET_ACTIVITY_PROVIDER_BITQUERY:
         return BitqueryAdapter(settings).is_configured()
     return False
+
+
+def _utc_datetime(value: Any, field_name: str) -> datetime:
+    if not isinstance(value, datetime):
+        raise ValueError(f"{field_name} must be a timezone-aware UTC datetime.")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field_name} must be a timezone-aware UTC datetime.")
+    return value.astimezone(timezone.utc)
+
+
+def _resolved_transaction_bounds(
+    request: WalletActivityAdapterRequest,
+) -> tuple[datetime, datetime] | None:
+    if request.resolved_start is None and request.resolved_end is None:
+        return None
+    if request.resolved_start is None or request.resolved_end is None:
+        raise ValueError(
+            "resolved_start and resolved_end must be supplied together."
+        )
+    start = _utc_datetime(request.resolved_start, "resolved_start")
+    end = _utc_datetime(request.resolved_end, "resolved_end")
+    if start >= end:
+        raise ValueError("resolved_start must be earlier than resolved_end.")
+    return start, end
+
+
+def _utc_iso(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
+
+
+def _stable_page_digest(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _strict_logical_time(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if not value or not value.isascii() or not value.isdigit():
+        return None
+    if value[0] == "0" or len(value) > 20:
+        return None
+    if int(value, 10) > 2**64 - 1:
+        return None
+    return value
+
+
+def _canonical_uint_string(value: Any) -> bool:
+    if not isinstance(value, str) or not value.isascii():
+        return False
+    if value == "0":
+        return True
+    if (
+        not value.isdigit()
+        or value[0] == "0"
+        or len(value) > 20
+    ):
+        return False
+    return int(value, 10) <= 2**64 - 1
+
+
+def _transaction_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        seconds = value
+    elif isinstance(value, str) and value.isascii() and value.isdigit():
+        seconds = int(value, 10)
+    else:
+        return None
+    if seconds < 0:
+        return None
+    try:
+        return datetime.fromtimestamp(seconds, tz=timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _legacy_transaction_page_data(value: Any, *, page_size: int) -> Any:
+    if not isinstance(value, dict):
+        return value
+    rows = value.get("transactions")
+    if not isinstance(rows, list):
+        return value
+    logical_times = [
+        _strict_logical_time(row.get("logical_time"))
+        if isinstance(row, dict)
+        else None
+        for row in rows
+    ]
+    valid_times = [item for item in logical_times if item is not None]
+    min_logical_time = (
+        str(min(int(item, 10) for item in valid_times))
+        if len(valid_times) == len(rows) and rows
+        else None
+    )
+    max_logical_time = (
+        str(max(int(item, 10) for item in valid_times))
+        if len(valid_times) == len(rows) and rows
+        else None
+    )
+    return {
+        "wallet_address": value.get("wallet_address"),
+        "requested_limit": page_size,
+        "request_before_lt": None,
+        "raw_count": len(rows),
+        "min_logical_time": min_logical_time,
+        "max_logical_time": max_logical_time,
+        "next_before_lt": min_logical_time,
+        "transactions": rows,
+    }
+
+
+def _validate_transaction_page(
+    value: Any,
+    *,
+    request_cursor: str | None,
+    requested_limit: int,
+    require_timestamps: bool,
+) -> _ValidatedTransactionPage:
+    if not isinstance(value, dict):
+        raise ValueError("transaction page must be an object")
+    if value.get("requested_limit") != requested_limit:
+        raise ValueError("transaction page requested_limit does not match request")
+    if value.get("request_before_lt") != request_cursor:
+        raise ValueError("transaction page request cursor does not match request")
+
+    rows = value.get("transactions")
+    if not isinstance(rows, list):
+        raise ValueError("transaction page transactions must be a list")
+    raw_count = value.get("raw_count")
+    if isinstance(raw_count, bool) or raw_count != len(rows):
+        raise ValueError("transaction page raw_count does not match rows")
+    if raw_count > requested_limit:
+        raise ValueError("transaction page returned more rows than requested")
+
+    logical_times: list[str] = []
+    timestamps: list[datetime | None] = []
+    prior_lt: int | None = None
+    prior_timestamp: datetime | None = None
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"transaction page row {index} must be an object")
+        tx_hash = row.get("tx_hash")
+        if (
+            not isinstance(tx_hash, str)
+            or not tx_hash
+            or tx_hash != tx_hash.strip()
+        ):
+            raise ValueError(
+                f"transaction page row {index} has invalid transaction hash"
+            )
+        total_fees = row.get("total_fees")
+        if total_fees is not None and not _canonical_uint_string(total_fees):
+            raise ValueError(
+                f"transaction page row {index} has invalid total fees"
+            )
+        logical_time = _strict_logical_time(row.get("logical_time"))
+        if logical_time is None:
+            raise ValueError(
+                f"transaction page row {index} has invalid logical time"
+            )
+        logical_time_value = int(logical_time, 10)
+        if prior_lt is not None and logical_time_value >= prior_lt:
+            raise ValueError(
+                "transaction page logical times must be strictly descending"
+            )
+        prior_lt = logical_time_value
+        logical_times.append(logical_time)
+
+        timestamp = _transaction_timestamp(row.get("utime"))
+        if require_timestamps and timestamp is None:
+            raise ValueError(
+                f"transaction page row {index} has invalid timestamp"
+            )
+        if (
+            require_timestamps
+            and timestamp is not None
+            and prior_timestamp is not None
+            and timestamp > prior_timestamp
+        ):
+            raise ValueError(
+                "transaction page timestamps must follow logical-time order"
+            )
+        if timestamp is not None:
+            prior_timestamp = timestamp
+        timestamps.append(timestamp)
+
+    min_logical_time = (
+        str(min(int(item, 10) for item in logical_times))
+        if logical_times
+        else None
+    )
+    max_logical_time = (
+        str(max(int(item, 10) for item in logical_times))
+        if logical_times
+        else None
+    )
+    if value.get("min_logical_time") != min_logical_time:
+        raise ValueError("transaction page minimum logical time is inconsistent")
+    if value.get("max_logical_time") != max_logical_time:
+        raise ValueError("transaction page maximum logical time is inconsistent")
+
+    response_cursor = value.get("next_before_lt")
+    if not logical_times:
+        if response_cursor is not None:
+            raise ValueError("empty transaction page must terminate its cursor")
+    else:
+        response_cursor = _strict_logical_time(response_cursor)
+        if response_cursor != min_logical_time:
+            raise ValueError(
+                "transaction page response cursor must equal minimum logical time"
+            )
+        if (
+            request_cursor is not None
+            and int(response_cursor, 10) >= int(request_cursor, 10)
+        ):
+            raise ValueError("transaction page cursor did not advance")
+
+    available_timestamps = [item for item in timestamps if item is not None]
+    min_timestamp = (
+        _utc_iso(min(available_timestamps)) if available_timestamps else None
+    )
+    max_timestamp = (
+        _utc_iso(max(available_timestamps)) if available_timestamps else None
+    )
+    return _ValidatedTransactionPage(
+        rows=rows,
+        raw_count=raw_count,
+        response_cursor=response_cursor,
+        min_logical_time=min_logical_time,
+        max_logical_time=max_logical_time,
+        timestamps=timestamps,
+        min_timestamp=min_timestamp,
+        max_timestamp=max_timestamp,
+        response_digest=_stable_page_digest(value),
+    )
+
+
+def _sanitize_provider_message(value: Any, settings: Settings) -> str:
+    message = str(value or "Provider error.").strip() or "Provider error."
+    api_key = getattr(settings, "tonapi_api_key", "")
+    if api_key:
+        message = message.replace(api_key, "[redacted]")
+    return message[:500]
+
+
+def _transaction_error_page_evidence(
+    *,
+    page_index: int,
+    request_cursor: str | None,
+    requested_limit: int,
+    response: Any,
+    error_code: str,
+    error_message: str,
+    fetched_at: str,
+) -> WalletActivityAcquisitionPageEvidence:
+    data = response if isinstance(response, dict) else {}
+    raw_count = data.get("raw_count")
+    if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+        raw_count = 0
+    response_cursor = data.get("next_before_lt")
+    if not isinstance(response_cursor, str):
+        response_cursor = None
+    return WalletActivityAcquisitionPageEvidence(
+        page_index=page_index,
+        request_cursor=request_cursor,
+        response_cursor=response_cursor,
+        requested_limit=requested_limit,
+        raw_count=max(0, raw_count),
+        normalized_count=0,
+        duplicate_count=0,
+        min_logical_time=(
+            data.get("min_logical_time")
+            if isinstance(data.get("min_logical_time"), str)
+            else None
+        ),
+        max_logical_time=(
+            data.get("max_logical_time")
+            if isinstance(data.get("max_logical_time"), str)
+            else None
+        ),
+        min_timestamp=None,
+        max_timestamp=None,
+        response_digest=_stable_page_digest(response),
+        attempt_count=1,
+        error_code=error_code,
+        error_message=error_message,
+        fetched_at=fetched_at,
+    )
+
+
+def _transaction_stream_evidence(
+    *,
+    request: WalletActivityAdapterRequest,
+    page_size: int,
+    page_cap: int,
+    completion_state: str,
+    termination_reason: str,
+    pages: list[WalletActivityAcquisitionPageEvidence],
+    raw_count: int,
+    normalized_count: int,
+    duplicate_count: int,
+    terminal_cursor: str | None,
+    bounds_verified: bool,
+    started_at: str,
+    finished_at: str,
+    error_code: str | None,
+    error_message: str | None,
+    bounds: tuple[datetime, datetime] | None,
+) -> WalletActivityAcquisitionStreamEvidence:
+    requested_start = _utc_iso(bounds[0]) if bounds is not None else ""
+    requested_end = _utc_iso(bounds[1]) if bounds is not None else ""
+    return WalletActivityAcquisitionStreamEvidence(
+        provider="tonapi",
+        stream_key="transactions",
+        contract_version=TONAPI_TRANSACTION_ACQUISITION_CONTRACT,
+        scope_kind=("bounded_interval" if bounds is not None else "legacy_unavailable"),
+        requested_start=requested_start,
+        requested_end=requested_end,
+        query_filters={
+            "endpoint": "account_transactions",
+            "cursor": "before_lt",
+            "limit": page_size,
+            "interval": "[resolved_start,resolved_end)",
+            "bounds_available": bounds is not None,
+        },
+        sort_order="logical_time_desc",
+        page_size=page_size,
+        page_cap=page_cap,
+        completion_state=completion_state,
+        termination_reason=termination_reason,
+        page_count=len(pages),
+        raw_count=raw_count,
+        normalized_count=normalized_count,
+        duplicate_count=duplicate_count,
+        first_cursor=pages[0].request_cursor if pages else None,
+        terminal_cursor=terminal_cursor,
+        bounds_verified=bounds_verified,
+        started_at=started_at,
+        finished_at=finished_at,
+        error_code=error_code,
+        error_message=error_message,
+        pages=pages,
+    )
 
 
 def _tonapi_live_warnings(
@@ -1288,9 +2114,10 @@ def _optional_decimal(value: Any) -> Decimal | None:
     if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+    return parsed if parsed.is_finite() else None
 
 
 def _optional_string(value: Any) -> str | None:

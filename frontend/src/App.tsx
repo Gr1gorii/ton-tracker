@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.3 TRANSACTION IDENTITY";
+const RELEASE_LABEL = "v0.22.4 PAGINATION EVIDENCE";
 
 const navItems = [
   "DASHBOARD",
@@ -942,13 +942,13 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Low-level TON transaction identity</strong>
+            <strong>Bounded transaction acquisition evidence</strong>
             <p>
-              Guarded real/live TonAPI transaction rows can persist a strict,
-              migration-backed tuple: network, canonical run account, LT, and
-              32-byte hash. Original tx_hash and LT remain visible. The tuple
-              is deduplication evidence only; no deduplication is applied and
-              PnL is unchanged.
+              Guarded real/live TonAPI ingestion freezes one UTC interval,
+              follows low-level transaction cursors within a page cap, and
+              stores stream and page evidence. A terminal page or verified
+              start-bound crossing can complete that transaction stream;
+              reaching the cap stays explicitly incomplete. PnL is unchanged.
             </p>
           </div>
         </div>
@@ -985,18 +985,18 @@ function EvidenceColumn({
           />
           <ReleaseReadinessItem
             tone="ready"
-            label="Transaction identity"
-            text="Only coherent low-level real/live TonAPI rows receive the exact network + account + LT + hash tuple. Legacy live rows are backfilled only with matching stored provenance; mock or malformed rows stay unavailable."
+            label="Transaction acquisition"
+            text="Low-level TonAPI transaction pages use strict descending LT cursors, half-open UTC bounds, overlap deduplication, and persisted page digests. Preview remains one page and is never labeled complete."
           />
           <ReleaseReadinessItem
             tone="scoped"
             label="History readiness"
-            text="v0.22.3 groups only coherent persisted tuples as exact transaction identity; legacy raw hashes and high-level event actions remain weak, and no exact swap identity is claimed."
+            text="v0.22.4 can prove completion only for an individual bounded low-level transaction stream. Transfers, swaps, balances, and jettons still lack equivalent complete acquisition evidence, so full wallet history and cost basis remain blocked."
           />
           <ReleaseReadinessItem
             tone="ready"
             label="Schema migrations"
-            text="Retry-safe migration 0003 adds and verifies the low-level transaction identity fields and indexes without changing analytics semantics."
+            text="Retry-safe migration 0004 adds stream/page acquisition evidence with strict parent-child identity, cascade behavior, and no fabricated evidence for legacy runs."
           />
           <ReleaseReadinessItem
             tone="ready"
@@ -1046,7 +1046,7 @@ function EvidenceColumn({
         <EvidenceItem
           tone="warning"
           title="No canonical full-history cost basis"
-          text="Exact low-level transaction tuples do not merge runs, prove paginated history completeness, or supply acquisition cost basis."
+          text="A complete bounded transaction stream does not complete transfers, swaps, balances, or jettons; it does not merge runs or supply full-history acquisition cost basis."
         />
         <EvidenceItem
           tone="warning"

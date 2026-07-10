@@ -16,6 +16,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from adapters.wallet_activity import (
+    WalletActivityAcquisitionStreamEvidence,
     WalletActivityAdapterRequest,
     WalletActivityAdapterResult,
     WalletActivityBalanceSnapshot,
@@ -32,7 +33,13 @@ from services.ton_address_identity import (
     derive_ton_wallet_identity,
 )
 from services.ton_transaction_identity import derive_ton_transaction_identity
+from services.wallet_acquisition_bounds import (
+    WalletAcquisitionBounds,
+    resolve_wallet_acquisition_bounds,
+)
 from models import (
+    WalletAcquisitionPage,
+    WalletAcquisitionStream,
     WalletBalanceSnapshot,
     WalletIngestionRun,
     WalletIngestionWarning,
@@ -46,13 +53,15 @@ from schemas import WalletIngestionPreviewRequest
 def build_wallet_ingestion_preview(
     payload: WalletIngestionPreviewRequest,
     settings=None,
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Return adapter coverage for a wallet ingestion request."""
     settings = settings or get_settings()
-    _validate_window(payload)
+    bounds = _resolve_acquisition_bounds(payload, now=now)
     _derive_request_wallet_identity(payload.wallet_address, settings)
     adapter = build_wallet_activity_adapter(settings)
-    result = adapter.preview(_adapter_request(payload, settings))
+    result = adapter.preview(_adapter_request(payload, settings, bounds))
 
     return {
         "success": result.status in ("success", "partial"),
@@ -61,6 +70,8 @@ def build_wallet_ingestion_preview(
         "requested_surfaces": result.requested_surfaces,
         "provider_coverage": _provider_evidence(result),
         "unavailable_surfaces": result.unavailable_surfaces,
+        "incomplete_surfaces": result.incomplete_surfaces,
+        "acquisition_streams": _acquisition_stream_records(result),
         "warnings": result.warning_messages,
         "message": result.message,
     }
@@ -70,16 +81,19 @@ def persist_mock_wallet_ingestion(
     payload: WalletIngestionPreviewRequest,
     session: Session,
     settings=None,
+    *,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Persist one adapter-backed mock wallet ingestion run and return it."""
     settings = settings or get_settings()
     start, end = _validate_window(payload)
+    bounds = _resolve_acquisition_bounds(payload, now=now)
     wallet_identity = _derive_request_wallet_identity(
         payload.wallet_address,
         settings,
     )
     adapter = build_wallet_activity_adapter(settings)
-    result = adapter.ingest(_adapter_request(payload, settings))
+    result = adapter.ingest(_adapter_request(payload, settings, bounds))
 
     run = WalletIngestionRun(
         wallet_address=payload.wallet_address,
@@ -102,6 +116,7 @@ def persist_mock_wallet_ingestion(
             {
                 "provider_evidence": _provider_evidence(result),
                 "unavailable_surfaces": result.unavailable_surfaces,
+                "incomplete_surfaces": result.incomplete_surfaces,
                 "message": result.message,
                 "adapter_contract": "wallet_activity_adapter_v0.12.0",
             }
@@ -114,6 +129,9 @@ def persist_mock_wallet_ingestion(
     run.swaps.extend(_swap_models(result.swaps))
     run.balance_snapshots.extend(_balance_snapshot_models(priced_balances))
     run.warnings.extend(_warning_models(result.warnings))
+    run.acquisition_streams.extend(
+        _acquisition_stream_models(result.acquisition_streams)
+    )
 
     session.add(run)
     session.commit()
@@ -140,6 +158,9 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
     unavailable_surfaces = provider_summary.get("unavailable_surfaces")
     if not isinstance(unavailable_surfaces, list):
         unavailable_surfaces = []
+    incomplete_surfaces = provider_summary.get("incomplete_surfaces")
+    if not isinstance(incomplete_surfaces, list):
+        incomplete_surfaces = []
     message = provider_summary.get("message")
     if not isinstance(message, str) or not message:
         message = (
@@ -163,6 +184,14 @@ def wallet_ingestion_run_to_response(run: WalletIngestionRun) -> dict[str, Any]:
         "requested_surfaces": requested_surfaces,
         "provider_evidence": evidence,
         "unavailable_surfaces": unavailable_surfaces,
+        "incomplete_surfaces": incomplete_surfaces,
+        "acquisition_streams": [
+            _acquisition_stream_record(item)
+            for item in sorted(
+                run.acquisition_streams,
+                key=lambda stream: (stream.provider, stream.stream_key),
+            )
+        ],
         "transfers": transfers,
         "transactions": transactions,
         "swaps": swaps,
@@ -431,6 +460,7 @@ def _activity_summary(
 def _adapter_request(
     payload: WalletIngestionPreviewRequest,
     settings,
+    bounds: WalletAcquisitionBounds,
 ) -> WalletActivityAdapterRequest:
     return WalletActivityAdapterRequest(
         wallet_address=payload.wallet_address,
@@ -439,11 +469,39 @@ def _adapter_request(
         custom_end=payload.custom_end,
         surfaces=payload.surfaces,
         environment_data_mode=settings.data_mode,
+        resolved_start=bounds.start,
+        resolved_end=bounds.end,
     )
 
 
 def _provider_evidence(result: WalletActivityAdapterResult) -> list[dict[str, Any]]:
     return [item.to_public_dict() for item in result.provider_evidence]
+
+
+def _acquisition_stream_records(
+    result: WalletActivityAdapterResult,
+) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for item in result.acquisition_streams:
+        record = item.to_public_dict()
+        record["pages_succeeded"] = sum(
+            1 for page in item.pages if page.error_code is None
+        )
+        records.append(record)
+    return records
+
+
+def _resolve_acquisition_bounds(
+    payload: WalletIngestionPreviewRequest,
+    *,
+    now: datetime | None,
+) -> WalletAcquisitionBounds:
+    return resolve_wallet_acquisition_bounds(
+        time_window=payload.time_window,
+        custom_start=payload.custom_start,
+        custom_end=payload.custom_end,
+        now=now or datetime.now(timezone.utc),
+    )
 
 
 def _validate_window(
@@ -471,6 +529,151 @@ def _parse_datetime(value: str | None) -> datetime | None:
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _acquisition_stream_models(
+    streams: list[WalletActivityAcquisitionStreamEvidence],
+) -> list[WalletAcquisitionStream]:
+    models: list[WalletAcquisitionStream] = []
+    for item in streams:
+        pages_succeeded = sum(
+            1 for page in item.pages if page.error_code is None
+        )
+        model = WalletAcquisitionStream(
+            provider=item.provider,
+            stream_key=item.stream_key,
+            contract_version=item.contract_version,
+            scope_kind=item.scope_kind,
+            resolved_start_at=_parse_datetime(item.requested_start),
+            resolved_end_at=_parse_datetime(item.requested_end),
+            request_query_json=_json_dumps(
+                {
+                    "filters": item.query_filters,
+                    "sort_order": item.sort_order,
+                }
+            ),
+            page_size=item.page_size,
+            max_pages=item.page_cap,
+            max_items=item.page_size * item.page_cap,
+            completion_state=item.completion_state,
+            termination_reason=item.termination_reason or None,
+            pages_attempted=item.page_count,
+            pages_succeeded=pages_succeeded,
+            raw_item_count=item.raw_count,
+            normalized_item_count=item.normalized_count,
+            duplicate_item_count=item.duplicate_count,
+            first_cursor=item.first_cursor,
+            terminal_cursor=item.terminal_cursor,
+            bounds_verified=item.bounds_verified,
+            error_code=item.error_code,
+            error_message=item.error_message,
+            started_at=_parse_datetime(item.started_at)
+            or datetime.now(timezone.utc),
+            finished_at=_parse_datetime(item.finished_at),
+        )
+        model.pages.extend(
+            WalletAcquisitionPage(
+                page_index=page.page_index,
+                request_cursor=page.request_cursor,
+                response_cursor=page.response_cursor,
+                request_offset=None,
+                requested_limit=page.requested_limit,
+                request_query_json=_json_dumps(
+                    {
+                        "before_lt": page.request_cursor,
+                        "limit": page.requested_limit,
+                    }
+                ),
+                raw_item_count=page.raw_count,
+                normalized_item_count=page.normalized_count,
+                duplicate_item_count=page.duplicate_count,
+                newest_logical_time=page.max_logical_time,
+                oldest_logical_time=page.min_logical_time,
+                newest_activity_at=_parse_datetime(page.max_timestamp),
+                oldest_activity_at=_parse_datetime(page.min_timestamp),
+                response_digest_sha256=page.response_digest or None,
+                attempt_count=page.attempt_count,
+                fetch_status=(
+                    "error" if page.error_code is not None else "success"
+                ),
+                error_code=page.error_code,
+                error_message=page.error_message,
+                fetched_at=_parse_datetime(page.fetched_at)
+                or datetime.now(timezone.utc),
+            )
+            for page in item.pages
+        )
+        models.append(model)
+    return models
+
+
+def _acquisition_stream_record(
+    stream: WalletAcquisitionStream,
+) -> dict[str, Any]:
+    request_query = _json_loads(stream.request_query_json) or {}
+    filters = request_query.get("filters")
+    if not isinstance(filters, dict):
+        filters = {}
+    sort_order = request_query.get("sort_order")
+    if not isinstance(sort_order, str):
+        sort_order = "unknown"
+    pages = sorted(stream.pages, key=lambda page: page.page_index)
+    return {
+        "provider": stream.provider,
+        "stream_key": stream.stream_key,
+        "contract_version": stream.contract_version,
+        "scope_kind": stream.scope_kind,
+        "requested_start": _isoformat(stream.resolved_start_at),
+        "requested_end": _isoformat(stream.resolved_end_at),
+        "query_filters": filters,
+        "sort_order": sort_order,
+        "page_size": stream.page_size,
+        "page_cap": stream.max_pages,
+        "completion_state": stream.completion_state,
+        "termination_reason": stream.termination_reason,
+        "page_count": stream.pages_attempted,
+        "pages_succeeded": stream.pages_succeeded,
+        "raw_count": stream.raw_item_count,
+        "normalized_count": stream.normalized_item_count,
+        "duplicate_count": stream.duplicate_item_count,
+        "first_cursor": stream.first_cursor,
+        "terminal_cursor": stream.terminal_cursor,
+        "bounds_verified": bool(stream.bounds_verified),
+        "started_at": _isoformat(stream.started_at),
+        "finished_at": _isoformat(stream.finished_at),
+        "error_code": stream.error_code,
+        "error_message": stream.error_message,
+        "pages": [_acquisition_page_record(page) for page in pages],
+    }
+
+
+def _acquisition_page_record(page: WalletAcquisitionPage) -> dict[str, Any]:
+    return {
+        "page_index": page.page_index,
+        "request_cursor": page.request_cursor,
+        "response_cursor": page.response_cursor,
+        "requested_limit": page.requested_limit,
+        "raw_count": page.raw_item_count,
+        "normalized_count": page.normalized_item_count,
+        "duplicate_count": page.duplicate_item_count,
+        "min_logical_time": page.oldest_logical_time,
+        "max_logical_time": page.newest_logical_time,
+        "min_timestamp": _isoformat(page.oldest_activity_at),
+        "max_timestamp": _isoformat(page.newest_activity_at),
+        "response_digest": page.response_digest_sha256 or "",
+        "attempt_count": page.attempt_count,
+        "error_code": page.error_code,
+        "error_message": page.error_message,
+        "fetched_at": _isoformat(page.fetched_at),
+    }
+
+
+def _isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _transfer_models(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -193,6 +194,8 @@ def _run(
     created_at: str = "2026-06-02T00:00:00Z",
     requested_surfaces: list[str] | None = None,
     unavailable_surfaces: list[str] | None = None,
+    incomplete_surfaces: list[str] | None = None,
+    acquisition_streams: list[dict[str, Any]] | None = None,
     wallet_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     response = {
@@ -209,6 +212,8 @@ def _run(
             requested_surfaces or ["transfers", "transactions", "swaps"]
         ),
         "unavailable_surfaces": list(unavailable_surfaces or []),
+        "incomplete_surfaces": list(incomplete_surfaces or []),
+        "acquisition_streams": list(acquisition_streams or []),
         "_created_at": created_at,
         "_custom_start": custom_start,
         "_custom_end": custom_end,
@@ -216,6 +221,61 @@ def _run(
     if wallet_identity is not None:
         response["wallet_identity"] = wallet_identity
     return response
+
+
+def _transaction_acquisition_stream(
+    *,
+    completion_state: str = "complete",
+    termination_reason: str = "requested_start_crossed",
+    bounds_verified: bool = True,
+    digest: str = "cd" * 32,
+) -> dict[str, Any]:
+    return {
+        "provider": "tonapi",
+        "stream_key": "transactions",
+        "contract_version": "tonapi_account_transactions_v1",
+        "scope_kind": "bounded_interval",
+        "requested_start": "2026-06-01T00:00:00Z",
+        "requested_end": "2026-06-02T00:00:00Z",
+        "query_filters": {"limit": 100},
+        "sort_order": "logical_time_desc",
+        "page_size": 100,
+        "page_cap": 10,
+        "completion_state": completion_state,
+        "termination_reason": termination_reason,
+        "page_count": 1,
+        "pages_succeeded": 1,
+        "raw_count": 1,
+        "normalized_count": 0,
+        "duplicate_count": 0,
+        "first_cursor": None,
+        "terminal_cursor": "46000000000000",
+        "bounds_verified": bounds_verified,
+        "started_at": "2026-06-02T00:00:00Z",
+        "finished_at": "2026-06-02T00:00:01Z",
+        "error_code": None,
+        "error_message": None,
+        "pages": [
+            {
+                "page_index": 1,
+                "request_cursor": None,
+                "response_cursor": "46000000000000",
+                "requested_limit": 100,
+                "raw_count": 1,
+                "normalized_count": 0,
+                "duplicate_count": 0,
+                "min_logical_time": "46000000000000",
+                "max_logical_time": "46000000000000",
+                "min_timestamp": "2026-05-31T23:59:00Z",
+                "max_timestamp": "2026-05-31T23:59:00Z",
+                "response_digest": digest,
+                "attempt_count": 1,
+                "error_code": None,
+                "error_message": None,
+                "fetched_at": "2026-06-02T00:00:00Z",
+            }
+        ],
+    }
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -769,6 +829,127 @@ def test_empty_swap_coverage_is_not_reported_as_complete():
     assert coverage["fee_hash_match_coverage_state"] == "not_observed"
 
 
+def test_complete_transaction_stream_evidence_is_reported_but_not_global_history():
+    stream = _transaction_acquisition_stream()
+    runs = [
+        _run(1, acquisition_streams=[stream]),
+        _run(2, acquisition_streams=[stream]),
+    ]
+
+    result = assess_wallet_history_readiness(runs, target_run_id=2)
+
+    blockers = {item["code"]: item for item in result["blockers"]}
+    assert "transaction_pagination_evidence_incomplete" not in blockers
+    assert "pagination_completeness_unverified" in blockers
+    states = blockers["pagination_completeness_unverified"]["evidence"][
+        "transaction_streams_by_run"
+    ]
+    assert [item["state"] for item in states] == ["complete", "complete"]
+    assert result["requested_bounds_verified"] is False
+    assert result["history_complete"] is False
+    assert result["eligible_for_cost_basis"] is False
+    assert result["used_by_pnl"] is False
+
+
+@pytest.mark.parametrize(
+    "stream",
+    [
+        _transaction_acquisition_stream(
+            completion_state="incomplete",
+            termination_reason="page_cap_reached",
+            bounds_verified=False,
+        ),
+        _transaction_acquisition_stream(digest="not-a-sha256-digest"),
+    ],
+)
+def test_incomplete_or_invalid_transaction_stream_evidence_stays_blocked(stream):
+    result = assess_wallet_history_readiness(
+        [
+            _run(1, acquisition_streams=[_transaction_acquisition_stream()]),
+            _run(2, acquisition_streams=[stream]),
+        ],
+        target_run_id=2,
+    )
+
+    blocker = next(
+        item
+        for item in result["blockers"]
+        if item["code"] == "transaction_pagination_evidence_incomplete"
+    )
+    assert blocker["run_ids"] == [2]
+    assert result["history_complete"] is False
+    assert result["eligible_for_cost_basis"] is False
+
+
+def test_transaction_pagination_validation_fails_closed_on_tampered_scope():
+    cursor_stream = copy.deepcopy(_transaction_acquisition_stream())
+    cursor_stream["pages"][0]["response_cursor"] = "46000000000001"
+    cursor_stream["terminal_cursor"] = "46000000000001"
+
+    outside_stream = copy.deepcopy(_transaction_acquisition_stream())
+    outside_stream["normalized_count"] = 1
+    outside_stream["pages"][0]["normalized_count"] = 1
+    outside_transaction = _transaction(
+        "outside-bound",
+        timestamp="2026-06-02T00:00:00Z",
+    )
+    oversized_stream = copy.deepcopy(_transaction_acquisition_stream())
+    oversized_stream["raw_count"] = 101
+    oversized_stream["pages"][0]["raw_count"] = 101
+    invalid_page_size_stream = copy.deepcopy(
+        _transaction_acquisition_stream()
+    )
+    invalid_page_size_stream["page_size"] = "100"
+    wrong_window_stream = copy.deepcopy(_transaction_acquisition_stream())
+    wrong_window_stream["requested_start"] = "2026-06-01T01:00:00Z"
+
+    tampered_runs = [
+        _run(2, data_mode="mock", acquisition_streams=[_transaction_acquisition_stream()]),
+        _run(
+            2,
+            incomplete_surfaces=["transactions"],
+            acquisition_streams=[_transaction_acquisition_stream()],
+        ),
+        _run(2, acquisition_streams=[cursor_stream]),
+        _run(2, acquisition_streams=[oversized_stream]),
+        _run(2, acquisition_streams=[invalid_page_size_stream]),
+        _run(2, acquisition_streams=[wrong_window_stream]),
+        _run(
+            2,
+            transactions=[outside_transaction],
+            acquisition_streams=[outside_stream],
+        ),
+        _run(
+            2,
+            time_window="custom",
+            custom_start="2026-05-31T00:00:00Z",
+            custom_end="2026-06-02T00:00:00Z",
+            acquisition_streams=[_transaction_acquisition_stream()],
+        ),
+    ]
+
+    for tampered in tampered_runs:
+        first = _run(
+            1,
+            data_mode=tampered["data_mode"],
+            acquisition_streams=(
+                []
+                if tampered["data_mode"] == "mock"
+                else [_transaction_acquisition_stream()]
+            ),
+        )
+        result = assess_wallet_history_readiness([first, tampered], target_run_id=2)
+        blocker = next(
+            item
+            for item in result["blockers"]
+            if item["code"] == "transaction_pagination_evidence_incomplete"
+        )
+        assert 2 in blocker["run_ids"]
+        assert result["history_complete"] is False
+        assert result["eligible_for_cost_basis"] is False
+        assert result["used_by_pnl"] is False
+
+
 def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
     client, session_factory = db_client
     transaction = _transaction("shared", fee_ton="0.01")
@@ -805,7 +986,7 @@ def test_endpoint_is_read_only_and_does_not_change_pnl(db_client):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["analysis_version"] == "wallet_history_readiness_v0.22.3"
+    assert body["analysis_version"] == "wallet_history_readiness_v0.22.4"
     assert body["run_ids"] == [first_id, target_id]
     assert body["target_run_id"] == target_id
     assert next(scope for scope in body["runs"] if scope["is_target"])[

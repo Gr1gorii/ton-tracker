@@ -13,9 +13,10 @@ from typing import Any
 import pytest
 from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.schema import CreateTable
 
 import database
 import models  # noqa: F401 - register every table on database.Base.metadata
@@ -33,7 +34,11 @@ LEGACY_FIXTURE = Path(__file__).parent / "fixtures" / "legacy_v0_22_0.sql"
 DOMAIN_TABLES = tuple(sorted(database.Base.metadata.tables))
 WALLET_IDENTITY_REVISION = "20260710_0002"
 TRANSACTION_IDENTITY_REVISION = "20260710_0003"
-CURRENT_REVISION = TRANSACTION_IDENTITY_REVISION
+ACQUISITION_EVIDENCE_REVISION = "20260710_0004"
+CURRENT_REVISION = ACQUISITION_EVIDENCE_REVISION
+
+ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
+ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
 
 ACCOUNT_ID = "ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
 RAW_ADDRESS = f"0:{ACCOUNT_ID}"
@@ -155,15 +160,17 @@ TRANSACTION_IDENTITY_VERSION = "ton_account_tx_v1"
 
 
 def _engine(path: Path) -> Engine:
-    return create_engine(
-        f"sqlite:///{path}",
-        connect_args={"check_same_thread": False},
-    )
+    return database.create_database_engine(f"sqlite:///{path}")
 
 
 def _upgrade_to_revision(engine: Engine, revision: str) -> None:
     with engine.begin() as connection:
         command.upgrade(migration_config(connection), revision)
+
+
+def _create_model_table_without_indexes(connection, table_name: str) -> None:
+    table = database.Base.metadata.tables[table_name]
+    connection.execute(CreateTable(table))
 
 
 def _rewrite_table_sql(
@@ -239,7 +246,7 @@ def _data_snapshot(engine: Engine) -> dict[str, list[tuple[Any, ...]]]:
     """Snapshot only the frozen columns that existed before revision 0002."""
     snapshot: dict[str, list[tuple[Any, ...]]] = {}
     with engine.connect() as connection:
-        for table_name in DOMAIN_TABLES:
+        for table_name in sorted(PRE_0002_COLUMNS):
             columns = ", ".join(
                 _quote(column) for column in PRE_0002_COLUMNS[table_name]
             )
@@ -248,6 +255,17 @@ def _data_snapshot(engine: Engine) -> dict[str, list[tuple[Any, ...]]]:
             ).fetchall()
             snapshot[table_name] = [tuple(row) for row in rows]
     return snapshot
+
+
+def _acquisition_evidence_counts(engine: Engine) -> tuple[int, int]:
+    with engine.connect() as connection:
+        stream_count = connection.exec_driver_sql(
+            f"SELECT COUNT(*) FROM {ACQUISITION_STREAMS_TABLE}"
+        ).scalar_one()
+        page_count = connection.exec_driver_sql(
+            f"SELECT COUNT(*) FROM {ACQUISITION_PAGES_TABLE}"
+        ).scalar_one()
+    return int(stream_count), int(page_count)
 
 
 def _identity_snapshot(engine: Engine) -> dict[int, tuple[Any, ...]]:
@@ -435,15 +453,36 @@ def _reflected_index_signature(
 
 def _metadata_foreign_key_signature(
     table,
-) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
-    signatures: set[tuple[tuple[str, ...], str, tuple[str, ...]]] = set()
+) -> set[tuple[tuple[str, ...], str, tuple[str, ...], tuple[tuple[str, str], ...]]]:
+    signatures: set[
+        tuple[
+            tuple[str, ...],
+            str,
+            tuple[str, ...],
+            tuple[tuple[str, str], ...],
+        ]
+    ] = set()
     for constraint in table.foreign_key_constraints:
         elements = list(constraint.elements)
+        options = {
+            "onupdate": constraint.onupdate,
+            "ondelete": constraint.ondelete,
+            "deferrable": constraint.deferrable,
+            "initially": constraint.initially,
+            "match": constraint.match,
+        }
         signatures.add(
             (
                 tuple(element.parent.name for element in elements),
                 elements[0].column.table.name,
                 tuple(element.column.name for element in elements),
+                tuple(
+                    sorted(
+                        (key, str(value))
+                        for key, value in options.items()
+                        if value is not None
+                    )
+                ),
             )
         )
     return signatures
@@ -452,12 +491,25 @@ def _metadata_foreign_key_signature(
 def _reflected_foreign_key_signature(
     inspector,
     table_name: str,
-) -> set[tuple[tuple[str, ...], str, tuple[str, ...]]]:
+) -> set[
+    tuple[
+        tuple[str, ...],
+        str,
+        tuple[str, ...],
+        tuple[tuple[str, str], ...],
+    ]
+]:
     return {
         (
             tuple(foreign_key["constrained_columns"]),
             foreign_key["referred_table"],
             tuple(foreign_key["referred_columns"]),
+            tuple(
+                sorted(
+                    (str(key), str(value))
+                    for key, value in (foreign_key.get("options") or {}).items()
+                )
+            ),
         )
         for foreign_key in inspector.get_foreign_keys(table_name)
     }
@@ -547,6 +599,62 @@ def _assert_transaction_identity_schema(engine: Engine) -> None:
             False,
         ),
     }.issubset(indexes)
+
+
+def _assert_acquisition_evidence_schema(engine: Engine) -> None:
+    inspector = inspect(engine)
+    assert {
+        ACQUISITION_STREAMS_TABLE,
+        ACQUISITION_PAGES_TABLE,
+    }.issubset(inspector.get_table_names())
+
+    stream_indexes = {
+        (
+            index["name"],
+            tuple(index.get("column_names") or ()),
+            bool(index.get("unique")),
+        )
+        for index in inspector.get_indexes(ACQUISITION_STREAMS_TABLE)
+    }
+    assert stream_indexes == {
+        (
+            "uq_wallet_acquisition_streams_run_provider_key",
+            ("run_id", "provider", "stream_key"),
+            True,
+        )
+    }
+
+    page_indexes = {
+        (
+            index["name"],
+            tuple(index.get("column_names") or ()),
+            bool(index.get("unique")),
+        )
+        for index in inspector.get_indexes(ACQUISITION_PAGES_TABLE)
+    }
+    assert page_indexes == {
+        (
+            "uq_wallet_acquisition_pages_stream_page",
+            ("stream_id", "page_index"),
+            True,
+        )
+    }
+
+    stream_foreign_keys = inspector.get_foreign_keys(
+        ACQUISITION_STREAMS_TABLE
+    )
+    assert len(stream_foreign_keys) == 1
+    assert stream_foreign_keys[0]["constrained_columns"] == ["run_id"]
+    assert stream_foreign_keys[0]["referred_table"] == "wallet_ingestion_runs"
+    assert stream_foreign_keys[0]["referred_columns"] == ["id"]
+    assert stream_foreign_keys[0]["options"] == {"ondelete": "CASCADE"}
+
+    page_foreign_keys = inspector.get_foreign_keys(ACQUISITION_PAGES_TABLE)
+    assert len(page_foreign_keys) == 1
+    assert page_foreign_keys[0]["constrained_columns"] == ["stream_id"]
+    assert page_foreign_keys[0]["referred_table"] == ACQUISITION_STREAMS_TABLE
+    assert page_foreign_keys[0]["referred_columns"] == ["id"]
+    assert page_foreign_keys[0]["options"] == {"ondelete": "CASCADE"}
 
 
 def _assert_legacy_identity_backfill(engine: Engine) -> None:
@@ -679,10 +787,13 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         BASELINE_REVISION,
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
+        ACQUISITION_EVIDENCE_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
     _assert_transaction_identity_schema(engine)
+    _assert_acquisition_evidence_schema(engine)
+    assert _acquisition_evidence_counts(engine) == (0, 0)
 
     engine.dispose()
     reopened = _engine(tmp_path / "fresh.db")
@@ -706,11 +817,14 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
     assert report.applied_revisions == (
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
+        ACQUISITION_EVIDENCE_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
     _assert_transaction_identity_schema(engine)
+    _assert_acquisition_evidence_schema(engine)
+    assert _acquisition_evidence_counts(engine) == (0, 0)
     _assert_legacy_identity_backfill(engine)
     _assert_legacy_transaction_identity_backfill(engine)
     engine.dispose()
@@ -736,6 +850,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
     assert report.applied_revisions == (
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
+        ACQUISITION_EVIDENCE_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -755,6 +870,7 @@ def test_runner_is_idempotent_at_head(tmp_path):
     data_after_first = _data_snapshot(engine)
     identities_after_first = _identity_snapshot(engine)
     transaction_identities_after_first = _transaction_identity_snapshot(engine)
+    acquisition_counts_after_first = _acquisition_evidence_counts(engine)
 
     second = run_database_migrations(engine)
 
@@ -770,6 +886,8 @@ def test_runner_is_idempotent_at_head(tmp_path):
         _transaction_identity_snapshot(engine)
         == transaction_identities_after_first
     )
+    assert _acquisition_evidence_counts(engine) == acquisition_counts_after_first
+    _assert_acquisition_evidence_schema(engine)
     _assert_legacy_identity_backfill(engine)
     _assert_legacy_transaction_identity_backfill(engine)
     engine.dispose()
@@ -843,6 +961,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
     assert report.applied_revisions == (
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
+        ACQUISITION_EVIDENCE_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -856,6 +975,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
     _assert_schema_matches_models(engine)
     _assert_wallet_identity_schema(engine)
     _assert_transaction_identity_schema(engine)
+    _assert_acquisition_evidence_schema(engine)
     engine.dispose()
 
 
@@ -975,8 +1095,11 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
 
     assert report.action == "upgraded"
     assert report.revision_before == WALLET_IDENTITY_REVISION
-    assert report.revision_after == TRANSACTION_IDENTITY_REVISION
-    assert report.applied_revisions == (TRANSACTION_IDENTITY_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        TRANSACTION_IDENTITY_REVISION,
+        ACQUISITION_EVIDENCE_REVISION,
+    )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
 
@@ -1036,6 +1159,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
     assert statuses == [("network_scoped", 2), ("unavailable", 9)]
     _assert_schema_matches_models(engine)
     _assert_transaction_identity_schema(engine)
+    _assert_acquisition_evidence_schema(engine)
     engine.dispose()
 
 
@@ -1112,12 +1236,16 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
 
     assert report.action == "upgraded"
     assert report.revision_before == WALLET_IDENTITY_REVISION
-    assert report.revision_after == TRANSACTION_IDENTITY_REVISION
-    assert report.applied_revisions == (TRANSACTION_IDENTITY_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        TRANSACTION_IDENTITY_REVISION,
+        ACQUISITION_EVIDENCE_REVISION,
+    )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
     _assert_schema_matches_models(engine)
     _assert_transaction_identity_schema(engine)
+    _assert_acquisition_evidence_schema(engine)
     engine.dispose()
 
 
@@ -1242,6 +1370,203 @@ def test_current_schema_rejects_partial_unique_transaction_index(tmp_path):
     with pytest.raises(MigrationBootstrapError, match="current indexes differ"):
         run_database_migrations(engine)
 
+    engine.dispose()
+
+
+def test_acquisition_evidence_migration_repairs_correct_partial_sqlite_ddl(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "partial-acquisition-evidence.db")
+    _upgrade_to_revision(engine, TRANSACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            ACQUISITION_STREAMS_TABLE,
+        )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX "
+            "uq_wallet_acquisition_streams_run_provider_key "
+            "ON wallet_acquisition_streams (run_id, provider, stream_key)"
+        )
+
+    report = run_database_migrations(engine)
+
+    assert report.action == "upgraded"
+    assert report.revision_before == TRANSACTION_IDENTITY_REVISION
+    assert report.revision_after == ACQUISITION_EVIDENCE_REVISION
+    assert report.applied_revisions == (ACQUISITION_EVIDENCE_REVISION,)
+    _assert_schema_matches_models(engine)
+    _assert_acquisition_evidence_schema(engine)
+    assert _acquisition_evidence_counts(engine) == (0, 0)
+    engine.dispose()
+
+
+def test_acquisition_evidence_migration_repairs_missing_page_index(tmp_path):
+    engine = _engine(tmp_path / "partial-acquisition-page-index.db")
+    _upgrade_to_revision(engine, TRANSACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            ACQUISITION_STREAMS_TABLE,
+        )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX "
+            "uq_wallet_acquisition_streams_run_provider_key "
+            "ON wallet_acquisition_streams (run_id, provider, stream_key)"
+        )
+        _create_model_table_without_indexes(
+            connection,
+            ACQUISITION_PAGES_TABLE,
+        )
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == TRANSACTION_IDENTITY_REVISION
+    assert report.revision_after == ACQUISITION_EVIDENCE_REVISION
+    assert report.applied_revisions == (ACQUISITION_EVIDENCE_REVISION,)
+    _assert_schema_matches_models(engine)
+    _assert_acquisition_evidence_schema(engine)
+    engine.dispose()
+
+
+def test_partial_acquisition_table_shape_fails_before_more_ddl(tmp_path):
+    engine = _engine(tmp_path / "malformed-acquisition-evidence.db")
+    _upgrade_to_revision(engine, TRANSACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE wallet_acquisition_streams ("
+            "id INTEGER NOT NULL, "
+            "run_id INTEGER NOT NULL, "
+            "provider TEXT NOT NULL, "
+            "PRIMARY KEY (id), "
+            "FOREIGN KEY(run_id) REFERENCES wallet_ingestion_runs (id) "
+            "ON DELETE CASCADE"
+            ")"
+        )
+
+    with pytest.raises(RuntimeError, match="columns do not match revision 0004"):
+        run_database_migrations(engine)
+
+    assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRANSACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_wrong_partial_acquisition_index_fails_before_page_table(tmp_path):
+    engine = _engine(tmp_path / "malformed-acquisition-index.db")
+    _upgrade_to_revision(engine, TRANSACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            ACQUISITION_STREAMS_TABLE,
+        )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX "
+            "uq_wallet_acquisition_streams_run_provider_key "
+            "ON wallet_acquisition_streams (run_id, stream_key, provider)"
+        )
+
+    with pytest.raises(RuntimeError, match="index does not match revision 0004"):
+        run_database_migrations(engine)
+
+    assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRANSACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_wrong_partial_acquisition_foreign_key_options_fail_closed(tmp_path):
+    engine = _engine(tmp_path / "malformed-acquisition-foreign-key.db")
+    _upgrade_to_revision(engine, TRANSACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _create_model_table_without_indexes(
+            connection,
+            ACQUISITION_STREAMS_TABLE,
+        )
+    _rewrite_table_sql(
+        engine,
+        ACQUISITION_STREAMS_TABLE,
+        " ON DELETE CASCADE",
+        "",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="foreign keys do not match revision 0004",
+    ):
+        run_database_migrations(engine)
+
+    assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRANSACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_pre_revision_acquisition_evidence_rows_are_never_adopted(tmp_path):
+    engine = _engine(tmp_path / "unexpected-acquisition-data.db")
+    _upgrade_to_revision(engine, TRANSACTION_IDENTITY_REVISION)
+    with engine.begin() as connection:
+        _insert_scoped_run(connection, run_id=1)
+        _create_model_table_without_indexes(
+            connection,
+            ACQUISITION_STREAMS_TABLE,
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO wallet_acquisition_streams ("
+            "id, run_id, provider, stream_key, contract_version, scope_kind, "
+            "page_size, max_pages, max_items, started_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                1,
+                1,
+                "tonapi",
+                "blockchain_transactions",
+                "wallet_activity_acquisition_v1",
+                "bounded_history",
+                100,
+                20,
+                2000,
+                "2026-07-10 12:00:00.000000",
+            ),
+        )
+
+    with pytest.raises(RuntimeError, match="unexpected pre-revision data"):
+        run_database_migrations(engine)
+
+    assert ACQUISITION_PAGES_TABLE not in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRANSACTION_IDENTITY_REVISION
+    engine.dispose()
+
+
+def test_acquisition_evidence_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "acquisition-forward-only.db")
+    run_database_migrations(engine)
+
+    with engine.begin() as connection:
+        with pytest.raises(
+            RuntimeError,
+            match="Acquisition evidence downgrade would discard",
+        ):
+            command.downgrade(
+                migration_config(connection),
+                TRANSACTION_IDENTITY_REVISION,
+            )
+
+    _assert_schema_matches_models(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == ACQUISITION_EVIDENCE_REVISION
     engine.dispose()
 
 
@@ -1438,6 +1763,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         BASELINE_REVISION,
         WALLET_IDENTITY_REVISION,
         TRANSACTION_IDENTITY_REVISION,
+        ACQUISITION_EVIDENCE_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

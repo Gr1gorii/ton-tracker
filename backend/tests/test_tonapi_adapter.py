@@ -14,6 +14,7 @@ from config import (
     DEFAULT_TONAPI_TESTNET_BASE_URL,
     ERROR_PROVIDER_ERROR,
     ERROR_PROVIDER_NOT_CONFIGURED,
+    ERROR_PROVIDER_PROTOCOL,
     Settings,
     get_settings,
 )
@@ -51,6 +52,22 @@ class _FakeResponse:
 
 def _json_response(payload: dict | list) -> _FakeResponse:
     return _FakeResponse(json.dumps(payload).encode("utf-8"))
+
+
+def _transaction_page_payload(*logical_times) -> dict:
+    return {
+        "transactions": [
+            {
+                "hash": f"{index + 1:064x}",
+                "lt": logical_time,
+                "utime": 1717236000 - index,
+                "total_fees": 4200000,
+                "success": True,
+                "transaction_type": "TransOrd",
+            }
+            for index, logical_time in enumerate(logical_times)
+        ]
+    }
 
 
 def _forbid_network(monkeypatch):
@@ -411,12 +428,293 @@ def test_get_account_transactions_preview_mock_mode_does_not_probe_network(
     assert "not actively queried" in (result.message or "").lower()
 
 
+def test_get_account_transactions_page_first_and_next_cursor_urls(monkeypatch):
+    captured_urls = []
+    payloads = iter(
+        (
+            _transaction_page_payload("300", "200"),
+            _transaction_page_payload("150", "100"),
+        )
+    )
+
+    def fake_urlopen(request, timeout):
+        captured_urls.append(request.full_url)
+        return _json_response(next(payloads))
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+    adapter = TonapiAdapter(_settings("real", tonapi_api_key="test-key"))
+
+    first = adapter.get_account_transactions_page("EQwallet", limit=2)
+    second = adapter.get_account_transactions_page(
+        "EQwallet",
+        limit=2,
+        before_lt=first.data["next_before_lt"],
+    )
+
+    assert first.ok is True
+    assert second.ok is True
+    assert captured_urls == [
+        (
+            f"{DEFAULT_TONAPI_BASE_URL}/v2/blockchain/accounts/EQwallet"
+            "/transactions?limit=2"
+        ),
+        (
+            f"{DEFAULT_TONAPI_BASE_URL}/v2/blockchain/accounts/EQwallet"
+            "/transactions?limit=2&before_lt=200"
+        ),
+    ]
+    assert first.data == {
+        "wallet_address": "EQwallet",
+        "requested_limit": 2,
+        "request_before_lt": None,
+        "raw_count": 2,
+        "min_logical_time": "200",
+        "max_logical_time": "300",
+        "next_before_lt": "200",
+        "transactions": [
+            {
+                "wallet_address": "EQwallet",
+                "tx_hash": f"{1:064x}",
+                "logical_time": "300",
+                "utime": 1717236000,
+                "total_fees": "4200000",
+                "success": True,
+                "transaction_type": "TransOrd",
+                "orig_status": None,
+                "end_status": None,
+                "source": "tonapi",
+            },
+            {
+                "wallet_address": "EQwallet",
+                "tx_hash": f"{2:064x}",
+                "logical_time": "200",
+                "utime": 1717235999,
+                "total_fees": "4200000",
+                "success": True,
+                "transaction_type": "TransOrd",
+                "orig_status": None,
+                "end_status": None,
+                "source": "tonapi",
+            },
+        ],
+    }
+    assert second.data["request_before_lt"] == "200"
+    assert second.data["min_logical_time"] == "100"
+    assert second.data["max_logical_time"] == "150"
+    assert second.data["next_before_lt"] == "100"
+
+
+def test_get_account_transactions_page_empty_page_terminates_cursor(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return _json_response({"transactions": []})
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet",
+        limit=25,
+        before_lt="100",
+    )
+
+    assert result.ok is True
+    assert captured["url"].endswith(
+        "/transactions?limit=25&before_lt=100"
+    )
+    assert result.data == {
+        "wallet_address": "EQwallet",
+        "requested_limit": 25,
+        "request_before_lt": "100",
+        "raw_count": 0,
+        "min_logical_time": None,
+        "max_logical_time": None,
+        "next_before_lt": None,
+        "transactions": [],
+    }
+
+
+@pytest.mark.parametrize("limit", [0, 1001, True, "10"])
+def test_get_account_transactions_page_rejects_invalid_limit(monkeypatch, limit):
+    _forbid_network(monkeypatch)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet",
+        limit=limit,
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_ERROR
+    assert "between 1 and 1000" in (result.message or "")
+
+
+@pytest.mark.parametrize(
+    "before_lt",
+    [0, -1, True, "01", " 1", str(2**64), 2**64],
+)
+def test_get_account_transactions_page_rejects_invalid_cursor(
+    monkeypatch,
+    before_lt,
+):
+    _forbid_network(monkeypatch)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet",
+        before_lt=before_lt,
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_ERROR
+    assert "before_lt" in (result.message or "")
+
+
+@pytest.mark.parametrize(
+    "logical_time",
+    [None, 0, "01", " 1", str(2**64)],
+)
+def test_get_account_transactions_page_rejects_missing_or_invalid_lt(
+    monkeypatch,
+    logical_time,
+):
+    def fake_urlopen(request, timeout):
+        payload = _transaction_page_payload(logical_time)
+        if logical_time is None:
+            payload["transactions"][0].pop("lt")
+        return _json_response(payload)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(
+        _settings("real", tonapi_api_key="provider-secret")
+    ).get_account_transactions_page("EQwallet")
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "logical time" in (result.message or "").lower()
+    assert "provider-secret" not in (result.message or "")
+
+
+@pytest.mark.parametrize(
+    "tx_hash",
+    [True, {}, [], "short", "ab" * 31, f" {'ab' * 32}"],
+)
+def test_get_account_transactions_page_rejects_noncanonical_hash(
+    monkeypatch,
+    tx_hash,
+):
+    def fake_urlopen(request, timeout):
+        payload = _transaction_page_payload("100")
+        payload["transactions"][0]["hash"] = tx_hash
+        return _json_response(payload)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet"
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "canonical 32-byte hash" in (result.message or "")
+
+
+@pytest.mark.parametrize(
+    "total_fees",
+    [True, 1.5, "Infinity", "NaN", "01", "-1", str(2**64)],
+)
+def test_get_account_transactions_page_rejects_invalid_total_fees(
+    monkeypatch,
+    total_fees,
+):
+    def fake_urlopen(request, timeout):
+        payload = _transaction_page_payload("100")
+        payload["transactions"][0]["total_fees"] = total_fees
+        return _json_response(payload)
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet"
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "total_fees" in (result.message or "")
+
+
+def test_get_account_transactions_page_rejects_oversized_response(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return _json_response(_transaction_page_payload("200", "100"))
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet",
+        limit=1,
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "more rows than requested" in (result.message or "")
+
+
+def test_get_account_transactions_page_rejects_non_descending_lt(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return _json_response(_transaction_page_payload("100", "200"))
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet"
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "strictly descending" in (result.message or "").lower()
+
+
+def test_get_account_transactions_page_rejects_stalled_cursor(monkeypatch):
+    def fake_urlopen(request, timeout):
+        return _json_response(_transaction_page_payload("100", "90"))
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet",
+        before_lt="100",
+    )
+
+    assert result.ok is False
+    assert result.error == ERROR_PROVIDER_PROTOCOL
+    assert "did not advance" in (result.message or "").lower()
+
+
+def test_get_account_transactions_page_accepts_max_limit(monkeypatch):
+    captured = {}
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        return _json_response({"transactions": []})
+
+    monkeypatch.setattr(tonapi_module.urllib.request, "urlopen", fake_urlopen)
+
+    result = TonapiAdapter(_settings("real")).get_account_transactions_page(
+        "EQwallet",
+        limit=1000,
+    )
+
+    assert result.ok is True
+    assert result.data["requested_limit"] == 1000
+    assert captured["url"].endswith("/transactions?limit=1000")
+
+
 def test_get_account_transactions_preview_success_normalizes_response(monkeypatch):
     captured = {}
     payload = {
         "transactions": [
             {
-                "hash": "abc123",
+                "hash": "ab" * 32,
                 "lt": 46000000000001,
                 "utime": 1717236000,
                 "total_fees": 4200000,
@@ -426,7 +724,7 @@ def test_get_account_transactions_preview_success_normalizes_response(monkeypatc
                 "end_status": "active",
             },
             {
-                "hash": "def456",
+                "hash": "de" * 32,
                 "lt": 46000000000000,
                 "utime": 1717235000,
                 "total_fees": 0,
@@ -443,21 +741,21 @@ def test_get_account_transactions_preview_success_normalizes_response(monkeypatc
 
     result = TonapiAdapter(
         _settings("real", tonapi_api_key="test-key")
-    ).get_account_transactions_preview("EQwallet", limit=1)
+    ).get_account_transactions_preview("EQwallet", limit=2)
 
     assert result.ok is True
     assert result.source == "real"
     assert captured["url"] == (
         f"{DEFAULT_TONAPI_BASE_URL}/v2/blockchain/accounts/EQwallet"
-        "/transactions?limit=1"
+        "/transactions?limit=2"
     )
     assert result.data["wallet_address"] == "EQwallet"
-    assert result.data["preview_count"] == 1
+    assert result.data["preview_count"] == 2
     assert result.data["total_transactions"] == 2
     tx = result.data["transactions"][0]
     assert tx == {
         "wallet_address": "EQwallet",
-        "tx_hash": "abc123",
+        "tx_hash": "ab" * 32,
         "logical_time": "46000000000001",
         "utime": 1717236000,
         "total_fees": "4200000",
@@ -483,7 +781,7 @@ def test_get_account_transactions_preview_unexpected_shape_returns_error(
     )
 
     assert result.ok is False
-    assert result.error == ERROR_PROVIDER_ERROR
+    assert result.error == ERROR_PROVIDER_PROTOCOL
     assert "unexpected structure" in (result.message or "").lower()
 
 

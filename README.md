@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.3 TRANSACTION IDENTITY
+# TON Wallet Intelligence Dashboard — v0.22.4 PAGINATION EVIDENCE
 
 A local crypto intelligence dashboard for TON wallets, provider previews, and
 mock-aware wallet analytics. On top of the guarded live wallet activity path
@@ -19,7 +19,7 @@ mode, values remaining in-window holdings separately from realized figures,
 and names the price source. Deterministic mock data remains the default
 executable ingestion path.
 
-> **v0.22.3 TRANSACTION IDENTITY status — guarded real/live TonAPI transaction rows can persist a strict, migration-backed low-level TON account-transaction tuple: TON network + canonical run account + logical time (LT) + 32-byte transaction hash. Original `tx_hash` and LT remain visible. The tuple is deduplication evidence only: it is not locally verified against blockchain proof, does not prove ownership, is not used to apply deduplication, and does not change PnL. Pre-v0.22.3 live rows are backfilled only when their stored provenance coherently satisfies the same contract; mock, malformed, and inconsistent rows stay explicitly unavailable. Pagination, history completeness, and cost basis remain unavailable.**
+> **v0.22.4 PAGINATION EVIDENCE status — guarded real/live TonAPI ingestion freezes one half-open UTC interval and follows strict low-level account-transaction cursors up to a configured page cap. Every attempted page and the aggregate stream outcome are persisted. An empty provider page or an ordered crossing of the requested start can verify completion of that bounded transaction stream; a page cap, cursor/protocol error, or provider failure stays explicitly incomplete. Preview remains one page and never claims completion. The existing network + canonical account + LT + 32-byte hash identity remains deduplication evidence only. Equivalent pagination evidence is not yet available for transfers, swaps, balances, or jettons, so full wallet history, cross-run merging, acquisition cost basis, and PnL remain unchanged.**
 > - Runs in `DATA_MODE=mock` (default) or `DATA_MODE=real`.
 > - Provider previews are available for TonAPI account jettons, TonAPI
 >   jettons-only wallet intelligence, and STON.fi pools.
@@ -73,6 +73,10 @@ executable ingestion path.
 >   backfills coherent legacy live provenance, leaves mock/malformed rows
 >   explicitly unavailable, and preserves
 >   history-completeness, cost-basis, and PnL semantics.
+>   Revision 0004 adds retry-safe `wallet_acquisition_streams` and
+>   `wallet_acquisition_pages` evidence tables with cascading foreign keys and
+>   unique stream/page identities. Existing runs receive zero fabricated
+>   acquisition rows.
 > - Each persisted run exposes rule-based evidence signals with confidence
 >   levels and explicit insufficient-evidence records, rendered in a workspace
 >   card and exportable as JSON/CSV. Signals are heuristic observations, not a
@@ -140,7 +144,7 @@ executable ingestion path.
 > - Provider status shows endpoint coverage and online/degraded/offline counts,
 >   including the wallet activity adapter selection row, without probing
 >   network providers from the status endpoint.
-> - User-facing UI copy uses the `v0.22.3 TRANSACTION IDENTITY` product label
+> - User-facing UI copy uses the `v0.22.4 PAGINATION EVIDENCE` product label
 >   and avoids stale product version references.
 > - Public release notes for the stable baseline remain in `PUBLIC_RELEASE.md`.
 > - Real wallet ingestion phases remain captured in
@@ -148,8 +152,8 @@ executable ingestion path.
 > - Wallet activity preview/run/read endpoints persist deterministic
 >   mock-normalized transfers, transactions, swaps, balances, warnings, and
 >   provider evidence.
-> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.3 TRANSACTION
->   IDENTITY` is the product release label.
+> - Backend `VERSION=0.2.1` remains an API-version field; `v0.22.4 PAGINATION
+>   EVIDENCE` is the product release label.
 > - Wallet clustering is probabilistic: similarity signals only, not proof of
 >   common ownership.
 
@@ -192,6 +196,8 @@ backend/
                        Additive run-wallet identity fields + backfill
       20260710_0003_transaction_identity.py
                        Retry-safe low-level transaction identity fields + indexes
+      20260710_0004_acquisition_evidence.py
+                       Durable acquisition stream/page evidence foundation
   routers/
     tonapi.py          TonAPI account jettons + wallet intelligence previews
     stonfi.py          STON.fi pools preview
@@ -207,6 +213,8 @@ backend/
                        Strict TON address parsing + canonical run-wallet identity
     ton_transaction_identity.py
                        Strict low-level TON account-transaction tuple
+    wallet_acquisition_bounds.py
+                       Immutable half-open UTC interval resolution
     pnl.py             Decimal-based PnL calculations
     clustering.py      Probabilistic wallet similarity / grouping
     mock_data.py       Hand-crafted mock token/pool/wallet fixtures
@@ -337,7 +345,7 @@ VITE_API_BASE=http://localhost:8000
 
 ---
 
-## Data modes & providers (v0.22.3 TRANSACTION IDENTITY)
+## Data modes & providers (v0.22.4 PAGINATION EVIDENCE)
 
 Configure providers via environment variables (copy `backend/.env.example` to
 `backend/.env`):
@@ -359,6 +367,7 @@ Configure providers via environment variables (copy `backend/.env.example` to
 | `WALLET_ACTIVITY_LIVE_ENABLED` | `false` by default; enables the guarded TonAPI live path only when `DATA_MODE=real` and `WALLET_ACTIVITY_PROVIDER=tonapi` |
 | `WALLET_ACTIVITY_LIVE_JETTON_LIMIT` | TonAPI live jetton snapshot limit, clamped to `1..500` |
 | `WALLET_ACTIVITY_LIVE_TX_LIMIT` | TonAPI live transaction-history page size, clamped to `1..1000` |
+| `WALLET_ACTIVITY_LIVE_TX_MAX_PAGES` | Maximum bounded transaction pages per ingest run, clamped to `1..100`; reaching it remains incomplete |
 | `WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT` | TonAPI live transfer-history (account events) page size, clamped to `1..1000` |
 | `WALLET_ACTIVITY_LIVE_SWAP_LIMIT` | TonAPI live DEX-swap (account events) page size, clamped to `1..1000` |
 
@@ -378,7 +387,7 @@ milestone:
 | Bitquery token trades preview/analysis       | provider-limited | limited by current TON schema coverage            |
 | Imported CSV/JSON trade preview/analysis     | local input     | local input                                       |
 | Legacy buyers, PnL, exports, clustering      | mock-aware      | mock-aware / deferred                             |
-| Full wallet transfers/history/swaps/balances | mock-normalized | mock by default; explicit TonAPI live guard returns native TON balance, jetton balance snapshots, an ordered transaction-history timeline, TON/jetton transfer history, and DEX swaps (all from TonAPI); persisted runs feed evidence signals, cluster comparison, and evidence-gated PnL |
+| Wallet transfers/history/swaps/balances | mock-normalized | mock by default; the explicit TonAPI live guard paginates only bounded low-level transactions, while native/jetton balances remain snapshots and transfer/swap event views remain pagination-incomplete; persisted rows can feed run-scoped diagnostics and existing evidence-gated PnL |
 
 Each `/api/analyze` response includes a `data_quality` block
 (`{ mode, warnings, provider_notes }`) describing the run. The UI shows a
@@ -395,7 +404,7 @@ of being silently inferred.
 Returns service status, backend API version, and current `data_mode`.
 
 Note: the backend `version` field remains `0.2.1` by design. It is the backend
-API-version field, while `v0.22.3 TRANSACTION IDENTITY` is the current
+API-version field, while `v0.22.4 PAGINATION EVIDENCE` is the current
 user-facing product release label.
 
 ### `GET /api/providers/status`
@@ -441,8 +450,11 @@ Returns provider coverage for a wallet activity ingestion request. The default
 mock path is deterministic. Since v0.12.0 the explicit TonAPI live guard can
 call TonAPI for native TON balance, account jetton balance, account
 transaction-history, TON/jetton transfer, and DEX swap coverage. This coverage
-preview does not calculate PnL; after persistence, the run-scoped PnL endpoint
-can evaluate the stored evidence.
+preview does not calculate PnL. In v0.22.4 every request resolves one immutable
+half-open UTC interval `[start, end)`. A live transaction preview fetches
+exactly one low-level TonAPI account-transaction page and reports
+`completion_state: preview_only`; it does not follow the cursor or persist a
+run and cannot verify interval completeness.
 
 ### `POST /api/wallets/ingest`
 Persists one adapter-backed wallet activity run and returns run id, status,
@@ -460,6 +472,20 @@ remain `false`. Eligible low-level real/live TonAPI transaction rows also expose
 canonical run account, canonical LT, and canonical 32-byte hash. The original
 `tx_hash` and `logical_time` fields remain unchanged.
 
+Only the low-level `transactions` surface is paginated in v0.22.4. Pages use
+`WALLET_ACTIVITY_LIVE_TX_LIMIT` and a strict descending `before_lt` chain, with
+at most `WALLET_ACTIVITY_LIVE_TX_MAX_PAGES` attempts. Each page and its
+aggregate stream record are persisted through migration 0004, including
+request/response cursors, counts, LT/time extrema, response digest, bounds,
+termination reason, and sanitized failure evidence. The bounded transaction
+stream becomes `complete` only after a terminal empty provider page or an
+ordered, verified crossing below the requested start. Page-cap exhaustion,
+provider failure, malformed protocol data, or a stalled/non-descending cursor
+remains `incomplete` or `error`. Transfers and swaps remain one-page TonAPI
+event-derived views whose high-level action structure can change; jettons and
+balances remain snapshot surfaces. None receives equivalent pagination
+completion evidence in this release.
+
 ### `GET /api/wallets/ingest/{run_id}`
 Returns one persisted wallet activity run by id, including provider evidence,
 unavailable surfaces, normalized rows, warnings, the original submitted
@@ -474,6 +500,11 @@ provenance remain coherent; `is_blockchain_proof_verified`,
 false. Pre-v0.22.3 live rows are backfilled only when their stored provenance
 passes the same strict contract; mock, malformed, or inconsistent transaction
 rows stay explicitly `unavailable`.
+
+The run response also returns persisted `acquisition_streams` and per-page
+evidence for v0.22.4 low-level transaction pagination. Runs created before
+migration 0004 have no synthesized stream or page records; their pagination
+state remains unavailable rather than inferred.
 
 ### `GET /api/wallets/ingest/{run_id}/export.json` and `.../export.csv`
 Download one persisted run as JSON, or as flattened one-row-per-activity CSV.
@@ -555,14 +586,18 @@ complete canonical identity, all runs must use the exact same submitted
 The response preserves each submitted address, exposes wallet identity at the
 target and per-run scope, and reports observed bounds, transaction identity
 coverage, overlaps, conflicts, asset-address and fee hash-match coverage, and
-blockers under `analysis_version: wallet_history_readiness_v0.22.3`. An exact
+blockers under `analysis_version: wallet_history_readiness_v0.22.4`. An exact
 transaction group requires a coherent persisted network + canonical account +
 LT + 32-byte-hash tuple and matching real/live TonAPI provenance. A legacy raw
 transaction hash is classified only as weak evidence. High-level TonAPI event
 actions and swaps also remain weak because provider-derived actions can change;
-there is no exact swap identity. Diagnostic only: the endpoint does not apply
-deduplication, merge activity, prove complete paginated history, establish cost
-basis, or change any PnL result; `history_complete`,
+there is no exact swap identity. The v0.22.4 diagnostic can report validated
+per-run bounded transaction pagination or explain why that stream is
+incomplete, but transfers, swaps, jettons, balances, interval continuity across
+runs, and wallet history before the selected runs remain unverified.
+Diagnostic only: the endpoint does not apply cross-run deduplication, merge
+activity, prove complete wallet history, establish cost basis, or change any
+PnL result; `history_complete`,
 `deduplication_applied`, `is_cost_basis`, `eligible_for_cost_basis`, and
 `used_by_pnl` remain `false`.
 
@@ -686,13 +721,18 @@ The `v0.12.0` wallet ingestion DEX-swaps milestone was considered ready when:
 - README, `RELEASE_NOTES.md`, `RELEASE_PROMOTION.md`,
   `REAL_WALLET_INGESTION_PLAN.md`, and UI release labels all identified the
   product milestone as `v0.12.0 SWAPS` at that time; the UI release label now
-  tracks the current release (`v0.22.3 TRANSACTION IDENTITY`).
+  tracks the current release (`v0.22.4 PAGINATION EVIDENCE`).
 
-## Roadmap beyond v0.22.3 TRANSACTION IDENTITY
+## Roadmap beyond v0.22.4 PAGINATION EVIDENCE
 
-- Build paginated ingestion plus canonical transfer, swap-action, jetton-asset,
-  and counterparty identity contracts. The low-level transaction tuple alone
-  cannot make multi-run data complete history or a cost-basis source.
+- Add durable pagination/completeness contracts for transfers, swaps,
+  jetton-balance snapshots, and native-balance snapshots. TonAPI high-level
+  event actions remain display-oriented provider interpretations and cannot be
+  treated as authoritative transaction logic.
+- Add canonical transfer, swap-action, jetton-asset, and counterparty identity
+  contracts, then explicit cross-run interval continuity and deduplication.
+  One bounded low-level transaction stream cannot make multi-run data complete
+  wallet history or a cost-basis source.
 - Wire the live activity surfaces (balances, transactions, transfers, swaps)
   into Real PnL instead of mock-aware legacy analysis, once historical prices
   exist and ingestion quality is measurable.

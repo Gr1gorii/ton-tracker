@@ -19,6 +19,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -118,6 +119,185 @@ class WalletIngestionRun(Base):
         back_populates="run",
         cascade="all, delete-orphan",
     )
+    acquisition_streams = relationship(
+        "WalletAcquisitionStream",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletAcquisitionStream(Base):
+    """Persisted acquisition contract and aggregate evidence for one stream."""
+
+    __tablename__ = "wallet_acquisition_streams"
+    __table_args__ = (
+        Index(
+            "uq_wallet_acquisition_streams_run_provider_key",
+            "run_id",
+            "provider",
+            "stream_key",
+            unique=True,
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    run_id = Column(
+        Integer,
+        ForeignKey("wallet_ingestion_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    provider = Column(String(32), nullable=False)
+    stream_key = Column(String(40), nullable=False)
+    contract_version = Column(String(48), nullable=False)
+    scope_kind = Column(String(24), nullable=False)
+    resolved_start_at = Column(DateTime, nullable=True)
+    resolved_end_at = Column(DateTime, nullable=True)
+    # Sanitized provider query metadata only; never headers or credentials.
+    request_query_json = Column(
+        Text,
+        nullable=False,
+        default="{}",
+        server_default="{}",
+    )
+    page_size = Column(Integer, nullable=False)
+    max_pages = Column(Integer, nullable=False)
+    max_items = Column(Integer, nullable=False)
+    completion_state = Column(
+        String(24),
+        nullable=False,
+        default="incomplete",
+        server_default="incomplete",
+    )
+    termination_reason = Column(String(48), nullable=True)
+    pages_attempted = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    pages_succeeded = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    raw_item_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    normalized_item_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    duplicate_item_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    first_cursor = Column(String(128), nullable=True)
+    terminal_cursor = Column(String(128), nullable=True)
+    bounds_verified = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+    )
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    # Structured sanitized diagnostics; raw provider exceptions do not belong here.
+    error_json = Column(Text, nullable=True)
+    started_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    finished_at = Column(DateTime, nullable=True)
+
+    run = relationship("WalletIngestionRun", back_populates="acquisition_streams")
+    pages = relationship(
+        "WalletAcquisitionPage",
+        back_populates="stream",
+        cascade="all, delete-orphan",
+    )
+
+
+class WalletAcquisitionPage(Base):
+    """Provider-safe evidence for one attempted page in an acquisition stream."""
+
+    __tablename__ = "wallet_acquisition_pages"
+    __table_args__ = (
+        Index(
+            "uq_wallet_acquisition_pages_stream_page",
+            "stream_id",
+            "page_index",
+            unique=True,
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    stream_id = Column(
+        Integer,
+        ForeignKey("wallet_acquisition_streams.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    page_index = Column(Integer, nullable=False)
+    request_cursor = Column(String(128), nullable=True)
+    response_cursor = Column(String(128), nullable=True)
+    request_offset = Column(Integer, nullable=True)
+    requested_limit = Column(Integer, nullable=False)
+    # Sanitized page query metadata only; never headers or credentials.
+    request_query_json = Column(
+        Text,
+        nullable=False,
+        default="{}",
+        server_default="{}",
+    )
+    raw_item_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    normalized_item_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    duplicate_item_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    newest_logical_time = Column(String(20), nullable=True)
+    oldest_logical_time = Column(String(20), nullable=True)
+    newest_activity_at = Column(DateTime, nullable=True)
+    oldest_activity_at = Column(DateTime, nullable=True)
+    response_digest_sha256 = Column(String(64), nullable=True)
+    attempt_count = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    fetch_status = Column(String(16), nullable=False)
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(Text, nullable=True)
+    # Structured sanitized diagnostics for this page attempt.
+    error_json = Column(Text, nullable=True)
+    fetched_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    stream = relationship("WalletAcquisitionStream", back_populates="pages")
 
 
 class WalletTransfer(Base):
