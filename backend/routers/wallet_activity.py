@@ -19,6 +19,7 @@ from schemas import (
     WalletIngestionRunResponse,
     WalletPersistedTraceEvidenceResponse,
     WalletNativeTonFlowObservationsResponse,
+    WalletNativeTonAssetBindingResponse,
     WalletRunSignalsResponse,
     WalletTraceBocMessageEvidenceResponse,
     WalletTraceBocVerificationResponse,
@@ -58,6 +59,7 @@ from services.wallet_trace_boc_verification import (
     verify_wallet_transaction_trace_bocs,
 )
 from services.wallet_native_ton_flow_observations import (
+    get_wallet_native_ton_asset_binding,
     get_wallet_native_ton_flow_observations,
 )
 
@@ -79,6 +81,71 @@ def _derive_pnl_preview(
     if include_historical:
         return derive_run_pnl_preview_with_historical(result)
     return derive_run_pnl_preview(result)
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence/boc-verification/native-ton-asset",
+    response_model=WalletNativeTonAssetBindingResponse,
+)
+def read_wallet_native_ton_asset_binding(
+    response: Response,
+    run_id: str = Path(..., description="Canonical positive persisted run id."),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Bind verified native TON flows to one canonical network asset identity."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    canonical_run_id = _validated_trace_path(
+        run_id,
+        transaction_hash,
+        no_store_headers,
+    )
+    try:
+        result = get_wallet_native_ton_asset_binding(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+        if result is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Native TON asset binding not found",
+                headers=no_store_headers,
+            )
+        return result
+    except HTTPException:
+        raise
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletTraceEvidenceIneligible,
+        WalletPersistedTraceEvidenceConflict,
+        WalletTraceBocVerificationConflict,
+    ) as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except (
+        WalletPersistedTraceEvidenceFailure,
+        WalletTraceBocVerificationFailure,
+        SQLAlchemyError,
+    ) as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Native TON asset binding storage is unavailable.",
+            headers=no_store_headers,
+        ) from exc
 
 
 @router.post(

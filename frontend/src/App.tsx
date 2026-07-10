@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.23.4 NATIVE TON FLOW OBSERVATIONS";
+const RELEASE_LABEL = "v0.23.5 NATIVE TON ASSET IDENTITY";
 
 const navItems = [
   "DASHBOARD",
@@ -942,16 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Account-scoped native TON flow observations</strong>
+            <strong>Canonical network-scoped Toncoin identity</strong>
             <p>
-              Classify verified internal-message value as incoming, outgoing,
-              or self relative to the stored run account. Amount and observed
-              counterparty come from the verified header only and never become
-              an authoritative transfer, actor, cost-basis, or PnL identity.
+              Bind every verified native flow to one canonical TON asset key,
+              nine decimals, and nanoton base units. Jetton and counterparty
+              identities remain separate future contracts; cost basis and PnL
+              still cannot consume these observations.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Native Toncoin asset identity"
+            text="Every native flow is digest-bound to ton_native_asset_v1 plus its TON network, fixed nine decimals, and nanoton base units. String symbols no longer act as identity; jetton identity, counterparties, merge, cost basis, and PnL remain separate."
+          />
           <ReleaseReadinessItem
             tone="scoped"
             label="Native TON flow observations"

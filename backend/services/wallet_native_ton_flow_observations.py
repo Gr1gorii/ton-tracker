@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -18,6 +19,8 @@ from services.wallet_trace_evidence import (
 
 NATIVE_TON_FLOW_CONTRACT_VERSION = "ton_native_flow_observations_v1"
 NATIVE_TON_FLOW_IDENTITY_VERSION = "ton_native_message_flow_obs_v1"
+NATIVE_TON_ASSET_BINDING_CONTRACT_VERSION = "ton_native_asset_binding_v1"
+NATIVE_TON_ASSET_IDENTITY_VERSION = "ton_native_asset_v1"
 
 
 def get_wallet_native_ton_flow_observations(
@@ -142,8 +145,95 @@ def get_wallet_native_ton_flow_observations(
     }
 
 
+def get_wallet_native_ton_asset_binding(
+    run_id: int,
+    transaction_hash: str,
+    session: Session,
+) -> dict[str, Any] | None:
+    """Bind every native flow observation to one canonical network asset."""
+    flows = get_wallet_native_ton_flow_observations(
+        run_id,
+        transaction_hash,
+        session,
+    )
+    if flows is None:
+        return None
+    asset_identity_key = "|".join(
+        (NATIVE_TON_ASSET_IDENTITY_VERSION, flows["network"])
+    )
+    bindings = [
+        {
+            "flow_observation_identity": flow["observation_identity"],
+            "transaction_hash": flow["transaction_hash"],
+            "message_hash": flow["message_hash"],
+            "direction": flow["direction"],
+            "amount_base_units": flow["amount_nanoton"],
+            "asset_identity_key": asset_identity_key,
+        }
+        for flow in flows["flows"]
+    ]
+    document = {
+        "contract_version": NATIVE_TON_ASSET_BINDING_CONTRACT_VERSION,
+        "flow_message_evidence_digest_sha256": flows[
+            "message_evidence_digest_sha256"
+        ],
+        "asset_identity_key": asset_identity_key,
+        "bindings": bindings,
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            document,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "contract_version": NATIVE_TON_ASSET_BINDING_CONTRACT_VERSION,
+        "verification_id": flows["verification_id"],
+        "capture_id": flows["capture_id"],
+        "run_id": flows["run_id"],
+        "network": flows["network"],
+        "wallet_account_canonical": flows["wallet_account_canonical"],
+        "anchor": flows["anchor"],
+        "flow_message_evidence_digest_sha256": flows[
+            "message_evidence_digest_sha256"
+        ],
+        "asset": {
+            "identity_version": NATIVE_TON_ASSET_IDENTITY_VERSION,
+            "identity_key": asset_identity_key,
+            "network": flows["network"],
+            "kind": "native",
+            "symbol": "TON",
+            "name": "Toncoin",
+            "decimals": 9,
+            "base_unit": "nanoton",
+            "master_address": None,
+        },
+        "binding_count": len(bindings),
+        "bindings": bindings,
+        "asset_binding_digest_sha256": digest,
+        "canonical_native_asset_identity": True,
+        "jetton_asset_identity_applied": False,
+        "counterparty_identity_applied": False,
+        "activity_merge_applied": False,
+        "deduplication_applied": False,
+        "eligible_for_cost_basis": False,
+        "used_by_pnl": False,
+        "message": (
+            "Every verified native TON flow observation is bound to the "
+            "network-scoped Toncoin base-unit identity. Jetton and counterparty "
+            "identity contracts are not applied."
+        ),
+    }
+
+
 __all__ = [
+    "NATIVE_TON_ASSET_BINDING_CONTRACT_VERSION",
+    "NATIVE_TON_ASSET_IDENTITY_VERSION",
     "NATIVE_TON_FLOW_CONTRACT_VERSION",
     "NATIVE_TON_FLOW_IDENTITY_VERSION",
     "get_wallet_native_ton_flow_observations",
+    "get_wallet_native_ton_asset_binding",
 ]

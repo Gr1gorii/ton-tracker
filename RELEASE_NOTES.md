@@ -1,3 +1,15 @@
+# TON Wallet Intelligence Dashboard — v0.23.5 NATIVE TON ASSET IDENTITY
+
+v0.23.5 adds provider-free
+`GET .../boc-verification/native-ton-asset`. Every verified native TON flow is
+bound to `ton_native_asset_v1|{network}`, fixed `TON`/`Toncoin` metadata, nine
+decimals, and `nanoton` base units. The binding list and upstream message digest
+produce a canonical SHA-256 record. Symbols are display metadata, not identity.
+Jetton assets, counterparties, activity merge/deduplication, cost basis, and PnL
+remain explicitly outside this contract.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.23.4 NATIVE TON FLOW OBSERVATIONS
 
 v0.23.4 adds provider-free
