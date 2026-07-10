@@ -148,6 +148,61 @@ class WalletActivityProviderEvidence(BaseModel):
         return cleaned
 
 
+class WalletActivityAcquisitionPageRecord(BaseModel):
+    page_index: int = Field(ge=0)
+    request_cursor: str | None = None
+    response_cursor: str | None = None
+    requested_limit: int = Field(ge=1)
+    raw_count: int = Field(ge=0)
+    normalized_count: int = Field(ge=0)
+    duplicate_count: int = Field(ge=0)
+    min_logical_time: str | None = None
+    max_logical_time: str | None = None
+    min_timestamp: str | None = None
+    max_timestamp: str | None = None
+    response_digest: str = ""
+    attempt_count: int = Field(default=1, ge=1)
+    error_code: str | None = None
+    error_message: str | None = None
+    fetched_at: str | None = None
+
+
+class WalletActivityAcquisitionStreamRecord(BaseModel):
+    provider: str
+    stream_key: str
+    contract_version: str
+    scope_kind: str
+    requested_start: str | None = None
+    requested_end: str | None = None
+    query_filters: dict[str, Any] = Field(default_factory=dict)
+    sort_order: str
+    page_size: int = Field(ge=1)
+    page_cap: int = Field(ge=1)
+    completion_state: Literal[
+        "complete",
+        "incomplete",
+        "error",
+        "preview_only",
+        "legacy_unavailable",
+    ]
+    termination_reason: str | None = None
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(default=0, ge=0)
+    raw_count: int = Field(ge=0)
+    normalized_count: int = Field(ge=0)
+    duplicate_count: int = Field(ge=0)
+    first_cursor: str | None = None
+    terminal_cursor: str | None = None
+    bounds_verified: bool = False
+    started_at: str | None = None
+    finished_at: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    pages: list[WalletActivityAcquisitionPageRecord] = Field(
+        default_factory=list
+    )
+
+
 class WalletIngestionPreviewResponse(BaseModel):
     success: bool
     wallet_address: str
@@ -155,6 +210,10 @@ class WalletIngestionPreviewResponse(BaseModel):
     requested_surfaces: list[WalletIngestionSurface]
     provider_coverage: list[WalletActivityProviderEvidence]
     unavailable_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
+    incomplete_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
+    acquisition_streams: list[WalletActivityAcquisitionStreamRecord] = Field(
+        default_factory=list
+    )
     warnings: list[str] = Field(default_factory=list)
     message: str
 
@@ -258,6 +317,10 @@ class WalletIngestionRunResponse(BaseModel):
         default_factory=list
     )
     unavailable_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
+    incomplete_surfaces: list[WalletIngestionSurface] = Field(default_factory=list)
+    acquisition_streams: list[WalletActivityAcquisitionStreamRecord] = Field(
+        default_factory=list
+    )
     transfers: list[WalletTransferRecord] = Field(default_factory=list)
     transactions: list[WalletTransactionRecord] = Field(default_factory=list)
     swaps: list[WalletSwapRecord] = Field(default_factory=list)
@@ -416,7 +479,7 @@ class WalletHistoryBlockerRecord(BaseModel):
 
 
 class WalletHistoryReadinessResponse(BaseModel):
-    analysis_version: Literal["wallet_history_readiness_v0.22.3"]
+    analysis_version: Literal["wallet_history_readiness_v0.22.4"]
     target_run_id: int
     run_ids: list[int]
     wallet_address: str

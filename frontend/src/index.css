@@ -4575,3 +4575,377 @@ input {
     max-width: 100%;
   }
 }
+
+/* Wallet acquisition evidence v0.22.4 ------------------------------ */
+.acquisition-evidence-card {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 14px;
+  border: 1px solid rgba(33, 74, 49, 0.78);
+  border-radius: 9px;
+  background:
+    linear-gradient(135deg, rgba(0, 230, 118, 0.045), transparent 48%),
+    rgba(2, 6, 4, 0.4);
+}
+
+.acquisition-evidence-toolbar {
+  align-items: flex-start;
+}
+
+.acquisition-evidence-toolbar .table-toolbar-main p {
+  max-width: 820px;
+}
+
+.acquisition-surface-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid rgba(33, 74, 49, 0.66);
+  border-radius: 7px;
+  background: rgba(2, 6, 4, 0.38);
+}
+
+.acquisition-surface-state > strong {
+  flex-shrink: 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.acquisition-surface-state > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.acquisition-surface-state-warning {
+  border-color: rgba(230, 180, 80, 0.32);
+  background: rgba(230, 180, 80, 0.055);
+}
+
+.acquisition-evidence-empty {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+  border: 1px dashed rgba(95, 122, 104, 0.4);
+  border-radius: 7px;
+  background: rgba(2, 6, 4, 0.3);
+}
+
+.acquisition-evidence-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.acquisition-evidence-empty p,
+.acquisition-page-empty {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.acquisition-stream-list {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.acquisition-stream {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 12px;
+  border: 1px solid rgba(33, 74, 49, 0.7);
+  border-radius: 8px;
+  background: rgba(2, 6, 4, 0.48);
+}
+
+.acquisition-stream-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.acquisition-stream-head > div {
+  min-width: 0;
+}
+
+.acquisition-stream-head > div > span,
+.acquisition-stream-grid > div > span {
+  display: block;
+  color: var(--primary-green);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.65px;
+  text-transform: uppercase;
+}
+
+.acquisition-stream-head h3 {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.acquisition-stream-head p {
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.acquisition-stream-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+
+.acquisition-stream-grid > div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(33, 74, 49, 0.54);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.acquisition-stream-grid .acquisition-stream-bound {
+  grid-column: 1 / -1;
+}
+
+.acquisition-stream-grid strong,
+.acquisition-stream-grid code {
+  display: block;
+  margin-top: 5px;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.acquisition-stream-bound code {
+  color: var(--peak-green);
+}
+
+.acquisition-stream-error {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 9px;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 92, 92, 0.36);
+  border-radius: 6px;
+  background: rgba(255, 92, 92, 0.075);
+  color: #ffabab;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.acquisition-page-details {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid rgba(33, 74, 49, 0.62);
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(2, 6, 4, 0.34);
+}
+
+.acquisition-page-details summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 10px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11.5px;
+  font-weight: 800;
+  list-style-position: inside;
+}
+
+.acquisition-page-details summary::before {
+  content: "▸";
+  flex: 0 0 auto;
+  color: var(--primary-green);
+  transition: transform 120ms ease;
+}
+
+.acquisition-page-details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+.acquisition-page-details summary:hover {
+  background: rgba(0, 230, 118, 0.045);
+}
+
+.acquisition-page-details summary > span:first-of-type {
+  margin-right: auto;
+}
+
+.acquisition-page-details summary span:last-child {
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.acquisition-stream-contract {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-top: 1px solid rgba(33, 74, 49, 0.5);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.acquisition-stream-contract code,
+.acquisition-stream-contract time {
+  color: var(--text);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.acquisition-page-empty {
+  padding: 10px;
+  border-top: 1px solid rgba(33, 74, 49, 0.5);
+}
+
+.acquisition-page-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border-top: 1px solid rgba(33, 74, 49, 0.5);
+}
+
+.acquisition-page-table {
+  min-width: 1040px;
+  table-layout: fixed;
+}
+
+.acquisition-page-table th:nth-child(1) {
+  width: 125px;
+}
+
+.acquisition-page-table th:nth-child(2) {
+  width: 180px;
+}
+
+.acquisition-page-table th:nth-child(3) {
+  width: 130px;
+}
+
+.acquisition-page-table th:nth-child(4) {
+  width: 180px;
+}
+
+.acquisition-page-table th:nth-child(5) {
+  width: 205px;
+}
+
+.acquisition-page-table th:nth-child(6) {
+  width: 220px;
+}
+
+.acquisition-page-table td {
+  height: auto;
+  padding-block: 9px;
+  vertical-align: top;
+  white-space: normal;
+}
+
+.acquisition-page-table td > strong,
+.acquisition-page-table td > small,
+.acquisition-page-table td > code,
+.acquisition-page-table td > time,
+.acquisition-page-table td > span:not(.source-badge) {
+  display: block;
+}
+
+.acquisition-page-table td > .source-badge {
+  margin-top: 5px;
+}
+
+.acquisition-page-table td > small {
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  line-height: 1.4;
+}
+
+.acquisition-page-table code,
+.acquisition-page-table time {
+  font-size: 9.5px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.acquisition-page-table small code {
+  display: block;
+  max-height: 4.2em;
+  overflow: hidden;
+  color: var(--muted);
+}
+
+.acquisition-page-table .acquisition-page-error {
+  color: #ffabab;
+}
+
+@media (max-width: 900px) {
+  .acquisition-stream-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .acquisition-stream-grid .acquisition-stream-bound {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .acquisition-evidence-card {
+    padding: 10px;
+  }
+
+  .acquisition-surface-state,
+  .acquisition-stream-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .acquisition-surface-state > div {
+    justify-content: flex-start;
+  }
+
+  .acquisition-stream-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .acquisition-stream-grid .acquisition-stream-bound {
+    grid-column: auto;
+  }
+
+  .acquisition-page-details summary {
+    align-items: flex-start;
+  }
+
+  .acquisition-stream-error {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

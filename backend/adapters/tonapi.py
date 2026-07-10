@@ -14,6 +14,7 @@ does not provide full wallet intelligence by itself.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 import urllib.error
@@ -23,6 +24,7 @@ import urllib.request
 from config import (
     ERROR_PROVIDER_ERROR,
     ERROR_PROVIDER_NOT_CONFIGURED,
+    ERROR_PROVIDER_PROTOCOL,
     ProviderResult,
     Settings,
     get_settings,
@@ -30,6 +32,10 @@ from config import (
 )
 
 _HTTP_TIMEOUT = 10
+_MAX_TRANSACTION_PAGE_LIMIT = 1000
+_MAX_LOGICAL_TIME = 2**64 - 1
+_LOGICAL_TIME_RE = re.compile(r"^[1-9][0-9]{0,19}$")
+_TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 class TonapiAdapter:
@@ -303,35 +309,52 @@ class TonapiAdapter:
             ),
         )
 
-    # -- Transactions preview -------------------------------------------
+    # -- Transaction pages and preview ----------------------------------
 
-    def get_account_transactions_preview(
+    def get_account_transactions_page(
         self,
         account_address: str,
         limit: int = 10,
-        before_lt: Optional[int] = None,
+        before_lt: Optional[int | str] = None,
     ) -> ProviderResult:
-        """Fetch and normalize a TonAPI account transaction-history preview.
+        """Fetch one strictly ordered TonAPI account-transaction page.
 
-        This is an ordered account-level activity timeline only. It is not DEX
-        swap reconstruction, transfer-level attribution, PnL, or ownership
-        proof.
+        The returned cursor is evidence about this response page only. An
+        empty page terminates the cursor chain; it does not by itself prove
+        that a requested historical time range is complete.
         """
         account = self._optional_string(account_address)
         if account is None:
             return self._provider_error("TonAPI account address is required.")
-        if limit < 1:
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= _MAX_TRANSACTION_PAGE_LIMIT
+        ):
             return self._provider_error(
-                "TonAPI transactions preview limit must be at least 1."
+                "TonAPI transaction page limit must be between 1 and 1000."
             )
+
+        request_before_lt = None
+        if before_lt is not None:
+            request_before_lt = self._strict_logical_time(before_lt)
+            if request_before_lt is None:
+                return self._provider_error(
+                    "TonAPI transaction page before_lt must be a canonical "
+                    "decimal logical time from 1 through 2^64-1."
+                )
 
         if self.settings.is_mock:
             return ProviderResult.success(
                 {
                     "wallet_address": account,
+                    "requested_limit": limit,
+                    "request_before_lt": request_before_lt,
+                    "raw_count": 0,
+                    "min_logical_time": None,
+                    "max_logical_time": None,
+                    "next_before_lt": None,
                     "transactions": [],
-                    "preview_count": 0,
-                    "total_transactions": 0,
                 },
                 source="mock",
                 message="Mock mode: TonAPI is not actively queried.",
@@ -340,7 +363,7 @@ class TonapiAdapter:
         encoded_account = urllib.parse.quote(account, safe="")
         result = self.fetch_json(
             f"/v2/blockchain/accounts/{encoded_account}/transactions",
-            query={"limit": limit, "before_lt": before_lt},
+            query={"limit": limit, "before_lt": request_before_lt},
         )
         if not result.ok:
             return result
@@ -350,25 +373,109 @@ class TonapiAdapter:
                 result.data,
                 account,
             )
-        except ValueError as exc:
-            return self._provider_error(
-                f"TonAPI response had an unexpected structure: {exc}."
+            if len(transactions) > limit:
+                raise ValueError(
+                    "transaction page returned more rows than requested"
+                )
+            logical_times = [
+                int(transaction["logical_time"], 10)
+                for transaction in transactions
+            ]
+            if any(
+                previous <= current
+                for previous, current in zip(
+                    logical_times,
+                    logical_times[1:],
+                )
+            ):
+                raise ValueError(
+                    "transaction logical times must be strictly descending"
+                )
+            if (
+                request_before_lt is not None
+                and logical_times
+                and max(logical_times) >= int(request_before_lt, 10)
+            ):
+                raise ValueError(
+                    "transaction page did not advance below its before_lt cursor"
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_PROTOCOL,
+                self._sanitize_diagnostic(
+                    "TonAPI response had an unexpected structure for "
+                    f"transaction page: {exc}."
+                )
+                or "TonAPI transaction page protocol error.",
+                source="real",
             )
 
+        min_logical_time = str(min(logical_times)) if logical_times else None
+        max_logical_time = str(max(logical_times)) if logical_times else None
+        return ProviderResult.success(
+            {
+                "wallet_address": account,
+                "requested_limit": limit,
+                "request_before_lt": request_before_lt,
+                "raw_count": len(transactions),
+                "min_logical_time": min_logical_time,
+                "max_logical_time": max_logical_time,
+                "next_before_lt": min_logical_time,
+                "transactions": transactions,
+            },
+            source="real",
+            message=(
+                "TonAPI account transaction page fetched with a strict "
+                "descending logical-time cursor. This page is not proof of "
+                "complete wallet history, PnL, or ownership."
+            ),
+        )
+
+    def get_account_transactions_preview(
+        self,
+        account_address: str,
+        limit: int = 10,
+        before_lt: Optional[int | str] = None,
+    ) -> ProviderResult:
+        """Fetch and normalize a TonAPI account transaction-history preview.
+
+        This is an ordered account-level activity timeline only. It is not DEX
+        swap reconstruction, transfer-level attribution, PnL, or ownership
+        proof.
+        """
+        page = self.get_account_transactions_page(
+            account_address,
+            limit=limit,
+            before_lt=before_lt,
+        )
+        if not page.ok:
+            return page
+
+        data = page.data if isinstance(page.data, dict) else {}
+        account = data.get("wallet_address")
+        transactions = (
+            data.get("transactions")
+            if isinstance(data.get("transactions"), list)
+            else []
+        )
         preview = transactions[:limit]
+        if page.source == "mock":
+            message = "Mock mode: TonAPI is not actively queried."
+        else:
+            message = (
+                "TonAPI account transaction history fetched. This is an "
+                "ordered account-level activity timeline only and is not DEX "
+                "swap reconstruction, PnL, or ownership proof."
+            )
         return ProviderResult.success(
             {
                 "wallet_address": account,
                 "transactions": preview,
                 "preview_count": len(preview),
-                "total_transactions": len(transactions),
+                "total_transactions": data.get("raw_count", len(transactions)),
             },
-            source="real",
-            message=(
-                "TonAPI account transaction history fetched. This is an "
-                "ordered account-level activity timeline only and is not DEX "
-                "swap reconstruction, PnL, or ownership proof."
-            ),
+            source=page.source,
+            message=message,
         )
 
     # -- Transfers preview (events) -------------------------------------
@@ -716,17 +823,30 @@ class TonapiAdapter:
         raw_tx: dict,
         wallet_address: str,
     ) -> dict:
-        tx_hash = cls._optional_string(raw_tx.get("hash"))
-        if tx_hash is None:
-            raise ValueError("transaction is missing a hash")
+        tx_hash = raw_tx.get("hash")
+        if (
+            not isinstance(tx_hash, str)
+            or tx_hash != tx_hash.strip()
+            or _TRANSACTION_HASH_RE.fullmatch(tx_hash) is None
+        ):
+            raise ValueError("transaction is missing a canonical 32-byte hash")
+        logical_time = cls._strict_logical_time(raw_tx.get("lt"))
+        if logical_time is None:
+            raise ValueError(
+                "transaction is missing or has invalid logical time"
+            )
+        raw_total_fees = raw_tx.get("total_fees")
+        total_fees = cls._strict_nonnegative_integer_string(raw_total_fees)
+        if raw_total_fees is not None and total_fees is None:
+            raise ValueError("transaction has invalid total_fees")
 
         success = raw_tx.get("success")
         return {
             "wallet_address": wallet_address,
             "tx_hash": tx_hash,
-            "logical_time": cls._optional_string(raw_tx.get("lt")),
+            "logical_time": logical_time,
             "utime": cls._optional_int(raw_tx.get("utime")),
-            "total_fees": cls._optional_string(raw_tx.get("total_fees")),
+            "total_fees": total_fees,
             "success": success if isinstance(success, bool) else None,
             "transaction_type": cls._optional_string(
                 raw_tx.get("transaction_type")
@@ -1003,12 +1123,55 @@ class TonapiAdapter:
 
     @staticmethod
     def _optional_int(value: Any) -> int | None:
-        if value is None or value == "":
+        if isinstance(value, bool) or value is None or value == "":
             return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
+        if isinstance(value, int):
+            return value
+        if (
+            isinstance(value, str)
+            and value.isascii()
+            and (value == "0" or (value.isdigit() and value[0] != "0"))
+        ):
+            return int(value, 10)
+        return None
+
+    @staticmethod
+    def _strict_logical_time(value: Any) -> str | None:
+        if isinstance(value, bool):
             return None
+        if isinstance(value, int):
+            if not 1 <= value <= _MAX_LOGICAL_TIME:
+                return None
+            return str(value)
+        if not isinstance(value, str) or _LOGICAL_TIME_RE.fullmatch(value) is None:
+            return None
+        parsed = int(value, 10)
+        if parsed > _MAX_LOGICAL_TIME:
+            return None
+        return value
+
+    @staticmethod
+    def _strict_nonnegative_integer_string(value: Any) -> str | None:
+        if value is None or isinstance(value, bool):
+            return None
+        if isinstance(value, int):
+            if 0 <= value <= _MAX_LOGICAL_TIME:
+                return str(value)
+            return None
+        if not isinstance(value, str):
+            return None
+        if value == "0":
+            return value
+        if (
+            not value.isascii()
+            or not value.isdigit()
+            or value[0] == "0"
+            or len(value) > 20
+        ):
+            return None
+        if int(value, 10) > _MAX_LOGICAL_TIME:
+            return None
+        return value
 
     def _sanitize_diagnostic(self, value: Any) -> str | None:
         text = self._optional_string(value)

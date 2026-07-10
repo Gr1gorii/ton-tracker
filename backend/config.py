@@ -25,6 +25,7 @@ DEFAULT_TONAPI_TESTNET_BASE_URL = "https://testnet.tonapi.io"
 # Machine-readable provider error codes.
 ERROR_PROVIDER_NOT_CONFIGURED = "provider_not_configured"
 ERROR_PROVIDER_ERROR = "provider_error"
+ERROR_PROVIDER_PROTOCOL = "provider_protocol_error"
 ERROR_PROVIDER_COVERAGE_UNAVAILABLE = "provider_coverage_unavailable"
 ERROR_NOT_IMPLEMENTED = "real_not_implemented"
 
@@ -69,6 +70,7 @@ class Settings:
     wallet_activity_live_enabled: bool = False
     wallet_activity_live_jetton_limit: int = 100
     wallet_activity_live_tx_limit: int = 100
+    wallet_activity_live_tx_max_pages: int = 10
     wallet_activity_live_transfer_limit: int = 100
     wallet_activity_live_swap_limit: int = 100
     ton_network: str = "mainnet"
@@ -157,6 +159,12 @@ def get_settings() -> Settings:
             default=100,
             minimum=1,
             maximum=1000,
+        ),
+        wallet_activity_live_tx_max_pages=_env_int(
+            "WALLET_ACTIVITY_LIVE_TX_MAX_PAGES",
+            default=10,
+            minimum=1,
+            maximum=100,
         ),
         wallet_activity_live_transfer_limit=_env_int(
             "WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT",

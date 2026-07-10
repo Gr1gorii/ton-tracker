@@ -395,31 +395,52 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
     client,
     monkeypatch,
 ):
-    def fake_get_account_transactions_preview(self, account_address, limit):
+    calls = []
+
+    def fake_get_account_transactions_page(
+        self,
+        account_address,
+        limit,
+        before_lt=None,
+    ):
+        calls.append(before_lt)
+        transactions = []
+        if before_lt is None:
+            transactions = [
+                {
+                    "tx_hash": VALID_TRANSACTION_HASH.upper(),
+                    "logical_time": "46000000000001",
+                    "utime": 1717236000,
+                    "total_fees": "4200000",
+                    "success": True,
+                    "transaction_type": "TransOrd",
+                    "source": "tonapi",
+                }
+            ]
         return ProviderResult.success(
             {
                 "wallet_address": account_address,
-                "transactions": [
-                    {
-                        "tx_hash": VALID_TRANSACTION_HASH.upper(),
-                        "logical_time": "46000000000001",
-                        "utime": 1717236000,
-                        "total_fees": "4200000",
-                        "success": True,
-                        "transaction_type": "TransOrd",
-                        "source": "tonapi",
-                    }
-                ],
-                "preview_count": 1,
-                "total_transactions": 1,
+                "requested_limit": limit,
+                "request_before_lt": before_lt,
+                "raw_count": len(transactions),
+                "min_logical_time": (
+                    "46000000000001" if transactions else None
+                ),
+                "max_logical_time": (
+                    "46000000000001" if transactions else None
+                ),
+                "next_before_lt": (
+                    "46000000000001" if transactions else None
+                ),
+                "transactions": transactions,
             },
             source="real",
-            message="TonAPI account transaction history fetched.",
+            message="TonAPI account transaction page fetched.",
         )
 
     monkeypatch.setattr(
-        "adapters.tonapi.TonapiAdapter.get_account_transactions_preview",
-        fake_get_account_transactions_preview,
+        "adapters.tonapi.TonapiAdapter.get_account_transactions_page",
+        fake_get_account_transactions_page,
     )
     monkeypatch.setenv("DATA_MODE", "real")
     monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
@@ -430,7 +451,9 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
         "/api/wallets/ingest",
         json={
             "wallet_address": VALID_MAINNET_WALLET,
-            "time_window": "24h",
+            "time_window": "custom",
+            "custom_start": "2024-06-01T00:00:00Z",
+            "custom_end": "2024-06-02T00:00:00Z",
             "surfaces": ["transactions"],
         },
     )
@@ -446,6 +469,17 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
     assert body["provider_evidence"][0]["raw_count"] == 1
     assert body["provider_evidence"][0]["normalized_count"] == 1
     assert body["balances"] == []
+    assert calls == [None, "46000000000001"]
+    assert body["incomplete_surfaces"] == []
+    stream = body["acquisition_streams"][0]
+    assert stream["completion_state"] == "complete"
+    assert stream["termination_reason"] == "provider_terminal"
+    assert stream["bounds_verified"] is True
+    assert stream["requested_start"] == "2024-06-01T00:00:00Z"
+    assert stream["requested_end"] == "2024-06-02T00:00:00Z"
+    assert stream["page_count"] == 2
+    assert stream["pages_succeeded"] == 2
+    assert [page["page_index"] for page in stream["pages"]] == [1, 2]
     assert len(body["transactions"]) == 1
     tx = body["transactions"][0]
     assert tx["tx_hash"] == VALID_TRANSACTION_HASH.upper()
@@ -483,36 +517,61 @@ def test_wallet_ingestion_guarded_tonapi_live_persists_transaction_history(
         read_body["transactions"][0]["transaction_identity"]
         == tx["transaction_identity"]
     )
+    assert read_body["acquisition_streams"] == body["acquisition_streams"]
 
 
 def test_wallet_ingestion_rejects_duplicate_transaction_identity_within_run(
     client,
     monkeypatch,
 ):
-    transaction = {
-        "tx_hash": VALID_TRANSACTION_HASH,
-        "logical_time": "46000000000001",
-        "utime": 1717236000,
-        "total_fees": "4200000",
-        "success": True,
-        "transaction_type": "TransOrd",
-        "source": "tonapi",
-    }
+    from adapters.wallet_activity import (
+        WalletActivityAdapterResult,
+        WalletActivityProviderEvidence,
+        WalletActivityTransaction,
+    )
 
-    def fake_get_account_transactions_preview(self, account_address, limit):
-        return ProviderResult.success(
-            {
-                "wallet_address": account_address,
-                "transactions": [dict(transaction), dict(transaction)],
-                "preview_count": 2,
-                "total_transactions": 2,
-            },
-            source="real",
-        )
+    transaction = WalletActivityTransaction(
+        tx_hash=VALID_TRANSACTION_HASH,
+        logical_time="46000000000001",
+        timestamp="2024-06-01T10:00:00Z",
+        fee_ton="0.0042",
+        success="success",
+        provider="tonapi",
+        source_status="live",
+        raw={
+            "provider": "tonapi",
+            "surface": "transactions",
+            "tx_hash": VALID_TRANSACTION_HASH,
+            "logical_time": "46000000000001",
+        },
+    )
+
+    class DuplicateAdapter:
+        def ingest(self, request):
+            return WalletActivityAdapterResult(
+                status="success",
+                data_mode="real",
+                requested_surfaces=["transactions"],
+                provider_evidence=[
+                    WalletActivityProviderEvidence(
+                        provider="tonapi_wallet_activity_live",
+                        data_mode="real",
+                        source_status="live",
+                        warnings=[],
+                        freshness="2024-06-02T00:00:00Z",
+                        raw_count=2,
+                        normalized_count=2,
+                    )
+                ],
+                unavailable_surfaces=[],
+                warnings=[],
+                message="Duplicate transaction identity fixture.",
+                transactions=[transaction, transaction],
+            )
 
     monkeypatch.setattr(
-        "adapters.tonapi.TonapiAdapter.get_account_transactions_preview",
-        fake_get_account_transactions_preview,
+        "services.wallet_activity_ingestion.build_wallet_activity_adapter",
+        lambda settings: DuplicateAdapter(),
     )
     monkeypatch.setenv("DATA_MODE", "real")
     monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
@@ -523,13 +582,172 @@ def test_wallet_ingestion_rejects_duplicate_transaction_identity_within_run(
         "/api/wallets/ingest",
         json={
             "wallet_address": VALID_MAINNET_WALLET,
-            "time_window": "24h",
+            "time_window": "custom",
+            "custom_start": "2024-06-01T00:00:00Z",
+            "custom_end": "2024-06-02T00:00:00Z",
             "surfaces": ["transactions"],
         },
     )
 
     assert response.status_code == 400
     assert "duplicate canonical identity" in response.json()["detail"]
+
+
+def test_wallet_ingestion_persists_page_cap_as_incomplete_evidence(
+    client,
+    monkeypatch,
+):
+    calls = []
+    logical_times = ["46000000000003", "46000000000002"]
+
+    def fake_get_account_transactions_page(
+        self,
+        account_address,
+        limit,
+        before_lt=None,
+    ):
+        calls.append(before_lt)
+        index = len(calls) - 1
+        logical_time = logical_times[index]
+        transaction = {
+            "tx_hash": f"{index + 1:064x}",
+            "logical_time": logical_time,
+            "utime": 1717236000 - index * 60,
+            "total_fees": "1000000",
+            "success": True,
+            "transaction_type": "TransOrd",
+            "source": "tonapi",
+        }
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "requested_limit": limit,
+                "request_before_lt": before_lt,
+                "raw_count": 1,
+                "min_logical_time": logical_time,
+                "max_logical_time": logical_time,
+                "next_before_lt": logical_time,
+                "transactions": [transaction],
+            },
+            source="real",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_transactions_page",
+        fake_get_account_transactions_page,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_TX_LIMIT", "1")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_TX_MAX_PAGES", "2")
+
+    response = client.post(
+        "/api/wallets/ingest",
+        json={
+            "wallet_address": VALID_MAINNET_WALLET,
+            "time_window": "custom",
+            "custom_start": "2024-06-01T00:00:00Z",
+            "custom_end": "2024-06-02T00:00:00Z",
+            "surfaces": ["transactions"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "partial"
+    assert body["provider_evidence"][0]["source_status"] == "limited"
+    assert body["incomplete_surfaces"] == ["transactions"]
+    assert len(body["transactions"]) == 2
+    assert calls == [None, "46000000000003"]
+    stream = body["acquisition_streams"][0]
+    assert stream["completion_state"] == "incomplete"
+    assert stream["termination_reason"] == "page_cap_reached"
+    assert stream["bounds_verified"] is False
+    assert stream["page_count"] == 2
+    assert stream["pages_succeeded"] == 2
+    assert stream["terminal_cursor"] == "46000000000002"
+    assert len(stream["pages"]) == 2
+    assert all(len(page["response_digest"]) == 64 for page in stream["pages"])
+
+    read_back = client.get(f"/api/wallets/ingest/{body['run_id']}")
+    assert read_back.status_code == 200
+    assert read_back.json()["acquisition_streams"] == body["acquisition_streams"]
+
+    pnl = client.get(f"/api/wallets/ingest/{body['run_id']}/pnl-preview")
+    assert pnl.status_code == 200
+    assert pnl.json()["is_real_pnl"] is False
+
+
+def test_wallet_transaction_preview_is_one_page_and_explicitly_incomplete(
+    client,
+    monkeypatch,
+):
+    calls = []
+
+    def fake_get_account_transactions_page(
+        self,
+        account_address,
+        limit,
+        before_lt=None,
+    ):
+        calls.append(before_lt)
+        return ProviderResult.success(
+            {
+                "wallet_address": account_address,
+                "requested_limit": limit,
+                "request_before_lt": before_lt,
+                "raw_count": 1,
+                "min_logical_time": "46000000000003",
+                "max_logical_time": "46000000000003",
+                "next_before_lt": "46000000000003",
+                "transactions": [
+                    {
+                        "tx_hash": "01" * 32,
+                        "logical_time": "46000000000003",
+                        "utime": 1717236000,
+                        "total_fees": "1000000",
+                        "success": True,
+                        "source": "tonapi",
+                    }
+                ],
+            },
+            source="real",
+        )
+
+    monkeypatch.setattr(
+        "adapters.tonapi.TonapiAdapter.get_account_transactions_page",
+        fake_get_account_transactions_page,
+    )
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://tonapi.io")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_TX_MAX_PAGES", "10")
+
+    response = client.post(
+        "/api/wallets/ingest/preview",
+        json={
+            "wallet_address": VALID_MAINNET_WALLET,
+            "time_window": "custom",
+            "custom_start": "2024-06-01T00:00:00Z",
+            "custom_end": "2024-06-02T00:00:00Z",
+            "surfaces": ["transactions"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert calls == [None]
+    assert body["success"] is True
+    assert body["incomplete_surfaces"] == ["transactions"]
+    stream = body["acquisition_streams"][0]
+    assert stream["completion_state"] == "preview_only"
+    assert stream["termination_reason"] == "preview_page_limit"
+    assert stream["bounds_verified"] is False
+    assert stream["page_count"] == 1
+    assert stream["pages_succeeded"] == 1
 
 
 def test_wallet_ingestion_guarded_tonapi_live_persists_transfer_history(
@@ -974,6 +1192,37 @@ def test_wallet_ingestion_custom_window_invalid_order_returns_400(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "custom_end must be after custom_start"
+
+
+def test_wallet_ingestion_custom_window_future_end_returns_400(client):
+    response = client.post(
+        "/api/wallets/ingest/preview",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "custom",
+            "custom_start": "2999-01-01T00:00:00Z",
+            "custom_end": "2999-01-02T00:00:00Z",
+            "surfaces": ["transactions"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "cannot be later than acquisition time" in response.json()["detail"]
+
+
+def test_wallet_ingestion_rolling_window_rejects_custom_fields(client):
+    response = client.post(
+        "/api/wallets/ingest/preview",
+        json={
+            "wallet_address": "EQwallet",
+            "time_window": "24h",
+            "custom_start": "2026-07-09T00:00:00Z",
+            "surfaces": ["transactions"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "allowed only for custom windows" in response.json()["detail"]
 
 
 def test_wallet_ingestion_missing_run_returns_404(client):

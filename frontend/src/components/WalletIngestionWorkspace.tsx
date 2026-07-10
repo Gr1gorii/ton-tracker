@@ -17,6 +17,7 @@ import {
 } from "../api";
 import type {
   TimeWindow,
+  WalletActivityAcquisitionStreamEvidence,
   WalletActivityProviderEvidence,
   WalletActivitySummary,
   WalletBalanceSnapshotRecord,
@@ -86,6 +87,7 @@ const CAN_SHOW = [
   "Transfers",
   "Transactions",
   "Network-scoped transaction identity",
+  "Transaction acquisition bounds and page evidence",
   "Swaps",
   "Balances",
   "Provider evidence",
@@ -193,6 +195,22 @@ export default function WalletIngestionWorkspace({
   const canSubmit = !busy && validationMessage === null;
   const visibleEvidence =
     runResult?.provider_evidence ?? previewResult?.provider_coverage ?? [];
+  const visibleAcquisitionStreams = runResult
+    ? runResult.acquisition_streams ?? []
+    : previewResult?.acquisition_streams ?? [];
+  const visibleIncompleteSurfaces = runResult
+    ? runResult.incomplete_surfaces ?? []
+    : previewResult?.incomplete_surfaces ?? [];
+  const visibleRequestedSurfaces = runResult
+    ? runResult.requested_surfaces
+    : previewResult?.requested_surfaces ?? [];
+  const visibleAcquisitionContractPresent = runResult
+    ? Array.isArray(runResult.acquisition_streams) &&
+      Array.isArray(runResult.incomplete_surfaces)
+    : previewResult
+      ? Array.isArray(previewResult.acquisition_streams) &&
+        Array.isArray(previewResult.incomplete_surfaces)
+      : false;
   const visibleWarnings = runResult
     ? runResult.warnings.map((warning) => warning.message)
     : previewResult?.warnings ?? [];
@@ -671,6 +689,12 @@ export default function WalletIngestionWorkspace({
 
           <WalletIngestionMetrics result={runResult} preview={previewResult} />
           <ProviderEvidence evidence={visibleEvidence} />
+          <AcquisitionEvidenceCard
+            streams={visibleAcquisitionStreams}
+            incompleteSurfaces={visibleIncompleteSurfaces}
+            requestedSurfaces={visibleRequestedSurfaces}
+            contractPresent={visibleAcquisitionContractPresent}
+          />
           <WalletIngestionWarnings warnings={visibleWarnings} />
 
           {runResult?.activity_summary && (
@@ -956,6 +980,386 @@ function ProviderEvidence({
         </div>
       ))}
     </div>
+  );
+}
+
+function acquisitionStateClass(state: string): string {
+  const normalized = state.trim().toLowerCase();
+  if (normalized === "complete" || normalized === "completed") {
+    return "source-badge source-real";
+  }
+  if (
+    normalized === "incomplete" ||
+    normalized === "partial" ||
+    normalized === "failed" ||
+    normalized === "error" ||
+    normalized === "capped" ||
+    normalized === "preview_only" ||
+    normalized === "legacy_unavailable"
+  ) {
+    return "source-badge source-mock";
+  }
+  return "source-badge source-unknown";
+}
+
+function acquisitionValue(value: string | null | undefined): string {
+  return value && value.length > 0 ? value : "∅";
+}
+
+function acquisitionRange(
+  minimum: string | null | undefined,
+  maximum: string | null | undefined,
+): string {
+  return acquisitionValue(minimum) + " → " + acquisitionValue(maximum);
+}
+
+function AcquisitionTimestamp({
+  value,
+}: {
+  value: string | null | undefined;
+}) {
+  if (!value) return <span>∅</span>;
+  return <time dateTime={value}>{value}</time>;
+}
+
+function succeededPageCount(
+  stream: WalletActivityAcquisitionStreamEvidence,
+): number {
+  if (
+    typeof stream.pages_succeeded === "number" &&
+    Number.isFinite(stream.pages_succeeded) &&
+    stream.pages_succeeded >= 0
+  ) {
+    return stream.pages_succeeded;
+  }
+  const pages = Array.isArray(stream.pages) ? stream.pages : [];
+  return pages.filter((page) => !page.error_code && !page.error_message).length;
+}
+
+function AcquisitionEvidenceCard({
+  streams,
+  incompleteSurfaces,
+  requestedSurfaces,
+  contractPresent,
+}: {
+  streams: WalletActivityAcquisitionStreamEvidence[];
+  incompleteSurfaces: WalletIngestionSurface[];
+  requestedSurfaces: WalletIngestionSurface[];
+  contractPresent: boolean;
+}) {
+  const safeStreams = Array.isArray(streams) ? streams : [];
+  const safeIncompleteSurfaces = Array.isArray(incompleteSurfaces)
+    ? incompleteSurfaces
+    : [];
+  const safeRequestedSurfaces = Array.isArray(requestedSurfaces)
+    ? requestedSurfaces
+    : [];
+  const everyStreamBounded =
+    safeStreams.length > 0 &&
+    safeStreams.every((stream) => stream.bounds_verified === true);
+  const incompleteSummary = contractPresent
+    ? "INCOMPLETE " + safeIncompleteSurfaces.length
+    : "INCOMPLETE UNKNOWN";
+  const surfaceStateHeading = !contractPresent
+    ? "Incomplete-surface evidence unavailable"
+    : safeIncompleteSurfaces.length > 0
+      ? "Incomplete surfaces"
+      : "No surface marked incomplete";
+
+  return (
+    <section
+      className="intelligence-table-block acquisition-evidence-card"
+      aria-label="Wallet activity acquisition evidence"
+    >
+      <div className="table-toolbar acquisition-evidence-toolbar">
+        <div className="table-toolbar-main">
+          <span className="section-eyebrow">Acquisition contract</span>
+          <h2>Stream and pagination evidence</h2>
+          <p>
+            Transaction stream evidence is scoped only to its recorded stream
+            and exact half-open UTC interval. It does not prove completeness of
+            transfers, swaps, balances, or jettons, and it is not PnL or
+            acquisition cost basis.
+          </p>
+        </div>
+        <div className="table-meta" aria-label="Acquisition evidence summary">
+          <span className="badge badge-provider">
+            STREAMS {safeStreams.length}
+          </span>
+          <span
+            className={
+              "badge " +
+              (!contractPresent || safeIncompleteSurfaces.length > 0
+                ? "badge-mock"
+                : "badge-provider")
+            }
+          >
+            {incompleteSummary}
+          </span>
+          <span
+            className={
+              "badge " + (everyStreamBounded ? "badge-real" : "badge-mock")
+            }
+          >
+            {everyStreamBounded ? "BOUNDS VERIFIED" : "BOUNDS UNVERIFIED"}
+          </span>
+        </div>
+      </div>
+
+      <div
+        className={
+          "acquisition-surface-state" +
+          (!contractPresent || safeIncompleteSurfaces.length > 0
+            ? " acquisition-surface-state-warning"
+            : "")
+        }
+        role="status"
+      >
+        <strong>{surfaceStateHeading}</strong>
+        <div>
+          {!contractPresent ? (
+            <span className="muted small">
+              Legacy response: treat every requested surface as unverified.
+            </span>
+          ) : safeIncompleteSurfaces.length > 0 ? (
+            safeIncompleteSurfaces.map((surface) => (
+              <span className="source-badge source-mock" key={surface}>
+                {surfaceLabel(surface)}
+              </span>
+            ))
+          ) : (
+            <span className="muted small">
+              This is not a claim that every requested surface is complete.
+            </span>
+          )}
+        </div>
+      </div>
+
+      {safeStreams.length === 0 ? (
+        <div className="acquisition-evidence-empty">
+          <strong>No stream-level acquisition evidence returned</strong>
+          <p>
+            Treat pagination and requested bounds as unverified for{" "}
+            {safeRequestedSurfaces.length > 0
+              ? formatSurfaces(safeRequestedSurfaces)
+              : "the requested surfaces"}
+            . Legacy responses may not contain this contract.
+          </p>
+        </div>
+      ) : (
+        <div className="acquisition-stream-list">
+          {safeStreams.map((stream) => (
+            <AcquisitionStreamEvidence
+              key={[
+                stream.provider,
+                stream.stream_key,
+                acquisitionValue(stream.requested_start),
+              ].join(":")}
+              stream={stream}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AcquisitionStreamEvidence({
+  stream,
+}: {
+  stream: WalletActivityAcquisitionStreamEvidence;
+}) {
+  const pages = Array.isArray(stream.pages) ? stream.pages : [];
+  const pagesSucceeded = succeededPageCount(stream);
+  const queryFilters = JSON.stringify(stream.query_filters ?? {});
+
+  return (
+    <article className="acquisition-stream">
+      <div className="acquisition-stream-head">
+        <div>
+          <span>{stream.provider}</span>
+          <h3>{stream.stream_key}</h3>
+          <p>
+            {stream.contract_version} · {stream.scope_kind} · {stream.sort_order} ·
+            page {stream.page_size}/{stream.page_cap}
+          </p>
+        </div>
+        <span className={acquisitionStateClass(stream.completion_state)}>
+          {stream.completion_state}
+        </span>
+      </div>
+
+      <div className="acquisition-stream-grid">
+        <div className="acquisition-stream-bound">
+          <span>UTC half-open bounds</span>
+          <code>
+            [<AcquisitionTimestamp value={stream.requested_start} />,{" "}
+            <AcquisitionTimestamp value={stream.requested_end} />)
+          </code>
+        </div>
+        <div>
+          <span>Bounds contract</span>
+          <strong>{stream.bounds_verified ? "Verified" : "Unverified"}</strong>
+        </div>
+        <div>
+          <span>Pages succeeded / attempted</span>
+          <strong>
+            {pagesSucceeded} / {stream.page_count}
+          </strong>
+        </div>
+        <div>
+          <span>Normalized / raw / duplicates</span>
+          <strong>
+            {stream.normalized_count} / {stream.raw_count} /{" "}
+            {stream.duplicate_count}
+          </strong>
+        </div>
+        <div>
+          <span>Termination reason</span>
+          <strong>{acquisitionValue(stream.termination_reason)}</strong>
+        </div>
+        <div>
+          <span>Cursor: first → terminal</span>
+          <code>
+            {acquisitionRange(stream.first_cursor, stream.terminal_cursor)}
+          </code>
+        </div>
+      </div>
+
+      {(stream.error_code || stream.error_message) && (
+        <div className="acquisition-stream-error" role="alert">
+          <strong>{acquisitionValue(stream.error_code)}</strong>
+          <span>{acquisitionValue(stream.error_message)}</span>
+        </div>
+      )}
+
+      <details className="acquisition-page-details">
+        <summary>
+          <span>Page evidence</span>
+          <span>
+            {pages.length} record{pages.length === 1 ? "" : "s"}
+          </span>
+        </summary>
+        <div className="acquisition-stream-contract">
+          <span>
+            Filters <code>{queryFilters}</code>
+          </span>
+          <span>
+            Stream UTC{" "}
+            <AcquisitionTimestamp value={stream.started_at} />
+            {" → "}
+            <AcquisitionTimestamp value={stream.finished_at} />
+          </span>
+        </div>
+        {pages.length === 0 ? (
+          <p className="acquisition-page-empty">
+            No page-level evidence records were returned.
+          </p>
+        ) : (
+          <div className="table-wrap acquisition-page-table-wrap">
+            <table
+              className="data-table acquisition-page-table"
+              aria-label={
+                "Page-level acquisition evidence for " + stream.stream_key
+              }
+            >
+              <thead>
+                <tr>
+                  <th>Page</th>
+                  <th>Cursor</th>
+                  <th>Rows</th>
+                  <th>Logical time</th>
+                  <th>Activity UTC</th>
+                  <th>Fetch evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pages.map((page) => {
+                  const pageFailed = Boolean(
+                    page.error_code || page.error_message,
+                  );
+                  return (
+                    <tr
+                      key={[
+                        page.page_index,
+                        page.request_cursor ?? "root",
+                      ].join(":")}
+                    >
+                      <td>
+                        <strong>#{page.page_index}</strong>
+                        <span
+                          className={
+                            pageFailed
+                              ? "source-badge source-mock"
+                              : "source-badge source-real"
+                          }
+                        >
+                          {pageFailed ? "FAILED" : "SUCCEEDED"}
+                        </span>
+                        <small>
+                          {page.attempt_count} attempt
+                          {page.attempt_count === 1 ? "" : "s"} · limit{" "}
+                          {page.requested_limit}
+                        </small>
+                      </td>
+                      <td>
+                        <code>
+                          {acquisitionRange(
+                            page.request_cursor,
+                            page.response_cursor,
+                          )}
+                        </code>
+                        <small>request → response</small>
+                      </td>
+                      <td>
+                        <strong>
+                          {page.normalized_count} / {page.raw_count}
+                        </strong>
+                        <small>normalized / raw</small>
+                        <small>{page.duplicate_count} duplicates</small>
+                      </td>
+                      <td>
+                        <code>
+                          {acquisitionRange(
+                            page.min_logical_time,
+                            page.max_logical_time,
+                          )}
+                        </code>
+                        <small>minimum → maximum</small>
+                      </td>
+                      <td>
+                        <code>
+                          {acquisitionRange(
+                            page.min_timestamp,
+                            page.max_timestamp,
+                          )}
+                        </code>
+                        <small>minimum → maximum</small>
+                      </td>
+                      <td>
+                        <AcquisitionTimestamp value={page.fetched_at} />
+                        <small>
+                          Digest{" "}
+                          <code title={page.response_digest}>
+                            {acquisitionValue(page.response_digest)}
+                          </code>
+                        </small>
+                        {pageFailed && (
+                          <small className="acquisition-page-error">
+                            {acquisitionValue(page.error_code)} ·{" "}
+                            {acquisitionValue(page.error_message)}
+                          </small>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </details>
+    </article>
   );
 }
 

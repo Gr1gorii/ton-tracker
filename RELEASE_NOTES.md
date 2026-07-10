@@ -1,114 +1,97 @@
-# TON Wallet Intelligence Dashboard - v0.12.0 SWAPS
+# TON Wallet Intelligence Dashboard — v0.22.4 PAGINATION EVIDENCE
 
-Wallet activity guarded DEX-swap coverage handoff for the current wallet
-intelligence workspace. This milestone adds DEX swaps (parsed from account
-events) to the existing guarded balance snapshots, transaction-history timeline,
-and TON/jetton transfers — completing the live activity surface set.
+This release adds bounded, evidence-backed pagination for the low-level TonAPI
+account-transaction surface. It does not claim complete wallet history and does
+not change cost basis or PnL.
 
-## Release Scope
+## Release scope
 
-- Dark matrix-style TON wallet intelligence dashboard.
-- Wallet Activity Ingestion Workspace remains the user-facing workflow for
-  coverage preview, ingestion runs, refresh, evidence, warnings, unavailable
-  surfaces, and normalized activity tables.
-- `MockWalletActivityAdapter` remains the default executable adapter.
-- `TonapiWalletActivityLiveAdapter` still activates only when all three guards
-  are enabled: `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
-  `WALLET_ACTIVITY_LIVE_ENABLED=true`.
-- The guarded TonAPI live path now fetches native TON balance snapshots for
-  requested `balances`, account jetton balance snapshots for requested
-  `jettons`, an ordered account transaction-history timeline for requested
-  `transactions`, TON/jetton transfer history for requested `transfers`, and
-  DEX swaps from events for requested `swaps`.
-- PnL, clustering, and ownership proof remain unavailable in this live path,
-  and swaps exclude USD valuation.
-- TonAPI without the live guard, TON provider, STON.fi, and Bitquery remain
-  scaffold/limited coverage paths for wallet activity ingestion.
-- `/api/providers/status` reports guarded TonAPI live scope as native TON
-  balance, account jetton balance snapshots, account transaction history,
-  TON/jetton transfers, and DEX swaps.
-- Version contract remains: backend `VERSION=0.2.1` is the API-version field;
-  `v0.12.0 SWAPS` is the product release label.
+- Every wallet ingestion request freezes one immutable half-open UTC interval:
+  `[resolved_start, resolved_end)`.
+- Rolling `24h`, `3d`, and `7d` windows resolve once at request time. Custom
+  windows are normalized to UTC and cannot end after acquisition time.
+- Only guarded real/live TonAPI `transactions` ingestion follows multiple
+  pages. Transfers, swaps, jettons, and balances retain their existing
+  one-request or snapshot behavior.
+- The existing v0.22.3 transaction identity remains unchanged: eligible
+  real/live low-level rows use network + canonical run account + canonical LT +
+  canonical 32-byte hash. Original provider values remain visible.
 
-## Current Data Contract
+## Transaction pagination contract
 
-- Product label: `v0.12.0 SWAPS`.
-- Backend API `VERSION` remains `0.2.1`.
-- `DATA_MODE=mock` remains the default.
-- `WALLET_ACTIVITY_PROVIDER=mock` remains the default wallet ingestion adapter.
-- `DATA_MODE=real` alone does not activate live wallet activity ingestion.
-- Guarded live ingestion requires:
-  - `DATA_MODE=real`
-  - `WALLET_ACTIVITY_PROVIDER=tonapi`
-  - `WALLET_ACTIVITY_LIVE_ENABLED=true`
-- `WALLET_ACTIVITY_LIVE_JETTON_LIMIT` controls the TonAPI account jetton limit
-  and is clamped to `1..500`.
-- `WALLET_ACTIVITY_LIVE_TX_LIMIT` controls the TonAPI transaction-history page
-  size and is clamped to `1..1000`.
-- `WALLET_ACTIVITY_LIVE_TRANSFER_LIMIT` controls the TonAPI transfer-history
-  (account events) page size and is clamped to `1..1000`.
-- `WALLET_ACTIVITY_LIVE_SWAP_LIMIT` controls the TonAPI DEX-swap (account
-  events) page size and is clamped to `1..1000`.
-- Guarded live responses use `data_mode=real`, provider
-  `tonapi_wallet_activity_live`, and source-aware balance, transaction,
-  transfer, and swap rows only for requested `balances`, `jettons`,
-  `transactions`, `transfers`, and `swaps`.
-- If one supported TonAPI surface fails and another succeeds, the run remains
-  partial and the failed surface is listed in `unavailable_surfaces`.
-- Unsupported requested surfaces remain listed in `unavailable_surfaces`.
-- Missing provider data must stay visible and must not be inferred.
+- Page size is `WALLET_ACTIVITY_LIVE_TX_LIMIT` (`1..1000`).
+- Page cap is `WALLET_ACTIVITY_LIVE_TX_MAX_PAGES` (`1..100`, default `10`).
+- Pages must form one globally strict descending logical-time chain. Each next
+  request uses the prior page's minimum LT as `before_lt`.
+- A provider page may not exceed its requested limit. Transaction hashes must
+  be canonical 32-byte hex strings; bounded timestamps and optional fee values
+  must be non-lossy integers. Booleans, floats, non-finite/oversized numbers,
+  and malformed hashes terminate as protocol evidence, never completeness.
+- Duplicate LT/hash observations inside one acquisition are counted and
+  suppressed only within that run. This is not cross-run deduplication.
+- Rows are accepted only inside the frozen `[start, end)` interval.
+- A bounded stream is `complete` only when TonAPI returns a terminal empty page
+  or ordered rows verifiably cross below the requested start.
+- Page-cap exhaustion, provider failure, malformed response data, changed
+  duplicate timestamps, missing required timestamps, or a stalled/non-descending
+  cursor leaves the stream `incomplete` or `error`.
+- Preview fetches exactly one page and reports `preview_only`; it never proves
+  pagination termination or persists a run.
 
-## Verification Snapshot
+## Persisted evidence
 
-Use this checklist before promoting the balance coverage branch:
+Alembic revision `20260710_0004` adds:
 
-- `npm run build` from `frontend/`.
-- `.venv/bin/python -m pytest -q` from `backend/`.
-- `.venv/bin/python -m pytest tests/test_tonapi_adapter.py -q` from `backend/`.
-- `.venv/bin/python -m pytest tests/test_wallet_activity_adapter.py -q` from
-  `backend/`.
-- `.venv/bin/python -m pytest tests/test_wallet_activity_ingestion.py -q` from
-  `backend/`.
-- `.venv/bin/python -m pytest tests/test_wallet_activity_provider_status.py -q`
-  from `backend/`.
-- Browser QA on desktop and mobile widths.
-- Confirm UI shows `RELEASE v0.12.0 SWAPS`.
-- Confirm Provider Status includes Wallet activity and shows dynamic provider
-  counts.
-- Confirm default wallet ingestion still previews, runs, refreshes, and renders
-  mock-normalized activity tables.
-- Confirm guarded TonAPI live mode can persist native TON balance snapshots,
-  account jetton balance snapshots, transaction-history rows, TON/jetton
-  transfer rows, and DEX swap rows in tests.
-- Confirm no user-facing UI copy shows stale current product labels such as
-  `v0.11.6 LIVE GUARDS`, `v0.11.5 SCAFFOLDS`, `v0.11.4 ADAPTERS`,
-  `v0.11.3 INGEST UI`, `v0.11.2 MOCK INGEST`, `v0.11.1 SCHEMA`,
-  `v0.11.0 PLAN`, `v0.10.7`, or `v0.2.1`.
-- Confirm horizontal page overflow is absent on desktop/mobile.
-- Confirm browser console has no runtime errors during initial dashboard load
-  and after preview/run/refresh interactions.
+- `wallet_acquisition_streams`: provider/stream contract, frozen bounds, query
+  scope, page limits, aggregate counts, completion state, termination reason,
+  first/terminal cursors, bounds verification, timestamps, and sanitized
+  diagnostics.
+- `wallet_acquisition_pages`: page index, request/response cursor, requested
+  limit, raw/normalized/duplicate counts, LT and timestamp extrema, response
+  digest, attempt count, fetch status, timestamp, and sanitized diagnostics.
 
-## Known Limitations
+The migration is forward-only, validates interrupted SQLite DDL before repair,
+and creates only missing correct tables or indexes. Stream identity is unique by
+run/provider/key; page identity is unique by stream/page index; run deletion
+cascades through stream and page evidence. Runtime SQLite connections enable
+foreign-key enforcement before use. Existing runs receive zero fabricated
+acquisition records.
 
-- Full real wallet activity analysis is not implemented yet.
-- Guarded TonAPI live mode does not compute PnL inputs, clustering inputs, or
-  ownership proof.
-- Live transfer rows are derived from account events (TON/jetton transfer
-  actions only) with best-effort direction; live swap rows are parsed from
-  `JettonSwap` actions and exclude USD valuation.
-- Mock ingestion runs and live balance/transaction/transfer/swap rows are not
-  wired into legacy PnL, clustering, or exports.
-- TonAPI wallet intelligence preview remains jettons-only.
-- STON.fi remains a pool/swap-scope provider, not complete TON DeFi coverage.
-- Bitquery TON trade coverage remains schema/provider limited.
-- Export endpoints rerun analysis instead of exporting a specific stored run id.
+Persisted runs expose `acquisition_streams`, `incomplete_surfaces`, and page
+evidence through the ingestion response. History readiness uses
+`analysis_version: wallet_history_readiness_v0.22.4` to report validated per-run
+transaction pagination or its blocker state, while all global history and PnL
+flags remain false.
 
-## Recommended Next Step
+## Explicitly unchanged
 
-Promote this DEX-swaps branch after the checklist is accepted. With all five
-activity surfaces live, the next logical track is wiring real activity into PnL
-and clustering:
+- TonAPI transfers and swaps are still derived from high-level account-event
+  actions. Those provider interpretations can change and are not authoritative
+  transaction logic or proof of full DEX history.
+- Jettons and native TON balances remain point-in-time snapshots without an
+  equivalent pagination-completeness contract.
+- No cross-run merge or deduplication is applied.
+- No interval-continuity proof exists across multiple runs.
+- No complete pre-run acquisition history or cost basis is established.
+- `history_complete`, `is_cost_basis`, `eligible_for_cost_basis`, and
+  `used_by_pnl` remain false for history readiness.
+- Existing realized/unrealized calculations and Real-PnL gates are unchanged.
+- Backend `VERSION=0.2.1` remains the API-version field; `v0.22.4 PAGINATION
+  EVIDENCE` is the product label.
+
+## Verification
+
+Before promotion:
 
 ```bash
-git checkout -b v0.12.1-wallet-activity-pnl
+cd backend
+.venv/bin/python -m pytest -q
+
+cd ../frontend
+npm run build
 ```
+
+Also verify a guarded live run with a deliberately small transaction page size:
+cursor values must descend, evidence must persist after readback, completion
+must follow only the two allowed terminal conditions, and no credential may
+appear in warnings, query evidence, errors, exports, or logs.
