@@ -1344,7 +1344,7 @@ export interface WalletNativeActivityPnlReadinessResponse {
 export type WalletMultiAssetPnlRequirementCode =
   | "deduplicated_native_activity"
   | "verified_jetton_payload_semantics"
-  | "provider_scoped_jetton_asset_evidence"
+  | "proof_checked_jetton_asset_identity"
   | "exact_transaction_fee_evidence"
   | "complete_wallet_history"
   | "authoritative_trade_semantics"
@@ -1378,8 +1378,12 @@ export interface WalletJettonAssetFeeEvidenceRecord {
   amount_base_units?: string | null;
   contract_account_role: WalletJettonPayloadObservationRecord["contract_account_role"];
   observed_contract_account_canonical?: string | null;
-  asset_binding_status: "provider_snapshot_match" | "unavailable";
+  asset_binding_status: "verified_contract_match" | "unavailable";
   jetton_master_account_canonical?: string | null;
+  asset_identity_key?: string | null;
+  contract_verification_ids: number[];
+  contract_verification_digests: string[];
+  contract_verification_run_ids: number[];
   provider_asset_observation_key?: string | null;
   asset_decimals?: number | null;
   asset_symbol?: string | null;
@@ -1405,6 +1409,7 @@ export interface WalletJettonEvidenceSummaryRecord {
   provider_jetton_snapshot_count: number;
   valid_provider_asset_snapshot_count: number;
   invalid_provider_asset_snapshot_count: number;
+  verified_jetton_contract_count: number;
   asset_matched_observation_count: number;
   asset_unmatched_observation_count: number;
   fee_linked_observation_count: number;
@@ -1415,7 +1420,7 @@ export interface WalletJettonEvidenceSummaryRecord {
 }
 
 export interface WalletMultiAssetPnlReadinessResponse {
-  contract_version: "ton_multi_asset_pnl_readiness_v1";
+  contract_version: "ton_multi_asset_pnl_readiness_v2";
   target_run_id: number;
   selected_run_ids: number[];
   network: string;
@@ -1437,9 +1442,11 @@ export interface WalletMultiAssetPnlReadinessResponse {
   native_activity_deduplication_applied: true;
   jetton_observation_deduplication_applied: true;
   jetton_payload_semantics_used_by_pnl_readiness: boolean;
-  provider_asset_evidence_used_by_pnl_readiness: boolean;
+  verified_contract_identity_used_by_pnl_readiness: boolean;
+  provider_asset_metadata_used_by_pnl_readiness: boolean;
   transaction_fee_evidence_used_by_pnl_readiness: boolean;
   provider_snapshot_asset_identity_is_authoritative: false;
+  verified_contract_asset_identity_is_authoritative: boolean;
   transaction_fee_allocation_applied: false;
   provider_requests_performed: false;
   message_bodies_returned: false;

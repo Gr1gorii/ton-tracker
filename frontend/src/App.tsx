@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.27.0 VERIFIED JETTON CONTRACTS";
+const RELEASE_LABEL = "v0.28.0 PROOF-BOUND ASSET RECONCILIATION";
 
 const navItems = [
   "DASHBOARD",
@@ -942,15 +942,20 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Proof-checked jetton contract identity</strong>
+            <strong>Proof-bound multi-asset reconciliation</strong>
             <p>
-              Selected live jetton relations can now be checked against
-              liteserver account-state proofs and locally executed
-              wallet/master getters. Activity, cost basis, and PnL remain locked.
+              Verified TEP-74 observations now bind to locally revalidated
+              wallet/master proofs; provider snapshots supply metadata only.
+              Trade semantics, lots, and PnL remain locked.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="ready"
+            label="Proof-bound asset reconciliation"
+            text="The multi-run evidence gate now accepts jetton asset identity only from immutable v0.27 contract proofs. TonAPI snapshot fields may enrich symbol and decimals after the master agrees, but can no longer satisfy identity by themselves."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Verified jetton contract identity"
