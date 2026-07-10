@@ -48,6 +48,7 @@ import PreviewReadinessStrip, {
   type PreviewReadinessTone,
 } from "./PreviewReadinessStrip";
 import WalletHistoryIntervalCoverageCard from "./WalletHistoryIntervalCoverageCard";
+import WalletNativePnlReadinessCard from "./WalletNativePnlReadinessCard";
 import WalletRunCatalog from "./WalletRunCatalog";
 import WalletTransactionTraceEvidenceCard from "./WalletTransactionTraceEvidenceCard";
 import {
@@ -1054,6 +1055,12 @@ export default function WalletIngestionWorkspace({
           {runResult?.run_id != null && (
             <WalletHistoryIntervalCoverageCard
               key={runResult.run_id}
+              targetRunId={runResult.run_id}
+            />
+          )}
+          {runResult?.run_id != null && (
+            <WalletNativePnlReadinessCard
+              key={`native-pnl-${runResult.run_id}`}
               targetRunId={runResult.run_id}
             />
           )}

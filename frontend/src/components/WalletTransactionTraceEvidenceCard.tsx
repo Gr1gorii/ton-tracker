@@ -75,7 +75,8 @@ const FALSE_INVARIANTS = [
   },
   {
     field: "used_by_pnl",
-    meaning: "Trace evidence is not passed into PnL.",
+    meaning:
+      "Trace evidence is not passed into a PnL calculation; a separately built native ledger may feed the readiness gate.",
   },
   {
     field: "is_ownership_proof",
@@ -551,7 +552,9 @@ export default function WalletTransactionTraceEvidenceCard({
           <p>
             Saved evidence is read automatically from local storage without a
             provider call. Live preview and immutable capture remain separate,
-            explicit actions and never feed activity reconstruction or PnL.
+            explicit actions. Only a separately built and fully revalidated
+            native ledger can feed the multi-run readiness gate, never a PnL
+            calculation by itself.
           </p>
         </div>
         <div className="table-meta" aria-label="Permanent trace limitations">

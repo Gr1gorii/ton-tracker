@@ -18,6 +18,7 @@ import type {
   WalletIngestionPreviewResponse,
   WalletIngestionRequest,
   WalletIngestionRunResponse,
+  WalletNativeActivityPnlReadinessResponse,
   WalletRunPnlPreviewResponse,
   WalletRunSignalsResponse,
 } from "./types";
@@ -553,6 +554,27 @@ export async function inspectWalletHistoryReadiness(
   }
 
   return (await res.json()) as WalletHistoryReadinessResponse;
+}
+
+export async function inspectWalletNativePnlReadiness(
+  targetRunId: number,
+  runIds: number[],
+): Promise<WalletNativeActivityPnlReadinessResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${targetRunId}/native-activity-pnl-readiness`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_ids: runIds }),
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Native activity PnL readiness failed"),
+    );
+  }
+  return (await res.json()) as WalletNativeActivityPnlReadinessResponse;
 }
 
 async function responseError(res: Response, fallback: string): Promise<string> {

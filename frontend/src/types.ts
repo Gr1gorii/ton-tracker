@@ -1133,6 +1133,70 @@ export interface WalletHistoryReadinessResponse {
   note: string;
 }
 
+export interface WalletNativeActivityPnlFlowSummaryRecord {
+  asset_identity_key: string;
+  activity_count: number;
+  incoming_activity_count: number;
+  outgoing_activity_count: number;
+  self_activity_count: number;
+  incoming_nanoton: string;
+  outgoing_nanoton: string;
+  self_nanoton: string;
+  net_nanoton: string;
+  incoming_ton: string;
+  outgoing_ton: string;
+  self_ton: string;
+  net_ton: string;
+}
+
+export type WalletNativeActivityPnlRequirementCode =
+  | "deduplicated_native_activity"
+  | "complete_wallet_history"
+  | "authoritative_trade_semantics"
+  | "jetton_asset_identity"
+  | "historical_trade_prices"
+  | "transaction_fee_linkage"
+  | "acquisition_cost_basis";
+
+export interface WalletNativeActivityPnlRequirementRecord {
+  code: WalletNativeActivityPnlRequirementCode;
+  available: boolean;
+  reason?: string | null;
+}
+
+export interface WalletNativeActivityPnlReadinessResponse {
+  contract_version: "ton_native_activity_pnl_readiness_v1";
+  target_run_id: number;
+  selected_run_ids: number[];
+  source_dedup_digest_sha256: string;
+  flow_summary: WalletNativeActivityPnlFlowSummaryRecord;
+  requirements: WalletNativeActivityPnlRequirementRecord[];
+  blocked_requirement_codes: WalletNativeActivityPnlRequirementCode[];
+  network: string;
+  wallet_account_canonical: string;
+  source_ledger_count: number;
+  merged_activity_count: number;
+  deduplicated_activity_count: number;
+  suppressed_occurrence_count: number;
+  analysis_digest_sha256: string;
+  analysis_status: "blocked_missing_evidence";
+  calculation_mode: "native_flow_reconciliation_only";
+  cost_basis_method: "unavailable";
+  cost_basis_usd: null;
+  realized_pnl_usd: null;
+  unrealized_pnl_usd: null;
+  activity_merge_applied: true;
+  cross_run_deduplication_applied: true;
+  native_activity_used_by_pnl_readiness: true;
+  native_activity_used_by_pnl_calculation: false;
+  establishes_complete_wallet_history: false;
+  eligible_for_cost_basis: false;
+  is_cost_basis: false;
+  is_real_pnl: false;
+  real_pnl_locked: true;
+  message: string;
+}
+
 export interface WalletEvidenceSignalRecord {
   code: string;
   title: string;

@@ -9,6 +9,7 @@ for OpenAPI via a permissive model.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1111,6 +1112,150 @@ class WalletNativeActivityDedupResponse(BaseModel):
             raise ValueError("dedup conservation failed")
         if [row.dedup_index for row in self.activities] != list(range(len(self.activities))):
             raise ValueError("dedup indexes are not canonical")
+        return self
+
+
+class WalletNativeActivityPnlFlowSummaryRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    asset_identity_key: str = Field(
+        pattern=r"^ton_native_asset_v1\|ton-(?:mainnet|testnet)$"
+    )
+    activity_count: Annotated[int, Field(strict=True, ge=0)]
+    incoming_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    outgoing_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    self_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    incoming_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    outgoing_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    self_nanoton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)$")
+    net_nanoton: str = Field(pattern=r"^-?(?:0|[1-9][0-9]*)$")
+    incoming_ton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,9})?$")
+    outgoing_ton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,9})?$")
+    self_ton: str = Field(pattern=r"^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,9})?$")
+    net_ton: str = Field(pattern=r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]{1,9})?$")
+
+    @model_validator(mode="after")
+    def _flow_counts_and_amounts_must_balance(self):
+        if self.activity_count != (
+            self.incoming_activity_count
+            + self.outgoing_activity_count
+            + self.self_activity_count
+        ):
+            raise ValueError("native activity direction counts do not balance")
+        if int(self.net_nanoton, 10) != (
+            int(self.incoming_nanoton, 10) - int(self.outgoing_nanoton, 10)
+        ):
+            raise ValueError("native activity net amount does not balance")
+        try:
+            amount_pairs = (
+                (self.incoming_nanoton, self.incoming_ton),
+                (self.outgoing_nanoton, self.outgoing_ton),
+                (self.self_nanoton, self.self_ton),
+                (self.net_nanoton, self.net_ton),
+            )
+            if any(
+                Decimal(ton) * Decimal("1000000000") != Decimal(nanoton)
+                for nanoton, ton in amount_pairs
+            ):
+                raise ValueError("TON and nanoton native activity amounts diverged")
+        except InvalidOperation as exc:
+            raise ValueError("native activity TON amount is not decimal") from exc
+        return self
+
+
+class WalletNativeActivityPnlRequirementRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: Literal[
+        "deduplicated_native_activity",
+        "complete_wallet_history",
+        "authoritative_trade_semantics",
+        "jetton_asset_identity",
+        "historical_trade_prices",
+        "transaction_fee_linkage",
+        "acquisition_cost_basis",
+    ]
+    available: bool
+    reason: str | None = None
+
+
+class WalletNativeActivityPnlReadinessResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    contract_version: Literal["ton_native_activity_pnl_readiness_v1"]
+    target_run_id: PositiveStrictRunId
+    selected_run_ids: list[PositiveStrictRunId] = Field(min_length=2, max_length=50)
+    source_dedup_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    flow_summary: WalletNativeActivityPnlFlowSummaryRecord
+    requirements: list[WalletNativeActivityPnlRequirementRecord]
+    blocked_requirement_codes: list[str]
+    network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
+    wallet_account_canonical: str
+    source_ledger_count: Annotated[int, Field(strict=True, ge=2)]
+    merged_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    deduplicated_activity_count: Annotated[int, Field(strict=True, ge=0)]
+    suppressed_occurrence_count: Annotated[int, Field(strict=True, ge=0)]
+    analysis_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    analysis_status: Literal["blocked_missing_evidence"]
+    calculation_mode: Literal["native_flow_reconciliation_only"]
+    cost_basis_method: Literal["unavailable"]
+    cost_basis_usd: None = None
+    realized_pnl_usd: None = None
+    unrealized_pnl_usd: None = None
+    activity_merge_applied: Literal[True]
+    cross_run_deduplication_applied: Literal[True]
+    native_activity_used_by_pnl_readiness: Literal[True]
+    native_activity_used_by_pnl_calculation: Literal[False] = False
+    establishes_complete_wallet_history: Literal[False] = False
+    eligible_for_cost_basis: Literal[False] = False
+    is_cost_basis: Literal[False] = False
+    is_real_pnl: Literal[False] = False
+    real_pnl_locked: Literal[True]
+    message: str
+
+    @model_validator(mode="after")
+    def _readiness_must_stay_fail_closed(self):
+        expected_codes = [
+            "deduplicated_native_activity",
+            "complete_wallet_history",
+            "authoritative_trade_semantics",
+            "jetton_asset_identity",
+            "historical_trade_prices",
+            "transaction_fee_linkage",
+            "acquisition_cost_basis",
+        ]
+        codes = [requirement.code for requirement in self.requirements]
+        if codes != expected_codes:
+            raise ValueError("PnL readiness requirements changed")
+        if [requirement.available for requirement in self.requirements] != [
+            True,
+            False,
+            False,
+            False,
+            False,
+            False,
+            False,
+        ]:
+            raise ValueError("PnL readiness availability was promoted")
+        if self.requirements[0].reason is not None or any(
+            not requirement.reason for requirement in self.requirements[1:]
+        ):
+            raise ValueError("PnL readiness reasons changed")
+        blocked = [
+            requirement.code
+            for requirement in self.requirements
+            if not requirement.available
+        ]
+        if blocked != self.blocked_requirement_codes:
+            raise ValueError("blocked PnL requirements changed")
+        if self.deduplicated_activity_count != self.flow_summary.activity_count:
+            raise ValueError("PnL flow count changed after deduplication")
+        if self.merged_activity_count != (
+            self.deduplicated_activity_count + self.suppressed_occurrence_count
+        ):
+            raise ValueError("PnL dedup conservation failed")
+        if (
+            len(set(self.selected_run_ids)) != len(self.selected_run_ids)
+            or self.target_run_id not in self.selected_run_ids
+        ):
+            raise ValueError("PnL readiness run selection changed")
         return self
 
 

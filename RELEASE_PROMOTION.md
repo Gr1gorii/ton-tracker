@@ -1,19 +1,20 @@
-# TON Wallet Intelligence Dashboard — v0.23.9 Promotion Checklist
+# TON Wallet Intelligence Dashboard — v0.24.0 Promotion Checklist
 
-Operational gates for canonical cross-run native activity deduplication.
+Operational gates for native activity PnL readiness.
 
 ## Version and migration
 
-- Product label is `v0.23.9 CROSS-RUN NATIVE ACTIVITY DEDUP`; backend API version stays
+- Product label is `v0.24.0 NATIVE ACTIVITY PNL READINESS`; backend API version stays
   independently frozen at `0.2.1`.
-- New public contract is `ton_native_activity_dedup_v1`; the persisted ledger,
-  merge, and all lower evidence contracts remain unchanged.
+- New public contract is `ton_native_activity_pnl_readiness_v1`; the dedup,
+  merge, persisted ledger, and all lower evidence contracts remain unchanged.
 - Alembic head is `20260710_0008`, adding native activity ledgers and rows on
   top of the unchanged 0007 BOC tables.
 - Fresh, 0006 upgrade, exact empty interrupted DDL, and already-current paths
   have model parity. Drift, orphan fragments, unexpected rows/indexes/FKs,
   offline SQL, and downgrade fail closed.
-- README remains frozen until v0.24.0.
+- README is rewritten only after the v0.24.0 implementation and live contract
+  have passed their release checks.
 
 ## Verification contract
 
@@ -42,6 +43,16 @@ Operational gates for canonical cross-run native activity deduplication.
 
 ## Endpoint and UI
 
+- POST `.../{target_run_id}/native-activity-pnl-readiness` consumes the
+  canonical dedup result provider-free and reconciles incoming, outgoing, self,
+  and net native TON flow.
+- A seven-item checklist exposes dedup availability and every missing complete-
+  history, trade-semantic, jetton-identity, historical-price, fee-linkage, and
+  acquisition-basis prerequisite. Calculation values remain null and Real PnL
+  remains locked.
+- The wallet workspace accepts 1–49 other selected run ids, shows canonical and
+  suppressed counts, exact native flow, the calculation lock, and all
+  requirement reasons on desktop and narrow layouts.
 - POST `.../{target_run_id}/native-activity-dedup` runs the unchanged merge,
   chooses the first deterministic occurrence per identity, and preserves every
   winner/suppressed coordinate in digest-bound resolution evidence.
@@ -90,12 +101,13 @@ Operational gates for canonical cross-run native activity deduplication.
 
 - Full backend pytest and compileall pass.
 - Full frontend Vitest, TypeScript/Vite build, and dependency audit pass.
-- Deterministic two-run fixtures prove ordering, duplicate grouping, canonical
+- Deterministic fixtures prove flow reconciliation, stable analysis digest,
+  response validation, ordering, duplicate grouping, canonical
   winner selection, complete suppression provenance, semantic-conflict
   rejection, response validation, and incompatible-wallet rejection.
 - Credential/prohibited-brand scans are clean and README has no diff.
 - Commit only intended files, push the dedicated release branch, open and merge
-  a ready PR, then create annotated tag `v0.23.9` on the merge commit.
+  a ready PR, then create annotated tag `v0.24.0` on the merge commit.
 
 ## Rollback
 
