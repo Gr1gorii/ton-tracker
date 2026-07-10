@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import Response
@@ -16,6 +17,7 @@ from schemas import (
     WalletIngestionRunCatalogResponse,
     WalletIngestionRunResponse,
     WalletRunSignalsResponse,
+    WalletTransactionTraceEvidenceResponse,
 )
 from schemas import WalletRunPnlPreviewResponse
 from services import export
@@ -31,10 +33,18 @@ from services.wallet_activity_ingestion import (
     list_wallet_ingestion_runs,
     persist_mock_wallet_ingestion,
 )
+from services.wallet_trace_evidence import (
+    WalletTraceEvidenceIneligible,
+    WalletTraceEvidenceNotFound,
+    WalletTraceEvidenceProviderFailure,
+    get_wallet_transaction_trace_evidence,
+)
 
 router = APIRouter(prefix="/api/wallets", tags=["wallet-activity"])
 _MAX_SQLITE_RUN_ID = 2**63 - 1
 _MAX_RUN_CATALOG_LIMIT = 50
+_CANONICAL_RUN_ID_RE = re.compile(r"^[1-9][0-9]{0,18}$")
+_CANONICAL_TRACE_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _derive_pnl_preview(
@@ -154,6 +164,70 @@ def read_wallet_ingestion_run(
     if result is None:
         raise HTTPException(status_code=404, detail="Wallet ingestion run not found")
     return result
+
+
+@router.get(
+    "/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence",
+    response_model=WalletTransactionTraceEvidenceResponse,
+)
+def read_wallet_transaction_trace_evidence(
+    response: Response,
+    run_id: str = Path(
+        ...,
+        description="Canonical positive persisted run id.",
+    ),
+    transaction_hash: str = Path(
+        ...,
+        description="Canonical lowercase persisted transaction hash.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Inspect one bounded provider trace without persistence or reconstruction."""
+    no_store_headers = {"Cache-Control": "no-store"}
+    response.headers.update(no_store_headers)
+    if _CANONICAL_RUN_ID_RE.fullmatch(run_id) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="run_id must be a canonical positive signed 64-bit integer",
+            headers=no_store_headers,
+        )
+    if _CANONICAL_TRACE_HASH_RE.fullmatch(transaction_hash) is None:
+        raise HTTPException(
+            status_code=422,
+            detail="transaction_hash must be canonical lowercase 32-byte hex",
+            headers=no_store_headers,
+        )
+    canonical_run_id = int(run_id, 10)
+    if canonical_run_id > _MAX_SQLITE_RUN_ID:
+        raise HTTPException(
+            status_code=422,
+            detail="run_id must be a canonical positive signed 64-bit integer",
+            headers=no_store_headers,
+        )
+    try:
+        return get_wallet_transaction_trace_evidence(
+            canonical_run_id,
+            transaction_hash,
+            session,
+        )
+    except WalletTraceEvidenceNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except WalletTraceEvidenceIneligible as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
+    except WalletTraceEvidenceProviderFailure as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers=no_store_headers,
+        ) from exc
 
 
 @router.get(

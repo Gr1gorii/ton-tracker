@@ -21,7 +21,7 @@ import type { ProviderPreviewRunUpdate } from "./components/providerPreviewUtils
 
 const SAMPLE_URL =
   "https://www.geckoterminal.com/ton/pools/EQCp_C-wPq2Z-mock-pool";
-const RELEASE_LABEL = "v0.22.9 RECENT RUN CATALOG";
+const RELEASE_LABEL = "v0.23.0 TRACE EVIDENCE PREVIEW";
 
 const navItems = [
   "DASHBOARD",
@@ -942,16 +942,21 @@ function EvidenceColumn({
         <div className="release-readiness-summary">
           <span className="release-readiness-led" aria-hidden="true" />
           <div>
-            <strong>Privacy-bounded recent-run discovery</strong>
+            <strong>Explicit transaction trace evidence preview</strong>
             <p>
-              Discover the newest persisted runs through masked wallet hints and
-              minimal metadata, then open one through the existing read-only
-              loader. Catalog reads use one bounded query, never call providers,
-              and never mutate stored evidence.
+              Choose one eligible transaction from a real stored run and inspect
+              a sanitized provider-indexed trace summary only after an explicit
+              action. The preview never persists, reconstructs activity, proves
+              authority or ownership, or feeds PnL.
             </p>
           </div>
         </div>
         <div className="release-readiness-list">
+          <ReleaseReadinessItem
+            tone="scoped"
+            label="Transaction trace preview"
+            text="One explicit no-store request validates a stored account + logical-time + transaction-hash anchor and returns bounded trace counts. Provider evidence never upgrades the transaction to blockchain proof, semantic reconstruction, authoritative activity, cost basis, ownership proof, or PnL input."
+          />
           <ReleaseReadinessItem
             tone="ready"
             label="Recent run catalog"
@@ -1044,7 +1049,7 @@ function EvidenceColumn({
         <EvidenceItem
           tone="info"
           title="Can show stored-run intelligence"
-          text="Activity rows, selected-run interval diagnostics, evidence signals, run-scoped PnL, probabilistic cluster comparison, provider previews, and explicit limitations."
+          text="Activity rows, explicit per-transaction trace evidence previews, selected-run interval diagnostics, evidence signals, run-scoped PnL, probabilistic cluster comparison, provider previews, and explicit limitations."
         />
         <EvidenceItem
           tone="info"

@@ -618,6 +618,45 @@ export interface WalletTransactionIdentityRecord {
   used_by_pnl: false;
 }
 
+export interface WalletTransactionTraceEvidenceAnchor {
+  transaction_hash: string;
+  logical_time: string;
+  account_canonical: string;
+  matches_stored_transaction: true;
+}
+
+export interface WalletTransactionTraceEvidenceSummary {
+  root_transaction_hash: string;
+  transaction_count: number;
+  max_depth: number;
+  out_message_count: number;
+  pending_internal_message_count: number;
+  successful_transaction_count: number;
+  failed_transaction_count: number;
+  aborted_transaction_count: number;
+  unique_account_count: number;
+}
+
+export interface WalletTransactionTraceEvidenceResponse {
+  contract_version: "tonapi_transaction_trace_preview_v1";
+  run_id: string;
+  provider: "tonapi";
+  source_status: "live";
+  trace_state: "finalized" | "pending";
+  anchor: WalletTransactionTraceEvidenceAnchor;
+  summary: WalletTransactionTraceEvidenceSummary;
+  is_provider_indexed_low_level_trace: true;
+  is_blockchain_proof_verified: false;
+  is_authoritative_activity_identity: false;
+  semantic_reconstruction_applied: false;
+  activity_merge_applied: false;
+  deduplication_applied: false;
+  eligible_for_cost_basis: false;
+  used_by_pnl: false;
+  is_ownership_proof: false;
+  message: string;
+}
+
 export interface WalletSwapRecord {
   tx_hash?: string | null;
   timestamp?: string | null;

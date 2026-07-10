@@ -1,4 +1,4 @@
-# TON Wallet Intelligence Dashboard — v0.22.9 RECENT RUN CATALOG
+# TON Wallet Intelligence Dashboard — v0.23.0 TRACE EVIDENCE PREVIEW
 
 Planning and rollout contract for bounded real-wallet acquisition. Guarded
 low-level TonAPI transactions and the v0.22.5 shared account-event page chain
@@ -8,8 +8,9 @@ coverage across 2-50 explicitly selected runs without promoting a selected
 span, provider display events, or derived actions to complete wallet history.
 v0.22.8 added read-only selection of an existing persisted run. v0.22.9 adds a
 privacy-bounded newest-run catalog that discovers stored ids without loading
-full activity or changing any acquisition, identity, readiness, or interval
-contract.
+full activity. v0.23.0 adds one explicit read-only provider trace preview for a
+strictly eligible persisted low-level transaction. It changes no acquisition,
+persistence, identity, readiness, interval, cost-basis, or PnL contract.
 
 ## Objective
 
@@ -20,7 +21,10 @@ evidence limits must remain visible; no missing interval or activity is
 inferred. A user must also be able to reopen one exact stored run without
 creating another run, contacting a provider, or mutating persisted evidence.
 Recent-run discovery must expose only bounded metadata, preserve signed-64-bit
-ids exactly, and remain one provider-free, mutation-free database read.
+ids exactly, and remain one provider-free, mutation-free database read. Trace
+inspection must remain an explicit one-provider-call diagnostic whose exact
+stored transaction anchor, bounded structure, pending/finalized state, and
+non-authoritative limits are visible without persisting the provider response.
 
 ## Frozen interval contract
 
@@ -118,6 +122,112 @@ parsing become sanitized provider protocol errors; transport/read failures keep
 their provider/network classification. None establishes stream completion or
 leaks a credential. Keyed requests still require HTTPS, and authorization is
 not forwarded through redirects.
+
+## Explicit transaction trace evidence contract
+
+v0.23.0 introduces the read-only contract
+`tonapi_transaction_trace_preview_v1` at:
+
+```text
+GET /api/wallets/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence
+```
+
+This is an on-demand diagnostic for one already persisted low-level transaction,
+not a new acquisition surface. The browser never requests it during ingestion,
+stored-run loading, catalog discovery, run refresh, or card mount. Only an
+explicit **Inspect trace evidence** action can issue the request.
+
+### Eligibility before network access
+
+The path requires a canonical positive signed-64-bit `run_id` and a lowercase
+64-hex-character transaction hash. Malformed or noncanonical path values return
+422. Before provider construction/call, the service requires:
+
+- one existing real persisted run matching the current configured TON network;
+- current `DATA_MODE=real`, `WALLET_ACTIVITY_PROVIDER=tonapi`, and
+  `WALLET_ACTIVITY_LIVE_ENABLED=true` guards;
+- a valid network-matching TonAPI base URL;
+- exactly one stored transaction for the requested run/hash;
+- coherent live TonAPI provider/source/raw provenance;
+- an exact persisted `ton_account_tx_v1` tuple that re-derives to the stored
+  canonical account, unsigned-64-bit LT, and lowercase 32-byte hash.
+
+Missing runs/transactions return 404. Ambiguous or incoherent identity,
+disabled guards, and configuration/network/run mismatch return 409 without a
+provider call. An eligible request performs exactly one official TonAPI
+`GET /v2/traces/{transaction_hash}` call, with no query, body, account-trace
+discovery, pagination, background poll, automatic retry, or fallback.
+
+TonAPI's provider operation accepts a trace id or the hash of a transaction in a
+trace. This product deliberately accepts only a transaction hash already bound
+to the selected run. The provider result must contain the requested hash exactly
+once, and that node's hash + LT + canonical raw account must exactly match the
+stored identity. Missing or mismatched anchors, provider failures, and malformed
+trace protocol return a sanitized 502.
+
+### Trace-specific resource and protocol bounds
+
+The recursive provider tree is traversed iteratively and accepts at most:
+
+- 256 transaction nodes;
+- maximum tree depth 32;
+- 2,048 outgoing messages across the tree;
+- 128 non-empty interface strings per node, each at most 128 characters.
+
+These caps are additional to the generic TonAPI byte/JSON limits. Every node
+must be non-emulated and contain a typed interface list, transaction object, and
+list-shaped children. Each transaction requires a canonical hash, canonical raw
+account, uint64 LT, nonnegative signed-64-bit timestamp, boolean success and
+aborted states, and a list of outgoing messages with known message types.
+Hashes cannot repeat. Reusing one account + LT coordinate with a different hash
+is a protocol error. Raw/decoded content is never required or returned.
+
+### Sanitized response and trace lifecycle
+
+The exact response allowlist contains contract/run/provider metadata,
+`trace_state`, one stored anchor, one structural summary, permanent safety flags,
+and a bounded message. The anchor contains only canonical hash, LT, account, and
+`matches_stored_transaction: true`. The summary contains only root hash,
+transaction/depth/account counts, outgoing and pending-internal message counts,
+and successful/failed/aborted counts. Raw messages, BOCs, decoded bodies,
+interfaces, actions, presentation metadata, and the recursive provider payload
+are omitted.
+
+An emulated node is rejected. For accepted non-emulated traces:
+
+- zero remaining internal outgoing messages means `finalized`;
+- one or more remaining internal outgoing messages means `pending`.
+
+This is provider lifecycle evidence, not a success verdict. A finalized trace
+may still contain failed or aborted transactions, and a later explicit request
+may observe a pending trace become finalized. Both states leave
+`is_blockchain_proof_verified`, `is_authoritative_activity_identity`,
+`semantic_reconstruction_applied`, `activity_merge_applied`,
+`deduplication_applied`, `eligible_for_cost_basis`, `used_by_pnl`, and
+`is_ownership_proof` false. Only
+`is_provider_indexed_low_level_trace` is true.
+
+Every success and handled error is `no-store`; the browser request also uses
+`no-store`. Repeated inspection performs another explicit provider read but no
+database insert, update, delete, commit, trace persistence, activity mutation,
+or PnL integration.
+
+### Workspace state contract
+
+The run-scoped card distinguishes real-run-required, no-eligible-anchor,
+explicit-request-required, inspecting, refreshing, first-error unavailable,
+last-success-preserved, finalized, and pending states. Mock/empty/ineligible
+states cannot issue a request. The selected anchor exposes its exact stored hash
+and LT; changing it aborts the previous request and clears only its trace result.
+A monotonic sequence guard ignores late responses. Loading another run remounts
+the card, aborts pending work, and removes all prior run-scoped trace state. A
+failed retry leaves the last successful result visible with an error and retry
+action. The permanent false-invariant table remains visible in every state.
+
+v0.23.0 adds no model, column, index, table, migration, or backfill. Alembic head
+remains `20260710_0005`; backend `VERSION=0.2.1`,
+`wallet_history_readiness_v0.22.7`, and
+`wallet_multi_run_interval_coverage_v1` remain unchanged.
 
 ## Acquisition persistence contract
 
@@ -340,7 +450,7 @@ The layer state is `no_validated_intervals`, `contiguous_selected_span`, or
 `excluded`, and `not_requested` classifications visible even when the included
 intervals are contiguous.
 
-## Surface status in v0.22.9
+## Surface status in v0.23.0
 
 | Surface | Current acquisition behavior | Completion meaning |
 | --- | --- | --- |
@@ -349,6 +459,7 @@ intervals are contiguous.
 | Swaps | Same shared chain, `JettonSwap` interpretation, and shared observation-identity namespace | Provider chain can terminate; derived actions remain incomplete and not full DEX history |
 | Jettons | Account jetton balance snapshot | Point-in-time snapshot, not history |
 | Native TON balance | One account snapshot | Point-in-time snapshot, not history |
+| Transaction trace evidence | One explicit guarded TonAPI trace read for an eligible stored transaction | Sanitized provider lifecycle/structure preview only; not persisted, locally verified, reconstructed, authoritative, or used by PnL |
 | Recent persisted-run catalog | One bounded ID-descending projection of up to 50 run summaries | Discovery metadata only; no full address, activity, provider call, or mutation |
 | Persisted run loading | Existing database-only GET plus validated atomic workspace restoration | Exact readback of one run; no provider call, ingestion, or mutation |
 | Multi-run interval diagnostics | Two independent unions over strictly revalidated selected-run evidence | Continuity only inside each eligible selected span; outside time remains unknown |
@@ -403,6 +514,11 @@ or a PnL/deduplication key. The public flags state those limits explicitly.
   64-bit ids, returns 200/404/422 as defined above, and reads persisted evidence
   plus exact custom bounds and creation time without provider access, mutation,
   inferred legacy pages, or inferred action indexes.
+- `GET /api/wallets/ingest/{run_id}/transactions/{transaction_hash}/trace-evidence`
+  accepts only a canonical stored anchor, returns `tonapi_transaction_trace_preview_v1`
+  after one explicit provider read, uses no-store, and maps missing resources to
+  404, ineligible state to 409, and sanitized provider/protocol/anchor failure to
+  502. It never persists or reconstructs the trace.
 - `POST /api/wallets/history/readiness` accepts one explicit target within 2-50
   distinct selected run ids. Under `wallet_history_readiness_v0.22.7`, it
   reports per-run acquisition validation, identity coverage/groups/conflicts,
@@ -423,6 +539,12 @@ surfaces do not convert an incomplete transaction stream into complete history.
   provider-scoped observation coordinate.
 - No jetton or native-balance history completion from snapshots.
 - No authoritative logic built from TonAPI high-level event actions.
+- No automatic trace call, polling, account-trace discovery, trace pagination,
+  provider retry, or hidden fallback.
+- No persisted raw trace, trace summary, lifecycle state, interface, message,
+  BOC, decoded body, or trace-derived semantic activity row.
+- No authoritative transfer/trade reconstruction from the structural trace
+  preview and no promotion of a finalized provider state to success or proof.
 - No activity-row merge, semantic stitching, or cross-run deduplication. The
   bounded interval union is diagnostic math only.
 - No proof of time before the earliest eligible selected interval, time after
@@ -455,6 +577,15 @@ surfaces do not convert an incomplete transaction stream into complete history.
   field summary allowlist, bounded masked wallet hints, decimal-string signed-
   64-bit ids, strict ID-descending order, `truncated`, one projected SELECT, no
   child-table read, no-store, no provider/settings call, and no mutation.
+- Trace endpoint tests cover canonical run/hash paths, eligibility-before-network
+  ordering, exactly one provider GET, exact stored hash + LT + account matching,
+  200/404/409/422/502 behavior, no-store on success and handled errors,
+  credential redaction, repeatability, and absence of database mutation.
+- Trace normalizer/schema tests cover exact 256-node and depth-32 boundaries,
+  the 2,048-message cap, bounded interfaces, iterative traversal, requested-hash
+  presence, duplicate hashes, conflicting account/LT coordinates, malformed and
+  emulated nodes, coherent pending/finalized state, strict response allowlists,
+  coherent counts, and permanently false promotion flags.
 - Keyed requests require HTTPS and never forward authorization through a
   redirect; lossy terminal cursor types fail closed.
 - Response tests cover the 16 MiB body limit, JSON depth 64, 200,000-node
@@ -475,18 +606,21 @@ surfaces do not convert an incomplete transaction stream into complete history.
   retry, last-success preservation, safe selection through the full loader,
   unsafe-id disabling, post-ingestion refresh, the positive safe-integer gate,
   response restoration, preview/run exclusivity, failed-load preservation,
-  run-card remounting, and normalized datetime signatures.
+  run-card remounting, normalized datetime signatures, network-silent mock/empty
+  trace states, explicit inspection, strict response/anchor validation,
+  superseded-request abort, run reset, retry, and last-success preservation.
 - Full backend tests, frontend Vitest 4 tests, and the Vite 8 build pass; the
   checked-in frontend dependency graph reports zero `npm audit`
   vulnerabilities.
 - The frontend engine contract is Node.js `^20.19.0 || >=22.12.0` with npm 10
   or newer, matching the supported Vite 8 toolchain.
 
-## Roadmap beyond v0.22.9
+## Roadmap beyond v0.23.0
 
-1. Acquire authoritative low-level transfer/trade evidence or reconstruct it
-   from validated traces without treating provider display actions as immutable
-   chain logic.
+1. Define a separately versioned persisted low-level message/trace evidence
+   contract with local revalidation before reconstructing authoritative transfer
+   or trade semantics. The v0.23.0 on-demand structural summary is not that
+   ledger and cannot be backfilled as one.
 2. Add authoritative semantic transfer/trade reconstruction plus jetton-asset
    and counterparty identity contracts; do not treat the provider observation
    coordinate as a substitute.

@@ -42,8 +42,18 @@ _MAX_TRANSACTION_PAGE_LIMIT = 1000
 _MAX_EVENT_PAGE_LIMIT = 100
 _MAX_EVENT_DATE = 2114380800
 _MAX_LOGICAL_TIME = 2**64 - 1
+_MAX_TRACE_TRANSACTION_NODES = 256
+_MAX_TRACE_DEPTH = 32
+_MAX_TRACE_OUT_MESSAGES = 2048
+_MAX_TRACE_INTERFACES_PER_NODE = 128
+_MAX_TRACE_INTERFACE_LENGTH = 128
 _LOGICAL_TIME_RE = re.compile(r"^[1-9][0-9]{0,19}$")
 _TRANSACTION_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_RAW_ACCOUNT_RE = re.compile(
+    r"^((?:0|[1-9][0-9]*|-[1-9][0-9]*)):([0-9a-fA-F]{64})$"
+)
+_MIN_WORKCHAIN = -(2**31)
+_MAX_WORKCHAIN = 2**31 - 1
 
 
 def _json_structure_is_bounded(value: Any) -> bool:
@@ -561,6 +571,64 @@ class TonapiAdapter:
             },
             source=page.source,
             message=message,
+        )
+
+    # -- Low-level transaction trace evidence preview ------------------
+
+    def get_transaction_trace_evidence_preview(
+        self,
+        transaction_hash: str,
+    ) -> ProviderResult:
+        """Fetch one bounded provider-indexed low-level transaction trace.
+
+        The result is a sanitized structural summary. It intentionally omits
+        raw messages, BOCs, decoded bodies, interfaces, and semantic actions.
+        A validated provider trace is still not locally verified blockchain
+        proof and is not an authoritative transfer/trade reconstruction.
+        """
+        if (
+            not isinstance(transaction_hash, str)
+            or transaction_hash != transaction_hash.lower()
+            or _TRANSACTION_HASH_RE.fullmatch(transaction_hash) is None
+        ):
+            return self._provider_error(
+                "TonAPI trace evidence requires a canonical lowercase "
+                "32-byte transaction hash."
+            )
+        if self.settings.is_mock:
+            return self._provider_error(
+                "TonAPI trace evidence requires guarded real mode."
+            )
+
+        result = self.fetch_json(f"/v2/traces/{transaction_hash}")
+        if not result.ok:
+            return result
+
+        try:
+            normalized = self.normalize_transaction_trace_evidence_response(
+                result.data,
+                requested_transaction_hash=transaction_hash,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            return ProviderResult.failure(
+                ERROR_PROVIDER_PROTOCOL,
+                self._sanitize_diagnostic(
+                    "TonAPI response had an unexpected structure for "
+                    f"transaction trace evidence: {exc}."
+                )
+                or "TonAPI transaction trace evidence protocol error.",
+                source="real",
+            )
+
+        return ProviderResult.success(
+            normalized,
+            source="real",
+            message=(
+                "TonAPI low-level transaction trace evidence fetched and "
+                "structurally validated. This provider-indexed summary is "
+                "not locally verified blockchain proof or authoritative "
+                "semantic activity reconstruction."
+            ),
         )
 
     # -- Account event pages and derived previews -----------------------
@@ -1082,6 +1150,207 @@ class TonapiAdapter:
         }
 
     @classmethod
+    def normalize_transaction_trace_evidence_response(
+        cls,
+        payload: Any,
+        *,
+        requested_transaction_hash: str,
+    ) -> dict[str, Any]:
+        """Validate a trace iteratively and return a bounded summary only."""
+        if (
+            not isinstance(requested_transaction_hash, str)
+            or requested_transaction_hash
+            != requested_transaction_hash.lower()
+            or _TRANSACTION_HASH_RE.fullmatch(requested_transaction_hash)
+            is None
+        ):
+            raise ValueError(
+                "requested transaction hash must be canonical lowercase hex"
+            )
+        if not isinstance(payload, dict):
+            raise ValueError("trace response must be an object")
+
+        stack: list[tuple[dict[str, Any], int]] = [(payload, 0)]
+        seen_hashes: set[str] = set()
+        seen_coordinates: dict[tuple[str, str], str] = {}
+        anchor: dict[str, str] | None = None
+        root_transaction_hash: str | None = None
+        transaction_count = 0
+        max_depth = 0
+        out_message_count = 0
+        pending_internal_message_count = 0
+        successful_transaction_count = 0
+        failed_transaction_count = 0
+        aborted_transaction_count = 0
+        accounts: set[str] = set()
+
+        while stack:
+            node, depth = stack.pop()
+            if not isinstance(node, dict):
+                raise ValueError("trace child must be an object")
+            if depth > _MAX_TRACE_DEPTH:
+                raise ValueError(
+                    "trace exceeds the maximum transaction-tree depth"
+                )
+            transaction_count += 1
+            if transaction_count > _MAX_TRACE_TRANSACTION_NODES:
+                raise ValueError(
+                    "trace exceeds the maximum transaction-node count"
+                )
+            max_depth = max(max_depth, depth)
+
+            emulated = node.get("emulated", False)
+            if not isinstance(emulated, bool):
+                raise ValueError("trace emulated state must be boolean")
+            if emulated:
+                raise ValueError("emulated trace nodes are not accepted")
+
+            interfaces = node.get("interfaces")
+            if (
+                not isinstance(interfaces, list)
+                or len(interfaces) > _MAX_TRACE_INTERFACES_PER_NODE
+                or any(
+                    not isinstance(interface, str)
+                    or not interface
+                    or interface != interface.strip()
+                    or len(interface) > _MAX_TRACE_INTERFACE_LENGTH
+                    for interface in interfaces
+                )
+            ):
+                raise ValueError("trace interfaces must be a bounded string list")
+
+            transaction = node.get("transaction")
+            if not isinstance(transaction, dict):
+                raise ValueError("trace node transaction must be an object")
+            raw_hash = transaction.get("hash")
+            if (
+                not isinstance(raw_hash, str)
+                or raw_hash != raw_hash.strip()
+                or _TRANSACTION_HASH_RE.fullmatch(raw_hash) is None
+            ):
+                raise ValueError(
+                    "trace transaction hash must be canonical 32-byte hex"
+                )
+            transaction_hash = raw_hash.lower()
+            if transaction_hash in seen_hashes:
+                raise ValueError("trace reuses a transaction hash")
+            seen_hashes.add(transaction_hash)
+            if root_transaction_hash is None:
+                root_transaction_hash = transaction_hash
+
+            logical_time = cls._strict_logical_time(transaction.get("lt"))
+            if logical_time is None:
+                raise ValueError("trace transaction has invalid logical time")
+            account = cls._canonical_raw_account_address(
+                transaction.get("account")
+            )
+            if account is None:
+                raise ValueError("trace transaction has invalid account")
+            accounts.add(account)
+            coordinate = (account, logical_time)
+            prior_coordinate_hash = seen_coordinates.get(coordinate)
+            if (
+                prior_coordinate_hash is not None
+                and prior_coordinate_hash != transaction_hash
+            ):
+                raise ValueError(
+                    "trace transaction coordinate changed hash"
+                )
+            seen_coordinates[coordinate] = transaction_hash
+
+            utime = transaction.get("utime")
+            if (
+                isinstance(utime, bool)
+                or not isinstance(utime, int)
+                or not 0 <= utime <= 2**63 - 1
+            ):
+                raise ValueError("trace transaction has invalid utime")
+            success = transaction.get("success")
+            if not isinstance(success, bool):
+                raise ValueError("trace transaction success must be boolean")
+            if success:
+                successful_transaction_count += 1
+            else:
+                failed_transaction_count += 1
+            aborted = transaction.get("aborted")
+            if not isinstance(aborted, bool):
+                raise ValueError("trace transaction aborted must be boolean")
+            if aborted:
+                aborted_transaction_count += 1
+
+            out_messages = transaction.get("out_msgs")
+            if not isinstance(out_messages, list):
+                raise ValueError("trace transaction out_msgs must be a list")
+            out_message_count += len(out_messages)
+            if out_message_count > _MAX_TRACE_OUT_MESSAGES:
+                raise ValueError(
+                    "trace exceeds the maximum outgoing-message count"
+                )
+            for message in out_messages:
+                if not isinstance(message, dict):
+                    raise ValueError("trace outgoing message must be an object")
+                message_type = message.get("msg_type")
+                if message_type not in (
+                    "int_msg",
+                    "ext_in_msg",
+                    "ext_out_msg",
+                ):
+                    raise ValueError(
+                        "trace outgoing message has invalid message type"
+                    )
+                if message_type == "int_msg":
+                    pending_internal_message_count += 1
+
+            if transaction_hash == requested_transaction_hash:
+                anchor = {
+                    "transaction_hash": transaction_hash,
+                    "logical_time": logical_time,
+                    "account_canonical": account,
+                }
+
+            raw_children = node.get("children", [])
+            if not isinstance(raw_children, list):
+                raise ValueError("trace children must be a list")
+            if transaction_count + len(stack) + len(raw_children) > (
+                _MAX_TRACE_TRANSACTION_NODES
+            ):
+                raise ValueError(
+                    "trace exceeds the maximum transaction-node count"
+                )
+            for child in reversed(raw_children):
+                if not isinstance(child, dict):
+                    raise ValueError("trace child must be an object")
+                stack.append((child, depth + 1))
+
+        if anchor is None:
+            raise ValueError(
+                "trace does not contain the requested transaction hash"
+            )
+        assert root_transaction_hash is not None
+        trace_state = (
+            "pending" if pending_internal_message_count else "finalized"
+        )
+        return {
+            "trace_state": trace_state,
+            "anchor": anchor,
+            "summary": {
+                "root_transaction_hash": root_transaction_hash,
+                "transaction_count": transaction_count,
+                "max_depth": max_depth,
+                "out_message_count": out_message_count,
+                "pending_internal_message_count": (
+                    pending_internal_message_count
+                ),
+                "successful_transaction_count": (
+                    successful_transaction_count
+                ),
+                "failed_transaction_count": failed_transaction_count,
+                "aborted_transaction_count": aborted_transaction_count,
+                "unique_account_count": len(accounts),
+            },
+        }
+
+    @classmethod
     def normalize_account_events_response(
         cls,
         payload: Any,
@@ -1444,6 +1713,24 @@ class TonapiAdapter:
         ):
             return int(value, 10)
         return None
+
+    @staticmethod
+    def _canonical_raw_account_address(value: Any) -> str | None:
+        if not isinstance(value, dict):
+            return None
+        address = value.get("address")
+        if (
+            not isinstance(address, str)
+            or address != address.strip()
+        ):
+            return None
+        match = _RAW_ACCOUNT_RE.fullmatch(address)
+        if match is None:
+            return None
+        workchain = int(match.group(1), 10)
+        if not _MIN_WORKCHAIN <= workchain <= _MAX_WORKCHAIN:
+            return None
+        return f"{workchain}:{match.group(2).lower()}"
 
     @staticmethod
     def _strict_logical_time(value: Any) -> str | None:
