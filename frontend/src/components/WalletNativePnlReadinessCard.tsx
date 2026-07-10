@@ -16,7 +16,7 @@ interface WalletNativePnlReadinessCardProps {
 const requirementLabels: Record<WalletMultiAssetPnlRequirementCode, string> = {
   deduplicated_native_activity: "Deduplicated native activity",
   verified_jetton_payload_semantics: "Verified jetton payload semantics",
-  provider_scoped_jetton_asset_evidence: "Provider-scoped jetton asset evidence",
+  proof_checked_jetton_asset_identity: "Proof-checked jetton asset identity",
   exact_transaction_fee_evidence: "Exact transaction fee evidence",
   complete_wallet_history: "Complete wallet history",
   authoritative_trade_semantics: "Authoritative trade semantics",
@@ -74,8 +74,8 @@ export default function WalletNativePnlReadinessCard({
             Multi-asset PnL readiness
           </h2>
           <p>
-            Revalidate native TON activity and verified TEP-74 observations,
-            then reconcile provider snapshot asset matches and exact fees.
+            Revalidate native TON activity, TEP-74 observations, proof-checked
+            jetton identities, optional provider metadata, and exact fees.
           </p>
         </div>
         <div className="table-meta" aria-label="PnL readiness limitations">
@@ -189,7 +189,7 @@ export default function WalletNativePnlReadinessCard({
               value={String(
                 result.jetton_evidence_summary.asset_matched_observation_count,
               )}
-              detail="Provider snapshot evidence; not local master proof"
+              detail="Proof-checked wallet/master contract identity"
             />
             <FlowMetric
               label="Fee matches"
@@ -251,8 +251,8 @@ export default function WalletNativePnlReadinessCard({
                       <th scope="row">{row.operation.replace(/_/g, " ")}</th>
                       <td>{row.occurrence_count}</td>
                       <td>
-                        {row.asset_binding_status === "provider_snapshot_match"
-                          ? `${row.asset_symbol ?? "master matched"} · provider snapshot`
+                        {row.asset_binding_status === "verified_contract_match"
+                          ? `${row.asset_symbol ?? "master verified"} · contract proof`
                           : "unavailable"}
                       </td>
                       <td>
@@ -309,7 +309,7 @@ function pnlReadiness({
     return {
       tone: "running",
       label: "RECONCILING MULTI-ASSET EVIDENCE",
-      message: "Revalidating native ledgers, BOCs, asset snapshots, and fees.",
+      message: "Revalidating native ledgers, BOCs, contract proofs, and fees.",
     };
   }
   if (error) {

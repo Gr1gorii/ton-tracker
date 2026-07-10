@@ -92,6 +92,21 @@ def _snapshot_index() -> dict:
     }
 
 
+def _contract_index() -> dict:
+    return {
+        ("jetton_wallet", JETTON_WALLET): {
+            "jetton_master_account_canonical": JETTON_MASTER,
+            "wallet_contract_account_canonical": JETTON_WALLET,
+            "asset_identity_key": (
+                "ton_jetton_asset_v1|ton-mainnet|" + JETTON_MASTER
+            ),
+            "verification_ids": [31, 32],
+            "verification_digests": ["a" * 64, "b" * 64],
+            "source_run_ids": [1, 2],
+        }
+    }
+
+
 def _occurrences() -> list[dict]:
     observation = _observation()
     return [
@@ -155,6 +170,7 @@ def test_payload_occurrences_deduplicate_and_bind_asset_and_fee():
     rows = readiness._deduplicate_and_bind(
         _occurrences(),
         _snapshot_index(),
+        _contract_index(),
         {TRANSACTION_HASH: {"fee_nanoton": 468567, "source_run_ids": [1]}},
     )
 
@@ -165,8 +181,9 @@ def test_payload_occurrences_deduplicate_and_bind_asset_and_fee():
         {"run_id": 1, "capture_id": 10, "verification_id": 20},
         {"run_id": 2, "capture_id": 11, "verification_id": 21},
     ]
-    assert rows[0]["asset_binding_status"] == "provider_snapshot_match"
+    assert rows[0]["asset_binding_status"] == "verified_contract_match"
     assert rows[0]["jetton_master_account_canonical"] == JETTON_MASTER
+    assert rows[0]["contract_verification_ids"] == [31, 32]
     assert rows[0]["transaction_fee_nanoton"] == "468567"
     assert rows[0]["transaction_fee_ton"] == "0.000468567"
     assert rows[0]["fee_allocation_applied"] is False
@@ -180,10 +197,18 @@ def test_same_payload_identity_with_changed_semantics_fails_closed():
         readiness.WalletMultiAssetPnlReadinessConflict,
         match="conflicting semantics",
     ):
-        readiness._deduplicate_and_bind(occurrences, {}, {})
+        readiness._deduplicate_and_bind(occurrences, {}, {}, {})
 
 
 def test_full_readiness_uses_evidence_without_unlocking_pnl(monkeypatch):
+    monkeypatch.setattr(
+        readiness,
+        "_load_verified_contract_index",
+        lambda _runs, _network, _owner, _session: {
+            "index": _contract_index(),
+            "verification_count": 2,
+        },
+    )
     monkeypatch.setattr(
         readiness,
         "build_native_activity_pnl_readiness",
@@ -249,6 +274,14 @@ def test_zero_recognized_payloads_remain_explicitly_blocked(monkeypatch):
     )
     monkeypatch.setattr(
         readiness,
+        "_load_verified_contract_index",
+        lambda _runs, _network, _owner, _session: {
+            "index": {},
+            "verification_count": 0,
+        },
+    )
+    monkeypatch.setattr(
+        readiness,
         "_load_asset_snapshot_index",
         lambda _runs, _network, _session: {
             "index": {},
@@ -278,7 +311,7 @@ def test_zero_recognized_payloads_remain_explicitly_blocked(monkeypatch):
 
     assert result["evidence"] == []
     assert result["requirements"][1]["available"] is False
-    assert result["provider_asset_evidence_used_by_pnl_readiness"] is False
+    assert result["verified_contract_identity_used_by_pnl_readiness"] is False
     assert result["transaction_fee_evidence_used_by_pnl_readiness"] is False
     WalletMultiAssetPnlReadinessResponse.model_validate(result)
 

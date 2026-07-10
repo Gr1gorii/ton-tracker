@@ -1546,7 +1546,7 @@ class WalletNativeActivityPnlReadinessResponse(BaseModel):
 MultiAssetPnlRequirementCode = Literal[
     "deduplicated_native_activity",
     "verified_jetton_payload_semantics",
-    "provider_scoped_jetton_asset_evidence",
+    "proof_checked_jetton_asset_identity",
     "exact_transaction_fee_evidence",
     "complete_wallet_history",
     "authoritative_trade_semantics",
@@ -1599,10 +1599,14 @@ class WalletJettonAssetFeeEvidenceRecord(BaseModel):
     observed_contract_account_canonical: str | None = Field(
         default=None, max_length=76
     )
-    asset_binding_status: Literal["provider_snapshot_match", "unavailable"]
+    asset_binding_status: Literal["verified_contract_match", "unavailable"]
     jetton_master_account_canonical: str | None = Field(
         default=None, max_length=76
     )
+    asset_identity_key: str | None = Field(default=None, max_length=128)
+    contract_verification_ids: list[PositiveStrictRunId] = Field(max_length=50)
+    contract_verification_digests: list[str] = Field(max_length=50)
+    contract_verification_run_ids: list[PositiveStrictRunId] = Field(max_length=50)
     provider_asset_observation_key: str | None = Field(
         default=None, max_length=128
     )
@@ -1638,18 +1642,35 @@ class WalletJettonAssetFeeEvidenceRecord(BaseModel):
             set(coordinates)
         ):
             raise ValueError("jetton payload occurrence coordinates changed")
-        asset_values = (
+        contract_values = (
             self.jetton_master_account_canonical,
+            self.asset_identity_key,
+        )
+        asset_matched = self.asset_binding_status == "verified_contract_match"
+        if asset_matched != all(value is not None for value in contract_values):
+            raise ValueError("verified contract evidence shape changed")
+        if asset_matched != bool(self.contract_verification_ids):
+            raise ValueError("verified contract IDs changed")
+        if not (
+            len(self.contract_verification_ids)
+            == len(self.contract_verification_digests)
+            == len(self.contract_verification_run_ids)
+        ) or any(
+            re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            for digest in self.contract_verification_digests
+        ):
+            raise ValueError("verified contract provenance changed")
+        metadata_values = (
             self.provider_asset_observation_key,
             self.asset_decimals,
         )
-        asset_matched = self.asset_binding_status == "provider_snapshot_match"
-        if asset_matched != all(value is not None for value in asset_values):
-            raise ValueError("provider asset evidence shape changed")
-        if asset_matched != bool(self.asset_snapshot_run_ids):
-            raise ValueError("provider asset source runs changed")
-        if not asset_matched and self.asset_symbol is not None:
-            raise ValueError("unmatched provider asset has metadata")
+        metadata_present = all(value is not None for value in metadata_values)
+        if any(value is not None for value in metadata_values) != metadata_present:
+            raise ValueError("provider metadata shape changed")
+        if metadata_present != bool(self.asset_snapshot_run_ids):
+            raise ValueError("provider metadata source runs changed")
+        if not metadata_present and self.asset_symbol is not None:
+            raise ValueError("unmatched provider metadata has symbol")
         fee_values = (self.transaction_fee_nanoton, self.transaction_fee_ton)
         fee_matched = (
             self.transaction_fee_evidence_status == "exact_transaction_match"
@@ -1693,6 +1714,9 @@ class WalletJettonEvidenceSummaryRecord(BaseModel):
     invalid_provider_asset_snapshot_count: Annotated[
         int, Field(strict=True, ge=0, le=5000)
     ]
+    verified_jetton_contract_count: Annotated[
+        int, Field(strict=True, ge=0, le=5000)
+    ]
     asset_matched_observation_count: Annotated[
         int, Field(strict=True, ge=0, le=10000)
     ]
@@ -1724,7 +1748,7 @@ class WalletMultiAssetOperationCountRecord(BaseModel):
 class WalletMultiAssetPnlReadinessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contract_version: Literal["ton_multi_asset_pnl_readiness_v1"]
+    contract_version: Literal["ton_multi_asset_pnl_readiness_v2"]
     target_run_id: PositiveStrictRunId
     selected_run_ids: list[PositiveStrictRunId] = Field(min_length=2, max_length=50)
     network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
@@ -1746,9 +1770,11 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
     native_activity_deduplication_applied: Literal[True]
     jetton_observation_deduplication_applied: Literal[True]
     jetton_payload_semantics_used_by_pnl_readiness: bool
-    provider_asset_evidence_used_by_pnl_readiness: bool
+    verified_contract_identity_used_by_pnl_readiness: bool
+    provider_asset_metadata_used_by_pnl_readiness: bool
     transaction_fee_evidence_used_by_pnl_readiness: bool
     provider_snapshot_asset_identity_is_authoritative: Literal[False] = False
+    verified_contract_asset_identity_is_authoritative: bool
     transaction_fee_allocation_applied: Literal[False] = False
     provider_requests_performed: Literal[False] = False
     message_bodies_returned: Literal[False] = False
@@ -1802,6 +1828,7 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
             or self.target_run_id not in selected
             or any(
                 not set(row.source_run_ids).issubset(selected)
+                or not set(row.contract_verification_run_ids).issubset(selected)
                 or not set(row.asset_snapshot_run_ids).issubset(selected)
                 or not set(row.fee_source_run_ids).issubset(selected)
                 or row.occurrence_count < len(row.source_run_ids)
@@ -1810,7 +1837,7 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
         ):
             raise ValueError("multi-asset selected-run provenance changed")
         matched_assets = sum(
-            row.asset_binding_status == "provider_snapshot_match"
+            row.asset_binding_status == "verified_contract_match"
             for row in self.evidence
         )
         linked_fees = sum(
@@ -1844,7 +1871,7 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
         expected_codes = [
             "deduplicated_native_activity",
             "verified_jetton_payload_semantics",
-            "provider_scoped_jetton_asset_evidence",
+            "proof_checked_jetton_asset_identity",
             "exact_transaction_fee_evidence",
             "complete_wallet_history",
             "authoritative_trade_semantics",
@@ -1872,8 +1899,14 @@ class WalletMultiAssetPnlReadinessResponse(BaseModel):
             raise ValueError("multi-asset blocked requirement codes changed")
         if self.jetton_payload_semantics_used_by_pnl_readiness != bool(self.evidence):
             raise ValueError("jetton readiness usage flag changed")
-        if self.provider_asset_evidence_used_by_pnl_readiness != bool(summary.asset_matched_observation_count):
-            raise ValueError("asset readiness usage flag changed")
+        if self.verified_contract_identity_used_by_pnl_readiness != bool(summary.asset_matched_observation_count):
+            raise ValueError("verified asset readiness usage flag changed")
+        if self.verified_contract_asset_identity_is_authoritative != bool(summary.asset_matched_observation_count):
+            raise ValueError("verified asset authority flag changed")
+        if self.provider_asset_metadata_used_by_pnl_readiness != any(
+            row.asset_decimals is not None for row in self.evidence
+        ):
+            raise ValueError("provider metadata usage flag changed")
         if self.transaction_fee_evidence_used_by_pnl_readiness != bool(summary.fee_linked_observation_count):
             raise ValueError("fee readiness usage flag changed")
         return self

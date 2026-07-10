@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from models import (
     WalletBalanceSnapshot,
+    WalletJettonContractVerification,
     WalletTraceEvidenceCapture,
     WalletTransaction,
 )
@@ -23,11 +24,10 @@ from services.wallet_jetton_payload_observations import (
 from services.wallet_native_activity_pnl_readiness import (
     build_native_activity_pnl_readiness,
 )
+from services.wallet_jetton_contract_verification import _record_response
 
 
-MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION = (
-    "ton_multi_asset_pnl_readiness_v1"
-)
+MULTI_ASSET_PNL_READINESS_CONTRACT_VERSION = "ton_multi_asset_pnl_readiness_v2"
 JETTON_PROVIDER_ASSET_OBSERVATION_VERSION = "tonapi_jetton_snapshot_v1"
 NANOTON_PER_TON = Decimal("1000000000")
 MAX_SELECTED_CAPTURES = 2500
@@ -50,14 +50,23 @@ def build_multi_asset_pnl_readiness(
     network = native["network"]
 
     snapshots = _load_asset_snapshot_index(selected_run_ids, network, session)
+    contracts = _load_verified_contract_index(
+        selected_run_ids,
+        network,
+        native["wallet_account_canonical"],
+        session,
+    )
     fees = _load_transaction_fee_index(selected_run_ids, network, session)
     collected = _collect_payload_observations(selected_run_ids, session)
     evidence_rows = _deduplicate_and_bind(
-        collected["occurrences"], snapshots["index"], fees
+        collected["occurrences"],
+        snapshots["index"],
+        contracts["index"],
+        fees,
     )
 
     matched_assets = sum(
-        row["asset_binding_status"] == "provider_snapshot_match"
+        row["asset_binding_status"] == "verified_contract_match"
         for row in evidence_rows
     )
     linked_fees = sum(
@@ -88,6 +97,7 @@ def build_multi_asset_pnl_readiness(
         "provider_jetton_snapshot_count": snapshots["snapshot_count"],
         "valid_provider_asset_snapshot_count": snapshots["valid_count"],
         "invalid_provider_asset_snapshot_count": snapshots["invalid_count"],
+        "verified_jetton_contract_count": contracts["verification_count"],
         "asset_matched_observation_count": matched_assets,
         "asset_unmatched_observation_count": unique_count - matched_assets,
         "fee_linked_observation_count": linked_fees,
@@ -128,9 +138,13 @@ def build_multi_asset_pnl_readiness(
         "native_activity_deduplication_applied": True,
         "jetton_observation_deduplication_applied": True,
         "jetton_payload_semantics_used_by_pnl_readiness": bool(unique_count),
-        "provider_asset_evidence_used_by_pnl_readiness": bool(matched_assets),
+        "verified_contract_identity_used_by_pnl_readiness": bool(matched_assets),
+        "provider_asset_metadata_used_by_pnl_readiness": any(
+            row["asset_decimals"] is not None for row in evidence_rows
+        ),
         "transaction_fee_evidence_used_by_pnl_readiness": bool(linked_fees),
         "provider_snapshot_asset_identity_is_authoritative": False,
+        "verified_contract_asset_identity_is_authoritative": bool(matched_assets),
         "transaction_fee_allocation_applied": False,
         "provider_requests_performed": False,
         "message_bodies_returned": False,
@@ -142,12 +156,79 @@ def build_multi_asset_pnl_readiness(
         "real_pnl_locked": True,
         "message": (
             "Verified native flow, TEP-74 payload observations, provider "
-            "snapshot asset matches, and exact transaction-fee evidence were "
-            "reconciled provider-free. Provider asset matches are not local "
-            "master proofs, fees are not allocated to lots, and PnL remains "
+            "proof-checked jetton contract identities, optional snapshot "
+            "metadata, and exact transaction-fee evidence were reconciled "
+            "provider-free. Fees are not allocated to lots, and PnL remains "
             "locked until every missing requirement is established."
         ),
     }
+
+
+def _load_verified_contract_index(
+    selected_run_ids: list[int],
+    network: str,
+    owner: str,
+    session: Session,
+) -> dict[str, Any]:
+    records = list(
+        session.scalars(
+            select(WalletJettonContractVerification)
+            .where(WalletJettonContractVerification.run_id.in_(selected_run_ids))
+            .order_by(
+                WalletJettonContractVerification.run_id,
+                WalletJettonContractVerification.id,
+            )
+        )
+    )
+    index: dict[tuple[str, str], dict[str, Any]] = {}
+    for record in records:
+        verified = _record_response(record)
+        if (
+            verified["network"] != network
+            or verified["owner_account_canonical"] != owner
+        ):
+            raise WalletMultiAssetPnlReadinessConflict(
+                "Verified jetton contract scope conflicts with selected runs."
+            )
+        normalized = {
+            "jetton_master_account_canonical": verified[
+                "jetton_master_account_canonical"
+            ],
+            "wallet_contract_account_canonical": verified[
+                "jetton_wallet_account_canonical"
+            ],
+            "asset_identity_key": verified["asset_identity_key"],
+            "verification_ids": [int(verified["verification_id"], 10)],
+            "verification_digests": [verified["evidence_digest_sha256"]],
+            "source_run_ids": [record.run_id],
+        }
+        for role, account in (
+            ("jetton_wallet", verified["jetton_wallet_account_canonical"]),
+            ("jetton_master", verified["jetton_master_account_canonical"]),
+        ):
+            key = (role, account)
+            existing = index.get(key)
+            if existing is None:
+                index[key] = normalized.copy()
+                continue
+            if (
+                existing["asset_identity_key"]
+                != normalized["asset_identity_key"]
+                or existing["wallet_contract_account_canonical"]
+                != normalized["wallet_contract_account_canonical"]
+            ):
+                raise WalletMultiAssetPnlReadinessConflict(
+                    "Verified jetton contract identities conflict."
+                )
+            for field in (
+                "verification_ids",
+                "verification_digests",
+                "source_run_ids",
+            ):
+                existing[field] = sorted(
+                    set(existing[field] + normalized[field])
+                )
+    return {"index": index, "verification_count": len(records)}
 
 
 def _collect_payload_observations(
@@ -344,6 +425,7 @@ def _load_transaction_fee_index(
 def _deduplicate_and_bind(
     occurrences: list[dict[str, Any]],
     snapshot_index: dict[tuple[str, str], dict[str, Any]],
+    contract_index: dict[tuple[str, str], dict[str, Any]],
     fee_index: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     grouped: dict[str, dict[str, Any]] = {}
@@ -389,6 +471,17 @@ def _deduplicate_and_bind(
         snapshot = None if role is None or account is None else snapshot_index.get(
             (role, account)
         )
+        contract = None if role is None or account is None else contract_index.get(
+            (role, account)
+        )
+        if snapshot and contract and (
+            snapshot["jetton_master_account_canonical"]
+            != contract["jetton_master_account_canonical"]
+        ):
+            raise WalletMultiAssetPnlReadinessConflict(
+                "Provider metadata conflicts with verified jetton identity."
+            )
+        metadata = snapshot if contract else None
         fee = fee_index.get(observation["transaction_hash"])
         rows.append(
             {
@@ -406,22 +499,34 @@ def _deduplicate_and_bind(
                 "contract_account_role": observation["contract_account_role"],
                 "observed_contract_account_canonical": account,
                 "asset_binding_status": (
-                    "provider_snapshot_match" if snapshot else "unavailable"
+                    "verified_contract_match" if contract else "unavailable"
                 ),
                 "jetton_master_account_canonical": (
-                    snapshot["jetton_master_account_canonical"]
-                    if snapshot
+                    contract["jetton_master_account_canonical"]
+                    if contract
                     else None
+                ),
+                "asset_identity_key": (
+                    contract["asset_identity_key"] if contract else None
+                ),
+                "contract_verification_ids": (
+                    contract["verification_ids"] if contract else []
+                ),
+                "contract_verification_digests": (
+                    contract["verification_digests"] if contract else []
+                ),
+                "contract_verification_run_ids": (
+                    contract["source_run_ids"] if contract else []
                 ),
                 "provider_asset_observation_key": (
-                    snapshot["provider_asset_observation_key"]
-                    if snapshot
+                    metadata["provider_asset_observation_key"]
+                    if metadata
                     else None
                 ),
-                "asset_decimals": snapshot["decimals"] if snapshot else None,
-                "asset_symbol": snapshot["symbol"] if snapshot else None,
+                "asset_decimals": metadata["decimals"] if metadata else None,
+                "asset_symbol": metadata["symbol"] if metadata else None,
                 "asset_snapshot_run_ids": (
-                    snapshot["source_run_ids"] if snapshot else []
+                    metadata["source_run_ids"] if metadata else []
                 ),
                 "transaction_fee_evidence_status": (
                     "exact_transaction_match" if fee else "unavailable"
@@ -504,13 +609,13 @@ def _requirements(
             ),
         },
         {
-            "code": "provider_scoped_jetton_asset_evidence",
+            "code": "proof_checked_jetton_asset_identity",
             "available": all_assets,
             "reason": (
                 None
                 if all_assets
                 else "Every recognized payload requires one unambiguous match "
-                "to a valid selected-run TonAPI jetton snapshot."
+                "to a proof-checked selected-run jetton contract identity."
             ),
         },
         {

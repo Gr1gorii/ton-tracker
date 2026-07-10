@@ -16,7 +16,7 @@ import WalletNativePnlReadinessCard from "./WalletNativePnlReadinessCard";
 
 function response(): WalletMultiAssetPnlReadinessResponse {
   return {
-    contract_version: "ton_multi_asset_pnl_readiness_v1",
+    contract_version: "ton_multi_asset_pnl_readiness_v2",
     target_run_id: 33,
     selected_run_ids: [32, 33],
     network: "ton-mainnet",
@@ -48,6 +48,7 @@ function response(): WalletMultiAssetPnlReadinessResponse {
       provider_jetton_snapshot_count: 4,
       valid_provider_asset_snapshot_count: 4,
       invalid_provider_asset_snapshot_count: 0,
+      verified_jetton_contract_count: 2,
       asset_matched_observation_count: 1,
       asset_unmatched_observation_count: 0,
       fee_linked_observation_count: 1,
@@ -75,8 +76,12 @@ function response(): WalletMultiAssetPnlReadinessResponse {
         amount_base_units: "123",
         contract_account_role: "destination_jetton_wallet_observed",
         observed_contract_account_canonical: `0:${"55".repeat(32)}`,
-        asset_binding_status: "provider_snapshot_match",
+        asset_binding_status: "verified_contract_match",
         jetton_master_account_canonical: `0:${"66".repeat(32)}`,
+        asset_identity_key: `ton_jetton_asset_v1|ton-mainnet|0:${"66".repeat(32)}`,
+        contract_verification_ids: [7, 8],
+        contract_verification_digests: ["77".repeat(32), "88".repeat(32)],
+        contract_verification_run_ids: [32, 33],
         provider_asset_observation_key: "provider-asset",
         asset_decimals: 9,
         asset_symbol: "JET",
@@ -103,7 +108,7 @@ function response(): WalletMultiAssetPnlReadinessResponse {
         reason: null,
       },
       {
-        code: "provider_scoped_jetton_asset_evidence",
+        code: "proof_checked_jetton_asset_identity",
         available: true,
         reason: null,
       },
@@ -155,9 +160,11 @@ function response(): WalletMultiAssetPnlReadinessResponse {
     native_activity_deduplication_applied: true,
     jetton_observation_deduplication_applied: true,
     jetton_payload_semantics_used_by_pnl_readiness: true,
-    provider_asset_evidence_used_by_pnl_readiness: true,
+    verified_contract_identity_used_by_pnl_readiness: true,
+    provider_asset_metadata_used_by_pnl_readiness: true,
     transaction_fee_evidence_used_by_pnl_readiness: true,
     provider_snapshot_asset_identity_is_authoritative: false,
+    verified_contract_asset_identity_is_authoritative: true,
     transaction_fee_allocation_applied: false,
     provider_requests_performed: false,
     message_bodies_returned: false,
@@ -199,7 +206,7 @@ describe("WalletNativePnlReadinessCard", () => {
     expect(screen.getByText("PNL REMAINS LOCKED")).toBeTruthy();
     expect(screen.getAllByText("-3.34 TON").length).toBeGreaterThan(0);
     expect(screen.getByText("Acquisition lots and cost basis")).toBeTruthy();
-    expect(screen.getByText("JET · provider snapshot")).toBeTruthy();
+    expect(screen.getByText("JET · contract proof")).toBeTruthy();
     expect(screen.getByText("0.000468567 TON · unallocated")).toBeTruthy();
   });
 
