@@ -36,7 +36,7 @@ import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } 
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.32.1";
+const RELEASE_LABEL = "v0.32.2";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 
@@ -223,15 +223,17 @@ export default function App() {
           )}
 
           <section hidden={activeSection !== "overview"}>
-            <Overview
-              account={workspaceAccount}
-              activeRun={activeRun}
-              dataMode={dataMode}
-              availableProviders={availableProviders}
-              providerTotal={providersList.length}
-              onOpenActivity={openActivity}
-              onRun={openActivity}
-            />
+            {activeSection === "overview" && (
+              <Overview
+                account={workspaceAccount}
+                activeRun={activeRun}
+                dataMode={dataMode}
+                availableProviders={availableProviders}
+                providerTotal={providersList.length}
+                onOpenActivity={openActivity}
+                onRun={openActivity}
+              />
+            )}
           </section>
 
           <section hidden={activeSection !== "activity"}>
