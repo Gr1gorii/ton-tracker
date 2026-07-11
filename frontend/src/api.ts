@@ -585,6 +585,31 @@ export function walletCanonicalReportCsvExportUrl(runId: number): string {
   return `${API_BASE}/api/wallets/ingest/${runId}/canonical-report/export.csv`;
 }
 
+export async function getWalletCanonicalReportAvailability(
+  runId: number,
+): Promise<{ available: boolean; message: string }> {
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/canonical-report`,
+    { cache: "no-store" },
+  );
+
+  if (res.ok) {
+    return {
+      available: true,
+      message: "Canonical ledger and report are ready for export.",
+    };
+  }
+
+  const detail = await responseError(
+    res,
+    `Canonical report readiness failed (${res.status})`,
+  );
+  if (res.status === 404) {
+    return { available: false, message: detail };
+  }
+  throw new Error(detail);
+}
+
 export function walletClusterCompareExportUrl(runIds: number[]): string {
   const params = runIds.map((id) => `run_ids=${id}`).join("&");
   return `${API_BASE}/api/wallets/cluster/compare/export.json?${params}`;
