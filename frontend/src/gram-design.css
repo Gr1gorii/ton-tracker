@@ -1132,6 +1132,23 @@ summary:focus-visible {
 
 .report-grid { grid-template-columns: repeat(2, 1fr); }
 
+.report-readiness {
+  display: flex;
+  margin-bottom: 16px;
+  padding: 13px 15px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid color-mix(in srgb, var(--warning) 25%, var(--border));
+  border-radius: 13px;
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  font-size: 10px;
+}
+
+.report-readiness > svg { flex: 0 0 auto; color: var(--warning); }
+.report-readiness.is-ready { border-color: color-mix(in srgb, var(--positive) 25%, var(--border)); background: color-mix(in srgb, var(--positive) 8%, var(--surface)); }
+.report-readiness.is-ready > svg { color: var(--positive); }
+
 .report-card {
   display: grid;
   min-height: 205px;

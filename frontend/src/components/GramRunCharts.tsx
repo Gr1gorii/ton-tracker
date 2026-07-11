@@ -53,7 +53,7 @@ export default function GramRunCharts({ run, nextStep }: { run: WalletIngestionR
           <ChartHeader title="Activity over time" subtitle="Observed records in the active run" />
           {flowData.length ? (
             <div className="chart-frame">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <AreaChart data={flowData} margin={{ left: -18, right: 8, top: 12, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 5" vertical={false} stroke="var(--chart-grid)" />
                   <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fill: "var(--text-muted)", fontSize: 11 }} />
@@ -73,7 +73,7 @@ export default function GramRunCharts({ run, nextStep }: { run: WalletIngestionR
           <ChartHeader title="Activity mix" subtitle="How the current evidence is distributed" />
           {activityMix.length ? (
             <div className="donut-wrap">
-              <ResponsiveContainer width="100%" height={210}>
+              <ResponsiveContainer width="100%" height={210} minWidth={1} minHeight={1}>
                 <PieChart>
                   <Pie data={activityMix} dataKey="value" nameKey="name" innerRadius={60} outerRadius={88} paddingAngle={3}>
                     {activityMix.map((item, index) => <Cell key={item.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />)}
@@ -95,7 +95,7 @@ export default function GramRunCharts({ run, nextStep }: { run: WalletIngestionR
           <ChartHeader title="DEX protocols" subtitle="Recognized swap observations" />
           {protocols.length ? (
             <div className="bar-chart-frame">
-              <ResponsiveContainer width="100%" height="100%">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <BarChart data={protocols} layout="vertical" margin={{ left: 8, right: 18 }}>
                   <XAxis type="number" hide allowDecimals={false} />
                   <YAxis type="category" dataKey="dex" width={88} tickLine={false} axisLine={false} tick={{ fill: "var(--text-muted)", fontSize: 11 }} />

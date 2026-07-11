@@ -58,6 +58,17 @@ function shortHash(value?: string | null) {
   return value.length > 18 ? `${value.slice(0, 9)}…${value.slice(-7)}` : value;
 }
 
+function displayAsset(value?: string | null) {
+  if (!value) return "";
+  return value === "TON" ? "GRAM" : value;
+}
+
+function displayMessage(value: string) {
+  return value
+    .split("native TON").join("native GRAM")
+    .split("TON/jetton").join("GRAM/jetton");
+}
+
 export default function GramActivityWorkspace({
   accountAddress,
   onAccountAddressChange,
@@ -250,7 +261,7 @@ export default function GramActivityWorkspace({
 function CoveragePreview({ preview, onCreateRun, loading }: { preview: WalletIngestionPreviewResponse; onCreateRun: () => void; loading: boolean }) {
   return (
     <section className="coverage-card">
-      <header className="result-heading"><div><span className="result-status is-ready"><Check size={15} weight="bold" />Coverage ready</span><h2>Providers can return this scope</h2><p>{preview.message}</p></div><button className="button-primary" type="button" onClick={onCreateRun} disabled={loading}>{loading ? <SpinnerGap className="spin" size={18} /> : <Play size={18} weight="fill" />}Persist this run</button></header>
+      <header className="result-heading"><div><span className="result-status is-ready"><Check size={15} weight="bold" />Coverage ready</span><h2>Providers can return this scope</h2><p>{displayMessage(preview.message)}</p></div><button className="button-primary" type="button" onClick={onCreateRun} disabled={loading}>{loading ? <SpinnerGap className="spin" size={18} /> : <Play size={18} weight="fill" />}Persist this run</button></header>
       <div className="coverage-grid">
         {preview.provider_coverage.map((item) => (
           <article key={item.provider}><span className={`coverage-dot status-${item.source_status}`} /><div><strong>{item.provider}</strong><small>{item.normalized_count} normalized rows</small></div><b>{item.source_status}</b></article>
@@ -272,7 +283,7 @@ function RunResult({ run, tab, onTabChange }: { run: WalletIngestionRunResponse;
   return (
     <section className="run-result-card">
       <header className="result-heading">
-        <div><span className="result-status is-ready"><Check size={15} weight="bold" />Run #{run.run_id} ready</span><h2>{countRows(run)} source-labelled records</h2><p>{run.message}</p></div>
+        <div><span className="result-status is-ready"><Check size={15} weight="bold" />Run #{run.run_id} ready</span><h2>{countRows(run)} source-labelled records</h2><p>{displayMessage(run.message)}</p></div>
         <div className="run-facts"><span><small>Network</small>{run.wallet_identity.network}</span><span><small>Mode</small>{run.data_mode}</span><span><small>Status</small>{run.status}</span></div>
       </header>
       <div className="result-tabs" role="tablist" aria-label="Run result views">
@@ -319,7 +330,7 @@ function TransactionRows({ run }: { run: WalletIngestionRunResponse }) {
 }
 
 function SwapRows({ run }: { run: WalletIngestionRunResponse }) {
-  return <ResultTable columns={["Protocol", "Sent", "Received", "Estimate", "Time"]} empty={!run.swaps.length}>{run.swaps.slice(0, 100).map((item, index) => <tr key={`${item.tx_hash}-${index}`}><td><strong>{item.dex_protocol.provider_label ?? item.dex ?? "Unknown"}</strong></td><td>{item.amount_in ?? "—"} {item.token_in ?? ""}</td><td>{item.amount_out ?? "—"} {item.token_out ?? ""}</td><td>{item.estimated_usd ? `$${item.estimated_usd}` : "—"}</td><td>{formatDate(item.timestamp)}</td></tr>)}</ResultTable>;
+  return <ResultTable columns={["Protocol", "Sent", "Received", "Estimate", "Time"]} empty={!run.swaps.length}>{run.swaps.slice(0, 100).map((item, index) => <tr key={`${item.tx_hash}-${index}`}><td><strong>{item.dex_protocol.provider_label ?? item.dex ?? "Unknown"}</strong></td><td>{item.amount_in ?? "—"} {displayAsset(item.token_in)}</td><td>{item.amount_out ?? "—"} {displayAsset(item.token_out)}</td><td>{item.estimated_usd ? `$${item.estimated_usd}` : "—"}</td><td>{formatDate(item.timestamp)}</td></tr>)}</ResultTable>;
 }
 
 function WarningRows({ run }: { run: WalletIngestionRunResponse }) {

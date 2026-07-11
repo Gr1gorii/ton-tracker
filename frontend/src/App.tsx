@@ -25,6 +25,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import {
+  getWalletCanonicalReportAvailability,
   getProvidersStatus,
   walletCanonicalReportCsvExportUrl,
   walletCanonicalReportExportUrl,
@@ -35,7 +36,7 @@ import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } 
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.32.0";
+const RELEASE_LABEL = "v0.32.1";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 
@@ -562,7 +563,7 @@ function AssetsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestionR
     <>
       <PageHeading eyebrow="Assets & protocols" title="Understand what moved — and where" description="Native currency, jettons and recognized DEX activity from the active source-labelled run." />
       <div className="asset-metrics">
-        <Metric icon={<Wallet size={21} />} label="Native balance" value={nativeBalance?.balance ? `${formatTokenAmount(nativeBalance.balance)} GRAM` : "—"} detail={nativeBalance ? `Snapshot from ${nativeBalance.provider}` : "No native balance snapshot"} tone="blue" />
+        <Metric icon={<Wallet size={21} />} label="Native balance" value={nativeBalance?.balance ? formatTokenAmount(nativeBalance.balance) : "—"} detail={nativeBalance ? `GRAM · Snapshot from ${nativeBalance.provider}` : "No native balance snapshot"} tone="blue" />
         <Metric icon={<Coins size={21} />} label="Jetton snapshots" value={String(jettonBalances.length)} detail="Distinct returned balance rows" tone="coral" />
         <Metric icon={<Swap size={21} />} label="DEX swaps" value={String(activeRun.swaps.length)} detail={`${dexRows.length} recognized labels`} tone="aqua" />
       </div>
@@ -605,12 +606,37 @@ function SourcesView({ providers, error }: { providers: ProvidersStatus | null; 
 }
 
 function ReportsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestionRunResponse | null; onOpenActivity: () => void }) {
+  const [availability, setAvailability] = useState<{ available: boolean; message: string } | null>(null);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setAvailability(null);
+    setAvailabilityError(null);
+    if (!activeRun) return () => { cancelled = true; };
+    getWalletCanonicalReportAvailability(activeRun.run_id)
+      .then((result) => {
+        if (!cancelled) setAvailability(result);
+      })
+      .catch((error) => {
+        if (!cancelled) setAvailabilityError(error instanceof Error ? error.message : "Could not check canonical report readiness.");
+      });
+    return () => { cancelled = true; };
+  }, [activeRun]);
+
+  const exportsReady = availability?.available === true;
   return (
     <>
       <PageHeading eyebrow="Canonical outputs" title="One ledger, every downstream answer" description="Reports and exports use the canonical ledger so the same normalized evidence flows into every downstream surface." action={!activeRun ? <button className="button-primary" type="button" onClick={onOpenActivity}>Select a run <ArrowRight size={18} /></button> : undefined} />
+      {activeRun && (
+        <div className={exportsReady ? "report-readiness is-ready" : "report-readiness"} role="status">
+          {availability === null && !availabilityError ? <SpinnerGap className="spin" size={18} /> : exportsReady ? <CheckCircle size={18} weight="fill" /> : <WarningCircle size={18} weight="fill" />}
+          <span>{availabilityError ?? availability?.message ?? "Checking canonical ledger readiness…"}</span>
+        </div>
+      )}
       <div className="report-grid">
-        <ReportCard icon={<Database size={24} />} title="Canonical ledger" text="Normalized source-labelled activity for downstream analysis." run={activeRun} jsonUrl={activeRun ? walletRunExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun ? walletRunExportCsvUrl(activeRun.run_id) : undefined} />
-        <ReportCard icon={<FileText size={24} />} title="Canonical report" text="Evidence-aware summary built from the same ledger contract." run={activeRun} jsonUrl={activeRun ? walletCanonicalReportExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun ? walletCanonicalReportCsvExportUrl(activeRun.run_id) : undefined} />
+        <ReportCard icon={<Database size={24} />} title="Canonical ledger" text="Normalized source-labelled activity for downstream analysis." run={activeRun} jsonUrl={activeRun && exportsReady ? walletRunExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun && exportsReady ? walletRunExportCsvUrl(activeRun.run_id) : undefined} />
+        <ReportCard icon={<FileText size={24} />} title="Canonical report" text="Evidence-aware summary built from the same ledger contract." run={activeRun} jsonUrl={activeRun && exportsReady ? walletCanonicalReportExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun && exportsReady ? walletCanonicalReportCsvExportUrl(activeRun.run_id) : undefined} />
       </div>
     </>
   );
