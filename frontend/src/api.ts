@@ -753,11 +753,14 @@ export async function compareWalletRuns(
 
 export async function inspectWalletHistoryReadiness(
   req: WalletHistoryReadinessRequest,
+  signal?: AbortSignal,
 ): Promise<WalletHistoryReadinessResponse> {
   const res = await fetch(`${API_BASE}/api/wallets/history/readiness`, {
     method: "POST",
+    cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
+    signal,
   });
 
   if (!res.ok) {
