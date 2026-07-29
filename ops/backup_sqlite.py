@@ -50,6 +50,31 @@ def verify_backup(path: Path) -> None:
             raise RuntimeError("Backup has no Alembic schema revision.")
 
 
+def check_backup_health(
+    destination_dir: Path,
+    *,
+    maximum_age_seconds: int,
+    now: float | None = None,
+) -> Path:
+    """Verify that the newest retained backup is recent and readable."""
+    if maximum_age_seconds < 1:
+        raise ValueError("maximum_age_seconds must be positive")
+    backups = list(destination_dir.glob("ton-check-*.sqlite3"))
+    if not backups:
+        raise RuntimeError("No completed SQLite backup is available.")
+    latest = max(backups, key=lambda path: path.stat().st_mtime)
+    current_time = time.time() if now is None else now
+    age_seconds = current_time - latest.stat().st_mtime
+    if age_seconds < -300:
+        raise RuntimeError("Newest SQLite backup timestamp is unexpectedly in the future.")
+    if age_seconds > maximum_age_seconds:
+        raise RuntimeError(
+            f"Newest SQLite backup is stale ({int(age_seconds)} seconds old)."
+        )
+    verify_backup(latest)
+    return latest
+
+
 def _apply_retention(directory: Path, retention: int) -> None:
     backups = sorted(
         directory.glob("ton-check-*.sqlite3"),
@@ -62,17 +87,26 @@ def _apply_retention(directory: Path, retention: int) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--loop", action="store_true")
-    parser.add_argument("--verify", type=Path)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--loop", action="store_true")
+    mode.add_argument("--verify", type=Path)
+    mode.add_argument("--healthcheck", action="store_true")
     args = parser.parse_args()
     if args.verify is not None:
         verify_backup(args.verify)
         print(f"verified {args.verify}", flush=True)
         return
-    source = database_path()
     directory = Path(os.environ.get("BACKUP_DIR", "/backups"))
     retention = int(os.environ.get("BACKUP_RETENTION", "14"))
     interval = max(300, int(os.environ.get("BACKUP_INTERVAL_SECONDS", "86400")))
+    if args.healthcheck:
+        backup = check_backup_health(
+            directory,
+            maximum_age_seconds=max(900, interval * 2),
+        )
+        print(f"healthy {backup}", flush=True)
+        return
+    source = database_path()
     while True:
         backup = create_backup(source, directory, retention)
         print(f"created {backup}", flush=True)

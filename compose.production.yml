@@ -87,6 +87,12 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    healthcheck:
+      test: ["CMD", "python", "/app/ops/backup_sqlite.py", "--healthcheck"]
+      interval: 5m
+      timeout: 60s
+      start_period: 60s
+      retries: 3
 
 volumes:
   ton_tracker_data:
