@@ -25,12 +25,15 @@ import type {
   WalletMultiAssetPnlReadinessResponse,
   WalletRunPnlPreviewResponse,
   WalletRunSignalsResponse,
+  WalletOwnershipChallengeResponse,
+  WalletOwnershipProofRequest,
+  WalletOwnershipProofResponse,
 } from "./types";
 
 // API base URL. Override with VITE_API_BASE at build/dev time.
 export const API_BASE =
   (import.meta.env.VITE_API_BASE as string | undefined) ??
-  "http://localhost:8000";
+  (import.meta.env.DEV ? "http://localhost:8000" : "");
 
 export async function analyze(
   req: AnalyzeRequest,
@@ -608,6 +611,52 @@ export async function getWalletCanonicalReportAvailability(
     return { available: false, message: detail };
   }
   throw new Error(detail);
+}
+
+export async function createWalletOwnershipChallenge(
+  expectedWallet: string,
+  signal?: AbortSignal,
+): Promise<WalletOwnershipChallengeResponse> {
+  const res = await fetch(`${API_BASE}/api/wallets/ownership/challenges`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({ expected_wallet: expectedWallet }),
+    signal,
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Ownership challenge request failed"),
+    );
+  }
+
+  return (await res.json()) as WalletOwnershipChallengeResponse;
+}
+
+export async function verifyWalletOwnershipChallenge(
+  challengeId: string,
+  proof: WalletOwnershipProofRequest,
+  signal?: AbortSignal,
+): Promise<WalletOwnershipProofResponse> {
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ownership/challenges/${encodeURIComponent(challengeId)}/verify`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      cache: "no-store",
+      body: JSON.stringify(proof),
+      signal,
+    },
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Ownership verification failed"),
+    );
+  }
+
+  return (await res.json()) as WalletOwnershipProofResponse;
 }
 
 export function walletClusterCompareExportUrl(runIds: number[]): string {

@@ -10,7 +10,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from database import Base
-from schemas import WalletOwnershipChallengeResponse, WalletOwnershipProofResponse
+from schemas import (
+    WalletOwnershipChallengeRequest,
+    WalletOwnershipChallengeResponse,
+    WalletOwnershipProofResponse,
+)
 from services.wallet_ownership_proof import (
     WalletOwnershipProofConflict,
     _ton_proof_digest,
@@ -109,3 +113,28 @@ def test_ownership_proof_rejects_cross_network_replay_before_key_resolution(
                 AssertionError("key resolution must not occur")
             ),
         )
+
+
+def test_ownership_challenge_accepts_user_friendly_expected_wallet(monkeypatch):
+    monkeypatch.setenv("TON_NETWORK", "mainnet")
+    session = _session()
+    state = StateInit(
+        code=begin_cell().store_uint(1, 8).end_cell(),
+        data=begin_cell().store_uint(2, 8).end_cell(),
+    ).serialize()
+    address = Address(f"0:{state.hash.hex()}")
+    friendly = address.to_str(
+        is_user_friendly=True,
+        is_bounceable=False,
+        is_test_only=False,
+    )
+
+    request = WalletOwnershipChallengeRequest(expected_wallet=friendly)
+    challenge = create_ownership_challenge(
+        session,
+        expected_wallet=request.expected_wallet,
+    )
+
+    assert challenge["expected_wallet_account_canonical"] == address.to_str(
+        is_user_friendly=False,
+    )

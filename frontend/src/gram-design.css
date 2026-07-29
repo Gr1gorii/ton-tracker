@@ -1048,6 +1048,237 @@ summary:focus-visible {
 
 /* Proofs, reports and section surfaces */
 
+.ownership-proof-card {
+  margin-bottom: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 34%),
+    var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.ownership-proof-card.phase-verified {
+  border-color: color-mix(in srgb, var(--positive) 34%, var(--border));
+  background:
+    radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--positive) 13%, transparent), transparent 34%),
+    var(--surface);
+}
+
+.ownership-proof-header {
+  display: grid;
+  align-items: start;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 15px;
+}
+
+.ownership-proof-icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: 15px;
+  color: var(--accent);
+  background: var(--surface-accent);
+}
+
+.ownership-proof-header small {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ownership-proof-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: -0.03em;
+}
+
+.ownership-proof-header p {
+  max-width: 700px;
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.ownership-badge {
+  display: inline-flex;
+  min-height: 31px;
+  padding: 0 10px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: var(--surface-solid);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ownership-badge.is-verified {
+  border-color: color-mix(in srgb, var(--positive) 28%, var(--border));
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 8%, var(--surface));
+}
+
+.ownership-steps {
+  display: grid;
+  margin: 22px 0 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ownership-steps > span {
+  display: flex;
+  min-height: 38px;
+  padding: 0 11px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--text-muted);
+  background: var(--surface-solid);
+  font-size: 9px;
+  font-weight: 670;
+}
+
+.ownership-steps i {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+
+.ownership-steps .is-active { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 25%, var(--border)); }
+.ownership-steps .is-active i { border-color: var(--accent); }
+.ownership-steps .is-complete { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 25%, var(--border)); }
+.ownership-steps .is-complete i { border-color: var(--positive); color: var(--surface-solid); background: var(--positive); }
+
+.ownership-message {
+  display: flex;
+  min-height: 46px;
+  padding: 12px 14px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: 12px;
+  color: var(--text-soft);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.ownership-message > svg { flex: 0 0 auto; color: var(--accent); }
+.ownership-message.is-error { border-color: color-mix(in srgb, var(--danger) 28%, var(--border)); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
+.ownership-message.is-error > svg { color: var(--danger); }
+.ownership-message.is-success { border-color: color-mix(in srgb, var(--positive) 28%, var(--border)); background: color-mix(in srgb, var(--positive) 7%, var(--surface)); }
+.ownership-message.is-success > svg { color: var(--positive); }
+
+.ownership-facts {
+  display: grid;
+  margin: 14px 0 0;
+  overflow: hidden;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--border);
+}
+
+.ownership-facts div {
+  display: grid;
+  min-width: 0;
+  padding: 11px 12px;
+  gap: 3px;
+  background: var(--surface-solid);
+}
+
+.ownership-facts dt {
+  color: var(--text-muted);
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.ownership-facts dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text);
+  font-size: 9.5px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ownership-challenge-meta {
+  display: grid;
+  margin-top: 12px;
+  padding: 11px 13px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 11px;
+  color: var(--text-muted);
+  font-size: 8px;
+}
+
+.ownership-challenge-meta strong {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 9px;
+  font-weight: 640;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ownership-verification-grid {
+  display: grid;
+  margin-top: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ownership-verification-grid span {
+  display: flex;
+  min-height: 36px;
+  padding: 0 10px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--positive) 23%, var(--border));
+  border-radius: 10px;
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 6%, var(--surface));
+  font-size: 8.5px;
+  font-weight: 680;
+}
+
+.ownership-actions {
+  display: flex;
+  margin-top: 15px;
+  align-items: center;
+  gap: 9px;
+}
+
+.ownership-actions p {
+  margin: 0 0 0 auto;
+  color: var(--text-muted);
+  font-size: 8.5px;
+}
+
 .proof-grid,
 .report-grid {
   display: grid;
@@ -1064,6 +1295,26 @@ summary:focus-visible {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 13px;
 }
+
+.proof-grid-secondary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.proof-card.is-eligible { border-color: color-mix(in srgb, var(--positive) 20%, var(--border)); }
+
+.proof-capability-state {
+  display: inline-flex;
+  min-height: 28px;
+  padding: 0 9px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--warning);
+  background: var(--surface-solid);
+  font-size: 8px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.proof-card.is-eligible .proof-capability-state { color: var(--positive); }
 
 .proof-card > span {
   display: grid;
@@ -1440,6 +1691,16 @@ summary:focus-visible {
   .metric-grid { grid-template-columns: 1fr; }
   .metric-card { min-height: 106px; }
   .report-grid { grid-template-columns: 1fr; }
+  .proof-grid-secondary { grid-template-columns: 1fr; }
+  .ownership-proof-header { grid-template-columns: auto minmax(0, 1fr); }
+  .ownership-badge { grid-column: 1 / -1; justify-self: start; }
+  .ownership-steps,
+  .ownership-facts,
+  .ownership-verification-grid { grid-template-columns: 1fr; }
+  .ownership-challenge-meta { grid-template-columns: 1fr; }
+  .ownership-actions { align-items: stretch; flex-direction: column; }
+  .ownership-actions .button-secondary { width: 100%; }
+  .ownership-actions p { margin: 3px 0 0; text-align: center; }
   .evidence-summary-card dl { grid-template-columns: 1fr; }
   .gram-surface { padding: 14px; border-radius: 16px; }
   .next-step-card { grid-template-columns: 1fr; }

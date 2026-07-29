@@ -10,7 +10,6 @@ import {
   Database,
   DownloadSimple,
   FileText,
-  Fingerprint,
   Gauge,
   HardDrives,
   MagnifyingGlass,
@@ -34,9 +33,10 @@ import {
 } from "./api";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
+import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.32.2";
+const RELEASE_LABEL = "v0.33.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 
@@ -525,15 +525,18 @@ function NextStepCard({ activeRun, account, onOpenActivity, onRun }: { activeRun
 
 function ProofsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestionRunResponse | null; onOpenActivity: () => void }) {
   const proofItems = [
-    { icon: <Fingerprint size={24} />, title: "Wallet ownership", text: "Signature challenge binds a connected wallet to the requested address.", status: "Challenge available" },
-    { icon: <ShieldCheck size={24} />, title: "Transaction inclusion", text: "BoC evidence can be anchored to the block and checked against the stored transaction.", status: "Cryptographic path" },
-    { icon: <Database size={24} />, title: "Account state", text: "Account-state evidence is verified against the selected block context.", status: "Cryptographic path" },
+    { icon: <ShieldCheck size={24} />, title: "Transaction inclusion", text: "BoC evidence can be anchored to the block and checked against the stored transaction.", status: activeRun?.transactions.length ? "Run is eligible" : "Run required", ready: Boolean(activeRun?.transactions.length) },
+    { icon: <Database size={24} />, title: "Account state", text: "Account-state evidence can be verified against an explicitly selected block context.", status: activeRun ? "Run is eligible" : "Run required", ready: Boolean(activeRun) },
   ];
   return (
     <>
       <PageHeading eyebrow="Proof center" title="Separate observation from verification" description="A provider response is useful evidence, but the interface never presents it as a blockchain or ownership proof without the matching cryptographic path." action={<button className="button-primary" type="button" onClick={onOpenActivity}>Inspect active run <ArrowRight size={18} /></button>} />
-      <div className="proof-grid">
-        {proofItems.map((item) => <article className="proof-card" key={item.title}><span>{item.icon}</span><div><small>{item.status}</small><h2>{item.title}</h2><p>{item.text}</p></div><CheckCircle size={21} weight="fill" /></article>)}
+      <GramOwnershipProofCard
+        expectedWallet={activeRun?.wallet_identity.canonical_address}
+        expectedNetwork={activeRun?.wallet_identity.network}
+      />
+      <div className="proof-grid proof-grid-secondary">
+        {proofItems.map((item) => <article className={item.ready ? "proof-card is-eligible" : "proof-card"} key={item.title}><span>{item.icon}</span><div><small>{item.status}</small><h2>{item.title}</h2><p>{item.text}</p></div><div className="proof-capability-state">{item.ready ? <CheckCircle size={16} weight="fill" /> : <WarningCircle size={16} weight="fill" />}{item.ready ? "Available" : "Unavailable"}</div></article>)}
       </div>
       <article className="evidence-summary-card">
         <div><span className="eyebrow">Selected evidence scope</span><h2>{activeRun ? `Run #${activeRun.run_id}` : "No run selected"}</h2><p>{activeRun ? activeRun.message : "Create or open a persisted run in Activity to inspect transaction-level trace evidence and canonical identities."}</p></div>
