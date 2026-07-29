@@ -36,15 +36,16 @@ import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.36.0";
+const RELEASE_LABEL = "v0.37.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
 const GramAccountStateProofCard = lazy(() => import("./components/GramAccountStateProofCard"));
 const GramInsightsView = lazy(() => import("./components/GramInsightsView"));
+const GramCompareView = lazy(() => import("./components/GramCompareView"));
 
 type Theme = "light" | "dark";
-type SectionId = "overview" | "activity" | "insights" | "proofs" | "assets" | "reports" | "sources";
+type SectionId = "overview" | "activity" | "insights" | "compare" | "proofs" | "assets" | "reports" | "sources";
 
 const sections: Array<{
   id: SectionId;
@@ -55,6 +56,7 @@ const sections: Array<{
   { id: "overview", label: "Overview", description: "Wallet at a glance", icon: Gauge },
   { id: "activity", label: "Activity", description: "Transfers, swaps and runs", icon: ChartLineUp },
   { id: "insights", label: "Insights", description: "Explainable patterns", icon: Sparkle },
+  { id: "compare", label: "Compare", description: "Behavioral similarity", icon: ArrowsClockwise },
   { id: "proofs", label: "Proofs", description: "Cryptographic evidence", icon: ShieldCheck },
   { id: "assets", label: "Assets & DEX", description: "Jettons and protocols", icon: ChartDonut },
   { id: "reports", label: "Reports", description: "Canonical exports", icon: FileText },
@@ -258,6 +260,14 @@ export default function App() {
             {activeSection === "insights" && (
               <Suspense fallback={<section className="insights-loading"><SpinnerGap className="spin" size={22} />Loading insights…</section>}>
                 <GramInsightsView activeRun={activeRun} onOpenActivity={openActivity} />
+              </Suspense>
+            )}
+          </section>
+
+          <section hidden={activeSection !== "compare"}>
+            {activeSection === "compare" && (
+              <Suspense fallback={<section className="compare-loading"><SpinnerGap className="spin" size={22} />Loading saved runs…</section>}>
+                <GramCompareView activeRun={activeRun} onOpenActivity={openActivity} />
               </Suspense>
             )}
           </section>

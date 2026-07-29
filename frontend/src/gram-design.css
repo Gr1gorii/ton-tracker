@@ -502,8 +502,13 @@ summary:focus-visible {
 
 .gram-nav {
   display: grid;
+  min-height: 0;
+  overflow-y: auto;
   gap: 5px;
+  scrollbar-width: none;
 }
+
+.gram-nav::-webkit-scrollbar { display: none; }
 
 .gram-nav-item {
   display: grid;
