@@ -734,11 +734,14 @@ export function walletClusterCompareCsvExportUrl(runIds: number[]): string {
 
 export async function compareWalletRuns(
   runIds: number[],
+  signal?: AbortSignal,
 ): Promise<WalletClusterCompareResponse> {
   const res = await fetch(`${API_BASE}/api/wallets/cluster/compare`, {
     method: "POST",
+    cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ run_ids: runIds }),
+    signal,
   });
 
   if (!res.ok) {

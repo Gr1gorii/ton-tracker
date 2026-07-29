@@ -1099,6 +1099,12 @@ export interface WalletSignalsRecord {
   sell_swap_count: number;
   avg_ton_per_buy_swap?: string | null;
   first_buy_at?: string | null;
+  signal_basis: "legacy_mock_fixture" | "canonical_native_activity_ledger";
+  canonical_ledger_digest_sha256?: string | null;
+  canonical_activity_count: number;
+  incoming_activity_count: number;
+  outgoing_activity_count: number;
+  counterparties: string[];
   warnings: string[];
 }
 
@@ -1110,6 +1116,7 @@ export interface WalletClusterPairRecord {
   score: number;
   band: string;
   shared_tokens: string[];
+  shared_counterparties: string[];
   note: string;
 }
 
@@ -1118,6 +1125,7 @@ export interface WalletClusterCompareResponse {
   comparison_window_seconds: number;
   pairs: WalletClusterPairRecord[];
   is_cluster_proof: boolean;
+  signal_basis: "legacy_mock_fixture" | "canonical_native_activity_ledger";
   note: string;
 }
 
