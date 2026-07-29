@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
@@ -27,6 +27,7 @@ import type {
   WalletIngestionSurface,
 } from "../types";
 import { useWalletRunCatalog } from "../useWalletRunCatalog";
+import { requestSignature, restoreStoredRunControls } from "../walletRunLoader";
 
 const surfaceOptions: Array<{
   id: WalletIngestionSurface;
@@ -89,6 +90,8 @@ export default function GramActivityWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<ResultTab>("summary");
   const catalog = useWalletRunCatalog();
+  const requestSequence = useRef(0);
+  const requestController = useRef<AbortController | null>(null);
 
   const payload = useMemo((): WalletIngestionRequest | null => {
     const wallet = accountAddress.trim();
@@ -104,8 +107,21 @@ export default function GramActivityWorkspace({
   }, [accountAddress, customEnd, customStart, surfaces, timeWindow]);
 
   useEffect(() => {
+    requestSequence.current += 1;
+    requestController.current?.abort();
+    requestController.current = null;
+    setLoading(null);
     setError(null);
+    setPreview(null);
   }, [accountAddress, customEnd, customStart, surfaces, timeWindow]);
+
+  useEffect(
+    () => () => {
+      requestSequence.current += 1;
+      requestController.current?.abort();
+    },
+    [],
+  );
 
   function toggleSurface(id: WalletIngestionSurface) {
     setSurfaces((current) => current.includes(id) ? (current.length === 1 ? current : current.filter((item) => item !== id)) : [...current, id]);
@@ -122,53 +138,82 @@ export default function GramActivityWorkspace({
   async function handlePreview() {
     const validation = validate();
     if (validation || !payload) return setError(validation);
-    setLoading("preview");
-    setError(null);
+    const request = beginRequest("preview");
     try {
-      const result = await previewWalletIngestion(payload);
+      const result = await previewWalletIngestion(payload, request.controller.signal);
+      if (!request.isCurrent()) return;
       setPreview(result);
       onRunResultChange(null);
     } catch (caught) {
+      if (!request.isCurrent() || request.controller.signal.aborted) return;
       setError(caught instanceof Error ? caught.message : "Could not preview wallet coverage.");
     } finally {
-      setLoading(null);
+      request.finish();
     }
   }
 
   async function handleRun() {
     const validation = validate();
     if (validation || !payload) return setError(validation);
-    setLoading("run");
-    setError(null);
+    const request = beginRequest("run");
     try {
-      const result = await runWalletIngestion(payload);
+      const result = await runWalletIngestion(payload, request.controller.signal);
+      if (!request.isCurrent()) return;
+      assertRunMatchesRequest(result, payload);
       setPreview(null);
       onRunResultChange(result);
       setTab("summary");
       await catalog.refresh();
     } catch (caught) {
+      if (!request.isCurrent() || request.controller.signal.aborted) return;
       setError(caught instanceof Error ? caught.message : "Could not create the evidence run.");
     } finally {
-      setLoading(null);
+      request.finish();
     }
   }
 
   async function loadRun(id: string) {
     const runId = Number(id);
     if (!Number.isSafeInteger(runId) || runId <= 0) return;
-    setLoading("load");
-    setError(null);
+    const request = beginRequest("load");
     try {
-      const result = await getWalletIngestionRun(runId);
-      onAccountAddressChange(result.wallet_address);
+      const result = await getWalletIngestionRun(runId, request.controller.signal);
+      if (!request.isCurrent()) return;
+      const restored = restoreStoredRunControls(result, runId);
+      onAccountAddressChange(restored.walletAddress);
+      setTimeWindow(restored.timeWindow);
+      setCustomStart(restored.customStart);
+      setCustomEnd(restored.customEnd);
+      setSurfaces(restored.surfaces);
       onRunResultChange(result);
       setPreview(null);
       setTab("summary");
     } catch (caught) {
+      if (!request.isCurrent() || request.controller.signal.aborted) return;
       setError(caught instanceof Error ? caught.message : `Could not open run #${id}.`);
     } finally {
-      setLoading(null);
+      request.finish();
     }
+  }
+
+  function beginRequest(kind: "preview" | "run" | "load") {
+    const sequence = requestSequence.current + 1;
+    requestSequence.current = sequence;
+    requestController.current?.abort();
+    const controller = new AbortController();
+    requestController.current = controller;
+    setLoading(kind);
+    setError(null);
+    return {
+      controller,
+      isCurrent: () => requestSequence.current === sequence,
+      finish: () => {
+        if (requestSequence.current === sequence) {
+          requestController.current = null;
+          setLoading(null);
+        }
+      },
+    };
   }
 
   return (
@@ -182,7 +227,7 @@ export default function GramActivityWorkspace({
 
           <label className="clean-field">
             <span>Wallet address</span>
-            <input value={accountAddress} onChange={(event) => onAccountAddressChange(event.target.value)} placeholder="EQ… or UQ…" />
+            <input value={accountAddress} disabled={Boolean(loading)} onChange={(event) => onAccountAddressChange(event.target.value)} placeholder="EQ… or UQ…" />
           </label>
 
           <div className="scope-row">
@@ -190,14 +235,14 @@ export default function GramActivityWorkspace({
               <span className="clean-label">Time window</span>
               <div className="window-picker" role="group" aria-label="Time window">
                 {(["24h", "3d", "7d", "custom"] as TimeWindow[]).map((value) => (
-                  <button key={value} type="button" className={timeWindow === value ? "is-active" : ""} onClick={() => setTimeWindow(value)}>{value === "custom" ? "Custom" : value}</button>
+                  <button key={value} type="button" disabled={Boolean(loading)} className={timeWindow === value ? "is-active" : ""} onClick={() => setTimeWindow(value)}>{value === "custom" ? "Custom" : value}</button>
                 ))}
               </div>
             </div>
             {timeWindow === "custom" && (
               <div className="custom-range">
-                <label><span>From</span><input type="datetime-local" value={customStart} onChange={(event) => setCustomStart(event.target.value)} /></label>
-                <label><span>To</span><input type="datetime-local" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /></label>
+                <label><span>From</span><input type="datetime-local" disabled={Boolean(loading)} value={customStart} onChange={(event) => setCustomStart(event.target.value)} /></label>
+                <label><span>To</span><input type="datetime-local" disabled={Boolean(loading)} value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} /></label>
               </div>
             )}
           </div>
@@ -209,7 +254,7 @@ export default function GramActivityWorkspace({
                 const Icon = surface.icon;
                 const selected = surfaces.includes(surface.id);
                 return (
-                  <button key={surface.id} type="button" className={selected ? "surface-option is-selected" : "surface-option"} onClick={() => toggleSurface(surface.id)} aria-pressed={selected}>
+                  <button key={surface.id} type="button" disabled={Boolean(loading)} className={selected ? "surface-option is-selected" : "surface-option"} onClick={() => toggleSurface(surface.id)} aria-pressed={selected}>
                     <span><Icon size={20} /></span><div><strong>{surface.label}</strong><small>{surface.help}</small></div>{selected && <Check size={17} weight="bold" />}
                   </button>
                 );
@@ -242,6 +287,8 @@ export default function GramActivityWorkspace({
               ))}
             </div>
           ) : <p className="runs-empty">No saved runs yet. Your first persisted run will appear here.</p>}
+          {catalog.error && <p className="runs-error" role="alert">Saved runs unavailable: {catalog.error}</p>}
+          {catalog.truncated && <p className="runs-note">Showing the {catalog.runs.length} most recent runs.</p>}
         </aside>
       </section>
 
@@ -321,6 +368,30 @@ function ResultTable({ columns, children, empty }: { columns: string[]; children
   return <div className="clean-table-wrap"><table className="clean-table"><thead><tr>{columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{children}</tbody></table></div>;
 }
 
+function assertRunMatchesRequest(
+  result: WalletIngestionRunResponse,
+  request: WalletIngestionRequest,
+) {
+  const restored = restoreStoredRunControls(result, result.run_id);
+  const responseSignature = requestSignature(
+    restored.walletAddress,
+    restored.timeWindow,
+    restored.canonicalCustomStart,
+    restored.canonicalCustomEnd,
+    restored.surfaces,
+  );
+  const requestValue = requestSignature(
+    request.wallet_address,
+    request.time_window,
+    request.custom_start ?? "",
+    request.custom_end ?? "",
+    request.surfaces,
+  );
+  if (responseSignature !== requestValue) {
+    throw new Error("Created run did not match the requested wallet scope.");
+  }
+}
+
 function TransferRows({ run }: { run: WalletIngestionRunResponse }) {
   return <ResultTable columns={["Direction", "Asset", "Amount", "Counterparty", "Time"]} empty={!run.transfers.length}>{run.transfers.slice(0, 100).map((item, index) => <tr key={`${item.tx_hash}-${index}`}><td><span className={`direction-badge is-${item.direction}`}>{item.direction === "in" ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}{item.direction}</span></td><td><strong>{item.asset === "TON" ? "GRAM" : item.asset}</strong></td><td>{item.amount ?? "—"}</td><td>{shortHash(item.counterparty)}</td><td>{formatDate(item.timestamp)}</td></tr>)}</ResultTable>;
 }
@@ -335,5 +406,5 @@ function SwapRows({ run }: { run: WalletIngestionRunResponse }) {
 
 function WarningRows({ run }: { run: WalletIngestionRunResponse }) {
   if (!run.warnings.length) return <div className="result-empty is-positive"><Check size={20} />No run warnings were reported.</div>;
-  return <div className="warning-list">{run.warnings.map((warning, index) => <article key={`${warning.evidence_key}-${index}`}><WarningCircle size={19} weight="fill" /><div><strong>{warning.severity}</strong><p>{warning.message}</p></div>{warning.provider && <span>{warning.provider}</span>}</article>)}</div>;
+  return <div className="warning-list">{run.warnings.map((warning, index) => <article key={`${warning.evidence_key}-${index}`}><WarningCircle size={19} weight="fill" /><div><strong>{warning.severity}</strong><p>{displayMessage(warning.message)}</p></div>{warning.provider && <span>{warning.provider}</span>}</article>)}</div>;
 }

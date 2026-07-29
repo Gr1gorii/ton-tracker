@@ -225,11 +225,14 @@ export async function previewTonapiWalletIntelligence(
 
 export async function previewWalletIngestion(
   req: WalletIngestionRequest,
+  signal?: AbortSignal,
 ): Promise<WalletIngestionPreviewResponse> {
   const res = await fetch(`${API_BASE}/api/wallets/ingest/preview`, {
     method: "POST",
+    cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
+    signal,
   });
 
   if (!res.ok) {
@@ -241,11 +244,14 @@ export async function previewWalletIngestion(
 
 export async function runWalletIngestion(
   req: WalletIngestionRequest,
+  signal?: AbortSignal,
 ): Promise<WalletIngestionRunResponse> {
   const res = await fetch(`${API_BASE}/api/wallets/ingest`, {
     method: "POST",
+    cache: "no-store",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(req),
+    signal,
   });
 
   if (!res.ok) {
@@ -257,8 +263,12 @@ export async function runWalletIngestion(
 
 export async function getWalletIngestionRun(
   runId: number,
+  signal?: AbortSignal,
 ): Promise<WalletIngestionRunResponse> {
-  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}`);
+  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}`, {
+    cache: "no-store",
+    signal,
+  });
 
   if (!res.ok) {
     throw new Error(await responseError(res, "Wallet ingestion read failed"));
