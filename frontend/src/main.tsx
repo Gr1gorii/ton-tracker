@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import "@fontsource-variable/manrope";
 import { TonConnectUIProvider } from "@tonconnect/ui-react";
 import App from "./App";
-import "./index.css";
 import "./gram-design.css";
 import "./gram-workspace.css";
 

@@ -74,7 +74,12 @@ body {
   color: var(--text);
   font-family: "Manrope Variable", Manrope, system-ui, sans-serif;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
   transition: background-color 220ms ease, color 220ms ease;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 button,
@@ -852,10 +857,8 @@ summary:focus-visible {
 
 .chart-card,
 .next-step-card,
-.proof-card,
 .evidence-summary-card,
-.report-card,
-.gram-surface {
+.report-card {
   border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--surface);
@@ -879,7 +882,6 @@ summary:focus-visible {
 
 .chart-header h2,
 .next-step-card h2,
-.proof-card h2,
 .evidence-summary-card h2,
 .report-card h2 {
   margin: 0;
@@ -891,7 +893,6 @@ summary:focus-visible {
 
 .chart-header p,
 .next-step-card p,
-.proof-card p,
 .evidence-summary-card p,
 .report-card p {
   margin: 5px 0 0;
@@ -1524,56 +1525,13 @@ summary:focus-visible {
 .proof-empty-state { margin-bottom: 16px; }
 .proof-empty-state .button-secondary { margin-top: 6px; }
 
-.proof-grid,
 .report-grid {
   display: grid;
   margin-bottom: 16px;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 14px;
 }
 
-.proof-card {
-  display: grid;
-  min-height: 176px;
-  padding: 22px;
-  align-items: start;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 13px;
-}
-
-.proof-grid-secondary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.proof-card.is-eligible { border-color: color-mix(in srgb, var(--positive) 20%, var(--border)); }
-
-.proof-capability-state {
-  display: inline-flex;
-  min-height: 28px;
-  padding: 0 9px;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--warning);
-  background: var(--surface-solid);
-  font-size: 8px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.proof-card.is-eligible .proof-capability-state { color: var(--positive); }
-
-.proof-card > span {
-  display: grid;
-  width: 43px;
-  height: 43px;
-  place-items: center;
-  border-radius: 13px;
-  color: var(--accent);
-  background: var(--surface-accent);
-}
-
-.proof-card > svg { color: var(--positive); }
-
-.proof-card small,
 .report-card small {
   display: block;
   margin-bottom: 5px;
@@ -1625,8 +1583,6 @@ summary:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-
-.report-grid { grid-template-columns: repeat(2, 1fr); }
 
 .report-readiness {
   display: flex;
@@ -1690,162 +1646,10 @@ summary:focus-visible {
 .report-actions a:hover { border-color: var(--accent); }
 .report-actions button:disabled { cursor: not-allowed; opacity: 0.45; }
 
-.gram-stack {
-  display: grid;
-  gap: 16px;
-}
-
-.split-surfaces {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.gram-surface {
-  min-width: 0;
-  padding: 22px;
-  overflow: hidden;
-}
-
-.report-price-panel { margin-top: 16px; }
-
-.experimental-drawer {
-  margin-top: 16px;
-  border: 1px solid var(--border);
-  border-radius: 17px;
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
-}
-
-.experimental-drawer summary {
-  padding: 18px 21px;
-  color: var(--text);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.experimental-grid {
-  display: grid;
-  padding: 0 21px 21px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-/* Existing evidence components restyled inside the new product shell */
-
-.gram-legacy-surface {
-  color: var(--text);
-  --bg: var(--surface-solid);
-  --panel: var(--surface-solid);
-  --panel-2: var(--surface-soft);
-  --border: var(--border);
-  --text: var(--text);
-  --muted: var(--text-muted);
-  --accent: var(--accent);
-  --success: var(--positive);
-  --warning: var(--warning);
-  --danger: var(--danger);
-}
-
-.gram-legacy-surface > section,
-.gram-legacy-surface .dashboard-section,
-.gram-legacy-surface .panel,
-.gram-legacy-surface .preview-panel,
-.gram-legacy-surface .wallet-ingestion-panel,
-.gram-legacy-surface .wallet-section,
-.gram-legacy-surface .provider-status,
-.gram-legacy-surface .provider-card,
-.gram-legacy-surface .evidence-card,
-.gram-legacy-surface .metric-card {
-  color: var(--text) !important;
-  border-color: var(--border) !important;
-  background: var(--surface-solid) !important;
-  box-shadow: none !important;
-}
-
-.gram-legacy-surface h1,
-.gram-legacy-surface h2,
-.gram-legacy-surface h3,
-.gram-legacy-surface h4,
-.gram-legacy-surface strong,
-.gram-legacy-surface th,
-.gram-legacy-surface label {
-  color: var(--text) !important;
-  font-family: inherit !important;
-}
-
-.gram-legacy-surface p,
-.gram-legacy-surface small,
-.gram-legacy-surface td,
-.gram-legacy-surface .field-sublabel,
-.gram-legacy-surface .section-description,
-.gram-legacy-surface .preview-copy,
-.gram-legacy-surface .muted {
-  color: var(--text-soft) !important;
-  font-family: inherit !important;
-}
-
-.gram-legacy-surface input,
-.gram-legacy-surface select,
-.gram-legacy-surface textarea,
-.gram-legacy-surface .text-input {
-  border-color: var(--border-strong) !important;
-  border-radius: 11px !important;
-  color: var(--text) !important;
-  background: var(--surface-soft) !important;
-  font-family: inherit !important;
-}
-
-.gram-legacy-surface button,
-.gram-legacy-surface .btn,
-.gram-legacy-surface a {
-  border-radius: 10px;
-  font-family: inherit !important;
-}
-
-.gram-legacy-surface .btn-primary,
-.gram-legacy-surface button.btn-primary {
-  border-color: transparent !important;
-  color: #fff !important;
-  background: var(--accent) !important;
-}
-
-.gram-legacy-surface .btn-ghost,
-.gram-legacy-surface .btn-secondary {
-  border-color: var(--border) !important;
-  color: var(--text) !important;
-  background: var(--surface-soft) !important;
-}
-
-.gram-legacy-surface table {
-  border-color: var(--border) !important;
-  color: var(--text) !important;
-  background: var(--surface-solid) !important;
-}
-
-.gram-legacy-surface th {
-  background: var(--surface-soft) !important;
-}
-
-.gram-legacy-surface tr,
-.gram-legacy-surface td {
-  border-color: var(--border) !important;
-}
-
-.gram-legacy-surface .badge,
-.gram-legacy-surface .source-badge {
-  border-radius: 999px !important;
-  font-family: inherit !important;
-  letter-spacing: 0.03em !important;
-}
-
 /* Responsive */
 
 @media (max-width: 1120px) {
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .proof-grid { grid-template-columns: 1fr; }
-  .proof-card { min-height: auto; }
   .evidence-summary-card { grid-template-columns: 1fr; }
 }
 
@@ -1894,8 +1698,6 @@ summary:focus-visible {
   }
   .overview-grid,
   .secondary-grid { grid-template-columns: 1fr; }
-  .split-surfaces,
-  .experimental-grid { grid-template-columns: 1fr; }
   .chart-card { min-height: 335px; }
 }
 
@@ -1936,7 +1738,6 @@ summary:focus-visible {
   .metric-grid { grid-template-columns: 1fr; }
   .metric-card { min-height: 106px; }
   .report-grid { grid-template-columns: 1fr; }
-  .proof-grid-secondary { grid-template-columns: 1fr; }
   .ownership-proof-header { grid-template-columns: auto minmax(0, 1fr); }
   .ownership-badge { grid-column: 1 / -1; justify-self: start; }
   .ownership-steps,
@@ -1958,11 +1759,8 @@ summary:focus-visible {
   .gram-proof-result-banner { grid-template-columns: auto minmax(0, 1fr); }
   .gram-proof-result-banner > span { grid-column: 2; justify-self: start; }
   .evidence-summary-card dl { grid-template-columns: 1fr; }
-  .gram-surface { padding: 14px; border-radius: 16px; }
   .next-step-card { grid-template-columns: 1fr; }
   .next-step-card .button-secondary { grid-column: 1; }
-  .proof-card { grid-template-columns: auto minmax(0, 1fr); }
-  .proof-card > svg { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
