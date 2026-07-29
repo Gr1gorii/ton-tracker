@@ -1279,6 +1279,251 @@ summary:focus-visible {
   font-size: 8.5px;
 }
 
+.proof-loading {
+  display: flex;
+  min-height: 96px;
+  margin-bottom: 16px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  color: var(--text-muted);
+  background: var(--surface);
+  font-size: 10px;
+}
+
+.gram-proof-flow {
+  margin-bottom: 16px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--aqua) 9%, transparent), transparent 34%),
+    var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.gram-proof-flow.is-verified {
+  border-color: color-mix(in srgb, var(--positive) 30%, var(--border));
+}
+
+.gram-proof-flow-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 15px;
+}
+
+.gram-proof-flow-icon {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: 15px;
+  color: var(--aqua);
+  background: color-mix(in srgb, var(--aqua) 11%, var(--surface));
+}
+
+.gram-proof-flow-icon.tone-coral {
+  color: var(--coral);
+  background: color-mix(in srgb, var(--coral) 11%, var(--surface));
+}
+
+.gram-proof-flow-header small {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.gram-proof-flow-header h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 720;
+  letter-spacing: -.03em;
+}
+
+.gram-proof-flow-header p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.55;
+}
+
+.gram-proof-status {
+  display: inline-flex;
+  min-height: 31px;
+  padding: 0 10px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: var(--surface-solid);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.gram-proof-status.is-verified {
+  border-color: color-mix(in srgb, var(--positive) 28%, var(--border));
+  color: var(--positive);
+}
+
+.gram-proof-selector {
+  display: grid;
+  margin-top: 20px;
+  padding: 11px 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-solid);
+}
+
+.gram-proof-selector label,
+.gram-proof-selector > span {
+  color: var(--text-muted);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.gram-proof-selector select {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+  font-size: 9.5px;
+}
+
+.gram-proof-steps {
+  display: grid;
+  margin: 12px 0 0;
+  padding: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  list-style: none;
+}
+
+.gram-proof-steps li {
+  display: grid;
+  min-height: 60px;
+  padding: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-solid);
+}
+
+.gram-proof-steps li > span {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  color: var(--text-muted);
+  font-size: 8px;
+  font-weight: 760;
+}
+
+.gram-proof-steps li div { display: grid; gap: 3px; min-width: 0; }
+.gram-proof-steps strong { color: var(--text); font-size: 9.5px; }
+.gram-proof-steps small { overflow: hidden; color: var(--text-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.gram-proof-steps li.is-active { border-color: color-mix(in srgb, var(--accent) 27%, var(--border)); }
+.gram-proof-steps li.is-active > span { border-color: var(--accent); color: var(--accent); }
+.gram-proof-steps li.is-complete { border-color: color-mix(in srgb, var(--positive) 23%, var(--border)); }
+.gram-proof-steps li.is-complete > span { border-color: var(--positive); color: var(--surface-solid); background: var(--positive); }
+
+.gram-proof-notice {
+  display: flex;
+  min-height: 54px;
+  margin-top: 14px;
+  padding: 11px 13px;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+
+.gram-proof-notice.is-error { border-color: color-mix(in srgb, var(--danger) 27%, var(--border)); color: var(--danger); background: color-mix(in srgb, var(--danger) 6%, var(--surface)); }
+.gram-proof-notice > svg { flex: 0 0 auto; }
+.gram-proof-notice div { display: grid; gap: 2px; }
+.gram-proof-notice strong { color: var(--text); font-size: 9.5px; }
+.gram-proof-notice span { color: var(--text-muted); font-size: 9px; line-height: 1.45; }
+
+.gram-proof-action-row {
+  display: flex;
+  margin-top: 14px;
+  align-items: center;
+  gap: 12px;
+}
+
+.gram-proof-action-row .button-primary { flex: 0 0 auto; }
+.gram-proof-action-row p { max-width: 600px; margin: 0; color: var(--text-muted); font-size: 8.5px; line-height: 1.5; }
+
+.gram-proof-result { margin-top: 14px; }
+.gram-proof-result-banner {
+  display: grid;
+  min-height: 64px;
+  padding: 12px 14px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, var(--positive) 26%, var(--border));
+  border-radius: 12px;
+  color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 6%, var(--surface));
+}
+
+.gram-proof-result-banner div { display: grid; gap: 3px; }
+.gram-proof-result-banner strong { color: var(--text); font-size: 10px; }
+.gram-proof-result-banner div span { color: var(--text-muted); font-size: 8.5px; line-height: 1.4; }
+.gram-proof-result-banner > span { padding: 5px 8px; border-radius: 999px; color: var(--positive); background: color-mix(in srgb, var(--positive) 10%, var(--surface)); font-size: 8px; font-weight: 760; }
+
+.gram-proof-facts {
+  display: grid;
+  margin: 8px 0 0;
+  overflow: hidden;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--border);
+}
+
+.gram-proof-facts div { display: grid; min-width: 0; padding: 10px 11px; gap: 3px; background: var(--surface-solid); }
+.gram-proof-facts dt { color: var(--text-muted); font-size: 7.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.gram-proof-facts dd { overflow: hidden; margin: 0; color: var(--text); font-size: 9.5px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+
+.account-proof-flow { background: radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--coral) 9%, transparent), transparent 34%), var(--surface); }
+.account-proof-addresses { display: grid; margin-top: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.account-proof-addresses div { display: flex; min-width: 0; padding: 9px 11px; align-items: center; justify-content: space-between; gap: 9px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-solid); }
+.account-proof-addresses span { color: var(--text-muted); font-size: 8px; }
+.account-proof-addresses code { overflow: hidden; color: var(--text-soft); font-family: var(--font-mono, monospace); font-size: 8.5px; text-overflow: ellipsis; }
+.account-proof-checks { display: grid; margin-top: 8px; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.account-proof-checks span { display: flex; min-height: 34px; padding: 0 9px; align-items: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--positive) 20%, var(--border)); border-radius: 9px; color: var(--positive); background: var(--surface-solid); font-size: 8px; font-weight: 670; }
+.proof-empty-state { margin-bottom: 16px; }
+.proof-empty-state .button-secondary { margin-top: 6px; }
+
 .proof-grid,
 .report-grid {
   display: grid;
@@ -1701,6 +1946,17 @@ summary:focus-visible {
   .ownership-actions { align-items: stretch; flex-direction: column; }
   .ownership-actions .button-secondary { width: 100%; }
   .ownership-actions p { margin: 3px 0 0; text-align: center; }
+  .gram-proof-flow { padding: 17px; }
+  .gram-proof-flow-header { grid-template-columns: auto minmax(0, 1fr); }
+  .gram-proof-status { grid-column: 1 / -1; justify-self: start; }
+  .gram-proof-selector { grid-template-columns: 1fr; }
+  .gram-proof-steps,
+  .gram-proof-facts,
+  .account-proof-addresses,
+  .account-proof-checks { grid-template-columns: 1fr; }
+  .gram-proof-action-row { align-items: stretch; flex-direction: column; }
+  .gram-proof-result-banner { grid-template-columns: auto minmax(0, 1fr); }
+  .gram-proof-result-banner > span { grid-column: 2; justify-self: start; }
   .evidence-summary-card dl { grid-template-columns: 1fr; }
   .gram-surface { padding: 14px; border-radius: 16px; }
   .next-step-card { grid-template-columns: 1fr; }

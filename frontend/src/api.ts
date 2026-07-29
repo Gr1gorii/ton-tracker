@@ -25,6 +25,7 @@ import type {
   WalletMultiAssetPnlReadinessResponse,
   WalletRunPnlPreviewResponse,
   WalletRunSignalsResponse,
+  WalletTransactionInclusionCatalogResponse,
   WalletOwnershipChallengeResponse,
   WalletOwnershipProofRequest,
   WalletOwnershipProofResponse,
@@ -415,6 +416,54 @@ export async function verifyWalletTransactionTraceBocs(
     );
   }
   return await res.json();
+}
+
+export async function getWalletTransactionInclusionProofs(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<WalletTransactionInclusionCatalogResponse | null> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence/boc-verification/block-inclusion`,
+    { cache: "no-store", signal },
+  );
+
+  if (res.status === 404) {
+    let detail = "Transaction inclusion proof read failed (404)";
+    try {
+      const body = await res.json();
+      if (body?.detail === "Transaction inclusion proofs not found") return null;
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch {
+      // Only the exact absence contract is converted to null.
+    }
+    throw new Error(detail);
+  }
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Transaction inclusion proof read failed"),
+    );
+  }
+  return (await res.json()) as WalletTransactionInclusionCatalogResponse;
+}
+
+export async function proveWalletTransactionInclusion(
+  runId: number,
+  transactionHash: string,
+  signal?: AbortSignal,
+): Promise<WalletTransactionInclusionCatalogResponse> {
+  const encodedHash = encodeURIComponent(transactionHash);
+  const res = await fetch(
+    `${API_BASE}/api/wallets/ingest/${runId}/transactions/${encodedHash}/trace-evidence/boc-verification/block-inclusion`,
+    { method: "POST", cache: "no-store", signal },
+  );
+  if (!res.ok) {
+    throw new Error(
+      await responseError(res, "Transaction inclusion proof failed"),
+    );
+  }
+  return (await res.json()) as WalletTransactionInclusionCatalogResponse;
 }
 
 export async function getWalletTransactionJettonPayloadObservations(
