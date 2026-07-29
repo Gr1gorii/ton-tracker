@@ -760,6 +760,46 @@ export interface WalletTraceBocVerificationResponse {
   message: string;
 }
 
+export interface WalletTransactionInclusionBlockRecord {
+  workchain: -1 | 0;
+  shard: string;
+  seqno: number;
+  root_hash: string;
+  file_hash: string;
+}
+
+export interface WalletTransactionInclusionProofRecord {
+  contract_version: "ton_transaction_inclusion_v1";
+  network: "ton-mainnet" | "ton-testnet";
+  trust_level: 0 | 1;
+  account_address_canonical: string;
+  logical_time: string;
+  transaction_hash: string;
+  block: WalletTransactionInclusionBlockRecord;
+  masterchain_anchor: WalletTransactionInclusionBlockRecord;
+  transaction_boc_sha256: string;
+  block_proof_boc_sha256: string;
+  evidence_digest_sha256: string;
+  verified_at: string;
+  block_merkle_proof_verified: true;
+  canonical_block_chain_verified_at_capture: boolean;
+  provider_free_revalidated: true;
+  raw_bocs_returned: false;
+}
+
+export interface WalletTransactionInclusionCatalogResponse {
+  contract_version: "ton_transaction_inclusion_v1";
+  boc_verification_id: string;
+  proof_count: number;
+  proof_digests: string[];
+  proofs: WalletTransactionInclusionProofRecord[];
+  catalog_digest_sha256: string;
+  provider_requests_performed: false;
+  all_transaction_bocs_included_in_blocks: true;
+  raw_bocs_returned: false;
+  message: string;
+}
+
 export type WalletJettonPayloadOperation =
   | "transfer"
   | "transfer_notification"

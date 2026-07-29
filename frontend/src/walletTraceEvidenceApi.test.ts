@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   API_BASE,
   getPersistedWalletTransactionTraceEvidence,
+  getWalletTransactionInclusionProofs,
   getWalletTransactionTraceBocVerification,
   getWalletTransactionTraceEvidence,
   persistWalletTransactionTraceEvidence,
+  proveWalletTransactionInclusion,
   verifyWalletTransactionTraceBocs,
 } from "./api";
 
@@ -53,6 +55,70 @@ describe("getWalletTransactionTraceEvidence", () => {
     ).rejects.toThrow("Stored transaction is ineligible.");
     expect(fetchMock.mock.calls[0][0]).toBe(
       `${API_BASE}/api/wallets/ingest/25/transactions/hash%2Fwith%20space/trace-evidence`,
+    );
+  });
+});
+
+describe("transaction block inclusion API", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("reads the exact provider-free endpoint and maps only its absence contract", async () => {
+    const payload = { contract_version: "ton_transaction_inclusion_v1" };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ detail: "Transaction inclusion proofs not found" }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ detail: "Transaction not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(
+      getWalletTransactionInclusionProofs(25, HASH, controller.signal),
+    ).resolves.toEqual(payload);
+    await expect(getWalletTransactionInclusionProofs(25, HASH)).resolves.toBeNull();
+    await expect(getWalletTransactionInclusionProofs(25, HASH)).rejects.toThrow(
+      "Transaction not found",
+    );
+    expect(fetchMock.mock.calls[0]).toEqual([
+      `${API_BASE}/api/wallets/ingest/25/transactions/${HASH}/trace-evidence/boc-verification/block-inclusion`,
+      { cache: "no-store", signal: controller.signal },
+    ]);
+  });
+
+  it("creates proofs through an explicit no-store POST", async () => {
+    const payload = { contract_version: "ton_transaction_inclusion_v1" };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(
+      proveWalletTransactionInclusion(25, HASH, controller.signal),
+    ).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/wallets/ingest/25/transactions/${HASH}/trace-evidence/boc-verification/block-inclusion`,
+      { method: "POST", cache: "no-store", signal: controller.signal },
     );
   });
 });

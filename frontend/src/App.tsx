@@ -36,9 +36,11 @@ import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.33.0";
+const RELEASE_LABEL = "v0.34.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
+const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
+const GramAccountStateProofCard = lazy(() => import("./components/GramAccountStateProofCard"));
 
 type Theme = "light" | "dark";
 type SectionId = "overview" | "activity" | "proofs" | "assets" | "reports" | "sources";
@@ -524,10 +526,6 @@ function NextStepCard({ activeRun, account, onOpenActivity, onRun }: { activeRun
 }
 
 function ProofsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestionRunResponse | null; onOpenActivity: () => void }) {
-  const proofItems = [
-    { icon: <ShieldCheck size={24} />, title: "Transaction inclusion", text: "BoC evidence can be anchored to the block and checked against the stored transaction.", status: activeRun?.transactions.length ? "Run is eligible" : "Run required", ready: Boolean(activeRun?.transactions.length) },
-    { icon: <Database size={24} />, title: "Account state", text: "Account-state evidence can be verified against an explicitly selected block context.", status: activeRun ? "Run is eligible" : "Run required", ready: Boolean(activeRun) },
-  ];
   return (
     <>
       <PageHeading eyebrow="Proof center" title="Separate observation from verification" description="A provider response is useful evidence, but the interface never presents it as a blockchain or ownership proof without the matching cryptographic path." action={<button className="button-primary" type="button" onClick={onOpenActivity}>Inspect active run <ArrowRight size={18} /></button>} />
@@ -535,9 +533,14 @@ function ProofsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestionR
         expectedWallet={activeRun?.wallet_identity.canonical_address}
         expectedNetwork={activeRun?.wallet_identity.network}
       />
-      <div className="proof-grid proof-grid-secondary">
-        {proofItems.map((item) => <article className={item.ready ? "proof-card is-eligible" : "proof-card"} key={item.title}><span>{item.icon}</span><div><small>{item.status}</small><h2>{item.title}</h2><p>{item.text}</p></div><div className="proof-capability-state">{item.ready ? <CheckCircle size={16} weight="fill" /> : <WarningCircle size={16} weight="fill" />}{item.ready ? "Available" : "Unavailable"}</div></article>)}
-      </div>
+      {activeRun ? (
+        <Suspense fallback={<section className="proof-loading"><SpinnerGap className="spin" size={22} />Loading proof workflows…</section>}>
+          <GramTransactionProofCard runId={activeRun.run_id} dataMode={activeRun.data_mode} transactions={activeRun.transactions} />
+          <GramAccountStateProofCard runId={activeRun.run_id} dataMode={activeRun.data_mode} network={activeRun.wallet_identity.network} balances={activeRun.balances} />
+        </Suspense>
+      ) : (
+        <section className="clean-empty-state proof-empty-state"><span><ShieldCheck size={30} weight="duotone" /></span><h2>Select an evidence run</h2><p>Open Activity and load a persisted run to inspect transaction and account-state proof paths.</p><button className="button-secondary" type="button" onClick={onOpenActivity}>Open activity <ArrowRight size={17} /></button></section>
+      )}
       <article className="evidence-summary-card">
         <div><span className="eyebrow">Selected evidence scope</span><h2>{activeRun ? `Run #${activeRun.run_id}` : "No run selected"}</h2><p>{activeRun ? activeRun.message : "Create or open a persisted run in Activity to inspect transaction-level trace evidence and canonical identities."}</p></div>
         <dl>
