@@ -539,8 +539,12 @@ export async function verifyWalletJettonContractRelationship(
 
 export async function getWalletRunSignals(
   runId: number,
+  signal?: AbortSignal,
 ): Promise<WalletRunSignalsResponse> {
-  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}/signals`);
+  const res = await fetch(`${API_BASE}/api/wallets/ingest/${runId}/signals`, {
+    cache: "no-store",
+    signal,
+  });
 
   if (!res.ok) {
     throw new Error(await responseError(res, "Wallet signals read failed"));
