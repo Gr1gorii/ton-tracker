@@ -1644,3 +1644,46 @@ export interface WalletRunSignalsResponse {
   insufficient_evidence: WalletEvidenceInsufficientRecord[];
   note: string;
 }
+
+export type WalletOwnershipNetwork = "ton-mainnet" | "ton-testnet";
+
+export interface WalletOwnershipChallengeResponse {
+  challenge_id: string;
+  payload: string;
+  expected_domain: string;
+  expected_network: WalletOwnershipNetwork;
+  expected_wallet_account_canonical?: string | null;
+  issued_at: string;
+  expires_at: string;
+  single_use: true;
+}
+
+export interface WalletTonProofRecord {
+  timestamp: number;
+  domain: {
+    lengthBytes: number;
+    value: string;
+  };
+  payload: string;
+  signature: string;
+}
+
+export interface WalletOwnershipProofRequest {
+  address: string;
+  network: WalletOwnershipNetwork;
+  wallet_state_init: string;
+  proof: WalletTonProofRecord;
+}
+
+export interface WalletOwnershipProofResponse {
+  challenge_id: string;
+  wallet_account_canonical: string;
+  network: WalletOwnershipNetwork;
+  domain: string;
+  verified_at: string;
+  signature_verified: true;
+  state_init_address_binding_verified: true;
+  public_key_resolved_from_proof_checked_account: true;
+  challenge_consumed: true;
+  is_ownership_proof: true;
+}

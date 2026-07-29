@@ -1104,7 +1104,7 @@ class WalletJettonContractVerificationCatalogResponse(BaseModel):
 
 class WalletOwnershipChallengeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    expected_wallet: str | None = Field(default=None, min_length=66, max_length=76)
+    expected_wallet: str | None = Field(default=None, min_length=48, max_length=76)
 
 
 class WalletOwnershipChallengeResponse(BaseModel):

@@ -31,6 +31,9 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
     restart: unless-stopped
+    environment:
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}
+      NGINX_ENVSUBST_FILTER: PUBLIC_APP_URL
     depends_on:
       backend:
         condition: service_healthy
