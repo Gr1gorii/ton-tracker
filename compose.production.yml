@@ -1,7 +1,8 @@
 services:
   production-preflight:
     profiles: ["ops"]
-    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -24,6 +25,8 @@ services:
       RECOVERY_RETRY_SECONDS: ${RECOVERY_RETRY_SECONDS:-300}
       RECOVERY_HEALTH_MAX_AGE_SECONDS: ${RECOVERY_HEALTH_MAX_AGE_SECONDS:-691200}
       PROMETHEUS_RETENTION: ${PROMETHEUS_RETENTION:-15d}
+      BACKEND_IMAGE: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
+      FRONTEND_IMAGE: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -32,7 +35,8 @@ services:
     restart: "no"
 
   backend:
-    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -66,7 +70,8 @@ services:
       - /tmp
 
   frontend:
-    image: "${FRONTEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-frontend:latest}"
+    image: "${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: frontend/Dockerfile
@@ -107,7 +112,8 @@ services:
       - no-new-privileges:true
 
   backup:
-    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -138,7 +144,8 @@ services:
 
   restore-drill:
     profiles: ["recovery"]
-    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -159,7 +166,8 @@ services:
     restart: "no"
 
   recovery-watchdog:
-    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
     build:
       context: .
       dockerfile: backend/Dockerfile

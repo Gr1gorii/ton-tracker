@@ -67,3 +67,74 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  verify:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    env:
+      PUBLIC_APP_URL: https://gram.example
+      APP_PORT: "18080"
+      APP_PULL_POLICY: always
+      DATA_MODE: real
+      TON_NETWORK: mainnet
+      TONAPI_BASE_URL: https://tonapi.io
+      TONAPI_API_KEY: ci-placeholder-key-with-valid-length
+      WALLET_ACTIVITY_PROVIDER: tonapi
+      WALLET_ACTIVITY_LIVE_ENABLED: "true"
+      TON_LITECLIENT_TRUST_LEVEL: "0"
+      TONCONNECT_EXPECTED_DOMAIN: gram.example
+      BACKUP_INTERVAL_SECONDS: "86400"
+      BACKUP_RETENTION: "14"
+      BACKUP_HEALTH_MAX_AGE_SECONDS: "172800"
+      RECOVERY_INTERVAL_SECONDS: "604800"
+      RECOVERY_RETRY_SECONDS: "300"
+      RECOVERY_HEALTH_MAX_AGE_SECONDS: "691200"
+      PROMETHEUS_RETENTION: 15d
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Select exact release images
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$RELEASE_TAG" |
+            grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          release=${RELEASE_TAG#v}
+          {
+            echo "BACKEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-backend:${release}"
+            echo "FRONTEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-frontend:${release}"
+          } >> "$GITHUB_ENV"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull and smoke-test exact release images
+        run: |
+          set -euo pipefail
+          project=gram-scope-published-release
+          cleanup() {
+            docker compose --project-name "$project" --file compose.production.yml \
+              down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+          docker compose --project-name "$project" --file compose.production.yml \
+            config --quiet
+          docker compose --project-name "$project" --file compose.production.yml \
+            pull backend frontend
+          if ! docker compose --project-name "$project" --file compose.production.yml \
+            up --detach --no-build --wait --wait-timeout 120 frontend; then
+            docker compose --project-name "$project" --file compose.production.yml ps
+            docker compose --project-name "$project" --file compose.production.yml \
+              logs --no-color backend frontend
+            exit 1
+          fi
+          python ops/production_preflight.py \
+            --smoke-url "http://127.0.0.1:${APP_PORT}" \
+            --expected-public-url "$PUBLIC_APP_URL"
