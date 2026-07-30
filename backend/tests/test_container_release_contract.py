@@ -15,6 +15,10 @@ LOGIN_ACTION = "docker/login-action@dbcb813823bdd20940b903addbd779551569679f"
 METADATA_ACTION = "docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302"
 BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
 PINNED_ACTION = re.compile(r"^[^@\s]+/[^@\s]+@[0-9a-f]{40}$")
+PYTHON_IMAGE = "python:3.10-slim@sha256:c1e4e6c01eb489c422288b2de34b0761ca316f7a2d98e2c33f47659a73ed108a"
+NODE_IMAGE = "node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32"
+NGINX_IMAGE = "nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
+PROMETHEUS_IMAGE = "prom/prometheus:v2.54.1@sha256:f6639335d34a77d9d9db382b92eeb7fc00934be8eae81dbc03b31cfe90411a94"
 
 
 def test_docker_context_excludes_local_state_and_credentials():
@@ -50,6 +54,9 @@ def test_dockerfiles_copy_only_required_application_trees():
     assert "COPY backend/ /app/backend/" in backend
     assert "COPY ops/ /app/ops/" in backend
     assert "COPY frontend/ ./" in frontend
+    assert f"FROM {PYTHON_IMAGE} AS runtime" in backend
+    assert f"FROM {NODE_IMAGE} AS build" in frontend
+    assert f"FROM {NGINX_IMAGE} AS runtime" in frontend
 
 
 def test_release_gate_covers_tests_builds_preflight_and_compose():
@@ -98,16 +105,18 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--expected-public-url" in commands
     production_environment = jobs["production"]["env"]
     assert production_environment["BACKEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.49.0"
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.50.0"
     )
     assert production_environment["FRONTEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-frontend:0.49.0"
+        "ghcr.io/gr1gorii/ton-tracker-frontend:0.50.0"
     )
     assert production_environment["APP_PULL_POLICY"] == "never"
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     )
     assert "/etc/nginx/conf.d" in compose["services"]["frontend"]["tmpfs"]
+    assert compose["services"]["prometheus"]["image"] == PROMETHEUS_IMAGE
+    assert PROMETHEUS_IMAGE in commands
 
 
 def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
@@ -215,8 +224,16 @@ def test_dependabot_tracks_every_release_dependency_surface():
         ("github-actions", "/"),
         ("pip", "/backend"),
         ("npm", "/frontend"),
+        ("docker", "/backend"),
+        ("docker", "/frontend"),
+        ("docker-compose", "/"),
     }
     for entry in updates.values():
         assert entry["schedule"]["interval"] == "weekly"
         assert entry["schedule"]["timezone"] == "Europe/Rome"
-        assert entry["open-pull-requests-limit"] == 5
+        expected_limit = (
+            3
+            if entry["package-ecosystem"] in {"docker", "docker-compose"}
+            else 5
+        )
+        assert entry["open-pull-requests-limit"] == expected_limit

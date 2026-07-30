@@ -72,8 +72,8 @@ jobs:
       RECOVERY_RETRY_SECONDS: "300"
       RECOVERY_HEALTH_MAX_AGE_SECONDS: "691200"
       PROMETHEUS_RETENTION: 15d
-      BACKEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-backend:0.49.0
-      FRONTEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-frontend:0.49.0
+      BACKEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-backend:0.50.0
+      FRONTEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-frontend:0.50.0
       APP_PULL_POLICY: never
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -114,5 +114,5 @@ jobs:
           docker run --rm
           --entrypoint /bin/promtool
           --volume "$PWD/monitoring:/etc/prometheus:ro"
-          prom/prometheus:v2.54.1
+          prom/prometheus:v2.54.1@sha256:f6639335d34a77d9d9db382b92eeb7fc00934be8eae81dbc03b31cfe90411a94
           check config /etc/prometheus/prometheus.yml
