@@ -64,6 +64,13 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "frontend/Dockerfile" in commands
     assert "--entrypoint /bin/promtool" in commands
     assert "check config /etc/prometheus/prometheus.yml" in commands
+    assert "up --detach --no-build --wait --wait-timeout 120 frontend" in commands
+    assert "--smoke-url" in commands
+    assert "--expected-public-url" in commands
+    compose = yaml.safe_load(
+        (ROOT / "compose.production.yml").read_text(encoding="utf-8")
+    )
+    assert "/etc/nginx/conf.d" in compose["services"]["frontend"]["tmpfs"]
 
 
 def test_tagged_release_publishes_bounded_ghcr_images_for_compose():

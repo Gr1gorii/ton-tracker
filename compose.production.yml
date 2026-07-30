@@ -84,6 +84,7 @@ services:
     read_only: true
     tmpfs:
       - /var/cache/nginx
+      - /etc/nginx/conf.d
       - /var/run
 
   prometheus:
