@@ -175,10 +175,10 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--expected-public-url" in commands
     production_environment = jobs["production"]["env"]
     assert production_environment["BACKEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.54.2"
+        "ghcr.io/gr1gorii/ton-tracker-backend@sha256:" + "a" * 64
     )
     assert production_environment["FRONTEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.2"
+        "ghcr.io/gr1gorii/ton-tracker-frontend@sha256:" + "b" * 64
     )
     assert production_environment["APP_PULL_POLICY"] == "never"
     compose = yaml.safe_load(

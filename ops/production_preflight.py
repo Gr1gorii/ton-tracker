@@ -17,7 +17,6 @@ from urllib.request import Request, urlopen
 
 _MAX_RESPONSE_BYTES = 65_536
 _RETENTION = re.compile(r"^[1-9][0-9]*(?:s|m|h|d|w|y)$")
-_SEMVER = r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -59,25 +58,18 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
     if len(api_key) < 16 or len(api_key) > 4096 or any(char.isspace() for char in api_key):
         errors.append("TONAPI_API_KEY is missing or structurally invalid")
 
-    backend_image = _release_image_identity(
+    _validate_release_image(
         environment,
         "BACKEND_IMAGE",
         "ghcr.io/gr1gorii/ton-tracker-backend",
         errors,
     )
-    frontend_image = _release_image_identity(
+    _validate_release_image(
         environment,
         "FRONTEND_IMAGE",
         "ghcr.io/gr1gorii/ton-tracker-frontend",
         errors,
     )
-    if (
-        backend_image is not None
-        and frontend_image is not None
-        and backend_image[0] == frontend_image[0] == "tag"
-        and backend_image[1] != frontend_image[1]
-    ):
-        errors.append("BACKEND_IMAGE and FRONTEND_IMAGE release tags must match")
 
     try:
         tonapi_url = urlsplit(
@@ -187,25 +179,21 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
     return errors
 
 
-def _release_image_identity(
+def _validate_release_image(
     environment: Mapping[str, str],
     name: str,
     repository: str,
     errors: list[str],
-) -> tuple[str, str] | None:
+) -> None:
     value = environment.get(name, "").strip()
-    tag_match = re.fullmatch(rf"{re.escape(repository)}:({_SEMVER})", value)
-    if tag_match is not None:
-        return "tag", tag_match.group(1)
     digest_prefix = f"{repository}@"
     if value.startswith(digest_prefix):
         digest = value.removeprefix(digest_prefix)
         if _IMAGE_DIGEST.fullmatch(digest) is not None:
-            return "digest", digest
+            return
     errors.append(
-        f"{name} must use the expected GHCR repository with an exact semver tag or sha256 digest"
+        f"{name} must use the expected GHCR repository pinned by sha256 digest"
     )
-    return None
 
 
 def run_smoke_checks(
