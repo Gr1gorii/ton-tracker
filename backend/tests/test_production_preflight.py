@@ -24,8 +24,12 @@ def _environment() -> dict[str, str]:
         "WALLET_ACTIVITY_LIVE_ENABLED": "true",
         "TON_LITECLIENT_TRUST_LEVEL": "0",
         "TON_NETWORK": "mainnet",
-        "BACKEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-backend:0.54.2",
-        "FRONTEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.2",
+        "BACKEND_IMAGE": (
+            "ghcr.io/gr1gorii/ton-tracker-backend@sha256:" + "a" * 64
+        ),
+        "FRONTEND_IMAGE": (
+            "ghcr.io/gr1gorii/ton-tracker-frontend@sha256:" + "b" * 64
+        ),
         "APP_PORT": "8080",
         "BACKUP_INTERVAL_SECONDS": "86400",
         "BACKUP_RETENTION": "14",
@@ -74,7 +78,7 @@ def test_production_environment_requires_recovery_within_retention():
     assert "TONAPI_BASE_URL must be an HTTPS URL without credentials" in errors
 
 
-def test_production_image_refs_are_exact_and_fail_closed():
+def test_production_image_refs_are_digest_pinned_and_fail_closed():
     environment = _environment()
     environment["BACKEND_IMAGE"] = (
         "ghcr.io/gr1gorii/ton-tracker-backend@sha256:" + "a" * 64
@@ -87,8 +91,8 @@ def test_production_image_refs_are_exact_and_fail_closed():
     invalid_refs = (
         "",
         "ghcr.io/gr1gorii/ton-tracker-backend:latest",
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.54",
-        "registry.example/ton-tracker-backend:0.54.2",
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.55.0",
+        "registry.example/ton-tracker-backend@sha256:" + "c" * 64,
         "ghcr.io/gr1gorii/ton-tracker-backend@sha256:abcd",
     )
     for image_ref in invalid_refs:
@@ -98,13 +102,6 @@ def test_production_image_refs_are_exact_and_fail_closed():
         assert any(error.startswith("BACKEND_IMAGE must use") for error in errors)
         if image_ref:
             assert image_ref not in " ".join(errors)
-
-    environment = _environment()
-    environment["FRONTEND_IMAGE"] = "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.3"
-    assert "BACKEND_IMAGE and FRONTEND_IMAGE release tags must match" in (
-        validate_environment(environment)
-    )
-
 
 def test_public_smoke_contract_accepts_guarded_real_release():
     origin = "https://gram.example"
