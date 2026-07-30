@@ -79,7 +79,7 @@ def write_backup_health_record(
         "backup_file": backup.name,
         "completed_at": completed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
         "size_bytes": backup.stat().st_size,
-        "sha256": _sha256(backup),
+        "sha256": sha256_file(backup),
         "schema_revision": schema_revision,
         "integrity_check": "ok",
     }
@@ -95,7 +95,7 @@ def write_backup_health_record(
     return destination
 
 
-def _sha256(path: Path) -> str:
+def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):

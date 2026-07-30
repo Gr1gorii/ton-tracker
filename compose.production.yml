@@ -97,6 +97,27 @@ services:
       start_period: 60s
       retries: 3
 
+  restore-drill:
+    profiles: ["recovery"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      - python
+      - /app/ops/restore_sqlite.py
+      - --heartbeat
+      - /backups/.backup-health.json
+      - --destination
+      - /tmp/restore-drill.sqlite3
+    volumes:
+      - ton_tracker_backups:/backups:ro
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+
 volumes:
   ton_tracker_data:
   ton_tracker_backups:
