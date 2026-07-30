@@ -35,6 +35,17 @@ _BACKUP_RECORD_KEYS = {
     "size_bytes",
     "status",
 }
+_RECOVERY_RECORD_KEYS = {
+    "backup_file",
+    "backup_sha256",
+    "backup_size_bytes",
+    "completed_at",
+    "integrity_check",
+    "restore_check",
+    "schema_revision",
+    "schema_version",
+    "status",
+}
 
 
 @dataclass(frozen=True)
@@ -44,6 +55,15 @@ class BackupHealthMetrics:
     age_seconds: float | None = None
     last_success_timestamp_seconds: float | None = None
     size_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class RecoveryHealthMetrics:
+    configured: bool
+    ready: bool
+    age_seconds: float | None = None
+    last_success_timestamp_seconds: float | None = None
+    source_size_bytes: int | None = None
 
 
 def observe_http_request(
@@ -118,6 +138,58 @@ def read_backup_health_metrics(
         )
     except (OSError, UnicodeError, ValueError, TypeError, OverflowError, json.JSONDecodeError):
         return BackupHealthMetrics(configured=True, ready=False)
+
+
+def read_recovery_health_metrics(
+    health_file: str,
+    *,
+    maximum_age_seconds: int,
+    now: float | None = None,
+) -> RecoveryHealthMetrics:
+    """Read a bounded recovery-drill heartbeat and fail closed."""
+    if not health_file:
+        return RecoveryHealthMetrics(configured=False, ready=False)
+    path = Path(health_file)
+    try:
+        record = _read_bounded_json(path)
+        if not isinstance(record, dict) or set(record) != _RECOVERY_RECORD_KEYS:
+            return RecoveryHealthMetrics(configured=True, ready=False)
+        completed_at = record["completed_at"]
+        if not isinstance(completed_at, str) or not completed_at.endswith("Z"):
+            return RecoveryHealthMetrics(configured=True, ready=False)
+        completed = datetime.fromisoformat(completed_at.replace("Z", "+00:00"))
+        if completed.tzinfo is None or completed.utcoffset() != timezone.utc.utcoffset(None):
+            return RecoveryHealthMetrics(configured=True, ready=False)
+        timestamp = completed.timestamp()
+        current = time.time() if now is None else now
+        age = current - timestamp
+        source_size = record["backup_size_bytes"]
+        backup_name = record["backup_file"]
+        if (
+            record["schema_version"] != 1
+            or record["status"] != "passed"
+            or record["integrity_check"] != "ok"
+            or record["restore_check"] != "ok"
+            or not isinstance(backup_name, str)
+            or _BACKUP_NAME.fullmatch(backup_name) is None
+            or not isinstance(source_size, int)
+            or isinstance(source_size, bool)
+            or source_size < 1
+            or not isinstance(record["backup_sha256"], str)
+            or _SHA256.fullmatch(record["backup_sha256"]) is None
+            or not isinstance(record["schema_revision"], str)
+            or _SCHEMA_REVISION.fullmatch(record["schema_revision"]) is None
+        ):
+            return RecoveryHealthMetrics(configured=True, ready=False)
+        return RecoveryHealthMetrics(
+            configured=True,
+            ready=age >= -300 and age <= maximum_age_seconds,
+            age_seconds=max(0.0, age),
+            last_success_timestamp_seconds=timestamp,
+            source_size_bytes=source_size,
+        )
+    except (OSError, UnicodeError, ValueError, TypeError, OverflowError, json.JSONDecodeError):
+        return RecoveryHealthMetrics(configured=True, ready=False)
 
 
 def _read_bounded_json(path: Path) -> object:
@@ -211,8 +283,10 @@ def render_prometheus_metrics(
     version: str,
     database_ready: bool,
     backup: BackupHealthMetrics | None = None,
+    recovery: RecoveryHealthMetrics | None = None,
 ) -> str:
     backup = backup or BackupHealthMetrics(configured=False, ready=False)
+    recovery = recovery or RecoveryHealthMetrics(configured=False, ready=False)
     with _LOCK:
         request_rows = list(_REQUESTS.items())
         duration_sums = list(_DURATION_SUM.items())
@@ -233,6 +307,12 @@ def render_prometheus_metrics(
         "# HELP ton_tracker_backup_ready Latest backup heartbeat and artifact readiness state.",
         "# TYPE ton_tracker_backup_ready gauge",
         f"ton_tracker_backup_ready {1 if backup.ready else 0}",
+        "# HELP ton_tracker_recovery_monitoring_configured Recovery drill monitoring configuration state.",
+        "# TYPE ton_tracker_recovery_monitoring_configured gauge",
+        f"ton_tracker_recovery_monitoring_configured {1 if recovery.configured else 0}",
+        "# HELP ton_tracker_recovery_ready Latest recovery drill readiness state.",
+        "# TYPE ton_tracker_recovery_ready gauge",
+        f"ton_tracker_recovery_ready {1 if recovery.ready else 0}",
     ]
     if backup.last_success_timestamp_seconds is not None:
         lines.extend((
@@ -251,6 +331,24 @@ def render_prometheus_metrics(
             "# HELP ton_tracker_backup_size_bytes Size of the latest verified backup artifact.",
             "# TYPE ton_tracker_backup_size_bytes gauge",
             f"ton_tracker_backup_size_bytes {backup.size_bytes}",
+        ))
+    if recovery.last_success_timestamp_seconds is not None:
+        lines.extend((
+            "# HELP ton_tracker_recovery_last_success_timestamp_seconds Latest successful recovery drill time.",
+            "# TYPE ton_tracker_recovery_last_success_timestamp_seconds gauge",
+            f"ton_tracker_recovery_last_success_timestamp_seconds {recovery.last_success_timestamp_seconds:.3f}",
+        ))
+    if recovery.age_seconds is not None:
+        lines.extend((
+            "# HELP ton_tracker_recovery_age_seconds Age of the latest successful recovery drill.",
+            "# TYPE ton_tracker_recovery_age_seconds gauge",
+            f"ton_tracker_recovery_age_seconds {recovery.age_seconds:.3f}",
+        ))
+    if recovery.source_size_bytes is not None:
+        lines.extend((
+            "# HELP ton_tracker_recovery_source_size_bytes Source backup size used by the latest drill.",
+            "# TYPE ton_tracker_recovery_source_size_bytes gauge",
+            f"ton_tracker_recovery_source_size_bytes {recovery.source_size_bytes}",
         ))
     lines.extend((
         "# HELP ton_tracker_http_requests_total HTTP requests by route and status.",
