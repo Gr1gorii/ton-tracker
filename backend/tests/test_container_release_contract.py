@@ -49,6 +49,25 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     )
     jobs = workflow["jobs"]
     assert set(jobs) == {"backend", "frontend", "production"}
+    actions = [
+        step["uses"]
+        for job in jobs.values()
+        for step in job["steps"]
+        if "uses" in step
+    ]
+    assert set(actions) == {
+        "actions/checkout@v7",
+        "actions/setup-node@v7",
+        "actions/setup-python@v7",
+    }
+    checkout_steps = [
+        step
+        for job in jobs.values()
+        for step in job["steps"]
+        if step.get("uses") == "actions/checkout@v7"
+    ]
+    assert len(checkout_steps) == len(jobs)
+    assert all(step["with"]["persist-credentials"] is False for step in checkout_steps)
     commands = "\n".join(
         str(step.get("run", ""))
         for job in jobs.values()
@@ -92,12 +111,13 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         },
     ]
     actions = {step.get("uses") for step in job["steps"]}
-    assert "docker/setup-buildx-action@v3" in actions
-    assert "docker/login-action@v3" in actions
-    assert "docker/metadata-action@v5" in actions
-    assert "docker/build-push-action@v6" in actions
+    assert "actions/checkout@v7" in actions
+    assert "docker/setup-buildx-action@v4" in actions
+    assert "docker/login-action@v4" in actions
+    assert "docker/metadata-action@v6" in actions
+    assert "docker/build-push-action@v7" in actions
     publisher = next(
-        step for step in job["steps"] if step.get("uses") == "docker/build-push-action@v6"
+        step for step in job["steps"] if step.get("uses") == "docker/build-push-action@v7"
     )
     assert publisher["with"]["push"] is True
     assert publisher["with"]["platforms"] == "linux/amd64"
@@ -109,7 +129,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "grep -Eq" in validator["run"]
     assert validator["env"]["RELEASE_TAG"] == "${{ github.ref_name }}"
     metadata = next(
-        step for step in job["steps"] if step.get("uses") == "docker/metadata-action@v5"
+        step for step in job["steps"] if step.get("uses") == "docker/metadata-action@v6"
     )
     assert "type=raw,value=latest" not in metadata["with"]["tags"]
 
