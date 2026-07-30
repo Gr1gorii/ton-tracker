@@ -85,6 +85,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         },
     ]
     actions = {step.get("uses") for step in job["steps"]}
+    assert "docker/setup-buildx-action@v3" in actions
     assert "docker/login-action@v3" in actions
     assert "docker/metadata-action@v5" in actions
     assert "docker/build-push-action@v6" in actions
@@ -100,6 +101,10 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     )
     assert "grep -Eq" in validator["run"]
     assert validator["env"]["RELEASE_TAG"] == "${{ github.ref_name }}"
+    metadata = next(
+        step for step in job["steps"] if step.get("uses") == "docker/metadata-action@v5"
+    )
+    assert "type=raw,value=latest" not in metadata["with"]["tags"]
 
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
