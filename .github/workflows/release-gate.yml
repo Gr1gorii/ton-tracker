@@ -73,8 +73,8 @@ jobs:
       RECOVERY_RETRY_SECONDS: "300"
       RECOVERY_HEALTH_MAX_AGE_SECONDS: "691200"
       PROMETHEUS_RETENTION: 15d
-      BACKEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-backend:0.51.0
-      FRONTEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-frontend:0.51.0
+      BACKEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-backend:0.52.0
+      FRONTEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-frontend:0.52.0
       APP_PULL_POLICY: never
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
