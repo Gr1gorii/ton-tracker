@@ -24,8 +24,8 @@ def _environment() -> dict[str, str]:
         "WALLET_ACTIVITY_LIVE_ENABLED": "true",
         "TON_LITECLIENT_TRUST_LEVEL": "0",
         "TON_NETWORK": "mainnet",
-        "BACKEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-backend:0.54.1",
-        "FRONTEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.1",
+        "BACKEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-backend:0.54.2",
+        "FRONTEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.2",
         "APP_PORT": "8080",
         "BACKUP_INTERVAL_SECONDS": "86400",
         "BACKUP_RETENTION": "14",
@@ -88,7 +88,7 @@ def test_production_image_refs_are_exact_and_fail_closed():
         "",
         "ghcr.io/gr1gorii/ton-tracker-backend:latest",
         "ghcr.io/gr1gorii/ton-tracker-backend:0.54",
-        "registry.example/ton-tracker-backend:0.54.1",
+        "registry.example/ton-tracker-backend:0.54.2",
         "ghcr.io/gr1gorii/ton-tracker-backend@sha256:abcd",
     )
     for image_ref in invalid_refs:
@@ -100,7 +100,7 @@ def test_production_image_refs_are_exact_and_fail_closed():
             assert image_ref not in " ".join(errors)
 
     environment = _environment()
-    environment["FRONTEND_IMAGE"] = "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.2"
+    environment["FRONTEND_IMAGE"] = "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.3"
     assert "BACKEND_IMAGE and FRONTEND_IMAGE release tags must match" in (
         validate_environment(environment)
     )

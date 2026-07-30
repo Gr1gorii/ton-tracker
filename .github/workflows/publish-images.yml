@@ -163,7 +163,7 @@ jobs:
           for image in "$BACKEND_IMAGE" "$FRONTEND_IMAGE"; do
             gh attestation verify "oci://${image}" \
               --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml" \
+              --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml" \
               --source-ref "$GITHUB_REF" \
               --source-digest "$GITHUB_SHA" \
               --deny-self-hosted-runners

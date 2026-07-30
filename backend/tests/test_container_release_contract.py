@@ -175,10 +175,10 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--expected-public-url" in commands
     production_environment = jobs["production"]["env"]
     assert production_environment["BACKEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.54.1"
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.54.2"
     )
     assert production_environment["FRONTEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.1"
+        "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.2"
     )
     assert production_environment["APP_PULL_POLICY"] == "never"
     compose = yaml.safe_load(
@@ -299,7 +299,10 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert '("linux", "amd64")' in verifier_commands
     assert '("linux", "arm64")' in verifier_commands
     assert 'gh attestation verify "oci://${image}"' in verifier_commands
-    assert '--signer-workflow "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml"' in verifier_commands
+    assert '--signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml"' in verifier_commands
+    assert 'https://github.com/$GITHUB_REPOSITORY/.github/workflows/' not in (
+        verifier_commands
+    )
     assert '--source-ref "$GITHUB_REF"' in verifier_commands
     assert '--source-digest "$GITHUB_SHA"' in verifier_commands
     assert "--deny-self-hosted-runners" in verifier_commands
