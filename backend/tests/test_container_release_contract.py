@@ -57,24 +57,40 @@ def test_dockerfiles_copy_only_required_application_trees():
     assert f"FROM {PYTHON_IMAGE} AS runtime" in backend
     assert f"FROM {NODE_IMAGE} AS build" in frontend
     assert f"FROM {NGINX_IMAGE} AS runtime" in frontend
-    assert "COPY backend/requirements.txt backend/requirements.lock ./" in backend
-    assert "pip install --no-cache-dir --require-hashes -r requirements.lock" in backend
+    assert (
+        "COPY backend/requirements.runtime.txt backend/requirements.runtime.lock ./"
+        in backend
+    )
+    assert (
+        "pip install --no-cache-dir --require-hashes -r requirements.runtime.lock"
+        in backend
+    )
 
 
 def test_backend_dependency_lock_is_complete_and_used_by_ci():
     lock = (ROOT / "backend/requirements.lock").read_text(encoding="utf-8")
+    runtime_lock = (ROOT / "backend/requirements.runtime.lock").read_text(
+        encoding="utf-8"
+    )
     requirement_lines = [
         line
         for line in lock.splitlines()
         if line and not line.startswith((" ", "#"))
     ]
+    runtime_requirement_lines = [
+        line
+        for line in runtime_lock.splitlines()
+        if line and not line.startswith((" ", "#"))
+    ]
     assert len(requirement_lines) >= 40
-    assert all(
-        line.endswith(" " + chr(92))
-        and re.fullmatch(r"[a-z0-9][a-z0-9._-]*==\S+", line[:-2])
-        for line in requirement_lines
-    )
+    for lines in (requirement_lines, runtime_requirement_lines):
+        assert all(
+            line.endswith(" " + chr(92))
+            and re.fullmatch(r"[a-z0-9][a-z0-9._-]*==\S+", line[:-2])
+            for line in lines
+        )
     assert lock.count("--hash=sha256:") >= len(requirement_lines)
+    assert runtime_lock.count("--hash=sha256:") >= len(runtime_requirement_lines)
     for requirement in (
         "fastapi==0.141.1",
         "pydantic==2.13.4",
@@ -84,6 +100,19 @@ def test_backend_dependency_lock_is_complete_and_used_by_ci():
         "pytoniq==0.1.43",
     ):
         assert any(line.startswith(f"{requirement} ") for line in requirement_lines)
+        assert any(
+            line.startswith(f"{requirement} ") for line in runtime_requirement_lines
+        )
+    runtime_packages = {line.split("==", 1)[0] for line in runtime_requirement_lines}
+    assert {
+        "pytest",
+        "httpx",
+        "httpcore",
+        "pluggy",
+        "iniconfig",
+        "pygments",
+    }.isdisjoint(runtime_packages)
+    assert len(runtime_requirement_lines) < len(requirement_lines)
 
     workflow = yaml.safe_load(
         (ROOT / ".github/workflows/release-gate.yml").read_text(encoding="utf-8")
@@ -144,10 +173,10 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--expected-public-url" in commands
     production_environment = jobs["production"]["env"]
     assert production_environment["BACKEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.51.0"
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.52.0"
     )
     assert production_environment["FRONTEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-frontend:0.51.0"
+        "ghcr.io/gr1gorii/ton-tracker-frontend:0.52.0"
     )
     assert production_environment["APP_PULL_POLICY"] == "never"
     compose = yaml.safe_load(
