@@ -96,6 +96,14 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in commands
     assert "--smoke-url" in commands
     assert "--expected-public-url" in commands
+    production_environment = jobs["production"]["env"]
+    assert production_environment["BACKEND_IMAGE"] == (
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.49.0"
+    )
+    assert production_environment["FRONTEND_IMAGE"] == (
+        "ghcr.io/gr1gorii/ton-tracker-frontend:0.49.0"
+    )
+    assert production_environment["APP_PULL_POLICY"] == "never"
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     )
@@ -106,6 +114,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     workflow_path = ROOT / ".github/workflows/publish-images.yml"
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     assert workflow["permissions"] == {"contents": "read", "packages": "write"}
+    assert set(workflow["jobs"]) == {"publish", "verify"}
     job = workflow["jobs"]["publish"]
     matrix = job["strategy"]["matrix"]["include"]
     assert matrix == [
@@ -149,7 +158,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     )
-    backend_image = "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
+    backend_image = "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
     for service_name in (
         "production-preflight",
         "backend",
@@ -158,9 +167,39 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         "recovery-watchdog",
     ):
         assert compose["services"][service_name]["image"] == backend_image
+        assert compose["services"][service_name]["pull_policy"] == (
+            "${APP_PULL_POLICY:-always}"
+        )
     assert compose["services"]["frontend"]["image"] == (
-        "${FRONTEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-frontend:latest}"
+        "${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}"
     )
+    assert compose["services"]["frontend"]["pull_policy"] == (
+        "${APP_PULL_POLICY:-always}"
+    )
+    assert ":latest" not in (ROOT / "compose.production.yml").read_text(encoding="utf-8")
+
+    verifier = workflow["jobs"]["verify"]
+    assert verifier["needs"] == "publish"
+    assert verifier["permissions"] == {"contents": "read", "packages": "read"}
+    verifier_actions = {
+        step["uses"] for step in verifier["steps"] if "uses" in step
+    }
+    assert verifier_actions == {CHECKOUT_ACTION, LOGIN_ACTION}
+    assert all(PINNED_ACTION.fullmatch(action) for action in verifier_actions)
+    verifier_commands = "\n".join(
+        str(step.get("run", "")) for step in verifier["steps"]
+    )
+    assert "BACKEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-backend:${release}" in (
+        verifier_commands
+    )
+    assert "FRONTEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-frontend:${release}" in (
+        verifier_commands
+    )
+    assert "pull backend frontend" in verifier_commands
+    assert "up --detach --no-build --wait --wait-timeout 120 frontend" in (
+        verifier_commands
+    )
+    assert "--smoke-url" in verifier_commands
 
 
 def test_dependabot_tracks_every_release_dependency_surface():

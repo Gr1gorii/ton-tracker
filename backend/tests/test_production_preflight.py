@@ -24,6 +24,8 @@ def _environment() -> dict[str, str]:
         "WALLET_ACTIVITY_LIVE_ENABLED": "true",
         "TON_LITECLIENT_TRUST_LEVEL": "0",
         "TON_NETWORK": "mainnet",
+        "BACKEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-backend:0.49.0",
+        "FRONTEND_IMAGE": "ghcr.io/gr1gorii/ton-tracker-frontend:0.49.0",
         "APP_PORT": "8080",
         "BACKUP_INTERVAL_SECONDS": "86400",
         "BACKUP_RETENTION": "14",
@@ -70,6 +72,38 @@ def test_production_environment_requires_recovery_within_retention():
     errors = validate_environment(environment)
     assert "PUBLIC_APP_URL must be an origin-only HTTPS URL without credentials" in errors
     assert "TONAPI_BASE_URL must be an HTTPS URL without credentials" in errors
+
+
+def test_production_image_refs_are_exact_and_fail_closed():
+    environment = _environment()
+    environment["BACKEND_IMAGE"] = (
+        "ghcr.io/gr1gorii/ton-tracker-backend@sha256:" + "a" * 64
+    )
+    environment["FRONTEND_IMAGE"] = (
+        "ghcr.io/gr1gorii/ton-tracker-frontend@sha256:" + "b" * 64
+    )
+    assert validate_environment(environment) == []
+
+    invalid_refs = (
+        "",
+        "ghcr.io/gr1gorii/ton-tracker-backend:latest",
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.49",
+        "registry.example/ton-tracker-backend:0.49.0",
+        "ghcr.io/gr1gorii/ton-tracker-backend@sha256:abcd",
+    )
+    for image_ref in invalid_refs:
+        environment = _environment()
+        environment["BACKEND_IMAGE"] = image_ref
+        errors = validate_environment(environment)
+        assert any(error.startswith("BACKEND_IMAGE must use") for error in errors)
+        if image_ref:
+            assert image_ref not in " ".join(errors)
+
+    environment = _environment()
+    environment["FRONTEND_IMAGE"] = "ghcr.io/gr1gorii/ton-tracker-frontend:0.49.1"
+    assert "BACKEND_IMAGE and FRONTEND_IMAGE release tags must match" in (
+        validate_environment(environment)
+    )
 
 
 def test_public_smoke_contract_accepts_guarded_real_release():
