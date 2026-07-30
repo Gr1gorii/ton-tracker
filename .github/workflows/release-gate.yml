@@ -1,0 +1,92 @@
+name: Release gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r backend/requirements.txt
+      - run: python -m compileall -q backend ops
+      - run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test -- --run --testTimeout=15000
+      - run: npm run build
+      - run: npm audit --omit=dev
+
+  production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PUBLIC_APP_URL: https://gram.example
+      APP_PORT: "8080"
+      DATA_MODE: real
+      TON_NETWORK: mainnet
+      TONAPI_BASE_URL: https://tonapi.io
+      TONAPI_API_KEY: ci-placeholder-key-with-valid-length
+      WALLET_ACTIVITY_PROVIDER: tonapi
+      WALLET_ACTIVITY_LIVE_ENABLED: "true"
+      TON_LITECLIENT_TRUST_LEVEL: "0"
+      TONCONNECT_EXPECTED_DOMAIN: gram.example
+      BACKUP_INTERVAL_SECONDS: "86400"
+      BACKUP_RETENTION: "14"
+      BACKUP_HEALTH_MAX_AGE_SECONDS: "172800"
+      RECOVERY_INTERVAL_SECONDS: "604800"
+      RECOVERY_RETRY_SECONDS: "300"
+      RECOVERY_HEALTH_MAX_AGE_SECONDS: "691200"
+      PROMETHEUS_RETENTION: 15d
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: python ops/production_preflight.py
+      - run: docker compose -f compose.production.yml config --quiet
+      - run: docker build --file backend/Dockerfile --tag gram-scope-backend:gate .
+      - run: docker build --file frontend/Dockerfile --tag gram-scope-frontend:gate .
+      - name: Validate Prometheus configuration and alerts
+        run: >-
+          docker run --rm
+          --entrypoint /bin/promtool
+          --volume "$PWD/monitoring:/etc/prometheus:ro"
+          prom/prometheus:v2.54.1
+          check config /etc/prometheus/prometheus.yml
