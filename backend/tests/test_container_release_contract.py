@@ -79,6 +79,7 @@ def test_backend_dependency_lock_is_complete_and_used_by_ci():
         "fastapi==0.141.1",
         "pydantic==2.13.4",
         "sqlalchemy==2.0.51",
+        "greenlet==3.5.4",
         "pytoniq-core==0.1.46",
         "pytoniq==0.1.43",
     ):
