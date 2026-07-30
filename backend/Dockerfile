@@ -7,8 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN addgroup --system tontracker && adduser --system --ingroup tontracker tontracker
 
 WORKDIR /app/backend
-COPY backend/requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+COPY backend/requirements.txt backend/requirements.lock ./
+RUN pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY backend/ /app/backend/
 COPY ops/ /app/ops/
