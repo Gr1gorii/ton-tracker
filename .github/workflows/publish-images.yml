@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: publish-images-${{ github.ref }}
@@ -17,6 +16,12 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +62,8 @@ jobs:
           labels: |
             org.opencontainers.image.title=GRAM Scope ${{ matrix.component }}
             org.opencontainers.image.version=${{ github.ref_name }}
-      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+      - id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ${{ matrix.dockerfile }}
@@ -70,6 +76,13 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+      - name: Attest signed build provenance
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ${{ matrix.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-version: ${{ github.ref_name }}
+          push-to-registry: true
 
   verify:
     needs: publish
@@ -78,6 +91,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      attestations: read
     env:
       PUBLIC_APP_URL: https://gram.example
       APP_PORT: "18080"
@@ -140,6 +154,19 @@ jobs:
               raise SystemExit(f"release manifest is missing platforms: {sorted(missing)}")
           PY
             rm -f "$manifest"
+          done
+      - name: Verify signed build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for image in "$BACKEND_IMAGE" "$FRONTEND_IMAGE"; do
+            gh attestation verify "oci://${image}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml" \
+              --source-ref "$GITHUB_REF" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
           done
       - name: Pull and smoke-test exact release images
         run: |
