@@ -78,6 +78,8 @@ class Settings:
     ton_liteclient_timeout_seconds: int = 20
     tonconnect_expected_domain: str = "127.0.0.1:5173"
     tonconnect_proof_ttl_seconds: int = 900
+    backup_health_file: str = ""
+    backup_health_max_age_seconds: int = 172800
 
     @property
     def is_mock(self) -> bool:
@@ -194,6 +196,10 @@ def get_settings() -> Settings:
         ),
         tonconnect_proof_ttl_seconds=_env_int(
             "TONCONNECT_PROOF_TTL_SECONDS", 900, 60, 3600
+        ),
+        backup_health_file=_env("BACKUP_HEALTH_FILE"),
+        backup_health_max_age_seconds=_env_int(
+            "BACKUP_HEALTH_MAX_AGE_SECONDS", 172800, 900, 2592000
         ),
     )
 

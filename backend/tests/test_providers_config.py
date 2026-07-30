@@ -33,6 +33,14 @@ def test_default_mode_is_mock(monkeypatch):
     assert get_settings().data_mode == "mock"
 
 
+def test_backup_monitoring_config_is_bounded(monkeypatch):
+    monkeypatch.setenv("BACKUP_HEALTH_FILE", "/backups/.backup-health.json")
+    monkeypatch.setenv("BACKUP_HEALTH_MAX_AGE_SECONDS", "99999999")
+    settings = get_settings()
+    assert settings.backup_health_file == "/backups/.backup-health.json"
+    assert settings.backup_health_max_age_seconds == 2_592_000
+
+
 def test_data_mode_real_from_env(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "real")
     s = get_settings()

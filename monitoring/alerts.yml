@@ -22,3 +22,10 @@ groups:
           severity: warning
         annotations:
           summary: Sustained backend 5xx responses detected
+      - alert: TonTrackerBackupNotReady
+        expr: ton_tracker_backup_monitoring_configured == 1 and ton_tracker_backup_ready == 0
+        for: 30m
+        labels:
+          severity: critical
+        annotations:
+          summary: Verified SQLite backup heartbeat is missing, stale, or invalid

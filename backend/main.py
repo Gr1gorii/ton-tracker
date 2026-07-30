@@ -40,7 +40,11 @@ from routers.wallet_activity import router as wallet_activity_router
 from routers.wallet_ownership import router as wallet_ownership_router
 from services import export
 from services.analysis import analyze, get_providers_status
-from services.monitoring import observe_http_request, render_prometheus_metrics
+from services.monitoring import (
+    observe_http_request,
+    read_backup_health_metrics,
+    render_prometheus_metrics,
+)
 
 VERSION = "0.2.1"
 
@@ -132,10 +136,16 @@ def prometheus_metrics(session: Session = Depends(get_session)) -> Response:
         session.execute(text("SELECT 1")).scalar_one()
     except SQLAlchemyError:
         database_ready = False
+    settings = get_settings()
+    backup = read_backup_health_metrics(
+        settings.backup_health_file,
+        maximum_age_seconds=settings.backup_health_max_age_seconds,
+    )
     return Response(
         content=render_prometheus_metrics(
             version=VERSION,
             database_ready=database_ready,
+            backup=backup,
         ),
         media_type="text/plain; version=0.0.4; charset=utf-8",
         headers={"Cache-Control": "no-store"},
