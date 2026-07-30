@@ -83,6 +83,29 @@ jobs:
       - run: docker compose -f compose.production.yml config --quiet
       - run: docker build --file backend/Dockerfile --tag gram-scope-backend:gate .
       - run: docker build --file frontend/Dockerfile --tag gram-scope-frontend:gate .
+      - name: Smoke-test read-only production containers
+        env:
+          APP_PORT: "18080"
+          BACKEND_IMAGE: gram-scope-backend:gate
+          FRONTEND_IMAGE: gram-scope-frontend:gate
+        run: |
+          set -euo pipefail
+          project=gram-scope-runtime-gate
+          cleanup() {
+            docker compose --project-name "$project" --file compose.production.yml \
+              down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+          if ! docker compose --project-name "$project" --file compose.production.yml \
+            up --detach --no-build --wait --wait-timeout 120 frontend; then
+            docker compose --project-name "$project" --file compose.production.yml ps
+            docker compose --project-name "$project" --file compose.production.yml \
+              logs --no-color backend frontend
+            exit 1
+          fi
+          python ops/production_preflight.py \
+            --smoke-url "http://127.0.0.1:${APP_PORT}" \
+            --expected-public-url "$PUBLIC_APP_URL"
       - name: Validate Prometheus configuration and alerts
         run: >-
           docker run --rm

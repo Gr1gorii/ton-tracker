@@ -169,13 +169,19 @@ def run_smoke_checks(
     public_url: str,
     *,
     fetch: Callable[[str], HttpProbe] | None = None,
+    expected_public_url: str | None = None,
 ) -> list[str]:
     """Probe the public origin with bounded responses and strict contracts."""
     origin = public_url.rstrip("/")
     try:
         parsed = urlsplit(origin)
+        loopback_http = (
+            expected_public_url is not None
+            and parsed.scheme == "http"
+            and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+        )
         valid_origin = (
-            parsed.scheme == "https"
+            (parsed.scheme == "https" or loopback_http)
             and bool(parsed.hostname)
             and parsed.username is None
             and parsed.password is None
@@ -188,6 +194,9 @@ def run_smoke_checks(
         valid_origin = False
     if not valid_origin:
         return ["smoke URL must be an origin-only HTTPS URL without credentials"]
+    manifest_origin = (expected_public_url or origin).rstrip("/")
+    if expected_public_url is not None and not _is_public_https_origin(manifest_origin):
+        return ["expected public URL must be an origin-only HTTPS URL"]
     get = fetch or _fetch
     errors: list[str] = []
     probes: dict[str, HttpProbe] = {}
@@ -241,12 +250,29 @@ def run_smoke_checks(
         errors,
     )
     if manifest is not None and (
-        manifest.get("url") != origin
+        manifest.get("url") != manifest_origin
         or manifest.get("name") != "GRAM Scope"
-        or manifest.get("iconUrl") != f"{origin}/gram-scope-icon.png"
+        or manifest.get("iconUrl") != f"{manifest_origin}/gram-scope-icon.png"
     ):
         errors.append("TonConnect manifest does not match the public origin")
     return errors
+
+
+def _is_public_https_origin(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        return (
+            parsed.scheme == "https"
+            and bool(parsed.hostname)
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+            and not parsed.path
+            and (parsed.port is None or parsed.port >= 1)
+        )
+    except ValueError:
+        return False
 
 
 def _bounded_integer(
@@ -314,9 +340,15 @@ def _json_object(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke-url")
+    parser.add_argument("--expected-public-url")
     args = parser.parse_args()
+    if args.expected_public_url and not args.smoke_url:
+        parser.error("--expected-public-url requires --smoke-url")
     errors = (
-        run_smoke_checks(args.smoke_url)
+        run_smoke_checks(
+            args.smoke_url,
+            expected_public_url=args.expected_public_url,
+        )
         if args.smoke_url
         else validate_environment(os.environ)
     )

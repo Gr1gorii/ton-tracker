@@ -1,8 +1,16 @@
 """Production configuration and public smoke gate tests."""
 
 import json
+import sys
 
-from ops.production_preflight import HttpProbe, run_smoke_checks, validate_environment
+import pytest
+
+from ops.production_preflight import (
+    HttpProbe,
+    main,
+    run_smoke_checks,
+    validate_environment,
+)
 
 
 def _environment() -> dict[str, str]:
@@ -105,6 +113,27 @@ def test_public_smoke_contract_accepts_guarded_real_release():
 
     assert run_smoke_checks(origin, fetch=fetch) == []
 
+    loopback = "http://127.0.0.1:18080"
+
+    def fetch_loopback(url: str) -> HttpProbe:
+        return responses[url.removeprefix(loopback)]
+
+    assert run_smoke_checks(
+        loopback,
+        fetch=fetch_loopback,
+        expected_public_url=origin,
+    ) == []
+    assert run_smoke_checks(
+        "http://backend.internal:8080",
+        fetch=fetch_loopback,
+        expected_public_url=origin,
+    ) == ["smoke URL must be an origin-only HTTPS URL without credentials"]
+    assert run_smoke_checks(
+        loopback,
+        fetch=fetch_loopback,
+        expected_public_url="http://gram.example",
+    ) == ["expected public URL must be an origin-only HTTPS URL"]
+
 
 def test_public_smoke_contract_fails_closed_without_leaking_payloads():
     origin = "https://gram.example"
@@ -128,6 +157,17 @@ def test_public_smoke_contract_fails_closed_without_leaking_payloads():
     assert "/api/health is not in guarded real mode" in errors
     assert "/tonconnect-manifest.json returned invalid JSON" in errors
     assert "not-json" not in " ".join(errors)
+
+
+def test_expected_public_url_requires_a_smoke_target(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["production_preflight.py", "--expected-public-url", "https://gram.example"],
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 2
 
 
 def _json_probe(payload: dict) -> HttpProbe:
