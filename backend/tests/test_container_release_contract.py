@@ -12,6 +12,7 @@ SETUP_PYTHON_ACTION = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e
 SETUP_NODE_ACTION = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
 SETUP_QEMU_ACTION = "docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a"
 SETUP_BUILDX_ACTION = "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c"
+ATTEST_ACTION = "actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d"
 LOGIN_ACTION = "docker/login-action@dbcb813823bdd20940b903addbd779551569679f"
 METADATA_ACTION = "docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302"
 BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
@@ -174,10 +175,10 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--expected-public-url" in commands
     production_environment = jobs["production"]["env"]
     assert production_environment["BACKEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.53.0"
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.54.0"
     )
     assert production_environment["FRONTEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-frontend:0.53.0"
+        "ghcr.io/gr1gorii/ton-tracker-frontend:0.54.0"
     )
     assert production_environment["APP_PULL_POLICY"] == "never"
     compose = yaml.safe_load(
@@ -191,9 +192,16 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
 def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     workflow_path = ROOT / ".github/workflows/publish-images.yml"
     workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
-    assert workflow["permissions"] == {"contents": "read", "packages": "write"}
+    assert workflow["permissions"] == {"contents": "read"}
     assert set(workflow["jobs"]) == {"publish", "verify"}
     job = workflow["jobs"]["publish"]
+    assert job["permissions"] == {
+        "contents": "read",
+        "packages": "write",
+        "id-token": "write",
+        "attestations": "write",
+        "artifact-metadata": "write",
+    }
     matrix = job["strategy"]["matrix"]["include"]
     assert matrix == [
         {
@@ -213,6 +221,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         CHECKOUT_ACTION,
         SETUP_QEMU_ACTION,
         SETUP_BUILDX_ACTION,
+        ATTEST_ACTION,
         LOGIN_ACTION,
         METADATA_ACTION,
         BUILD_PUSH_ACTION,
@@ -228,6 +237,16 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert publisher["with"]["platforms"] == "linux/amd64,linux/arm64"
     assert publisher["with"]["provenance"] == "mode=max"
     assert publisher["with"]["sbom"] is True
+    assert publisher["id"] == "build"
+    attester = next(
+        step for step in job["steps"] if step.get("uses") == ATTEST_ACTION
+    )
+    assert attester["with"] == {
+        "subject-name": "${{ matrix.image }}",
+        "subject-digest": "${{ steps.build.outputs.digest }}",
+        "subject-version": "${{ github.ref_name }}",
+        "push-to-registry": True,
+    }
     validator = next(
         step for step in job["steps"] if step.get("name") == "Validate stable release tag"
     )
@@ -263,7 +282,11 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
 
     verifier = workflow["jobs"]["verify"]
     assert verifier["needs"] == "publish"
-    assert verifier["permissions"] == {"contents": "read", "packages": "read"}
+    assert verifier["permissions"] == {
+        "contents": "read",
+        "packages": "read",
+        "attestations": "read",
+    }
     verifier_actions = {
         step["uses"] for step in verifier["steps"] if "uses" in step
     }
@@ -275,6 +298,11 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "docker buildx imagetools inspect --raw" in verifier_commands
     assert '("linux", "amd64")' in verifier_commands
     assert '("linux", "arm64")' in verifier_commands
+    assert 'gh attestation verify "oci://${image}"' in verifier_commands
+    assert '--signer-workflow "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml"' in verifier_commands
+    assert '--source-ref "$GITHUB_REF"' in verifier_commands
+    assert '--source-digest "$GITHUB_SHA"' in verifier_commands
+    assert "--deny-self-hosted-runners" in verifier_commands
     assert "BACKEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-backend:${release}" in (
         verifier_commands
     )
