@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_PYTHON_ACTION = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
 SETUP_NODE_ACTION = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+SETUP_QEMU_ACTION = "docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a"
 SETUP_BUILDX_ACTION = "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c"
 LOGIN_ACTION = "docker/login-action@dbcb813823bdd20940b903addbd779551569679f"
 METADATA_ACTION = "docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302"
@@ -173,10 +174,10 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--expected-public-url" in commands
     production_environment = jobs["production"]["env"]
     assert production_environment["BACKEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.52.0"
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.53.0"
     )
     assert production_environment["FRONTEND_IMAGE"] == (
-        "ghcr.io/gr1gorii/ton-tracker-frontend:0.52.0"
+        "ghcr.io/gr1gorii/ton-tracker-frontend:0.53.0"
     )
     assert production_environment["APP_PULL_POLICY"] == "never"
     compose = yaml.safe_load(
@@ -210,16 +211,21 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert all(PINNED_ACTION.fullmatch(action) for action in actions)
     assert actions == {
         CHECKOUT_ACTION,
+        SETUP_QEMU_ACTION,
         SETUP_BUILDX_ACTION,
         LOGIN_ACTION,
         METADATA_ACTION,
         BUILD_PUSH_ACTION,
     }
+    qemu = next(
+        step for step in job["steps"] if step.get("uses") == SETUP_QEMU_ACTION
+    )
+    assert qemu["with"] == {"platforms": "arm64"}
     publisher = next(
         step for step in job["steps"] if step.get("uses") == BUILD_PUSH_ACTION
     )
     assert publisher["with"]["push"] is True
-    assert publisher["with"]["platforms"] == "linux/amd64"
+    assert publisher["with"]["platforms"] == "linux/amd64,linux/arm64"
     assert publisher["with"]["provenance"] == "mode=max"
     assert publisher["with"]["sbom"] is True
     validator = next(
@@ -266,6 +272,9 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     verifier_commands = "\n".join(
         str(step.get("run", "")) for step in verifier["steps"]
     )
+    assert "docker buildx imagetools inspect --raw" in verifier_commands
+    assert '("linux", "amd64")' in verifier_commands
+    assert '("linux", "arm64")' in verifier_commands
     assert "BACKEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-backend:${release}" in (
         verifier_commands
     )
