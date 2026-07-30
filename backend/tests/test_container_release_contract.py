@@ -1,11 +1,20 @@
 """Container build-context and release-gate regression tests."""
 
+import re
 from pathlib import Path
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
+CHECKOUT_ACTION = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+SETUP_PYTHON_ACTION = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
+SETUP_NODE_ACTION = "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
+SETUP_BUILDX_ACTION = "docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c"
+LOGIN_ACTION = "docker/login-action@dbcb813823bdd20940b903addbd779551569679f"
+METADATA_ACTION = "docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302"
+BUILD_PUSH_ACTION = "docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a"
+PINNED_ACTION = re.compile(r"^[^@\s]+/[^@\s]+@[0-9a-f]{40}$")
 
 
 def test_docker_context_excludes_local_state_and_credentials():
@@ -55,16 +64,17 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         for step in job["steps"]
         if "uses" in step
     ]
+    assert all(PINNED_ACTION.fullmatch(action) for action in actions)
     assert set(actions) == {
-        "actions/checkout@v7",
-        "actions/setup-node@v7",
-        "actions/setup-python@v7",
+        CHECKOUT_ACTION,
+        SETUP_NODE_ACTION,
+        SETUP_PYTHON_ACTION,
     }
     checkout_steps = [
         step
         for job in jobs.values()
         for step in job["steps"]
-        if step.get("uses") == "actions/checkout@v7"
+        if step.get("uses") == CHECKOUT_ACTION
     ]
     assert len(checkout_steps) == len(jobs)
     assert all(step["with"]["persist-credentials"] is False for step in checkout_steps)
@@ -110,14 +120,17 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
             "dockerfile": "frontend/Dockerfile",
         },
     ]
-    actions = {step.get("uses") for step in job["steps"]}
-    assert "actions/checkout@v7" in actions
-    assert "docker/setup-buildx-action@v4" in actions
-    assert "docker/login-action@v4" in actions
-    assert "docker/metadata-action@v6" in actions
-    assert "docker/build-push-action@v7" in actions
+    actions = {step["uses"] for step in job["steps"] if "uses" in step}
+    assert all(PINNED_ACTION.fullmatch(action) for action in actions)
+    assert actions == {
+        CHECKOUT_ACTION,
+        SETUP_BUILDX_ACTION,
+        LOGIN_ACTION,
+        METADATA_ACTION,
+        BUILD_PUSH_ACTION,
+    }
     publisher = next(
-        step for step in job["steps"] if step.get("uses") == "docker/build-push-action@v7"
+        step for step in job["steps"] if step.get("uses") == BUILD_PUSH_ACTION
     )
     assert publisher["with"]["push"] is True
     assert publisher["with"]["platforms"] == "linux/amd64"
@@ -129,7 +142,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "grep -Eq" in validator["run"]
     assert validator["env"]["RELEASE_TAG"] == "${{ github.ref_name }}"
     metadata = next(
-        step for step in job["steps"] if step.get("uses") == "docker/metadata-action@v6"
+        step for step in job["steps"] if step.get("uses") == METADATA_ACTION
     )
     assert "type=raw,value=latest" not in metadata["with"]["tags"]
 
@@ -148,3 +161,23 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert compose["services"]["frontend"]["image"] == (
         "${FRONTEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-frontend:latest}"
     )
+
+
+def test_dependabot_tracks_every_release_dependency_surface():
+    config = yaml.safe_load(
+        (ROOT / ".github/dependabot.yml").read_text(encoding="utf-8")
+    )
+    assert config["version"] == 2
+    updates = {
+        (entry["package-ecosystem"], entry["directory"]): entry
+        for entry in config["updates"]
+    }
+    assert set(updates) == {
+        ("github-actions", "/"),
+        ("pip", "/backend"),
+        ("npm", "/frontend"),
+    }
+    for entry in updates.values():
+        assert entry["schedule"]["interval"] == "weekly"
+        assert entry["schedule"]["timezone"] == "Europe/Rome"
+        assert entry["open-pull-requests-limit"] == 5
