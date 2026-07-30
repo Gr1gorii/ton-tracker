@@ -1,11 +1,20 @@
 """Verified SQLite backup retention tests."""
 
+from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
 import sqlite3
 
 import pytest
 
-from ops.backup_sqlite import check_backup_health, create_backup, verify_backup
+from ops.backup_sqlite import (
+    BACKUP_HEALTH_RECORD,
+    check_backup_health,
+    create_backup,
+    verify_backup,
+    write_backup_health_record,
+)
 
 
 def _database(path: Path) -> None:
@@ -21,13 +30,36 @@ def test_backup_is_atomic_verified_and_retained(tmp_path):
     backups = tmp_path / "backups"
     _database(source)
     first = create_backup(source, backups, retention=1)
-    verify_backup(first)
+    assert verify_backup(first) == "20260710_0013"
     with sqlite3.connect(source) as connection:
         connection.execute("INSERT INTO evidence VALUES ('second')")
     second = create_backup(source, backups, retention=1)
-    verify_backup(second)
+    assert verify_backup(second) == "20260710_0013"
     assert list(backups.glob("*.tmp")) == []
+    assert list(backups.glob(".*.tmp")) == []
     assert len(list(backups.glob("ton-check-*.sqlite3"))) == 1
+    heartbeat = json.loads((backups / BACKUP_HEALTH_RECORD).read_text())
+    assert heartbeat["schema_version"] == 1
+    assert heartbeat["status"] == "verified"
+    assert heartbeat["backup_file"] == second.name
+    assert heartbeat["size_bytes"] == second.stat().st_size
+    assert heartbeat["sha256"] == hashlib.sha256(second.read_bytes()).hexdigest()
+    assert heartbeat["schema_revision"] == "20260710_0013"
+    assert heartbeat["integrity_check"] == "ok"
+    assert datetime.fromisoformat(heartbeat["completed_at"].replace("Z", "+00:00")).tzinfo == timezone.utc
+
+
+def test_backup_health_record_rejects_invalid_revision_and_naive_time(tmp_path):
+    backup = tmp_path / "ton-check-20260730T120000Z.sqlite3"
+    backup.write_bytes(b"backup")
+    with pytest.raises(RuntimeError, match="revision"):
+        write_backup_health_record(backup, schema_revision="bad revision")
+    with pytest.raises(RuntimeError, match="timezone-aware"):
+        write_backup_health_record(
+            backup,
+            schema_revision="20260710_0013",
+            completed_at=datetime(2026, 7, 30, 12, 0),
+        )
 
 
 def test_backup_healthcheck_accepts_the_newest_verified_backup(tmp_path):

@@ -16,8 +16,11 @@ services:
       TON_LITECLIENT_TIMEOUT_SECONDS: ${TON_LITECLIENT_TIMEOUT_SECONDS:-20}
       TONCONNECT_EXPECTED_DOMAIN: ${TONCONNECT_EXPECTED_DOMAIN:?TONCONNECT_EXPECTED_DOMAIN is required}
       TONCONNECT_PROOF_TTL_SECONDS: ${TONCONNECT_PROOF_TTL_SECONDS:-900}
+      BACKUP_HEALTH_FILE: /backups/.backup-health.json
+      BACKUP_HEALTH_MAX_AGE_SECONDS: ${BACKUP_HEALTH_MAX_AGE_SECONDS:-172800}
     volumes:
       - ton_tracker_data:/data
+      - ton_tracker_backups:/backups:ro
     expose:
       - "8000"
     security_opt:

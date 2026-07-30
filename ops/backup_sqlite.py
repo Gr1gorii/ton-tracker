@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
+import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import time
 from urllib.parse import unquote
+
+
+BACKUP_HEALTH_RECORD = ".backup-health.json"
+_SCHEMA_REVISION = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 
 def database_path() -> Path:
@@ -30,13 +37,14 @@ def create_backup(source: Path, destination_dir: Path, retention: int) -> Path:
     temporary.unlink(missing_ok=True)
     with sqlite3.connect(source) as source_db, sqlite3.connect(temporary) as backup_db:
         source_db.backup(backup_db)
-    verify_backup(temporary)
+    schema_revision = verify_backup(temporary)
     temporary.replace(final)
     _apply_retention(destination_dir, max(1, retention))
+    write_backup_health_record(final, schema_revision=schema_revision)
     return final
 
 
-def verify_backup(path: Path) -> None:
+def verify_backup(path: Path) -> str:
     if not path.is_file():
         raise RuntimeError(f"Backup does not exist: {path}")
     with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
@@ -48,6 +56,51 @@ def verify_backup(path: Path) -> None:
         ).fetchone()
         if version is None or not str(version[0]).strip():
             raise RuntimeError("Backup has no Alembic schema revision.")
+        return str(version[0]).strip()
+
+
+def write_backup_health_record(
+    backup: Path,
+    *,
+    schema_revision: str,
+    completed_at: datetime | None = None,
+) -> Path:
+    """Publish an atomic, bounded heartbeat for read-only monitoring consumers."""
+    if not backup.is_file():
+        raise RuntimeError("Completed backup is unavailable for health publication.")
+    if _SCHEMA_REVISION.fullmatch(schema_revision) is None:
+        raise RuntimeError("Backup schema revision is invalid.")
+    completed = completed_at or datetime.now(timezone.utc)
+    if completed.tzinfo is None or completed.utcoffset() is None:
+        raise RuntimeError("Backup completion time must be timezone-aware.")
+    record = {
+        "schema_version": 1,
+        "status": "verified",
+        "backup_file": backup.name,
+        "completed_at": completed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "size_bytes": backup.stat().st_size,
+        "sha256": _sha256(backup),
+        "schema_revision": schema_revision,
+        "integrity_check": "ok",
+    }
+    destination = backup.parent / BACKUP_HEALTH_RECORD
+    temporary = destination.with_suffix(".json.tmp")
+    temporary.unlink(missing_ok=True)
+    with temporary.open("w", encoding="utf-8") as handle:
+        json.dump(record, handle, sort_keys=True, separators=(",", ":"))
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(destination)
+    return destination
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def check_backup_health(
