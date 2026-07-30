@@ -14,8 +14,10 @@ from main import app
 from services.database_migrations import run_database_migrations
 from services.monitoring import (
     BackupHealthMetrics,
+    RecoveryHealthMetrics,
     observe_http_request,
     read_backup_health_metrics,
+    read_recovery_health_metrics,
     render_prometheus_metrics,
 )
 
@@ -27,6 +29,8 @@ def test_prometheus_renderer_uses_bounded_route_labels():
     assert "ton_tracker_database_ready 1" in metrics
     assert "ton_tracker_backup_monitoring_configured 0" in metrics
     assert "ton_tracker_backup_ready 0" in metrics
+    assert "ton_tracker_recovery_monitoring_configured 0" in metrics
+    assert "ton_tracker_recovery_ready 0" in metrics
     assert 'route="/api/health",status="200"' in metrics
     assert "ton_tracker_http_request_duration_seconds_sum" in metrics
 
@@ -102,6 +106,55 @@ def test_backup_heartbeat_rejects_unbounded_or_malformed_records(tmp_path):
     ).ready is False
 
 
+def test_recovery_heartbeat_metrics_are_bounded_and_fail_closed(tmp_path):
+    health = tmp_path / ".recovery-health.json"
+    completed = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc).timestamp()
+    record = {
+        "schema_version": 1,
+        "status": "passed",
+        "completed_at": "2026-07-30T12:00:00Z",
+        "backup_file": "ton-check-20260730T115900Z.sqlite3",
+        "backup_size_bytes": 12345,
+        "backup_sha256": "b" * 64,
+        "schema_revision": "20260710_0014",
+        "integrity_check": "ok",
+        "restore_check": "ok",
+    }
+    health.write_text(json.dumps(record), encoding="utf-8")
+
+    status = read_recovery_health_metrics(
+        str(health), maximum_age_seconds=900, now=completed + 899
+    )
+    assert status == RecoveryHealthMetrics(
+        configured=True,
+        ready=True,
+        age_seconds=899,
+        last_success_timestamp_seconds=completed,
+        source_size_bytes=12345,
+    )
+    metrics = render_prometheus_metrics(
+        version="0.2.1",
+        database_ready=True,
+        recovery=status,
+    )
+    assert "ton_tracker_recovery_monitoring_configured 1" in metrics
+    assert "ton_tracker_recovery_ready 1" in metrics
+    assert "ton_tracker_recovery_age_seconds 899.000" in metrics
+    assert "ton_tracker_recovery_source_size_bytes 12345" in metrics
+    assert record["backup_file"] not in metrics
+
+    stale = read_recovery_health_metrics(
+        str(health), maximum_age_seconds=900, now=completed + 901
+    )
+    assert stale.configured is True
+    assert stale.ready is False
+    record["restore_check"] = "failed"
+    health.write_text(json.dumps(record), encoding="utf-8")
+    assert read_recovery_health_metrics(
+        str(health), maximum_age_seconds=900, now=completed + 1
+    ).ready is False
+
+
 def test_readiness_and_metrics_endpoints(monkeypatch):
     engine = create_engine(
         "sqlite://",
@@ -130,6 +183,7 @@ def test_readiness_and_metrics_endpoints(monkeypatch):
         assert metrics.status_code == 200
         assert "ton_tracker_database_ready 1" in metrics.text
         assert "ton_tracker_backup_monitoring_configured 0" in metrics.text
+        assert "ton_tracker_recovery_monitoring_configured 0" in metrics.text
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

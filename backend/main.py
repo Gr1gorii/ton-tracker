@@ -43,6 +43,7 @@ from services.analysis import analyze, get_providers_status
 from services.monitoring import (
     observe_http_request,
     read_backup_health_metrics,
+    read_recovery_health_metrics,
     render_prometheus_metrics,
 )
 
@@ -141,11 +142,16 @@ def prometheus_metrics(session: Session = Depends(get_session)) -> Response:
         settings.backup_health_file,
         maximum_age_seconds=settings.backup_health_max_age_seconds,
     )
+    recovery = read_recovery_health_metrics(
+        settings.recovery_health_file,
+        maximum_age_seconds=settings.recovery_health_max_age_seconds,
+    )
     return Response(
         content=render_prometheus_metrics(
             version=VERSION,
             database_ready=database_ready,
             backup=backup,
+            recovery=recovery,
         ),
         media_type="text/plain; version=0.0.4; charset=utf-8",
         headers={"Cache-Control": "no-store"},

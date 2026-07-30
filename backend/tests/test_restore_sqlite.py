@@ -1,5 +1,6 @@
 """Fail-closed SQLite recovery drill tests."""
 
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -8,7 +9,13 @@ import sqlite3
 import pytest
 
 from ops.backup_sqlite import BACKUP_HEALTH_RECORD, create_backup
-from ops.restore_sqlite import restore_from_heartbeat
+from ops.restore_sqlite import (
+    RECOVERY_HEALTH_RECORD,
+    check_recovery_health,
+    invalidate_recovery_health_record,
+    restore_from_heartbeat,
+    run_recovery_drill,
+)
 
 
 def _database(path: Path) -> None:
@@ -121,3 +128,53 @@ def test_recovery_drill_requires_private_new_destination(tmp_path):
             linked_destination,
         )
     assert protected.read_bytes() == b"do-not-overwrite"
+
+
+def test_scheduled_recovery_drill_publishes_bounded_health_and_cleans_workspace(
+    tmp_path,
+):
+    source = tmp_path / "source.sqlite3"
+    backups = tmp_path / "backups"
+    recovery = tmp_path / "recovery"
+    recovery.mkdir()
+    _database(source)
+    backup = create_backup(source, backups, retention=2)
+    completed = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
+    status_file = recovery / RECOVERY_HEALTH_RECORD
+
+    result = run_recovery_drill(
+        backups / BACKUP_HEALTH_RECORD,
+        workspace=tmp_path,
+        status_file=status_file,
+        completed_at=completed,
+    )
+
+    assert result.source == backup
+    assert not result.restored.exists()
+    assert status_file.stat().st_mode & 0o777 == 0o600
+    assert list(tmp_path.glob("restore-drill-*.sqlite3")) == []
+    record = check_recovery_health(
+        status_file,
+        maximum_age_seconds=900,
+        now=completed.timestamp() + 899,
+    )
+    assert record == {
+        "schema_version": 1,
+        "status": "passed",
+        "completed_at": "2026-07-30T12:00:00Z",
+        "backup_file": backup.name,
+        "backup_size_bytes": backup.stat().st_size,
+        "backup_sha256": result.sha256,
+        "schema_revision": "20260710_0014",
+        "integrity_check": "ok",
+        "restore_check": "ok",
+    }
+    with pytest.raises(RuntimeError, match="stale"):
+        check_recovery_health(
+            status_file,
+            maximum_age_seconds=900,
+            now=completed.timestamp() + 901,
+        )
+
+    invalidate_recovery_health_record(status_file)
+    assert not status_file.exists()

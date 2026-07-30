@@ -18,9 +18,12 @@ services:
       TONCONNECT_PROOF_TTL_SECONDS: ${TONCONNECT_PROOF_TTL_SECONDS:-900}
       BACKUP_HEALTH_FILE: /backups/.backup-health.json
       BACKUP_HEALTH_MAX_AGE_SECONDS: ${BACKUP_HEALTH_MAX_AGE_SECONDS:-172800}
+      RECOVERY_HEALTH_FILE: /recovery/.recovery-health.json
+      RECOVERY_HEALTH_MAX_AGE_SECONDS: ${RECOVERY_HEALTH_MAX_AGE_SECONDS:-691200}
     volumes:
       - ton_tracker_data:/data
       - ton_tracker_backups:/backups:ro
+      - ton_tracker_recovery:/recovery:ro
     expose:
       - "8000"
     security_opt:
@@ -118,7 +121,50 @@ services:
       - /tmp
     restart: "no"
 
+  recovery-watchdog:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      - python
+      - /app/ops/restore_sqlite.py
+      - --loop
+      - --heartbeat
+      - /backups/.backup-health.json
+      - --workspace
+      - /tmp
+      - --status-file
+      - /recovery/.recovery-health.json
+    environment:
+      RECOVERY_INTERVAL_SECONDS: ${RECOVERY_INTERVAL_SECONDS:-604800}
+      RECOVERY_RETRY_SECONDS: ${RECOVERY_RETRY_SECONDS:-300}
+    volumes:
+      - ton_tracker_backups:/backups:ro
+      - ton_tracker_recovery:/recovery
+    depends_on:
+      backup:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - /app/ops/restore_sqlite.py
+        - --healthcheck
+        - --status-file
+        - /recovery/.recovery-health.json
+      interval: 10m
+      timeout: 60s
+      start_period: 120s
+      retries: 3
+
 volumes:
   ton_tracker_data:
   ton_tracker_backups:
+  ton_tracker_recovery:
   prometheus_data:

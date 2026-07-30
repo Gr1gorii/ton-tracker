@@ -29,3 +29,10 @@ groups:
           severity: critical
         annotations:
           summary: Verified SQLite backup heartbeat is missing, stale, or invalid
+      - alert: TonTrackerRecoveryDrillNotReady
+        expr: ton_tracker_recovery_monitoring_configured == 1 and ton_tracker_recovery_ready == 0
+        for: 2h
+        labels:
+          severity: critical
+        annotations:
+          summary: Verified SQLite recovery drill is missing, stale, or invalid

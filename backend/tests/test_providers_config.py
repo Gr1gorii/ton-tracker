@@ -41,6 +41,14 @@ def test_backup_monitoring_config_is_bounded(monkeypatch):
     assert settings.backup_health_max_age_seconds == 2_592_000
 
 
+def test_recovery_monitoring_config_is_bounded(monkeypatch):
+    monkeypatch.setenv("RECOVERY_HEALTH_FILE", "/recovery/.recovery-health.json")
+    monkeypatch.setenv("RECOVERY_HEALTH_MAX_AGE_SECONDS", "1")
+    settings = get_settings()
+    assert settings.recovery_health_file == "/recovery/.recovery-health.json"
+    assert settings.recovery_health_max_age_seconds == 3_600
+
+
 def test_data_mode_real_from_env(monkeypatch):
     monkeypatch.setenv("DATA_MODE", "real")
     s = get_settings()
