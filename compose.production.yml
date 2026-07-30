@@ -1,4 +1,35 @@
 services:
+  production-preflight:
+    profiles: ["ops"]
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "/app/ops/production_preflight.py"]
+    environment:
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:?PUBLIC_APP_URL is required}
+      APP_PORT: ${APP_PORT:-8080}
+      DATA_MODE: real
+      TON_NETWORK: ${TON_NETWORK:-mainnet}
+      TONAPI_BASE_URL: ${TONAPI_BASE_URL:-https://tonapi.io}
+      TONAPI_API_KEY: ${TONAPI_API_KEY:?TONAPI_API_KEY is required}
+      WALLET_ACTIVITY_PROVIDER: tonapi
+      WALLET_ACTIVITY_LIVE_ENABLED: "true"
+      TON_LITECLIENT_TRUST_LEVEL: "0"
+      TONCONNECT_EXPECTED_DOMAIN: ${TONCONNECT_EXPECTED_DOMAIN:?TONCONNECT_EXPECTED_DOMAIN is required}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-14}
+      BACKUP_HEALTH_MAX_AGE_SECONDS: ${BACKUP_HEALTH_MAX_AGE_SECONDS:-172800}
+      RECOVERY_INTERVAL_SECONDS: ${RECOVERY_INTERVAL_SECONDS:-604800}
+      RECOVERY_RETRY_SECONDS: ${RECOVERY_RETRY_SECONDS:-300}
+      RECOVERY_HEALTH_MAX_AGE_SECONDS: ${RECOVERY_HEALTH_MAX_AGE_SECONDS:-691200}
+      PROMETHEUS_RETENTION: ${PROMETHEUS_RETENTION:-15d}
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+
   backend:
     build:
       context: .
