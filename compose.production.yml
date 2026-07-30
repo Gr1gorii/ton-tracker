@@ -1,6 +1,7 @@
 services:
   production-preflight:
     profiles: ["ops"]
+    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -31,6 +32,7 @@ services:
     restart: "no"
 
   backend:
+    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -64,6 +66,7 @@ services:
       - /tmp
 
   frontend:
+    image: "${FRONTEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-frontend:latest}"
     build:
       context: .
       dockerfile: frontend/Dockerfile
@@ -103,6 +106,7 @@ services:
       - no-new-privileges:true
 
   backup:
+    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -133,6 +137,7 @@ services:
 
   restore-drill:
     profiles: ["recovery"]
+    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -153,6 +158,7 @@ services:
     restart: "no"
 
   recovery-watchdog:
+    image: "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
     build:
       context: .
       dockerfile: backend/Dockerfile

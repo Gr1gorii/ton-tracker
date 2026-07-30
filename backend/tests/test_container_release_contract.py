@@ -64,3 +64,55 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "frontend/Dockerfile" in commands
     assert "--entrypoint /bin/promtool" in commands
     assert "check config /etc/prometheus/prometheus.yml" in commands
+
+
+def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
+    workflow_path = ROOT / ".github/workflows/publish-images.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    assert workflow["permissions"] == {"contents": "read", "packages": "write"}
+    job = workflow["jobs"]["publish"]
+    matrix = job["strategy"]["matrix"]["include"]
+    assert matrix == [
+        {
+            "component": "backend",
+            "image": "ghcr.io/gr1gorii/ton-tracker-backend",
+            "dockerfile": "backend/Dockerfile",
+        },
+        {
+            "component": "frontend",
+            "image": "ghcr.io/gr1gorii/ton-tracker-frontend",
+            "dockerfile": "frontend/Dockerfile",
+        },
+    ]
+    actions = {step.get("uses") for step in job["steps"]}
+    assert "docker/login-action@v3" in actions
+    assert "docker/metadata-action@v5" in actions
+    assert "docker/build-push-action@v6" in actions
+    publisher = next(
+        step for step in job["steps"] if step.get("uses") == "docker/build-push-action@v6"
+    )
+    assert publisher["with"]["push"] is True
+    assert publisher["with"]["platforms"] == "linux/amd64"
+    assert publisher["with"]["provenance"] == "mode=max"
+    assert publisher["with"]["sbom"] is True
+    validator = next(
+        step for step in job["steps"] if step.get("name") == "Validate stable release tag"
+    )
+    assert "grep -Eq" in validator["run"]
+    assert validator["env"]["RELEASE_TAG"] == "${{ github.ref_name }}"
+
+    compose = yaml.safe_load(
+        (ROOT / "compose.production.yml").read_text(encoding="utf-8")
+    )
+    backend_image = "${BACKEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-backend:latest}"
+    for service_name in (
+        "production-preflight",
+        "backend",
+        "backup",
+        "restore-drill",
+        "recovery-watchdog",
+    ):
+        assert compose["services"][service_name]["image"] == backend_image
+    assert compose["services"]["frontend"]["image"] == (
+        "${FRONTEND_IMAGE:-ghcr.io/gr1gorii/ton-tracker-frontend:latest}"
+    )
