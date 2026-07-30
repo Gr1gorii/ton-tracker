@@ -1,7 +1,7 @@
 fastapi>=0.115
 uvicorn[standard]>=0.30
 pydantic>=2.7
-SQLAlchemy>=2.0
+SQLAlchemy>=2.0.51
 greenlet>=1  # Explicitly lock SQLAlchemy's Linux x86_64 dependency.
 alembic>=1.18,<2.0
 pytoniq-core==0.1.46
