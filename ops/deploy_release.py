@@ -13,6 +13,11 @@ import sys
 import tempfile
 
 try:
+    from .deployment_state import (
+        DeploymentIdentity,
+        DeploymentStateError,
+        locked_deployment_state,
+    )
     from .production_preflight import run_smoke_checks, validate_environment
     from .verify_release_bundle import (
         AttestationVerifier,
@@ -21,6 +26,11 @@ try:
         verify_release_bundle,
     )
 except ImportError:  # pragma: no cover - direct script execution
+    from deployment_state import (
+        DeploymentIdentity,
+        DeploymentStateError,
+        locked_deployment_state,
+    )
     from production_preflight import run_smoke_checks, validate_environment
     from verify_release_bundle import (
         AttestationVerifier,
@@ -106,26 +116,45 @@ def verify_and_deploy_release(
     attestation_path: Path,
     expected_tag: str,
     environment: Mapping[str, str],
+    state_directory: Path,
     smoke_url: str | None = None,
     attestation_verifier: AttestationVerifier | None = None,
     command_runner: CommandRunner | None = None,
     smoke_checker: SmokeChecker | None = None,
 ) -> DeploymentResult:
-    """Verify public assets immediately before running the guarded rollout."""
-    bundle = verify_release_bundle(
-        manifest_path=manifest_path,
-        checksum_path=checksum_path,
-        attestation_path=attestation_path,
-        expected_tag=expected_tag,
-        attestation_verifier=attestation_verifier,
-    )
-    return run_guarded_rollout(
-        bundle,
-        environment=environment,
-        smoke_url=smoke_url,
-        command_runner=command_runner,
-        smoke_checker=smoke_checker,
-    )
+    """Serialize, verify, deploy, then atomically record one successful release."""
+    try:
+        with locked_deployment_state(state_directory) as deployment_state:
+            bundle = verify_release_bundle(
+                manifest_path=manifest_path,
+                checksum_path=checksum_path,
+                attestation_path=attestation_path,
+                expected_tag=expected_tag,
+                attestation_verifier=attestation_verifier,
+            )
+            result = run_guarded_rollout(
+                bundle,
+                environment=environment,
+                smoke_url=smoke_url,
+                command_runner=command_runner,
+                smoke_checker=smoke_checker,
+            )
+            try:
+                deployment_state.record_success(
+                    DeploymentIdentity(
+                        tag=result.tag,
+                        source_commit=result.source_commit,
+                        manifest_sha256=result.manifest_sha256,
+                    )
+                )
+            except DeploymentStateError as exc:
+                raise DeploymentRolloutError(
+                    "deployment succeeded but receipt finalization failed; "
+                    "manual inspection is required"
+                ) from exc
+            return result
+    except DeploymentStateError as exc:
+        raise DeploymentRolloutError(f"deployment state gate failed: {exc}") from exc
 
 
 def rollout_steps() -> tuple[RolloutStep, ...]:
@@ -230,6 +259,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--checksum", type=Path, required=True)
     parser.add_argument("--attestation-bundle", type=Path, required=True)
     parser.add_argument("--tag", required=True)
+    parser.add_argument("--state-directory", type=Path, required=True)
     parser.add_argument("--smoke-url")
     args = parser.parse_args(argv)
     try:
@@ -239,6 +269,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             attestation_path=args.attestation_bundle,
             expected_tag=args.tag,
             environment=os.environ,
+            state_directory=args.state_directory,
             smoke_url=args.smoke_url,
         )
     except (ReleaseBundleVerificationError, DeploymentRolloutError) as exc:

@@ -187,7 +187,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.59.0" in commands
+    assert "--tag v0.60.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
