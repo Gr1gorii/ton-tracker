@@ -118,12 +118,13 @@ def verify_and_deploy_release(
     environment: Mapping[str, str],
     state_directory: Path,
     rollback: bool = False,
+    resume: bool = False,
     smoke_url: str | None = None,
     attestation_verifier: AttestationVerifier | None = None,
     command_runner: CommandRunner | None = None,
     smoke_checker: SmokeChecker | None = None,
 ) -> DeploymentResult:
-    """Serialize, verify, deploy, then atomically record one successful release."""
+    """Verify, journal, deploy, and commit one serialized release attempt."""
     try:
         with locked_deployment_state(state_directory) as deployment_state:
             bundle = verify_release_bundle(
@@ -138,7 +139,17 @@ def verify_and_deploy_release(
                 source_commit=bundle.source_commit,
                 manifest_sha256=hashlib.sha256(bundle.manifest_bytes).hexdigest(),
             )
-            deployment_state.authorize(identity, rollback=rollback)
+            attempt = deployment_state.prepare_attempt(
+                identity,
+                rollback=rollback,
+                resume=resume,
+            )
+            if attempt.already_completed:
+                return DeploymentResult(
+                    tag=identity.tag,
+                    source_commit=identity.source_commit,
+                    manifest_sha256=identity.manifest_sha256,
+                )
             result = run_guarded_rollout(
                 bundle,
                 environment=environment,
@@ -147,13 +158,13 @@ def verify_and_deploy_release(
                 smoke_checker=smoke_checker,
             )
             try:
-                deployment_state.record_success(
+                deployment_state.complete_attempt(
                     identity,
-                    operation="rollback" if rollback else "deployment",
+                    attempt,
                 )
             except DeploymentStateError as exc:
                 raise DeploymentRolloutError(
-                    "rollout succeeded but receipt finalization failed; "
+                    "rollout succeeded but deployment state finalization failed; "
                     "manual inspection is required"
                 ) from exc
             return result
@@ -269,6 +280,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         action="store_true",
         help="authorize only the exact previous release from the current receipt",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume only the exact signed release in the pending attempt journal",
+    )
     parser.add_argument("--smoke-url")
     args = parser.parse_args(argv)
     try:
@@ -280,6 +296,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             environment=os.environ,
             state_directory=args.state_directory,
             rollback=args.rollback,
+            resume=args.resume,
             smoke_url=args.smoke_url,
         )
     except (ReleaseBundleVerificationError, DeploymentRolloutError) as exc:

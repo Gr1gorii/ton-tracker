@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.61.0
+release=v0.62.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -41,21 +41,26 @@ operator-owned state directory. A concurrent rollout fails before bundle
 verification or any container action. While holding that lock, the command
 verifies the signed bundle immediately before use, keeps a private snapshot of
 the verified manifest for the entire rollout, and injects only its two
-digest-pinned image references. It then runs compose validation, the container
-preflight, an on-demand SQLite backup, a restore drill of that backup, the exact
-image pull, service activation, and the public smoke gate in order. No later
-step runs after an earlier failure. The tool discards command output on failure
-so provider or container diagnostics cannot leak through the release interface.
+digest-pinned image references. After authorization and before any compose or
+container action, it atomically writes `pending-deployment.json` with a random
+attempt id, operation, start time, exact target identity, and active base
+identity. It then runs compose validation, the container preflight, an on-demand
+SQLite backup, a restore drill of that backup, the exact image pull, service
+activation, and the public smoke gate in order. No later step runs after an
+earlier failure. The tool discards command output on failure so provider or
+container diagnostics cannot leak through the release interface.
 
 Only after every gate succeeds, the command atomically writes a private
 `current-deployment.json` receipt in the state directory. The strict receipt
 records the active tag, source commit, manifest digest, completion time, and the
-immediately previous successful release identity. Receipt schema v2 also records
-whether the successful transition was a deployment or rollback; existing v1
-receipts remain accepted and are upgraded on the next success. A failed or
-interrupted rollout never replaces the last successful receipt. Missing
-privacy, a corrupt receipt, or a busy deployment lock fails closed before
-rollout.
+immediately previous successful release identity. Receipt schema v3 also records
+whether the successful transition was a deployment or rollback and binds it to
+the journal attempt id. Existing v1 and v2 receipts remain accepted and are
+upgraded on the next success. The command durably writes the success receipt
+before removing the matching pending journal. A failed or interrupted rollout
+never replaces the last successful receipt and deliberately leaves its journal
+in place. Missing privacy, corrupt state, or a busy deployment lock fails closed
+before rollout.
 
 A normal deployment may repeat the exact active identity or move to a strictly
 newer stable SemVer release. It cannot silently downgrade or replace one tag
@@ -69,6 +74,30 @@ with no group or world permissions.
 The periodic backup and recovery watchdogs continue after activation. A
 rollout is complete only after the public smoke gate passes and backup/recovery
 health is confirmed through `/api/ops/ready` and monitoring.
+
+## Resume an interrupted rollout
+
+Do not edit or delete `pending-deployment.json`. Reuse the same three release
+assets, tag, state directory, and operation, then add `--resume` to the guarded
+command:
+
+```sh
+python ops/deploy_release.py \
+  --manifest "$assets/gram-scope-${release}-deployment.json" \
+  --checksum "$assets/gram-scope-${release}-deployment.json.sha256" \
+  --attestation-bundle "$assets/gram-scope-${release}-deployment.intoto.jsonl" \
+  --tag "$release" \
+  --state-directory "$state" \
+  --resume
+```
+
+The signed bundle, deployment or rollback operation, target identity, and base
+receipt must exactly match the journal. Otherwise the command fails before any
+compose action. A valid resume repeats the complete guarded rollout. If the
+success receipt was already durably committed and only journal removal was
+interrupted, the matching receipt attempt id proves completion and `--resume`
+clears the stale journal without touching containers. To resume a rollback,
+pass both `--rollback` and `--resume`.
 
 ## Rollback
 
