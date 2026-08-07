@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import hmac
 import json
@@ -42,6 +42,7 @@ class VerifiedReleaseBundle:
     tag: str
     source_commit: str
     deployment_environment: Mapping[str, str]
+    manifest_bytes: bytes = field(repr=False)
 
 
 AttestationVerifier = Callable[[Path, Path, Mapping[str, Any]], None]
@@ -109,6 +110,7 @@ def verify_release_bundle(
             "BACKEND_IMAGE": environment["BACKEND_IMAGE"],
             "FRONTEND_IMAGE": environment["FRONTEND_IMAGE"],
         },
+        manifest_bytes=manifest_bytes,
     )
 
 

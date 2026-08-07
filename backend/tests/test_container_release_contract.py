@@ -55,6 +55,8 @@ def test_dockerfiles_copy_only_required_application_trees():
     assert "COPY . " not in frontend
     assert "COPY backend/ /app/backend/" in backend
     assert "COPY ops/ /app/ops/" in backend
+    assert "RUN mkdir -p /data /backups /recovery" in backend
+    assert "chown -R tontracker:tontracker /app /data /backups /recovery" in backend
     assert "COPY frontend/ ./" in frontend
     assert f"FROM {PYTHON_IMAGE} AS runtime" in backend
     assert f"FROM --platform=$BUILDPLATFORM {NODE_IMAGE} AS build" in frontend
@@ -185,7 +187,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.58.0" in commands
+    assert "--tag v0.59.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
@@ -197,6 +199,27 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert preflight["volumes"] == [
         "${DEPLOYMENT_MANIFEST_FILE:?DEPLOYMENT_MANIFEST_FILE is required}:/app/deployment-manifest.json:ro"
     ]
+    backup_now = compose["services"]["backup-now"]
+    assert backup_now["profiles"] == ["deployment"]
+    assert backup_now["command"] == ["python", "/app/ops/backup_sqlite.py"]
+    assert backup_now["volumes"] == [
+        "ton_tracker_data:/data:ro",
+        "ton_tracker_backups:/backups",
+    ]
+    assert compose["services"]["backup"]["healthcheck"]["start_interval"] == "10s"
+    assert compose["services"]["restore-drill"]["profiles"] == [
+        "recovery",
+        "deployment",
+    ]
+    assert compose["services"]["recovery-watchdog"]["healthcheck"][
+        "start_interval"
+    ] == "10s"
+    assert "--profile deployment run --rm backup-now" in commands
+    assert "--profile deployment run --rm restore-drill" in commands
+    assert (
+        "up --detach --no-build --wait --wait-timeout 180 \\\n"
+        "  frontend prometheus backup recovery-watchdog"
+    ) in commands
     assert "/etc/nginx/conf.d" in compose["services"]["frontend"]["tmpfs"]
     assert compose["services"]["prometheus"]["image"] == PROMETHEUS_IMAGE
     assert PROMETHEUS_IMAGE in commands
@@ -278,6 +301,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         "production-preflight",
         "backend",
         "backup",
+        "backup-now",
         "restore-drill",
         "recovery-watchdog",
     ):
@@ -343,6 +367,12 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in (
         verifier_commands
     )
+    assert "--profile deployment run --rm backup-now" in verifier_commands
+    assert "--profile deployment run --rm restore-drill" in verifier_commands
+    assert (
+        "up --detach --no-build --wait --wait-timeout 180 \\\n"
+        "  frontend prometheus backup recovery-watchdog"
+    ) in verifier_commands
     assert "--smoke-url" in verifier_commands
     assert "python ops/create_release_manifest.py" in verifier_commands
     assert "DEPLOYMENT_MANIFEST_FILE=$manifest" in verifier_commands

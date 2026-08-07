@@ -87,7 +87,7 @@ jobs:
       - name: Create atomic deployment manifest fixture
         run: |
           python ops/create_release_manifest.py \
-            --tag v0.58.0 \
+            --tag v0.59.0 \
             --source-commit "$GITHUB_SHA" \
             --backend-digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --frontend-digest sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
@@ -116,6 +116,13 @@ jobs:
               logs --no-color backend frontend
             exit 1
           fi
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm backup-now
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm restore-drill
+          docker compose --project-name "$project" --file compose.production.yml \
+            up --detach --no-build --wait --wait-timeout 180 \
+            frontend prometheus backup recovery-watchdog
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"

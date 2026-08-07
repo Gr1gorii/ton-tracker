@@ -77,6 +77,7 @@ def test_verified_bundle_uses_private_snapshots_and_emits_only_digest_images(tmp
     }
     assert verified.tag == TAG
     assert verified.source_commit == SOURCE_COMMIT
+    assert verified.manifest_bytes == manifest.read_bytes()
     assert render_deployment_environment(verified) == (
         f"BACKEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-backend@{BACKEND_DIGEST}\n"
         f"FRONTEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-frontend@{FRONTEND_DIGEST}\n"

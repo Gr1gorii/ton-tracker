@@ -130,6 +130,33 @@ def readiness(response: Response, session: Session = Depends(get_session)) -> di
     return {"status": "ready", "database": "ready", "version": VERSION}
 
 
+@app.get("/api/ops/ready")
+def operational_readiness(response: Response) -> dict:
+    """Require recent verified backup and recovery evidence for a rollout."""
+    response.headers["Cache-Control"] = "no-store"
+    settings = get_settings()
+    backup = read_backup_health_metrics(
+        settings.backup_health_file,
+        maximum_age_seconds=settings.backup_health_max_age_seconds,
+    )
+    recovery = read_recovery_health_metrics(
+        settings.recovery_health_file,
+        maximum_age_seconds=settings.recovery_health_max_age_seconds,
+    )
+    if not backup.ready or not recovery.ready:
+        raise HTTPException(
+            status_code=503,
+            detail="operational recovery readiness unavailable",
+            headers={"Cache-Control": "no-store"},
+        )
+    return {
+        "status": "ready",
+        "backup": "ready",
+        "recovery": "ready",
+        "version": VERSION,
+    }
+
+
 @app.get("/metrics", include_in_schema=False)
 def prometheus_metrics(session: Session = Depends(get_session)) -> Response:
     database_ready = True

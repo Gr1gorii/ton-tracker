@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 import hashlib
 import json
+from types import SimpleNamespace
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -176,10 +177,13 @@ def test_readiness_and_metrics_endpoints(monkeypatch):
     try:
         with TestClient(app) as client:
             ready = client.get("/api/ready")
+            operational = client.get("/api/ops/ready")
             metrics = client.get("/metrics")
         assert ready.status_code == 200
         assert ready.json()["database"] == "ready"
         assert ready.headers["cache-control"] == "no-store"
+        assert operational.status_code == 503
+        assert operational.headers["cache-control"] == "no-store"
         assert metrics.status_code == 200
         assert "ton_tracker_database_ready 1" in metrics.text
         assert "ton_tracker_backup_monitoring_configured 0" in metrics.text
@@ -187,3 +191,31 @@ def test_readiness_and_metrics_endpoints(monkeypatch):
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
+
+
+def test_operational_readiness_requires_backup_and_recovery(monkeypatch):
+    settings = SimpleNamespace(
+        backup_health_file="/backups/.backup-health.json",
+        backup_health_max_age_seconds=900,
+        recovery_health_file="/recovery/.recovery-health.json",
+        recovery_health_max_age_seconds=900,
+    )
+    monkeypatch.setattr("main.get_settings", lambda: settings)
+    monkeypatch.setattr(
+        "main.read_backup_health_metrics",
+        lambda *_args, **_kwargs: BackupHealthMetrics(configured=True, ready=True),
+    )
+    monkeypatch.setattr(
+        "main.read_recovery_health_metrics",
+        lambda *_args, **_kwargs: RecoveryHealthMetrics(configured=True, ready=True),
+    )
+    with TestClient(app) as client:
+        response = client.get("/api/ops/ready")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {
+        "status": "ready",
+        "backup": "ready",
+        "recovery": "ready",
+        "version": "0.2.1",
+    }

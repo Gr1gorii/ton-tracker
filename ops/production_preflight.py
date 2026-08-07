@@ -260,6 +260,7 @@ def run_smoke_checks(
         "/",
         "/gram-scope-icon.png",
         "/api/ready",
+        "/api/ops/ready",
         "/api/health",
         "/tonconnect-manifest.json",
     ):
@@ -292,6 +293,18 @@ def run_smoke_checks(
         ready.get("status") != "ready" or ready.get("database") != "ready"
     ):
         errors.append("/api/ready dependency state is invalid")
+    operational = _json_object(
+        probes.get("/api/ops/ready"),
+        "/api/ops/ready",
+        errors,
+    )
+    if operational is not None and operational != {
+        "status": "ready",
+        "backup": "ready",
+        "recovery": "ready",
+        "version": "0.2.1",
+    }:
+        errors.append("/api/ops/ready recovery state is invalid")
     health = _json_object(probes.get("/api/health"), "/api/health", errors)
     if health is not None and (
         health.get("status") != "ok"
