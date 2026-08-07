@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.60.0
+release=v0.61.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -50,9 +50,16 @@ so provider or container diagnostics cannot leak through the release interface.
 Only after every gate succeeds, the command atomically writes a private
 `current-deployment.json` receipt in the state directory. The strict receipt
 records the active tag, source commit, manifest digest, completion time, and the
-immediately previous successful release identity. A failed or interrupted
-rollout never replaces the last successful receipt. Missing privacy, a corrupt
-receipt, or a busy deployment lock fails closed before rollout.
+immediately previous successful release identity. Receipt schema v2 also records
+whether the successful transition was a deployment or rollback; existing v1
+receipts remain accepted and are upgraded on the next success. A failed or
+interrupted rollout never replaces the last successful receipt. Missing
+privacy, a corrupt receipt, or a busy deployment lock fails closed before
+rollout.
+
+A normal deployment may repeat the exact active identity or move to a strictly
+newer stable SemVer release. It cannot silently downgrade or replace one tag
+with a different source or manifest identity.
 
 Keep the state directory on durable host storage and do not share it between
 unrelated installations. It contains no provider credential, but it is an
@@ -67,9 +74,25 @@ health is confirmed through `/api/ops/ready` and monitoring.
 
 Select the previous stable tag, download its three assets into a new empty
 directory, confirm its identity against `previous_release` in the current
-receipt, and run the same guarded command with the same state directory. Never
-retag an image or combine backend and frontend references from different
+receipt, and run the same guarded command with the same state directory plus
+`--rollback`. The command verifies the signed bundle first, then requires its
+tag, source commit, and manifest digest to exactly equal `previous_release`
+before any compose action. A missing previous identity, an arbitrary older
+release, or a same-tag identity conflict fails closed.
+
+```sh
+python ops/deploy_release.py \
+  --manifest "$assets/gram-scope-${release}-deployment.json" \
+  --checksum "$assets/gram-scope-${release}-deployment.json.sha256" \
+  --attestation-bundle "$assets/gram-scope-${release}-deployment.intoto.jsonl" \
+  --tag "$release" \
+  --state-directory "$state" \
+  --rollback
+```
+
+Never retag an image or combine backend and frontend references from different
 manifests. Persistent database, backup, recovery, and Prometheus volumes are not
-removed by this procedure. If the failed release changed the database schema
-incompatibly, restore the pre-rollout verified backup instead of starting older
-code against newer data.
+removed by this procedure. Receipt authorization does not claim database schema
+compatibility. If the failed release changed the database schema incompatibly,
+restore the pre-rollout verified backup instead of starting older code against
+newer data.
