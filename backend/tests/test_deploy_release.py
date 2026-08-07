@@ -11,7 +11,12 @@ import subprocess
 import pytest
 
 from ops.create_release_manifest import create_release_manifest, write_release_manifest
-from ops.deployment_state import DEPLOYMENT_RECEIPT, DeploymentStateError
+from ops.deployment_state import (
+    DEPLOYMENT_RECEIPT,
+    DeploymentIdentity,
+    DeploymentStateError,
+    locked_deployment_state,
+)
 from ops.deploy_release import (
     DeploymentRolloutError,
     RolloutStep,
@@ -21,23 +26,30 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.60.0"
+TAG = "v0.61.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
 
 
-def _release_assets(tmp_path: Path) -> tuple[Path, Path, Path]:
-    prefix = f"gram-scope-{TAG}-deployment"
+def _release_assets(
+    tmp_path: Path,
+    *,
+    tag: str = TAG,
+    source_commit: str = SOURCE_COMMIT,
+    backend_digest: str = BACKEND_DIGEST,
+    frontend_digest: str = FRONTEND_DIGEST,
+) -> tuple[Path, Path, Path]:
+    prefix = f"gram-scope-{tag}-deployment"
     manifest = tmp_path / f"{prefix}.json"
     checksum = tmp_path / f"{prefix}.json.sha256"
     attestation = tmp_path / f"{prefix}.intoto.jsonl"
     write_release_manifest(
         create_release_manifest(
-            tag=TAG,
-            source_commit=SOURCE_COMMIT,
-            backend_digest=BACKEND_DIGEST,
-            frontend_digest=FRONTEND_DIGEST,
+            tag=tag,
+            source_commit=source_commit,
+            backend_digest=backend_digest,
+            frontend_digest=frontend_digest,
         ),
         manifest,
     )
@@ -153,8 +165,9 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     assert snapshot_paths and not snapshot_paths[0].exists()
     receipt_path = tmp_path / "state" / DEPLOYMENT_RECEIPT
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    assert receipt["schema"] == "gram_scope_deployment_receipt_v1"
+    assert receipt["schema"] == "gram_scope_deployment_receipt_v2"
     assert receipt["status"] == "active"
+    assert receipt["operation"] == "deployment"
     assert receipt["release"] == {
         "tag": TAG,
         "source_commit": SOURCE_COMMIT,
@@ -285,6 +298,109 @@ def test_invalid_existing_receipt_runs_no_verification_or_rollout_step(tmp_path)
     assert observed == []
 
 
+def test_explicit_rollback_requires_and_activates_exact_previous_bundle(tmp_path):
+    rollback_tag = "v0.60.0"
+    manifest, checksum, attestation = _release_assets(
+        tmp_path,
+        tag=rollback_tag,
+        source_commit="2" * 40,
+        backend_digest="sha256:" + "c" * 64,
+        frontend_digest="sha256:" + "d" * 64,
+    )
+    rollback_identity = DeploymentIdentity(
+        tag=rollback_tag,
+        source_commit="2" * 40,
+        manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    )
+    current_identity = DeploymentIdentity(
+        tag=TAG,
+        source_commit="3" * 40,
+        manifest_sha256="e" * 64,
+    )
+    state_directory = tmp_path / "state"
+    with locked_deployment_state(state_directory) as state:
+        state.record_success(rollback_identity)
+        state.record_success(current_identity)
+
+    with pytest.raises(DeploymentRolloutError, match="must be newer"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=rollback_tag,
+            environment=_environment(),
+            state_directory=state_directory,
+            attestation_verifier=lambda *_args: None,
+            command_runner=lambda *_args: pytest.fail("rollout must not start"),
+        )
+
+    observed: list[str] = []
+    result = verify_and_deploy_release(
+        manifest_path=manifest,
+        checksum_path=checksum,
+        attestation_path=attestation,
+        expected_tag=rollback_tag,
+        environment=_environment(),
+        state_directory=state_directory,
+        rollback=True,
+        attestation_verifier=lambda *_args: None,
+        command_runner=lambda step, _env: observed.append(step.name),
+        smoke_checker=lambda *_args: [],
+    )
+
+    assert result.tag == rollback_tag
+    assert observed[-1] == "service activation"
+    receipt = json.loads(
+        (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
+    )
+    assert receipt["operation"] == "rollback"
+    assert receipt["release"] == {
+        "tag": rollback_identity.tag,
+        "source_commit": rollback_identity.source_commit,
+        "manifest_sha256": rollback_identity.manifest_sha256,
+    }
+    assert receipt["previous_release"] == {
+        "tag": current_identity.tag,
+        "source_commit": current_identity.source_commit,
+        "manifest_sha256": current_identity.manifest_sha256,
+    }
+
+
+def test_explicit_rollback_rejects_other_signed_release_before_rollout(tmp_path):
+    previous_identity = DeploymentIdentity(
+        tag="v0.60.0",
+        source_commit="2" * 40,
+        manifest_sha256="c" * 64,
+    )
+    current_identity = DeploymentIdentity(
+        tag=TAG,
+        source_commit="3" * 40,
+        manifest_sha256="d" * 64,
+    )
+    state_directory = tmp_path / "state"
+    with locked_deployment_state(state_directory) as state:
+        state.record_success(previous_identity)
+        state.record_success(current_identity)
+
+    manifest, checksum, attestation = _release_assets(
+        tmp_path,
+        tag="v0.59.0",
+        source_commit="4" * 40,
+    )
+    with pytest.raises(DeploymentRolloutError, match="does not match"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag="v0.59.0",
+            environment=_environment(),
+            state_directory=state_directory,
+            rollback=True,
+            attestation_verifier=lambda *_args: None,
+            command_runner=lambda *_args: pytest.fail("rollout must not start"),
+        )
+
+
 def test_receipt_finalization_failure_reports_ambiguous_active_state(
     tmp_path,
     monkeypatch,
@@ -301,7 +417,7 @@ def test_receipt_finalization_failure_reports_ambiguous_active_state(
     )
     with pytest.raises(
         DeploymentRolloutError,
-        match="deployment succeeded but receipt finalization failed",
+        match="rollout succeeded but receipt finalization failed",
     ):
         verify_and_deploy_release(
             manifest_path=manifest,

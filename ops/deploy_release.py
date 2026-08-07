@@ -117,6 +117,7 @@ def verify_and_deploy_release(
     expected_tag: str,
     environment: Mapping[str, str],
     state_directory: Path,
+    rollback: bool = False,
     smoke_url: str | None = None,
     attestation_verifier: AttestationVerifier | None = None,
     command_runner: CommandRunner | None = None,
@@ -132,6 +133,12 @@ def verify_and_deploy_release(
                 expected_tag=expected_tag,
                 attestation_verifier=attestation_verifier,
             )
+            identity = DeploymentIdentity(
+                tag=bundle.tag,
+                source_commit=bundle.source_commit,
+                manifest_sha256=hashlib.sha256(bundle.manifest_bytes).hexdigest(),
+            )
+            deployment_state.authorize(identity, rollback=rollback)
             result = run_guarded_rollout(
                 bundle,
                 environment=environment,
@@ -141,15 +148,12 @@ def verify_and_deploy_release(
             )
             try:
                 deployment_state.record_success(
-                    DeploymentIdentity(
-                        tag=result.tag,
-                        source_commit=result.source_commit,
-                        manifest_sha256=result.manifest_sha256,
-                    )
+                    identity,
+                    operation="rollback" if rollback else "deployment",
                 )
             except DeploymentStateError as exc:
                 raise DeploymentRolloutError(
-                    "deployment succeeded but receipt finalization failed; "
+                    "rollout succeeded but receipt finalization failed; "
                     "manual inspection is required"
                 ) from exc
             return result
@@ -260,6 +264,11 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--attestation-bundle", type=Path, required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--state-directory", type=Path, required=True)
+    parser.add_argument(
+        "--rollback",
+        action="store_true",
+        help="authorize only the exact previous release from the current receipt",
+    )
     parser.add_argument("--smoke-url")
     args = parser.parse_args(argv)
     try:
@@ -270,13 +279,15 @@ def main(argv: Sequence[str] | None = None) -> None:
             expected_tag=args.tag,
             environment=os.environ,
             state_directory=args.state_directory,
+            rollback=args.rollback,
             smoke_url=args.smoke_url,
         )
     except (ReleaseBundleVerificationError, DeploymentRolloutError) as exc:
         print(f"deployment error: {exc}", file=sys.stderr)
         raise SystemExit(2) from None
+    operation = "rollback" if args.rollback else "deployment"
     print(
-        "deployment completed "
+        f"{operation} completed "
         f"tag={result.tag} source={result.source_commit} "
         f"manifest_sha256={result.manifest_sha256}",
         flush=True,

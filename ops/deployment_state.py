@@ -27,13 +27,15 @@ _TIMESTAMP = re.compile(
     r"(?:\.[0-9]{1,6})?Z$"
 )
 _IDENTITY_KEYS = {"manifest_sha256", "source_commit", "tag"}
-_RECEIPT_KEYS = {
+_RECEIPT_V1_KEYS = {
     "completed_at",
     "previous_release",
     "release",
     "schema",
     "status",
 }
+_RECEIPT_V2_KEYS = _RECEIPT_V1_KEYS | {"operation"}
+_OPERATIONS = {"deployment", "rollback"}
 
 
 class DeploymentStateError(RuntimeError):
@@ -69,11 +71,14 @@ class LockedDeploymentState:
         self,
         identity: DeploymentIdentity,
         *,
+        operation: str = "deployment",
         completed_at: datetime | None = None,
     ) -> Path:
         """Atomically replace current state only after a successful rollout."""
         self._ensure_open()
         _validate_identity(identity)
+        if operation not in _OPERATIONS:
+            raise DeploymentStateError("deployment operation is invalid")
         current = self.current_receipt()
         previous: object = None
         if current is not None:
@@ -89,8 +94,9 @@ class LockedDeploymentState:
                 "deployment completion time must be timezone-aware"
             )
         payload: dict[str, object] = {
-            "schema": "gram_scope_deployment_receipt_v1",
+            "schema": "gram_scope_deployment_receipt_v2",
             "status": "active",
+            "operation": operation,
             "completed_at": completed.astimezone(timezone.utc)
             .isoformat()
             .replace("+00:00", "Z"),
@@ -100,6 +106,41 @@ class LockedDeploymentState:
         _validate_receipt(payload)
         _write_atomic_receipt(self.receipt_path, payload)
         return self.receipt_path
+
+    def authorize(self, identity: DeploymentIdentity, *, rollback: bool) -> None:
+        """Authorize only a forward deploy or the exact previous release."""
+        self._ensure_open()
+        _validate_identity(identity)
+        current = self.current_receipt()
+        if current is None:
+            if rollback:
+                raise DeploymentStateError(
+                    "rollback requires an existing deployment receipt"
+                )
+            return
+
+        current_identity = current["release"]
+        previous_identity = current["previous_release"]
+        target_identity = _identity_payload(identity)
+        if rollback:
+            if previous_identity is None:
+                raise DeploymentStateError(
+                    "rollback requires an immediately previous release"
+                )
+            if target_identity != previous_identity:
+                raise DeploymentStateError(
+                    "rollback bundle does not match the immediately previous release"
+                )
+            return
+
+        if target_identity == current_identity:
+            return
+        if _release_version(identity.tag) <= _release_version(
+            str(current_identity["tag"])
+        ):
+            raise DeploymentStateError(
+                "deployment target must be newer than the current release"
+            )
 
     def close(self) -> None:
         if self._closed:
@@ -227,17 +268,29 @@ def _read_receipt(path: Path) -> dict[str, object]:
 
 
 def _validate_receipt(payload: object) -> dict[str, object]:
-    if not isinstance(payload, dict) or set(payload) != _RECEIPT_KEYS:
+    if not isinstance(payload, dict):
+        raise DeploymentStateError("deployment receipt contract is invalid")
+    schema = payload.get("schema")
+    if schema == "gram_scope_deployment_receipt_v1":
+        if set(payload) != _RECEIPT_V1_KEYS:
+            raise DeploymentStateError("deployment receipt contract is invalid")
+    elif schema == "gram_scope_deployment_receipt_v2":
+        if (
+            set(payload) != _RECEIPT_V2_KEYS
+            or payload.get("operation") not in _OPERATIONS
+        ):
+            raise DeploymentStateError("deployment receipt contract is invalid")
+    else:
         raise DeploymentStateError("deployment receipt contract is invalid")
     if (
-        payload["schema"] != "gram_scope_deployment_receipt_v1"
-        or payload["status"] != "active"
+        payload["status"] != "active"
         or not _valid_timestamp(payload["completed_at"])
         or not _valid_identity_payload(payload["release"])
         or (
             payload["previous_release"] is not None
             and not _valid_identity_payload(payload["previous_release"])
         )
+        or payload["previous_release"] == payload["release"]
     ):
         raise DeploymentStateError("deployment receipt fields are invalid")
     return payload
@@ -277,6 +330,13 @@ def _valid_identity_payload(payload: object) -> bool:
         and isinstance(payload["manifest_sha256"], str)
         and _DIGEST.fullmatch(payload["manifest_sha256"]) is not None
     )
+
+
+def _release_version(tag: str) -> tuple[int, int, int]:
+    match = _TAG.fullmatch(tag)
+    if match is None:
+        raise DeploymentStateError("deployment identity is invalid")
+    return tuple(int(value) for value in match.groups())
 
 
 def _write_atomic_receipt(path: Path, payload: dict[str, object]) -> None:
