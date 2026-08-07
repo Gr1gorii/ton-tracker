@@ -91,7 +91,7 @@ def test_production_image_refs_are_digest_pinned_and_fail_closed():
     invalid_refs = (
         "",
         "ghcr.io/gr1gorii/ton-tracker-backend:latest",
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.55.0",
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.56.0",
         "registry.example/ton-tracker-backend@sha256:" + "c" * 64,
         "ghcr.io/gr1gorii/ton-tracker-backend@sha256:abcd",
     )
