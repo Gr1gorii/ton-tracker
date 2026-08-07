@@ -89,9 +89,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      contents: read
+      contents: write
       packages: read
-      attestations: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     env:
       PUBLIC_APP_URL: https://gram.example
       APP_PORT: "18080"
@@ -137,13 +139,18 @@ jobs:
           set -euo pipefail
           for image in "$BACKEND_IMAGE" "$FRONTEND_IMAGE"; do
             manifest=$(mktemp)
-            docker buildx imagetools inspect --raw "$image" > "$manifest"
-            python - "$manifest" <<'PY'
+            docker buildx imagetools inspect "$image" \
+              --format '{{json .Manifest}}' > "$manifest"
+            digest=$(python - "$manifest" <<'PY'
           import json
           from pathlib import Path
+          import re
           import sys
 
           payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          digest = payload.get("digest")
+          if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+              raise SystemExit("release manifest index digest is invalid")
           platforms = {
               (entry.get("platform", {}).get("os"), entry.get("platform", {}).get("architecture"))
               for entry in payload.get("manifests", [])
@@ -152,7 +159,16 @@ jobs:
           missing = required - platforms
           if missing:
               raise SystemExit(f"release manifest is missing platforms: {sorted(missing)}")
+          print(digest)
           PY
+            )
+            if [ "$image" = "$BACKEND_IMAGE" ]; then
+              echo "BACKEND_DIGEST=$digest" >> "$GITHUB_ENV"
+            elif [ "$image" = "$FRONTEND_IMAGE" ]; then
+              echo "FRONTEND_DIGEST=$digest" >> "$GITHUB_ENV"
+            else
+              exit 1
+            fi
             rm -f "$manifest"
           done
       - name: Verify signed build provenance
@@ -168,6 +184,32 @@ jobs:
               --source-digest "$GITHUB_SHA" \
               --deny-self-hosted-runners
           done
+      - name: Generate immutable deployment manifest
+        run: |
+          set -euo pipefail
+          manifest="$RUNNER_TEMP/gram-scope-${GITHUB_REF_NAME}-deployment.json"
+          python ops/create_release_manifest.py \
+            --tag "$GITHUB_REF_NAME" \
+            --source-commit "$GITHUB_SHA" \
+            --backend-digest "$BACKEND_DIGEST" \
+            --frontend-digest "$FRONTEND_DIGEST" \
+            --output "$manifest"
+          checksum="${manifest}.sha256"
+          manifest_dir=$(dirname "$manifest")
+          manifest_name=$(basename "$manifest")
+          (
+            cd "$manifest_dir"
+            sha256sum "$manifest_name" > "${manifest_name}.sha256"
+          )
+          {
+            echo "DEPLOYMENT_MANIFEST=$manifest"
+            echo "DEPLOYMENT_CHECKSUM=$checksum"
+          } >> "$GITHUB_ENV"
+      - id: attest-deployment-manifest
+        name: Attest deployment manifest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-path: ${{ env.DEPLOYMENT_MANIFEST }}
       - name: Pull and smoke-test exact release images
         run: |
           set -euo pipefail
@@ -191,3 +233,44 @@ jobs:
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"
+      - name: Publish verified deployment bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ATTESTATION_BUNDLE: ${{ steps.attest-deployment-manifest.outputs.bundle-path }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          bundle="$RUNNER_TEMP/gram-scope-${RELEASE_TAG}-deployment.intoto.jsonl"
+          cp "$ATTESTATION_BUNDLE" "$bundle"
+          manifest_name=$(basename "$DEPLOYMENT_MANIFEST")
+          checksum_name=$(basename "$DEPLOYMENT_CHECKSUM")
+          bundle_name=$(basename "$bundle")
+          verify_bundle() {
+            gh attestation verify "$DEPLOYMENT_MANIFEST" \
+              --bundle "$1" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml" \
+              --source-ref "$GITHUB_REF" \
+              --source-digest "$GITHUB_SHA" \
+              --deny-self-hosted-runners
+          }
+          verify_bundle "$bundle"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            existing=$(mktemp -d)
+            gh release download "$RELEASE_TAG" \
+              --pattern "$manifest_name" \
+              --pattern "$checksum_name" \
+              --pattern "$bundle_name" \
+              --dir "$existing"
+            cmp "$DEPLOYMENT_MANIFEST" "$existing/$manifest_name"
+            cmp "$DEPLOYMENT_CHECKSUM" "$existing/$checksum_name"
+            verify_bundle "$existing/$bundle_name"
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" \
+            "${DEPLOYMENT_MANIFEST}#Digest-pinned deployment manifest" \
+            "${DEPLOYMENT_CHECKSUM}#Deployment manifest SHA-256" \
+            "${bundle}#Signed deployment manifest attestation" \
+            --verify-tag \
+            --title "GRAM Scope ${RELEASE_TAG}" \
+            --notes "Verified multi-platform images, signed provenance, immutable deployment references, and a successful runtime smoke test."

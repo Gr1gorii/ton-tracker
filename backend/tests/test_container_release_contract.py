@@ -283,19 +283,33 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     verifier = workflow["jobs"]["verify"]
     assert verifier["needs"] == "publish"
     assert verifier["permissions"] == {
-        "contents": "read",
+        "contents": "write",
         "packages": "read",
-        "attestations": "read",
+        "id-token": "write",
+        "attestations": "write",
+        "artifact-metadata": "write",
     }
     verifier_actions = {
         step["uses"] for step in verifier["steps"] if "uses" in step
     }
-    assert verifier_actions == {CHECKOUT_ACTION, LOGIN_ACTION}
+    assert verifier_actions == {CHECKOUT_ACTION, LOGIN_ACTION, ATTEST_ACTION}
     assert all(PINNED_ACTION.fullmatch(action) for action in verifier_actions)
+    manifest_attester = next(
+        step
+        for step in verifier["steps"]
+        if step.get("id") == "attest-deployment-manifest"
+    )
+    assert manifest_attester["uses"] == ATTEST_ACTION
+    assert manifest_attester["with"] == {
+        "subject-path": "${{ env.DEPLOYMENT_MANIFEST }}"
+    }
     verifier_commands = "\n".join(
         str(step.get("run", "")) for step in verifier["steps"]
     )
-    assert "docker buildx imagetools inspect --raw" in verifier_commands
+    assert "docker buildx imagetools inspect" in verifier_commands
+    assert "--format '{{json .Manifest}}'" in verifier_commands
+    assert "BACKEND_DIGEST=$digest" in verifier_commands
+    assert "FRONTEND_DIGEST=$digest" in verifier_commands
     assert '("linux", "amd64")' in verifier_commands
     assert '("linux", "arm64")' in verifier_commands
     assert 'gh attestation verify "oci://${image}"' in verifier_commands
@@ -317,6 +331,19 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         verifier_commands
     )
     assert "--smoke-url" in verifier_commands
+    assert "python ops/create_release_manifest.py" in verifier_commands
+    assert "sha256sum" in verifier_commands
+    assert 'gh release view "$RELEASE_TAG"' in verifier_commands
+    assert 'gh release download "$RELEASE_TAG"' in verifier_commands
+    assert 'gh release create "$RELEASE_TAG"' in verifier_commands
+    assert 'gh attestation verify "$DEPLOYMENT_MANIFEST"' in verifier_commands
+    assert '--bundle "$1"' in verifier_commands
+    assert "--verify-tag" in verifier_commands
+    assert "cmp \"$DEPLOYMENT_MANIFEST\"" in verifier_commands
+    step_names = [step.get("name") for step in verifier["steps"]]
+    assert step_names.index("Pull and smoke-test exact release images") < (
+        step_names.index("Publish verified deployment bundle")
+    )
 
 
 def test_dependabot_tracks_every_release_dependency_surface():
