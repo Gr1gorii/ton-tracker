@@ -55,6 +55,8 @@ def test_dockerfiles_copy_only_required_application_trees():
     assert "COPY . " not in frontend
     assert "COPY backend/ /app/backend/" in backend
     assert "COPY ops/ /app/ops/" in backend
+    assert "RUN mkdir -p /data /backups /recovery" in backend
+    assert "chown -R tontracker:tontracker /app /data /backups /recovery" in backend
     assert "COPY frontend/ ./" in frontend
     assert f"FROM {PYTHON_IMAGE} AS runtime" in backend
     assert f"FROM --platform=$BUILDPLATFORM {NODE_IMAGE} AS build" in frontend
@@ -365,6 +367,12 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in (
         verifier_commands
     )
+    assert "--profile deployment run --rm backup-now" in verifier_commands
+    assert "--profile deployment run --rm restore-drill" in verifier_commands
+    assert (
+        "up --detach --no-build --wait --wait-timeout 180 \\\n"
+        "  frontend prometheus backup recovery-watchdog"
+    ) in verifier_commands
     assert "--smoke-url" in verifier_commands
     assert "python ops/create_release_manifest.py" in verifier_commands
     assert "DEPLOYMENT_MANIFEST_FILE=$manifest" in verifier_commands

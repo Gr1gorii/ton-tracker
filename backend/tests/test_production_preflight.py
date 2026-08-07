@@ -182,6 +182,14 @@ def test_public_smoke_contract_accepts_guarded_real_release():
         "/api/ready": _json_probe(
             {"status": "ready", "database": "ready", "version": "0.2.1"}
         ),
+        "/api/ops/ready": _json_probe(
+            {
+                "status": "ready",
+                "backup": "ready",
+                "recovery": "ready",
+                "version": "0.2.1",
+            }
+        ),
         "/api/health": _json_probe(
             {"status": "ok", "data_mode": "real", "is_mock": False}
         ),
@@ -240,6 +248,7 @@ def test_public_smoke_contract_fails_closed_without_leaking_payloads():
     errors = run_smoke_checks(origin, fetch=fetch)
     assert "/healthz response is invalid" in errors
     assert "/api/ready dependency state is invalid" in errors
+    assert "/api/ops/ready returned invalid JSON" in errors
     assert "/api/health is not in guarded real mode" in errors
     assert "/tonconnect-manifest.json returned invalid JSON" in errors
     assert "not-json" not in " ".join(errors)

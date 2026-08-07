@@ -45,7 +45,7 @@ interface.
 
 The periodic backup and recovery watchdogs continue after activation. A
 rollout is complete only after the public smoke gate passes and backup/recovery
-health is visible through `/api/ready` and monitoring.
+health is confirmed through `/api/ops/ready` and monitoring.
 
 ## Rollback
 

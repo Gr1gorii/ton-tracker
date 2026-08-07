@@ -12,7 +12,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.runtime.lock
 
 COPY backend/ /app/backend/
 COPY ops/ /app/ops/
-RUN mkdir -p /data /backups && chown -R tontracker:tontracker /app /data /backups
+RUN mkdir -p /data /backups /recovery && \
+    chown -R tontracker:tontracker /app /data /backups /recovery
 
 USER tontracker
 EXPOSE 8000

@@ -231,6 +231,13 @@ jobs:
               logs --no-color backend frontend
             exit 1
           fi
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm backup-now
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm restore-drill
+          docker compose --project-name "$project" --file compose.production.yml \
+            up --detach --no-build --wait --wait-timeout 180 \
+            frontend prometheus backup recovery-watchdog
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"
