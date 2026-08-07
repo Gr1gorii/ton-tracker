@@ -75,6 +75,7 @@ jobs:
       PROMETHEUS_RETENTION: 15d
       BACKEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       FRONTEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+      DEPLOYMENT_MANIFEST_FILE: ${{ github.workspace }}/.release-gate-deployment.json
       APP_PULL_POLICY: never
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -83,6 +84,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
+      - name: Create atomic deployment manifest fixture
+        run: |
+          python ops/create_release_manifest.py \
+            --tag v0.57.0 \
+            --source-commit "$GITHUB_SHA" \
+            --backend-digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            --frontend-digest sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+            --output "$DEPLOYMENT_MANIFEST_FILE"
       - run: python ops/production_preflight.py
       - run: docker compose -f compose.production.yml config --quiet
       - run: docker build --file backend/Dockerfile --tag gram-scope-backend:gate .

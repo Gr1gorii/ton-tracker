@@ -204,6 +204,7 @@ jobs:
           {
             echo "DEPLOYMENT_MANIFEST=$manifest"
             echo "DEPLOYMENT_CHECKSUM=$checksum"
+            echo "DEPLOYMENT_MANIFEST_FILE=$manifest"
           } >> "$GITHUB_ENV"
       - id: attest-deployment-manifest
         name: Attest deployment manifest

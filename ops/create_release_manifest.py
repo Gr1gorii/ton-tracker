@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
+import stat
 from typing import Any
 
 
@@ -17,6 +19,7 @@ _TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 _SOURCE_COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _PLATFORMS = ("linux/amd64", "linux/arm64")
+_MAX_MANIFEST_BYTES = 65_536
 
 
 def create_release_manifest(
@@ -83,6 +86,61 @@ def write_release_manifest(payload: dict[str, Any], output: Path) -> None:
         json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=True) + "\n",
         encoding="utf-8",
     )
+
+
+def validate_release_manifest(payload: Any) -> dict[str, Any]:
+    """Rebuild and compare a release manifest to reject partial or extra fields."""
+    try:
+        release = payload["release"]
+        images = payload["images"]
+        tag = release["tag"]
+        source_commit = release["source_commit"]
+        backend_digest = images["backend"]["digest"]
+        frontend_digest = images["frontend"]["digest"]
+    except (KeyError, TypeError):
+        raise ValueError("deployment manifest structure is invalid") from None
+    if not all(
+        isinstance(value, str)
+        for value in (tag, source_commit, backend_digest, frontend_digest)
+    ):
+        raise ValueError("deployment manifest identity fields must be strings")
+    expected = create_release_manifest(
+        tag=tag,
+        source_commit=source_commit,
+        backend_digest=backend_digest,
+        frontend_digest=frontend_digest,
+    )
+    if payload != expected:
+        raise ValueError("deployment manifest does not match its canonical contract")
+    return expected
+
+
+def load_release_manifest(path: Path) -> dict[str, Any]:
+    """Load one bounded regular manifest without following a final symlink."""
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("deployment manifest is unavailable") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("deployment manifest must be a regular file")
+        if metadata.st_size < 2 or metadata.st_size > _MAX_MANIFEST_BYTES:
+            raise ValueError("deployment manifest size is invalid")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            raw = handle.read(_MAX_MANIFEST_BYTES + 1)
+        if len(raw) > _MAX_MANIFEST_BYTES:
+            raise ValueError("deployment manifest exceeds the size limit")
+    finally:
+        os.close(descriptor)
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("deployment manifest JSON is invalid") from exc
+    return validate_release_manifest(payload)
 
 
 def main() -> None:

@@ -7,12 +7,18 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import json
 import os
+from pathlib import Path
 import re
 import sys
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
+
+try:
+    from .create_release_manifest import load_release_manifest
+except ImportError:  # pragma: no cover - direct script execution inside the image
+    from create_release_manifest import load_release_manifest
 
 
 _MAX_RESPONSE_BYTES = 65_536
@@ -71,6 +77,24 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
         errors,
     )
 
+    manifest_path = environment.get("DEPLOYMENT_MANIFEST_FILE", "").strip()
+    deployment_manifest: dict[str, Any] | None = None
+    if not manifest_path or len(manifest_path) > 4096 or "\x00" in manifest_path:
+        errors.append("DEPLOYMENT_MANIFEST_FILE is missing or invalid")
+    else:
+        try:
+            deployment_manifest = load_release_manifest(Path(manifest_path))
+        except (OSError, ValueError):
+            errors.append("DEPLOYMENT_MANIFEST_FILE is missing or invalid")
+    if deployment_manifest is not None:
+        expected_environment = deployment_manifest["deployment_environment"]
+        if any(
+            environment.get(name, "").strip() != expected_environment[name]
+            for name in ("BACKEND_IMAGE", "FRONTEND_IMAGE")
+        ):
+            errors.append(
+                "BACKEND_IMAGE and FRONTEND_IMAGE must match DEPLOYMENT_MANIFEST_FILE"
+            )
     try:
         tonapi_url = urlsplit(
             environment.get("TONAPI_BASE_URL", "https://tonapi.io").strip()
