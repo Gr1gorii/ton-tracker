@@ -246,16 +246,11 @@ jobs:
           manifest_name=$(basename "$DEPLOYMENT_MANIFEST")
           checksum_name=$(basename "$DEPLOYMENT_CHECKSUM")
           bundle_name=$(basename "$bundle")
-          verify_bundle() {
-            gh attestation verify "$DEPLOYMENT_MANIFEST" \
-              --bundle "$1" \
-              --repo "$GITHUB_REPOSITORY" \
-              --signer-workflow "github.com/$GITHUB_REPOSITORY/.github/workflows/publish-images.yml" \
-              --source-ref "$GITHUB_REF" \
-              --source-digest "$GITHUB_SHA" \
-              --deny-self-hosted-runners
-          }
-          verify_bundle "$bundle"
+          python ops/verify_release_bundle.py \
+            --manifest "$DEPLOYMENT_MANIFEST" \
+            --checksum "$DEPLOYMENT_CHECKSUM" \
+            --attestation-bundle "$bundle" \
+            --tag "$RELEASE_TAG" >/dev/null
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             existing=$(mktemp -d)
             gh release download "$RELEASE_TAG" \
@@ -265,7 +260,11 @@ jobs:
               --dir "$existing"
             cmp "$DEPLOYMENT_MANIFEST" "$existing/$manifest_name"
             cmp "$DEPLOYMENT_CHECKSUM" "$existing/$checksum_name"
-            verify_bundle "$existing/$bundle_name"
+            python ops/verify_release_bundle.py \
+              --manifest "$existing/$manifest_name" \
+              --checksum "$existing/$checksum_name" \
+              --attestation-bundle "$existing/$bundle_name" \
+              --tag "$RELEASE_TAG" >/dev/null
             exit 0
           fi
           gh release create "$RELEASE_TAG" \

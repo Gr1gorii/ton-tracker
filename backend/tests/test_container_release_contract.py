@@ -185,7 +185,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.57.0" in commands
+    assert "--tag v0.58.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
@@ -350,8 +350,11 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert 'gh release view "$RELEASE_TAG"' in verifier_commands
     assert 'gh release download "$RELEASE_TAG"' in verifier_commands
     assert 'gh release create "$RELEASE_TAG"' in verifier_commands
-    assert 'gh attestation verify "$DEPLOYMENT_MANIFEST"' in verifier_commands
-    assert '--bundle "$1"' in verifier_commands
+    assert "python ops/verify_release_bundle.py" in verifier_commands
+    assert '--manifest "$DEPLOYMENT_MANIFEST"' in verifier_commands
+    assert '--checksum "$DEPLOYMENT_CHECKSUM"' in verifier_commands
+    assert '--attestation-bundle "$bundle"' in verifier_commands
+    assert '--tag "$RELEASE_TAG"' in verifier_commands
     assert "--verify-tag" in verifier_commands
     assert "cmp \"$DEPLOYMENT_MANIFEST\"" in verifier_commands
     step_names = [step.get("name") for step in verifier["steps"]]
