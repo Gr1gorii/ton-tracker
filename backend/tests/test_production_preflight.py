@@ -5,6 +5,7 @@ import sys
 
 import pytest
 
+from ops.create_release_manifest import create_release_manifest, write_release_manifest
 from ops.production_preflight import (
     HttpProbe,
     main,
@@ -13,7 +14,17 @@ from ops.production_preflight import (
 )
 
 
-def _environment() -> dict[str, str]:
+def _environment(tmp_path) -> dict[str, str]:
+    manifest = tmp_path / "deployment.json"
+    write_release_manifest(
+        create_release_manifest(
+            tag="v0.57.0",
+            source_commit="1" * 40,
+            backend_digest="sha256:" + "a" * 64,
+            frontend_digest="sha256:" + "b" * 64,
+        ),
+        manifest,
+    )
     return {
         "PUBLIC_APP_URL": "https://gram.example",
         "TONCONNECT_EXPECTED_DOMAIN": "gram.example",
@@ -30,6 +41,7 @@ def _environment() -> dict[str, str]:
         "FRONTEND_IMAGE": (
             "ghcr.io/gr1gorii/ton-tracker-frontend@sha256:" + "b" * 64
         ),
+        "DEPLOYMENT_MANIFEST_FILE": str(manifest),
         "APP_PORT": "8080",
         "BACKUP_INTERVAL_SECONDS": "86400",
         "BACKUP_RETENTION": "14",
@@ -41,8 +53,8 @@ def _environment() -> dict[str, str]:
     }
 
 
-def test_production_environment_contract_passes_without_exposing_secret():
-    environment = _environment()
+def test_production_environment_contract_passes_without_exposing_secret(tmp_path):
+    environment = _environment(tmp_path)
     assert validate_environment(environment) == []
 
     environment["PUBLIC_APP_URL"] = "http://user:password@gram.example/path?secret=1"
@@ -59,8 +71,8 @@ def test_production_environment_contract_passes_without_exposing_secret():
     assert "secret" not in joined
 
 
-def test_production_environment_requires_recovery_within_retention():
-    environment = _environment()
+def test_production_environment_requires_recovery_within_retention(tmp_path):
+    environment = _environment(tmp_path)
     environment["BACKUP_RETENTION"] = "2"
     environment["RECOVERY_INTERVAL_SECONDS"] = "604800"
     errors = validate_environment(environment)
@@ -70,7 +82,7 @@ def test_production_environment_requires_recovery_within_retention():
     errors = validate_environment(environment)
     assert "RECOVERY_INTERVAL_SECONDS must be an integer" in errors
 
-    environment = _environment()
+    environment = _environment(tmp_path)
     environment["PUBLIC_APP_URL"] = "https://[invalid"
     environment["TONAPI_BASE_URL"] = "https://[invalid"
     errors = validate_environment(environment)
@@ -78,8 +90,8 @@ def test_production_environment_requires_recovery_within_retention():
     assert "TONAPI_BASE_URL must be an HTTPS URL without credentials" in errors
 
 
-def test_production_image_refs_are_digest_pinned_and_fail_closed():
-    environment = _environment()
+def test_production_image_refs_are_digest_pinned_and_fail_closed(tmp_path):
+    environment = _environment(tmp_path)
     environment["BACKEND_IMAGE"] = (
         "ghcr.io/gr1gorii/ton-tracker-backend@sha256:" + "a" * 64
     )
@@ -91,17 +103,60 @@ def test_production_image_refs_are_digest_pinned_and_fail_closed():
     invalid_refs = (
         "",
         "ghcr.io/gr1gorii/ton-tracker-backend:latest",
-        "ghcr.io/gr1gorii/ton-tracker-backend:0.56.0",
+        "ghcr.io/gr1gorii/ton-tracker-backend:0.57.0",
         "registry.example/ton-tracker-backend@sha256:" + "c" * 64,
         "ghcr.io/gr1gorii/ton-tracker-backend@sha256:abcd",
     )
     for image_ref in invalid_refs:
-        environment = _environment()
+        environment = _environment(tmp_path)
         environment["BACKEND_IMAGE"] = image_ref
         errors = validate_environment(environment)
         assert any(error.startswith("BACKEND_IMAGE must use") for error in errors)
         if image_ref:
             assert image_ref not in " ".join(errors)
+
+
+def test_production_images_must_match_one_canonical_manifest(tmp_path):
+    environment = _environment(tmp_path)
+    environment["BACKEND_IMAGE"] = (
+        "ghcr.io/gr1gorii/ton-tracker-backend@sha256:" + "c" * 64
+    )
+    assert validate_environment(environment) == [
+        "BACKEND_IMAGE and FRONTEND_IMAGE must match DEPLOYMENT_MANIFEST_FILE"
+    ]
+
+    environment = _environment(tmp_path)
+    environment.pop("DEPLOYMENT_MANIFEST_FILE")
+    assert validate_environment(environment) == [
+        "DEPLOYMENT_MANIFEST_FILE is missing or invalid"
+    ]
+
+    environment = _environment(tmp_path)
+    manifest = tmp_path / "deployment.json"
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    payload["unexpected"] = "must-fail-closed"
+    manifest.write_text(json.dumps(payload), encoding="utf-8")
+    assert validate_environment(environment) == [
+        "DEPLOYMENT_MANIFEST_FILE is missing or invalid"
+    ]
+
+    valid_manifest = tmp_path / "valid-deployment.json"
+    write_release_manifest(
+        create_release_manifest(
+            tag="v0.57.0",
+            source_commit="1" * 40,
+            backend_digest="sha256:" + "a" * 64,
+            frontend_digest="sha256:" + "b" * 64,
+        ),
+        valid_manifest,
+    )
+    symlink = tmp_path / "deployment-link.json"
+    symlink.symlink_to(valid_manifest)
+    environment["DEPLOYMENT_MANIFEST_FILE"] = str(symlink)
+    errors = validate_environment(environment)
+    assert errors == ["DEPLOYMENT_MANIFEST_FILE is missing or invalid"]
+    assert str(symlink) not in " ".join(errors)
+
 
 def test_public_smoke_contract_accepts_guarded_real_release():
     origin = "https://gram.example"

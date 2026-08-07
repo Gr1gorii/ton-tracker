@@ -181,9 +181,22 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "ghcr.io/gr1gorii/ton-tracker-frontend@sha256:" + "b" * 64
     )
     assert production_environment["APP_PULL_POLICY"] == "never"
+    assert production_environment["DEPLOYMENT_MANIFEST_FILE"] == (
+        "${{ github.workspace }}/.release-gate-deployment.json"
+    )
+    assert "python ops/create_release_manifest.py" in commands
+    assert "--tag v0.57.0" in commands
+    assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     )
+    preflight = compose["services"]["production-preflight"]
+    assert preflight["environment"]["DEPLOYMENT_MANIFEST_FILE"] == (
+        "/app/deployment-manifest.json"
+    )
+    assert preflight["volumes"] == [
+        "${DEPLOYMENT_MANIFEST_FILE:?DEPLOYMENT_MANIFEST_FILE is required}:/app/deployment-manifest.json:ro"
+    ]
     assert "/etc/nginx/conf.d" in compose["services"]["frontend"]["tmpfs"]
     assert compose["services"]["prometheus"]["image"] == PROMETHEUS_IMAGE
     assert PROMETHEUS_IMAGE in commands
@@ -332,6 +345,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     )
     assert "--smoke-url" in verifier_commands
     assert "python ops/create_release_manifest.py" in verifier_commands
+    assert "DEPLOYMENT_MANIFEST_FILE=$manifest" in verifier_commands
     assert "sha256sum" in verifier_commands
     assert 'gh release view "$RELEASE_TAG"' in verifier_commands
     assert 'gh release download "$RELEASE_TAG"' in verifier_commands
