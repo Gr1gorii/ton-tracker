@@ -143,10 +143,33 @@ services:
       interval: 5m
       timeout: 60s
       start_period: 60s
+      start_interval: 10s
       retries: 3
 
+  backup-now:
+    profiles: ["deployment"]
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "/app/ops/backup_sqlite.py"]
+    environment:
+      TON_CHECK_DB_URL: sqlite:////data/ton_check.db
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-14}
+    volumes:
+      - ton_tracker_data:/data:ro
+      - ton_tracker_backups:/backups
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+
   restore-drill:
-    profiles: ["recovery"]
+    profiles: ["recovery", "deployment"]
     image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
     pull_policy: ${APP_PULL_POLICY:-always}
     build:
@@ -210,6 +233,7 @@ services:
       interval: 10m
       timeout: 60s
       start_period: 120s
+      start_interval: 10s
       retries: 3
 
 volumes:
