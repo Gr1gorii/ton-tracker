@@ -12,6 +12,7 @@ import pytest
 
 from ops.create_release_manifest import create_release_manifest, write_release_manifest
 from ops.deployment_state import (
+    DEPLOYMENT_ATTEMPT,
     DEPLOYMENT_RECEIPT,
     DeploymentIdentity,
     DeploymentStateError,
@@ -26,7 +27,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.61.0"
+TAG = "v0.62.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -165,9 +166,10 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     assert snapshot_paths and not snapshot_paths[0].exists()
     receipt_path = tmp_path / "state" / DEPLOYMENT_RECEIPT
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    assert receipt["schema"] == "gram_scope_deployment_receipt_v2"
+    assert receipt["schema"] == "gram_scope_deployment_receipt_v3"
     assert receipt["status"] == "active"
     assert receipt["operation"] == "deployment"
+    assert len(receipt["attempt_id"]) == 32
     assert receipt["release"] == {
         "tag": TAG,
         "source_commit": SOURCE_COMMIT,
@@ -175,6 +177,7 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     }
     assert receipt["previous_release"] is None
     assert receipt_path.stat().st_mode & 0o777 == 0o600
+    assert not (tmp_path / "state" / DEPLOYMENT_ATTEMPT).exists()
 
 
 def test_bundle_verification_failure_runs_no_rollout_step(tmp_path):
@@ -200,6 +203,7 @@ def test_bundle_verification_failure_runs_no_rollout_step(tmp_path):
             command_runner=runner,
         )
     assert invoked is False
+    assert not (tmp_path / "state" / DEPLOYMENT_ATTEMPT).exists()
 
 
 def test_invalid_production_environment_runs_no_rollout_step(tmp_path):
@@ -225,6 +229,7 @@ def test_invalid_production_environment_runs_no_rollout_step(tmp_path):
         )
     assert invoked is False
     assert environment["TONAPI_API_KEY"] not in str(exc_info.value)
+    assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
 
 def test_rollout_stops_before_pull_when_backup_gate_fails(tmp_path):
@@ -252,6 +257,7 @@ def test_rollout_stops_before_pull_when_backup_gate_fails(tmp_path):
         "container production preflight",
         "pre-rollout backup",
     ]
+    assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
 
 def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
@@ -272,6 +278,68 @@ def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
         )
     assert observed[-1] == "service activation"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
+    assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
+
+
+def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_path):
+    manifest, checksum, attestation = _release_assets(tmp_path)
+    state_directory = tmp_path / "state"
+    first_steps: list[str] = []
+
+    def fail_after_activation(step: RolloutStep, _environment: dict[str, str]) -> None:
+        first_steps.append(step.name)
+        if step.name == "service activation":
+            raise DeploymentRolloutError("activation result is unknown")
+
+    with pytest.raises(DeploymentRolloutError, match="unknown"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=TAG,
+            environment=_environment(),
+            state_directory=state_directory,
+            attestation_verifier=lambda *_args: None,
+            command_runner=fail_after_activation,
+        )
+    pending_before = json.loads(
+        (state_directory / DEPLOYMENT_ATTEMPT).read_text(encoding="utf-8")
+    )
+    assert first_steps[-1] == "service activation"
+
+    with pytest.raises(DeploymentRolloutError, match="--resume"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=TAG,
+            environment=_environment(),
+            state_directory=state_directory,
+            attestation_verifier=lambda *_args: None,
+            command_runner=lambda *_args: pytest.fail("rollout must not restart"),
+        )
+
+    resumed_steps: list[str] = []
+    result = verify_and_deploy_release(
+        manifest_path=manifest,
+        checksum_path=checksum,
+        attestation_path=attestation,
+        expected_tag=TAG,
+        environment=_environment(),
+        state_directory=state_directory,
+        resume=True,
+        attestation_verifier=lambda *_args: None,
+        command_runner=lambda step, _env: resumed_steps.append(step.name),
+        smoke_checker=lambda *_args: [],
+    )
+
+    receipt = json.loads(
+        (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
+    )
+    assert result.tag == TAG
+    assert resumed_steps[-1] == "service activation"
+    assert receipt["attempt_id"] == pending_before["attempt_id"]
+    assert not (state_directory / DEPLOYMENT_ATTEMPT).exists()
 
 
 def test_invalid_existing_receipt_runs_no_verification_or_rollout_step(tmp_path):
@@ -299,7 +367,7 @@ def test_invalid_existing_receipt_runs_no_verification_or_rollout_step(tmp_path)
 
 
 def test_explicit_rollback_requires_and_activates_exact_previous_bundle(tmp_path):
-    rollback_tag = "v0.60.0"
+    rollback_tag = "v0.61.0"
     manifest, checksum, attestation = _release_assets(
         tmp_path,
         tag=rollback_tag,
@@ -368,7 +436,7 @@ def test_explicit_rollback_requires_and_activates_exact_previous_bundle(tmp_path
 
 def test_explicit_rollback_rejects_other_signed_release_before_rollout(tmp_path):
     previous_identity = DeploymentIdentity(
-        tag="v0.60.0",
+        tag="v0.61.0",
         source_commit="2" * 40,
         manifest_sha256="c" * 64,
     )
@@ -417,7 +485,7 @@ def test_receipt_finalization_failure_reports_ambiguous_active_state(
     )
     with pytest.raises(
         DeploymentRolloutError,
-        match="rollout succeeded but receipt finalization failed",
+        match="rollout succeeded but deployment state finalization failed",
     ):
         verify_and_deploy_release(
             manifest_path=manifest,
@@ -433,6 +501,7 @@ def test_receipt_finalization_failure_reports_ambiguous_active_state(
 
     assert observed[-1] == "service activation"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
+    assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
 
 def test_command_failure_does_not_expose_process_output(monkeypatch):
