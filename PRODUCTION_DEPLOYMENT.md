@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.65.0
+release=v0.66.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -21,6 +21,48 @@ gh release download "$release" \
   --pattern "gram-scope-${release}-deployment*" \
   --dir "$assets"
 ```
+
+## Configure alert delivery
+
+Create the Alertmanager configuration outside the repository and keep it in the
+deployment account's private configuration directory:
+
+```sh
+install -d -m 700 "$HOME/.config/gram-scope"
+alertmanager_config="$HOME/.config/gram-scope/alertmanager.yml"
+${EDITOR:?Set EDITOR first} "$alertmanager_config"
+chmod 600 "$alertmanager_config"
+export ALERTMANAGER_CONFIG_FILE="$alertmanager_config"
+export ALERTMANAGER_RETENTION=120h
+```
+
+The minimum routed configuration has one real notification integration. Replace
+the example endpoint with the production incident receiver before deployment:
+
+```yaml
+route:
+  receiver: operations
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+receivers:
+  - name: operations
+    webhook_configs:
+      - url: https://alerts.example.invalid/gram-scope
+        send_resolved: true
+```
+
+Do not commit this file: receiver URLs and credentials are secrets. The guarded
+rollout accepts only a regular, non-symlink file owned by the deployment account,
+with no group or world permissions, bounded size, no YAML aliases, a bounded
+route tree, and a configured integration for every routed receiver. The same
+configuration must also pass the Alertmanager v0.33.1 `amtool` validator.
+
+Alertmanager state is not supplied manually. The rollout creates a private
+durable sibling of the deployment state directory. For the example above it is
+`$HOME/.local/state/gram-scope-alertmanager`; it must remain owned by the same
+account with mode `0700` and be included in host backups.
 
 ## Preflight and start
 
@@ -44,11 +86,13 @@ the verified manifest for the entire rollout, and injects only its two
 digest-pinned image references. After authorization and before any compose or
 container action, it atomically writes `pending-deployment.json` with a random
 attempt id, operation, start time, exact target identity, and active base
-identity. It then runs compose validation, the container preflight, an on-demand
-SQLite backup, a restore drill of that backup, the exact image pull, service
-activation, and the public smoke gate in order. No later step runs after an
-earlier failure. The tool discards command output on failure so provider or
-container diagnostics cannot leak through the release interface.
+identity. It then runs compose validation, the container preflight, the upstream
+Alertmanager configuration validator, an on-demand SQLite backup, a restore
+drill of that backup, the exact image pull, service activation, an internal
+Prometheus-to-Alertmanager delivery smoke gate, and the public smoke gate in
+order. No later step runs after an earlier failure. The tool discards command
+output on failure so provider or container diagnostics cannot leak through the
+release interface.
 
 Only after every gate succeeds, the command atomically publishes a private event
 under `deployment-events/`, then atomically writes `current-deployment.json`.
@@ -79,17 +123,19 @@ unrelated installations. It contains no provider credential, but it is an
 operational integrity boundary and must remain owned by the deployment account
 with no group or world permissions.
 
-The periodic backup and recovery watchdogs continue after activation. A
-rollout is complete only after the public smoke gate passes and backup/recovery
-health is confirmed through `/api/ops/ready` and monitoring.
+The periodic backup and recovery watchdogs continue after activation. A rollout
+is complete only after the internal delivery and public smoke gates pass and
+backup/recovery health is confirmed through `/api/ops/ready` and monitoring.
 
 The rollout command also passes the absolute state directory and the operator's
-numeric uid/gid to Compose. The internal `deployment-monitor` container runs as
-that same host identity, mounts only the state directory plus its read-only
-image filesystem, and exposes port 9101 only to the Compose network. Do not
-start that service under a different uid or copy the deployment records into a
-second monitoring directory: both choices would break the single-lock audit
-boundary.
+numeric uid/gid to Compose. The internal `deployment-monitor` and Alertmanager
+containers run as that same host identity. Alertmanager mounts only its private
+configuration and durable state, exposes port 9093 only to the Compose network,
+and runs with clustering disabled for this single-node topology. The deployment
+monitor mounts only the state directory plus its read-only image filesystem and
+exposes port 9101 only to the Compose network. Do not start either service under
+a different uid or copy the deployment records into a second monitoring
+directory: both choices would break the validated ownership boundaries.
 
 ## Audit deployment state
 
@@ -121,7 +167,7 @@ resume path performs that reconciliation.
 ## Monitor deployment state
 
 Prometheus scrapes `deployment-monitor:9101/metrics` every 15 seconds. Each
-scrape acquires the same non-blocking lock and runs the complete v0.64.0 audit;
+scrape acquires the same non-blocking lock and runs the complete state audit;
 it never returns a release tag, source commit, manifest digest, attempt id,
 credential, command output, or free-form error. The bounded metric contract is:
 
@@ -141,6 +187,15 @@ an empty production state, and an unavailable monitor have separate alert
 rules. `/healthz` checks only that the internal exporter is serving; corrupt
 state remains scrapeable and therefore visible as metrics instead of causing a
 restart loop.
+
+Prometheus sends evaluated alerts to the internal Alertmanager API and scrapes
+Alertmanager metrics. Alertmanager is not published on a host port. Every
+rollout confirms Prometheus and Alertmanager readiness and requires Prometheus
+to report exactly `alertmanager:9093` as its active, non-dropped notification
+target. Separate critical rules detect an unavailable Alertmanager, failed
+Prometheus delivery, and failed downstream notifications. These rules diagnose
+the delivery chain, but they cannot replace an external receiver: test the
+configured incident destination under the organization's normal alerting drill.
 
 ## Resume an interrupted rollout
 

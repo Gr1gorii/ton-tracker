@@ -113,6 +113,7 @@ jobs:
       RECOVERY_RETRY_SECONDS: "300"
       RECOVERY_HEALTH_MAX_AGE_SECONDS: "691200"
       PROMETHEUS_RETENTION: 15d
+      ALERTMANAGER_RETENTION: 120h
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,13 +122,35 @@ jobs:
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/gram-scope-deployment-state"
+          alertmanager_data="$RUNNER_TEMP/gram-scope-alertmanager"
+          alertmanager_config="$RUNNER_TEMP/gram-scope-alertmanager.yml"
           mkdir -p "$state"
+          mkdir -p "$alertmanager_data"
           chmod 700 "$state"
+          chmod 700 "$alertmanager_data"
+          python - "$alertmanager_config" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          path.write_text(
+              "route:\n"
+              "  receiver: ci-webhook\n"
+              "receivers:\n"
+              "  - name: ci-webhook\n"
+              "    webhook_configs:\n"
+              "      - url: http://127.0.0.1:9/alerts\n",
+              encoding="utf-8",
+          )
+          path.chmod(0o600)
+          PY
           python ops/inspect_deployment_state.py --state-directory "$state" >/dev/null
           {
             echo "DEPLOYMENT_STATE_DIRECTORY=$state"
             echo "DEPLOYMENT_STATE_UID=$(id -u)"
             echo "DEPLOYMENT_STATE_GID=$(id -g)"
+            echo "ALERTMANAGER_CONFIG_FILE=$alertmanager_config"
+            echo "ALERTMANAGER_DATA_DIRECTORY=$alertmanager_data"
           } >> "$GITHUB_ENV"
       - name: Select exact release images
         env:
@@ -235,7 +258,9 @@ jobs:
           docker compose --project-name "$project" --file compose.production.yml \
             config --quiet
           docker compose --project-name "$project" --file compose.production.yml \
-            pull backend frontend
+            pull backend frontend alertmanager
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile ops run --rm alertmanager-config-check
           if ! docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 120 frontend; then
             docker compose --project-name "$project" --file compose.production.yml ps
@@ -249,7 +274,9 @@ jobs:
             --profile deployment run --rm restore-drill
           docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 180 \
-            frontend prometheus backup recovery-watchdog deployment-monitor
+            frontend prometheus backup recovery-watchdog deployment-monitor alertmanager
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm monitoring-smoke
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"
