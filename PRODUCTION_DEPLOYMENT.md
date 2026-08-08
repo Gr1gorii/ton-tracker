@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.62.0
+release=v0.63.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -50,17 +50,25 @@ activation, and the public smoke gate in order. No later step runs after an
 earlier failure. The tool discards command output on failure so provider or
 container diagnostics cannot leak through the release interface.
 
-Only after every gate succeeds, the command atomically writes a private
-`current-deployment.json` receipt in the state directory. The strict receipt
-records the active tag, source commit, manifest digest, completion time, and the
-immediately previous successful release identity. Receipt schema v3 also records
-whether the successful transition was a deployment or rollback and binds it to
-the journal attempt id. Existing v1 and v2 receipts remain accepted and are
-upgraded on the next success. The command durably writes the success receipt
-before removing the matching pending journal. A failed or interrupted rollout
-never replaces the last successful receipt and deliberately leaves its journal
-in place. Missing privacy, corrupt state, or a busy deployment lock fails closed
-before rollout.
+Only after every gate succeeds, the command atomically publishes a private event
+under `deployment-events/`, then atomically writes `current-deployment.json`.
+Each event records its sequence, exact base and target identities, operation,
+journal attempt id, completion time, rollback predecessor, and the SHA-256 digest
+of the preceding event. Its canonical bytes are bound to the digest in its file
+name. Receipt schema v4 records the verified ledger sequence and head digest in
+addition to the active and immediately previous release identities. Existing v1,
+v2, and v3 receipts remain accepted and start the ledger on the next success.
+
+The complete event chain and its receipt binding are validated before bundle
+verification or container work. A changed, removed, reordered, linked, public,
+or malformed event fails closed. The ledger is a local tamper-evident operational
+record, not an externally anchored signature: preserve the entire private state
+directory on durable access-controlled storage and include it in host backups.
+
+The command durably publishes the event and success receipt before removing the
+matching pending journal. A failed or interrupted rollout never replaces the
+last successful receipt and deliberately leaves its journal in place. Missing
+privacy, corrupt state, or a busy deployment lock fails closed before rollout.
 
 A normal deployment may repeat the exact active identity or move to a strictly
 newer stable SemVer release. It cannot silently downgrade or replace one tag
@@ -94,9 +102,9 @@ python ops/deploy_release.py \
 The signed bundle, deployment or rollback operation, target identity, and base
 receipt must exactly match the journal. Otherwise the command fails before any
 compose action. A valid resume repeats the complete guarded rollout. If the
-success receipt was already durably committed and only journal removal was
-interrupted, the matching receipt attempt id proves completion and `--resume`
-clears the stale journal without touching containers. To resume a rollback,
+success event was already durably published, the matching ledger attempt id
+proves that every rollout gate passed. `--resume` binds or confirms the v4 receipt
+and clears the stale journal without touching containers. To resume a rollback,
 pass both `--rollback` and `--resume`.
 
 ## Rollback
