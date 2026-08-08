@@ -28,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.63.0"
+TAG = "v0.64.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64

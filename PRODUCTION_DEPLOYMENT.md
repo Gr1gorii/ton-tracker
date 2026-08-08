@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.63.0
+release=v0.64.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -82,6 +82,33 @@ with no group or world permissions.
 The periodic backup and recovery watchdogs continue after activation. A
 rollout is complete only after the public smoke gate passes and backup/recovery
 health is confirmed through `/api/ops/ready` and monitoring.
+
+## Audit deployment state
+
+Validate the complete state boundary without changing the receipt, journal, or
+ledger events:
+
+```sh
+python ops/inspect_deployment_state.py --state-directory "$state"
+```
+
+The command acquires the same non-blocking lock as a rollout and emits one
+compact `gram_scope_deployment_audit_v1` JSON object. It reports the active and
+previous signed release identities, receipt metadata, ledger event count and
+head digest, receipt binding, and any exact pending attempt. It contains no
+provider credential or command output. Use the exit code as a monitoring
+contract:
+
+- `0`: the state is valid and either `ready` or `empty`;
+- `2`: the state is valid but an interrupted attempt requires inspection and an
+  explicit matching `--resume`;
+- `3`: the state is corrupt, unsafe, or otherwise fails validation;
+- `4`: another deployment currently holds the lock;
+- `64`: the audit command arguments are invalid.
+
+An audit never clears a stale journal or binds an awaiting receipt, even when a
+published ledger event proves that the rollout gates passed. Only the explicit
+resume path performs that reconciliation.
 
 ## Resume an interrupted rollout
 
