@@ -243,6 +243,18 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
             1_200,
         ),
         RolloutStep(
+            "target database migration rehearsal",
+            (
+                *compose,
+                "--profile",
+                "deployment",
+                "run",
+                "--rm",
+                "migration-rehearsal",
+            ),
+            900,
+        ),
+        RolloutStep(
             "service activation",
             (
                 *compose,

@@ -1,3 +1,19 @@
+# GRAM Scope — v0.68.0 TARGET DATABASE MIGRATION REHEARSAL
+
+v0.68.0 adds a fail-closed schema compatibility gate before production service
+activation. After the pre-rollout backup and restore checks, the exact target
+backend image restores a second private copy, runs the same Alembic bootstrap
+used at application startup, validates the resulting model schema and SQLite
+integrity, checks source/target revision coherence, and destroys the copy.
+
+The live database and retained backup remain read-only. Unknown future
+revisions, partial or drifted schemas, failed migrations, integrity errors, and
+inconsistent results stop both deployments and explicit rollbacks before the
+target services can start. Release CI and published-image verification execute
+the same container gate.
+
+---
+
 # GRAM Scope — v0.67.0 ACTIVE NOTIFICATION DRILL
 
 v0.67.0 closes the automated production alert-delivery path. Every guarded

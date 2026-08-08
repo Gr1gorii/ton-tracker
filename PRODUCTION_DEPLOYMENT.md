@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.67.0
+release=v0.68.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -88,11 +88,26 @@ container action, it atomically writes `pending-deployment.json` with a random
 attempt id, operation, start time, exact target identity, and active base
 identity. It then runs compose validation, the container preflight, the upstream
 Alertmanager configuration validator, an on-demand SQLite backup, a restore
-drill of that backup, the exact image pull, service activation, an internal
+drill of that backup, the exact image pull, a target-image migration rehearsal
+on a second private restored copy, service activation, an internal
 Prometheus-to-Alertmanager delivery smoke gate, an active downstream
 notification drill, and the public smoke gate in order. No later step runs
 after an earlier failure. The tool discards command output on failure so
 provider or container diagnostics cannot leak through the release interface.
+
+The migration rehearsal runs the target backend image against an ephemeral copy
+of the heartbeat-selected verified backup. It applies the same fail-closed
+Alembic bootstrap used at application startup, validates the resulting model
+schema and SQLite integrity, confirms the observed source and target revisions,
+and then destroys the copy. The live database and retained backup stay
+read-only to this gate. An unknown future revision, schema drift, failed
+migration, integrity error, or inconsistent revision stops the rollout before
+service activation. The same rule applies to an explicit rollback, preventing
+older code from opening a newer schema it cannot recognize.
+Rollback targets created before v0.68.0 use the equivalent restore, migration,
+and post-migration verification commands already present in that signed target
+image, so the compatibility gate remains available for the immediate previous
+release.
 
 Only after every gate succeeds, the command atomically publishes a private event
 under `deployment-events/`, then atomically writes `current-deployment.json`.
