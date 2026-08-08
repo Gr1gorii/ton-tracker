@@ -28,6 +28,9 @@ services:
       BACKEND_IMAGE: ${BACKEND_IMAGE:?BACKEND_IMAGE is required}
       FRONTEND_IMAGE: ${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}
       DEPLOYMENT_MANIFEST_FILE: /app/deployment-manifest.json
+      DEPLOYMENT_STATE_DIRECTORY: "${DEPLOYMENT_STATE_DIRECTORY:?DEPLOYMENT_STATE_DIRECTORY is required}"
+      DEPLOYMENT_STATE_UID: "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}"
+      DEPLOYMENT_STATE_GID: "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
     volumes:
       - ${DEPLOYMENT_MANIFEST_FILE:?DEPLOYMENT_MANIFEST_FILE is required}:/app/deployment-manifest.json:ro
     security_opt:
@@ -111,8 +114,52 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      deployment-monitor:
+        condition: service_healthy
     security_opt:
       - no-new-privileges:true
+
+  deployment-monitor:
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    user: "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}:${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
+    command:
+      - python
+      - /app/ops/monitor_deployment_state.py
+      - --state-directory
+      - /deployment-state
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "9101"
+    volumes:
+      - type: bind
+        source: "${DEPLOYMENT_STATE_DIRECTORY:?DEPLOYMENT_STATE_DIRECTORY is required}"
+        target: /deployment-state
+    expose:
+      - "9101"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9101/healthz', timeout=3).read() == b'ok\\n' else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      start_interval: 2s
+      retries: 3
 
   backup:
     image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"

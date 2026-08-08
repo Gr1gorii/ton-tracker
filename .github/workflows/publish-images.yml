@@ -117,6 +117,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Prepare private deployment state fixture
+        run: |
+          set -euo pipefail
+          state="$RUNNER_TEMP/gram-scope-deployment-state"
+          mkdir -p "$state"
+          chmod 700 "$state"
+          python ops/inspect_deployment_state.py --state-directory "$state" >/dev/null
+          {
+            echo "DEPLOYMENT_STATE_DIRECTORY=$state"
+            echo "DEPLOYMENT_STATE_UID=$(id -u)"
+            echo "DEPLOYMENT_STATE_GID=$(id -g)"
+          } >> "$GITHUB_ENV"
       - name: Select exact release images
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -237,7 +249,7 @@ jobs:
             --profile deployment run --rm restore-drill
           docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 180 \
-            frontend prometheus backup recovery-watchdog
+            frontend prometheus backup recovery-watchdog deployment-monitor
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"

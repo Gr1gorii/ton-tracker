@@ -152,7 +152,12 @@ def verify_and_deploy_release(
                 )
             result = run_guarded_rollout(
                 bundle,
-                environment=environment,
+                environment={
+                    **environment,
+                    "DEPLOYMENT_STATE_DIRECTORY": str(state_directory),
+                    "DEPLOYMENT_STATE_UID": str(os.getuid()),
+                    "DEPLOYMENT_STATE_GID": str(os.getgid()),
+                },
                 smoke_url=smoke_url,
                 command_runner=command_runner,
                 smoke_checker=smoke_checker,
@@ -219,6 +224,7 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
                 "prometheus",
                 "backup",
                 "recovery-watchdog",
+                "deployment-monitor",
             ),
             300,
         ),

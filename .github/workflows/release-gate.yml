@@ -84,10 +84,22 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
+      - name: Prepare private deployment state fixture
+        run: |
+          set -euo pipefail
+          state="$RUNNER_TEMP/gram-scope-deployment-state"
+          mkdir -p "$state"
+          chmod 700 "$state"
+          python ops/inspect_deployment_state.py --state-directory "$state" >/dev/null
+          {
+            echo "DEPLOYMENT_STATE_DIRECTORY=$state"
+            echo "DEPLOYMENT_STATE_UID=$(id -u)"
+            echo "DEPLOYMENT_STATE_GID=$(id -g)"
+          } >> "$GITHUB_ENV"
       - name: Create atomic deployment manifest fixture
         run: |
           python ops/create_release_manifest.py \
-            --tag v0.64.0 \
+            --tag v0.65.0 \
             --source-commit "$GITHUB_SHA" \
             --backend-digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --frontend-digest sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
@@ -122,7 +134,7 @@ jobs:
             --profile deployment run --rm restore-drill
           docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 180 \
-            frontend prometheus backup recovery-watchdog
+            frontend prometheus backup recovery-watchdog deployment-monitor
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"
