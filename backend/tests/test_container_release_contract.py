@@ -182,6 +182,11 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "check config /etc/prometheus/prometheus.yml" in commands
     assert "--profile ops run --rm alertmanager-config-check" in commands
     assert "--profile deployment run --rm monitoring-smoke" in commands
+    assert "--profile deployment run --rm notification-drill" in commands
+    assert (
+        "--profile test up --detach --no-build --wait "
+        "notification-receiver-fixture"
+    ) in commands
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in commands
     assert "--smoke-url" in commands
     assert "--expected-public-url" in commands
@@ -197,7 +202,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.66.0" in commands
+    assert "--tag v0.67.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     assert "python ops/inspect_deployment_state.py" in commands
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands
@@ -308,7 +313,10 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert alertmanager["expose"] == ["9093"]
     assert alertmanager["cap_drop"] == ["ALL"]
     assert alertmanager["read_only"] is True
-    assert alertmanager["command"][-1] == "--cluster.listen-address="
+    assert alertmanager["command"][-2:] == [
+        "--cluster.listen-address=",
+        "--enable-feature=receiver-name-in-metrics",
+    ]
     assert alertmanager["volumes"] == [
         {
             "type": "bind",
@@ -344,6 +352,21 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "prometheus": {"condition": "service_healthy"},
         "alertmanager": {"condition": "service_healthy"},
     }
+    notification_drill = compose["services"]["notification-drill"]
+    assert notification_drill["profiles"] == ["deployment"]
+    assert notification_drill["command"] == [
+        "python",
+        "/app/ops/check_alert_notification.py",
+    ]
+    assert notification_drill["depends_on"] == {
+        "alertmanager": {"condition": "service_healthy"}
+    }
+    fixture = compose["services"]["notification-receiver-fixture"]
+    assert fixture["profiles"] == ["test"]
+    assert fixture["expose"] == ["9199"]
+    assert fixture["command"][-1] == "9199"
+    assert fixture["read_only"] is True
+    assert fixture["cap_drop"] == ["ALL"]
 
 
 def test_deployment_state_monitor_is_scraped_and_alerted_fail_closed():
@@ -493,6 +516,8 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         "recovery-watchdog",
         "deployment-monitor",
         "monitoring-smoke",
+        "notification-drill",
+        "notification-receiver-fixture",
     ):
         assert compose["services"][service_name]["image"] == backend_image
         assert compose["services"][service_name]["pull_policy"] == (
@@ -570,6 +595,11 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "pull backend frontend alertmanager" in verifier_commands
     assert "--profile ops run --rm alertmanager-config-check" in verifier_commands
     assert "--profile deployment run --rm monitoring-smoke" in verifier_commands
+    assert "--profile deployment run --rm notification-drill" in verifier_commands
+    assert (
+        "--profile test up --detach --no-build --wait "
+        "notification-receiver-fixture"
+    ) in verifier_commands
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in (
         verifier_commands
     )

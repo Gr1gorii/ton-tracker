@@ -28,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.66.0"
+TAG = "v0.67.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -143,6 +143,7 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "release image pull",
         "service activation",
         "monitoring delivery smoke",
+        "external notification drill",
     ]
     commands = [step.command for step, _environment_value in observed]
     assert commands[1][-5:] == (
@@ -182,6 +183,13 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "run",
         "--rm",
         "monitoring-smoke",
+    )
+    assert commands[8][-5:] == (
+        "--profile",
+        "deployment",
+        "run",
+        "--rm",
+        "notification-drill",
     )
     rollout_environment = observed[-1][1]
     assert rollout_environment["BACKEND_IMAGE"] == (
@@ -326,7 +334,7 @@ def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
             command_runner=lambda step, _env: observed.append(step.name),
             smoke_checker=lambda _target, _expected: ["/api/ready is unavailable"],
         )
-    assert observed[-1] == "monitoring delivery smoke"
+    assert observed[-1] == "external notification drill"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
@@ -387,7 +395,7 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
         (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
     )
     assert result.tag == TAG
-    assert resumed_steps[-1] == "monitoring delivery smoke"
+    assert resumed_steps[-1] == "external notification drill"
     assert receipt["attempt_id"] == pending_before["attempt_id"]
     assert not (state_directory / DEPLOYMENT_ATTEMPT).exists()
 
@@ -467,7 +475,7 @@ def test_explicit_rollback_requires_and_activates_exact_previous_bundle(tmp_path
     )
 
     assert result.tag == rollback_tag
-    assert observed[-1] == "monitoring delivery smoke"
+    assert observed[-1] == "external notification drill"
     receipt = json.loads(
         (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
     )
@@ -549,7 +557,7 @@ def test_receipt_finalization_failure_reports_ambiguous_active_state(
             smoke_checker=lambda *_args: [],
         )
 
-    assert observed[-1] == "monitoring delivery smoke"
+    assert observed[-1] == "external notification drill"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
@@ -582,7 +590,7 @@ def test_resume_finalizes_published_event_without_repeating_rollout(
             smoke_checker=lambda *_args: [],
         )
 
-    assert observed[-1] == "monitoring delivery smoke"
+    assert observed[-1] == "external notification drill"
     assert len(list((state_directory / DEPLOYMENT_LEDGER).iterdir())) == 1
     assert (state_directory / DEPLOYMENT_ATTEMPT).is_file()
     assert not (state_directory / DEPLOYMENT_RECEIPT).exists()

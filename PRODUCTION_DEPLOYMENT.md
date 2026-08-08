@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.66.0
+release=v0.67.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -89,10 +89,10 @@ attempt id, operation, start time, exact target identity, and active base
 identity. It then runs compose validation, the container preflight, the upstream
 Alertmanager configuration validator, an on-demand SQLite backup, a restore
 drill of that backup, the exact image pull, service activation, an internal
-Prometheus-to-Alertmanager delivery smoke gate, and the public smoke gate in
-order. No later step runs after an earlier failure. The tool discards command
-output on failure so provider or container diagnostics cannot leak through the
-release interface.
+Prometheus-to-Alertmanager delivery smoke gate, an active downstream
+notification drill, and the public smoke gate in order. No later step runs
+after an earlier failure. The tool discards command output on failure so
+provider or container diagnostics cannot leak through the release interface.
 
 Only after every gate succeeds, the command atomically publishes a private event
 under `deployment-events/`, then atomically writes `current-deployment.json`.
@@ -194,8 +194,25 @@ rollout confirms Prometheus and Alertmanager readiness and requires Prometheus
 to report exactly `alertmanager:9093` as its active, non-dropped notification
 target. Separate critical rules detect an unavailable Alertmanager, failed
 Prometheus delivery, and failed downstream notifications. These rules diagnose
-the delivery chain, but they cannot replace an external receiver: test the
-configured incident destination under the organization's normal alerting drill.
+the delivery chain.
+
+Every guarded rollout also submits one uniquely labelled
+`GramScopeNotificationDrill` through Alertmanager API v2. It requires the alert
+to become active, discovers every receiver selected by the live routing tree,
+and waits for each receiver integration to record at least one successful
+notification request. Receiver-name metrics are enabled only on Alertmanager's
+private Compose network. The drill then resolves the exact alert even when the
+delivery gate fails. A receiver error, silence, inhibition, missing route,
+counter reset, ambiguous metric series, or delivery taking longer than 120
+seconds fails the rollout and preserves the pending deployment journal.
+
+The external incident destination will therefore receive a firing test message
+whose summary says `GRAM Scope production notification drill`; no operator
+action is required. Keep the applicable `group_wait` comfortably below 120
+seconds and ensure organization-wide silences or inhibition rules do not match
+the drill label. The rollout proves delivery as observed by Alertmanager; keep
+the organization's independent incident-response drills as a separate human
+acknowledgement check.
 
 ## Resume an interrupted rollout
 

@@ -273,6 +273,18 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
             ),
             180,
         ),
+        RolloutStep(
+            "external notification drill",
+            (
+                *compose,
+                "--profile",
+                "deployment",
+                "run",
+                "--rm",
+                "notification-drill",
+            ),
+            180,
+        ),
     )
 
 
