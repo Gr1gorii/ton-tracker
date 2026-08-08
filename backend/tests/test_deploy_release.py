@@ -28,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.64.0"
+TAG = "v0.65.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -147,11 +147,12 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     )
     assert commands[3][-1] == "restore-drill"
     assert commands[4][-3:] == ("pull", "backend", "frontend")
-    assert commands[5][-4:] == (
+    assert commands[5][-5:] == (
         "frontend",
         "prometheus",
         "backup",
         "recovery-watchdog",
+        "deployment-monitor",
     )
     rollout_environment = observed[-1][1]
     assert rollout_environment["BACKEND_IMAGE"] == (
@@ -160,6 +161,11 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     assert rollout_environment["FRONTEND_IMAGE"] == (
         f"ghcr.io/gr1gorii/ton-tracker-frontend@{FRONTEND_DIGEST}"
     )
+    assert rollout_environment["DEPLOYMENT_STATE_DIRECTORY"] == str(
+        tmp_path / "state"
+    )
+    assert rollout_environment["DEPLOYMENT_STATE_UID"] == str(os.getuid())
+    assert rollout_environment["DEPLOYMENT_STATE_GID"] == str(os.getgid())
     assert smoke == [("http://127.0.0.1:18080", "https://gram.example")]
     assert result.tag == TAG
     assert result.source_commit == SOURCE_COMMIT

@@ -49,6 +49,9 @@ def _environment(tmp_path) -> dict[str, str]:
         "RECOVERY_INTERVAL_SECONDS": "604800",
         "RECOVERY_RETRY_SECONDS": "300",
         "RECOVERY_HEALTH_MAX_AGE_SECONDS": "691200",
+        "DEPLOYMENT_STATE_DIRECTORY": str(tmp_path / "deployment-state"),
+        "DEPLOYMENT_STATE_UID": "1000",
+        "DEPLOYMENT_STATE_GID": "1000",
         "PROMETHEUS_RETENTION": "15d",
     }
 
@@ -88,6 +91,33 @@ def test_production_environment_requires_recovery_within_retention(tmp_path):
     errors = validate_environment(environment)
     assert "PUBLIC_APP_URL must be an origin-only HTTPS URL without credentials" in errors
     assert "TONAPI_BASE_URL must be an HTTPS URL without credentials" in errors
+
+
+def test_production_environment_requires_safe_deployment_monitor_identity(tmp_path):
+    environment = _environment(tmp_path)
+    environment["DEPLOYMENT_STATE_DIRECTORY"] = "relative/state"
+    environment["DEPLOYMENT_STATE_UID"] = "01"
+    environment["DEPLOYMENT_STATE_GID"] = "not-a-number"
+
+    assert validate_environment(environment) == [
+        "DEPLOYMENT_STATE_DIRECTORY must be an absolute host path",
+        "DEPLOYMENT_STATE_UID must be a canonical numeric host identifier",
+        "DEPLOYMENT_STATE_GID must be a canonical numeric host identifier",
+    ]
+
+    environment = _environment(tmp_path)
+    environment["DEPLOYMENT_STATE_UID"] = "2147483648"
+    assert validate_environment(environment) == [
+        "DEPLOYMENT_STATE_UID must be a canonical numeric host identifier"
+    ]
+
+    environment = _environment(tmp_path)
+    environment["DEPLOYMENT_STATE_DIRECTORY"] = f" {tmp_path}/deployment-state"
+    environment["DEPLOYMENT_STATE_UID"] = "1000 "
+    assert validate_environment(environment) == [
+        "DEPLOYMENT_STATE_DIRECTORY must be an absolute host path",
+        "DEPLOYMENT_STATE_UID must be a canonical numeric host identifier",
+    ]
 
 
 def test_production_image_refs_are_digest_pinned_and_fail_closed(tmp_path):

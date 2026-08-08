@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - direct script execution inside the ima
 _MAX_RESPONSE_BYTES = 65_536
 _RETENTION = re.compile(r"^[1-9][0-9]*(?:s|m|h|d|w|y)$")
 _IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_NUMERIC_ID = re.compile(r"^(?:0|[1-9][0-9]{0,9})$")
 
 
 @dataclass(frozen=True)
@@ -197,6 +198,22 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
     if recovery_retry is not None and recovery_interval is not None:
         if recovery_retry >= recovery_interval:
             errors.append("RECOVERY_RETRY_SECONDS must be shorter than the recovery interval")
+    deployment_state_directory = environment.get("DEPLOYMENT_STATE_DIRECTORY", "")
+    if (
+        not deployment_state_directory
+        or deployment_state_directory != deployment_state_directory.strip()
+        or len(deployment_state_directory) > 4096
+        or "\x00" in deployment_state_directory
+        or not Path(deployment_state_directory).is_absolute()
+    ):
+        errors.append("DEPLOYMENT_STATE_DIRECTORY must be an absolute host path")
+    for name in ("DEPLOYMENT_STATE_UID", "DEPLOYMENT_STATE_GID"):
+        value = environment.get(name, "")
+        if (
+            _NUMERIC_ID.fullmatch(value) is None
+            or int(value or "0") > 2_147_483_647
+        ):
+            errors.append(f"{name} must be a canonical numeric host identifier")
     prometheus_retention = environment.get("PROMETHEUS_RETENTION", "15d").strip()
     if _RETENTION.fullmatch(prometheus_retention) is None:
         errors.append("PROMETHEUS_RETENTION must be a positive Prometheus duration")

@@ -187,14 +187,27 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.64.0" in commands
+    assert "--tag v0.65.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
+    assert "python ops/inspect_deployment_state.py" in commands
+    assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands
+    assert "DEPLOYMENT_STATE_UID=$(id -u)" in commands
+    assert "DEPLOYMENT_STATE_GID=$(id -g)" in commands
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     )
     preflight = compose["services"]["production-preflight"]
     assert preflight["environment"]["DEPLOYMENT_MANIFEST_FILE"] == (
         "/app/deployment-manifest.json"
+    )
+    assert preflight["environment"]["DEPLOYMENT_STATE_DIRECTORY"] == (
+        "${DEPLOYMENT_STATE_DIRECTORY:?DEPLOYMENT_STATE_DIRECTORY is required}"
+    )
+    assert preflight["environment"]["DEPLOYMENT_STATE_UID"] == (
+        "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}"
+    )
+    assert preflight["environment"]["DEPLOYMENT_STATE_GID"] == (
+        "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
     )
     assert preflight["volumes"] == [
         "${DEPLOYMENT_MANIFEST_FILE:?DEPLOYMENT_MANIFEST_FILE is required}:/app/deployment-manifest.json:ro"
@@ -214,15 +227,79 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert compose["services"]["recovery-watchdog"]["healthcheck"][
         "start_interval"
     ] == "10s"
+    deployment_monitor = compose["services"]["deployment-monitor"]
+    assert deployment_monitor["user"] == (
+        "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}:"
+        "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
+    )
+    assert deployment_monitor["volumes"] == [
+        {
+            "type": "bind",
+            "source": (
+                "${DEPLOYMENT_STATE_DIRECTORY:?DEPLOYMENT_STATE_DIRECTORY is required}"
+            ),
+            "target": "/deployment-state",
+        }
+    ]
+    assert deployment_monitor["cap_drop"] == ["ALL"]
+    assert deployment_monitor["read_only"] is True
+    assert deployment_monitor["healthcheck"]["start_interval"] == "2s"
+    assert compose["services"]["prometheus"]["depends_on"][
+        "deployment-monitor"
+    ]["condition"] == "service_healthy"
     assert "--profile deployment run --rm backup-now" in commands
     assert "--profile deployment run --rm restore-drill" in commands
     assert (
         "up --detach --no-build --wait --wait-timeout 180 \\\n"
-        "  frontend prometheus backup recovery-watchdog"
+        "  frontend prometheus backup recovery-watchdog deployment-monitor"
     ) in commands
     assert "/etc/nginx/conf.d" in compose["services"]["frontend"]["tmpfs"]
     assert compose["services"]["prometheus"]["image"] == PROMETHEUS_IMAGE
     assert PROMETHEUS_IMAGE in commands
+
+
+def test_deployment_state_monitor_is_scraped_and_alerted_fail_closed():
+    prometheus = yaml.safe_load(
+        (ROOT / "monitoring/prometheus.yml").read_text(encoding="utf-8")
+    )
+    scrape_jobs = {
+        entry["job_name"]: entry for entry in prometheus["scrape_configs"]
+    }
+    assert scrape_jobs["ton-tracker-deployment"] == {
+        "job_name": "ton-tracker-deployment",
+        "metrics_path": "/metrics",
+        "static_configs": [{"targets": ["deployment-monitor:9101"]}],
+    }
+
+    alert_groups = yaml.safe_load(
+        (ROOT / "monitoring/alerts.yml").read_text(encoding="utf-8")
+    )["groups"]
+    rules = {
+        rule["alert"]: rule
+        for group in alert_groups
+        for rule in group["rules"]
+    }
+    assert rules["TonTrackerDeploymentMonitorDown"]["expr"] == (
+        'up{job="ton-tracker-deployment"} == 0'
+    )
+    assert rules["TonTrackerDeploymentStateInvalid"]["expr"] == (
+        "ton_tracker_deployment_audit_valid == 0 and "
+        "ton_tracker_deployment_lock_busy == 0"
+    )
+    assert rules["TonTrackerDeploymentInterrupted"]["expr"] == (
+        "ton_tracker_deployment_pending_attempt == 1"
+    )
+    assert rules["TonTrackerDeploymentReceiptUnbound"]["expr"] == (
+        "ton_tracker_deployment_ledger_events > 0 and "
+        "ton_tracker_deployment_receipt_bound == 0"
+    )
+    assert rules["TonTrackerDeploymentStateEmpty"]["for"] == "30m"
+    assert rules["TonTrackerDeploymentLockStuck"]["for"] == "45m"
+    assert all(
+        rule["labels"]["severity"] in {"warning", "critical"}
+        for name, rule in rules.items()
+        if name.startswith("TonTrackerDeployment")
+    )
 
 
 def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
@@ -304,6 +381,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         "backup-now",
         "restore-drill",
         "recovery-watchdog",
+        "deployment-monitor",
     ):
         assert compose["services"][service_name]["image"] == backend_image
         assert compose["services"][service_name]["pull_policy"] == (
@@ -363,6 +441,10 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "FRONTEND_IMAGE=ghcr.io/gr1gorii/ton-tracker-frontend:${release}" in (
         verifier_commands
     )
+    assert "python ops/inspect_deployment_state.py" in verifier_commands
+    assert "DEPLOYMENT_STATE_DIRECTORY=$state" in verifier_commands
+    assert "DEPLOYMENT_STATE_UID=$(id -u)" in verifier_commands
+    assert "DEPLOYMENT_STATE_GID=$(id -g)" in verifier_commands
     assert "pull backend frontend" in verifier_commands
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in (
         verifier_commands
@@ -371,7 +453,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "--profile deployment run --rm restore-drill" in verifier_commands
     assert (
         "up --detach --no-build --wait --wait-timeout 180 \\\n"
-        "  frontend prometheus backup recovery-watchdog"
+        "  frontend prometheus backup recovery-watchdog deployment-monitor"
     ) in verifier_commands
     assert "--smoke-url" in verifier_commands
     assert "python ops/create_release_manifest.py" in verifier_commands

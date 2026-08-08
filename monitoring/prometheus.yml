@@ -10,3 +10,7 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["backend:8000"]
+  - job_name: ton-tracker-deployment
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["deployment-monitor:9101"]

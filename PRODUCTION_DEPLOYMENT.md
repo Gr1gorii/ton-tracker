@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.64.0
+release=v0.65.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -83,6 +83,14 @@ The periodic backup and recovery watchdogs continue after activation. A
 rollout is complete only after the public smoke gate passes and backup/recovery
 health is confirmed through `/api/ops/ready` and monitoring.
 
+The rollout command also passes the absolute state directory and the operator's
+numeric uid/gid to Compose. The internal `deployment-monitor` container runs as
+that same host identity, mounts only the state directory plus its read-only
+image filesystem, and exposes port 9101 only to the Compose network. Do not
+start that service under a different uid or copy the deployment records into a
+second monitoring directory: both choices would break the single-lock audit
+boundary.
+
 ## Audit deployment state
 
 Validate the complete state boundary without changing the receipt, journal, or
@@ -109,6 +117,30 @@ contract:
 An audit never clears a stale journal or binds an awaiting receipt, even when a
 published ledger event proves that the rollout gates passed. Only the explicit
 resume path performs that reconciliation.
+
+## Monitor deployment state
+
+Prometheus scrapes `deployment-monitor:9101/metrics` every 15 seconds. Each
+scrape acquires the same non-blocking lock and runs the complete v0.64.0 audit;
+it never returns a release tag, source commit, manifest digest, attempt id,
+credential, command output, or free-form error. The bounded metric contract is:
+
+- `ton_tracker_deployment_audit_valid` for a complete successful validation;
+- `ton_tracker_deployment_state_ready` for an active receipt with no pending
+  attempt;
+- `ton_tracker_deployment_lock_busy` while a rollout owns the lock;
+- `ton_tracker_deployment_pending_attempt` for interrupted work;
+- `ton_tracker_deployment_ledger_events` and
+  `ton_tracker_deployment_receipt_bound` for ledger/receipt continuity;
+- `ton_tracker_deployment_state_info` with one fixed status label from
+  `ready`, `empty`, `interrupted`, `busy`, or `invalid`.
+
+A busy result is expected during a guarded rollout, so it becomes critical only
+after 45 minutes. Invalid state, an interrupted attempt, an unbound ledger head,
+an empty production state, and an unavailable monitor have separate alert
+rules. `/healthz` checks only that the internal exporter is serving; corrupt
+state remains scrapeable and therefore visible as metrics instead of causing a
+restart loop.
 
 ## Resume an interrupted rollout
 

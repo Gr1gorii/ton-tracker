@@ -36,3 +36,45 @@ groups:
           severity: critical
         annotations:
           summary: Verified SQLite recovery drill is missing, stale, or invalid
+      - alert: TonTrackerDeploymentMonitorDown
+        expr: up{job="ton-tracker-deployment"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Deployment state monitor is unavailable
+      - alert: TonTrackerDeploymentStateInvalid
+        expr: ton_tracker_deployment_audit_valid == 0 and ton_tracker_deployment_lock_busy == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Deployment receipt, journal, or ledger validation is failing
+      - alert: TonTrackerDeploymentInterrupted
+        expr: ton_tracker_deployment_pending_attempt == 1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Deployment attempt requires explicit inspection and resume
+      - alert: TonTrackerDeploymentReceiptUnbound
+        expr: ton_tracker_deployment_ledger_events > 0 and ton_tracker_deployment_receipt_bound == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Deployment ledger head is awaiting a matching active receipt
+      - alert: TonTrackerDeploymentStateEmpty
+        expr: ton_tracker_deployment_state_info{status="empty"} == 1
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: No successful release is recorded in deployment state
+      - alert: TonTrackerDeploymentLockStuck
+        expr: ton_tracker_deployment_lock_busy == 1
+        for: 45m
+        labels:
+          severity: critical
+        annotations:
+          summary: Deployment lock has remained busy beyond the rollout window
