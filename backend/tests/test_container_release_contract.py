@@ -202,7 +202,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.67.0" in commands
+    assert "--tag v0.68.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     assert "python ops/inspect_deployment_state.py" in commands
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands
@@ -267,6 +267,22 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "recovery",
         "deployment",
     ]
+    migration_rehearsal = compose["services"]["migration-rehearsal"]
+    assert migration_rehearsal["profiles"] == ["deployment"]
+    assert migration_rehearsal["entrypoint"] == ["/bin/sh", "-ec"]
+    rehearsal_command = migration_rehearsal["command"][0]
+    assert "/app/ops/rehearse_database_migration.py" in rehearsal_command
+    assert "/app/ops/restore_sqlite.py" in rehearsal_command
+    assert "python -m services.database_migrations" in rehearsal_command
+    assert "/app/ops/backup_sqlite.py" in rehearsal_command
+    assert migration_rehearsal["environment"] == {
+        "TON_CHECK_DB_URL": "sqlite:////tmp/rehearsal.sqlite3"
+    }
+    assert migration_rehearsal["volumes"] == [
+        "ton_tracker_backups:/backups:ro"
+    ]
+    assert migration_rehearsal["cap_drop"] == ["ALL"]
+    assert migration_rehearsal["read_only"] is True
     assert compose["services"]["recovery-watchdog"]["healthcheck"][
         "start_interval"
     ] == "10s"
@@ -295,6 +311,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     ] == "service_healthy"
     assert "--profile deployment run --rm backup-now" in commands
     assert "--profile deployment run --rm restore-drill" in commands
+    assert "--profile deployment run --rm migration-rehearsal" in commands
     assert (
         "up --detach --no-build --wait --wait-timeout 180 \\\n"
         "  frontend prometheus backup recovery-watchdog deployment-monitor alertmanager"
@@ -513,6 +530,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         "backup",
         "backup-now",
         "restore-drill",
+        "migration-rehearsal",
         "recovery-watchdog",
         "deployment-monitor",
         "monitoring-smoke",
@@ -605,6 +623,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     )
     assert "--profile deployment run --rm backup-now" in verifier_commands
     assert "--profile deployment run --rm restore-drill" in verifier_commands
+    assert "--profile deployment run --rm migration-rehearsal" in verifier_commands
     assert (
         "up --detach --no-build --wait --wait-timeout 180 \\\n"
         "  frontend prometheus backup recovery-watchdog deployment-monitor alertmanager"

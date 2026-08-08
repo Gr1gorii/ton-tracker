@@ -392,6 +392,39 @@ services:
       - /tmp
     restart: "no"
 
+  migration-rehearsal:
+    profiles: ["deployment"]
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ -f /app/ops/rehearse_database_migration.py ]; then
+          exec python /app/ops/rehearse_database_migration.py \
+            --heartbeat /backups/.backup-health.json --workspace /tmp
+        fi
+        python /app/ops/restore_sqlite.py \
+          --heartbeat /backups/.backup-health.json \
+          --destination /tmp/rehearsal.sqlite3 >/dev/null
+        python -m services.database_migrations >/dev/null
+        python /app/ops/backup_sqlite.py \
+          --verify /tmp/rehearsal.sqlite3 >/dev/null
+    environment:
+      TON_CHECK_DB_URL: sqlite:////tmp/rehearsal.sqlite3
+    volumes:
+      - ton_tracker_backups:/backups:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+
   recovery-watchdog:
     image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
     pull_policy: ${APP_PULL_POLICY:-always}

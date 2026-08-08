@@ -28,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.67.0"
+TAG = "v0.68.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -141,6 +141,7 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "pre-rollout backup",
         "pre-rollout restore drill",
         "release image pull",
+        "target database migration rehearsal",
         "service activation",
         "monitoring delivery smoke",
         "external notification drill",
@@ -169,7 +170,14 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     )
     assert commands[4][-1] == "restore-drill"
     assert commands[5][-4:] == ("pull", "backend", "frontend", "alertmanager")
-    assert commands[6][-6:] == (
+    assert commands[6][-5:] == (
+        "--profile",
+        "deployment",
+        "run",
+        "--rm",
+        "migration-rehearsal",
+    )
+    assert commands[7][-6:] == (
         "frontend",
         "prometheus",
         "backup",
@@ -177,14 +185,14 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "deployment-monitor",
         "alertmanager",
     )
-    assert commands[7][-5:] == (
+    assert commands[8][-5:] == (
         "--profile",
         "deployment",
         "run",
         "--rm",
         "monitoring-smoke",
     )
-    assert commands[8][-5:] == (
+    assert commands[9][-5:] == (
         "--profile",
         "deployment",
         "run",
@@ -336,6 +344,37 @@ def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
         )
     assert observed[-1] == "external notification drill"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
+    assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
+
+
+def test_migration_rehearsal_failure_stops_before_service_activation(tmp_path):
+    manifest, checksum, attestation = _release_assets(tmp_path)
+    observed: list[str] = []
+
+    def runner(step: RolloutStep, _environment_value: dict[str, str]) -> None:
+        observed.append(step.name)
+        if step.name == "target database migration rehearsal":
+            raise DeploymentRolloutError(
+                "rollout step failed: target database migration rehearsal"
+            )
+
+    with pytest.raises(DeploymentRolloutError, match="migration rehearsal"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=TAG,
+            environment=_environment(tmp_path),
+            state_directory=tmp_path / "state",
+            attestation_verifier=lambda *_args: None,
+            command_runner=runner,
+        )
+
+    assert observed[-2:] == [
+        "release image pull",
+        "target database migration rehearsal",
+    ]
+    assert "service activation" not in observed
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
 
