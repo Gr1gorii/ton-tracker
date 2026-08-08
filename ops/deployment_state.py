@@ -73,6 +73,10 @@ class DeploymentStateError(RuntimeError):
     """The private host deployment state cannot be trusted or updated."""
 
 
+class DeploymentStateBusyError(DeploymentStateError):
+    """Another process holds the deployment state lock."""
+
+
 @dataclass(frozen=True)
 class DeploymentIdentity:
     tag: str
@@ -96,6 +100,7 @@ class _LedgerEvent:
 
 @dataclass(frozen=True)
 class _LedgerSnapshot:
+    event_count: int
     previous: _LedgerEvent | None
     head: _LedgerEvent | None
 
@@ -146,6 +151,62 @@ class LockedDeploymentState:
             self.current_attempt(),
             _read_ledger(self.ledger_path),
         )
+
+    def audit_report(self) -> dict[str, object]:
+        """Build a stable, credential-free view of the verified state."""
+        self._ensure_open()
+        receipt = self.current_receipt()
+        pending = self.current_attempt()
+        ledger = _read_ledger(self.ledger_path)
+        _validate_state_consistency(receipt, pending, ledger)
+        head = ledger.head
+        if head is None:
+            binding = "none"
+        elif _receipt_matches_event(receipt, head):
+            binding = "bound"
+        else:
+            binding = "awaiting_receipt"
+        if pending is not None:
+            status = "interrupted"
+        elif receipt is None:
+            status = "empty"
+        else:
+            status = "ready"
+        return {
+            "schema": "gram_scope_deployment_audit_v1",
+            "status": status,
+            "active_release": None if receipt is None else receipt["release"],
+            "previous_release": (
+                None if receipt is None else receipt["previous_release"]
+            ),
+            "receipt": (
+                None
+                if receipt is None
+                else {
+                    "schema": receipt["schema"],
+                    "operation": receipt.get("operation"),
+                    "attempt_id": receipt.get("attempt_id"),
+                    "completed_at": receipt["completed_at"],
+                }
+            ),
+            "ledger": {
+                "event_count": ledger.event_count,
+                "head_sequence": None if head is None else head.payload["sequence"],
+                "head_sha256": None if head is None else head.sha256,
+                "receipt_binding": binding,
+            },
+            "pending_attempt": (
+                None
+                if pending is None
+                else {
+                    "attempt_id": pending["attempt_id"],
+                    "operation": pending["operation"],
+                    "started_at": pending["started_at"],
+                    "base_release": pending["base_release"],
+                    "target_release": pending["target_release"],
+                }
+            ),
+        }
 
     def record_success(
         self,
@@ -433,7 +494,7 @@ def locked_deployment_state(directory: Path) -> Iterator[LockedDeploymentState]:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
             if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EWOULDBLOCK}:
-                raise DeploymentStateError(
+                raise DeploymentStateBusyError(
                     "another deployment is already in progress"
                 ) from exc
             raise DeploymentStateError("deployment lock is unavailable") from exc
@@ -514,7 +575,7 @@ def _read_attempt(path: Path) -> dict[str, object]:
 
 def _read_ledger(path: Path) -> _LedgerSnapshot:
     if not os.path.lexists(path):
-        return _LedgerSnapshot(previous=None, head=None)
+        return _LedgerSnapshot(event_count=0, previous=None, head=None)
     _validate_private_directory(path, "deployment ledger")
     try:
         entries = sorted(path.iterdir(), key=lambda entry: entry.name)
@@ -544,7 +605,11 @@ def _read_ledger(path: Path) -> _LedgerSnapshot:
         _validate_event_chain(payload, prior)
         penultimate = prior
         prior = _LedgerEvent(payload=payload, sha256=digest, path=entry)
-    return _LedgerSnapshot(previous=penultimate, head=prior)
+    return _LedgerSnapshot(
+        event_count=len(entries),
+        previous=penultimate,
+        head=prior,
+    )
 
 
 def _read_private_json(path: Path, label: str) -> object:
