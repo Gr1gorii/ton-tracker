@@ -271,6 +271,8 @@ jobs:
             pull backend frontend alertmanager
           docker compose --project-name "$project" --file compose.production.yml \
             --profile ops run --rm alertmanager-config-check
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm database-bootstrap
           if ! docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 120 frontend; then
             docker compose --project-name "$project" --file compose.production.yml ps
@@ -284,6 +286,9 @@ jobs:
             --profile deployment run --rm restore-drill
           docker compose --project-name "$project" --file compose.production.yml \
             --profile deployment run --rm migration-rehearsal
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm database-bootstrap \
+            python /app/ops/rehearse_database_bootstrap.py --mode resume
           docker compose --project-name "$project" --file compose.production.yml \
             --profile test up --detach --no-build --wait notification-receiver-fixture
           docker compose --project-name "$project" --file compose.production.yml \

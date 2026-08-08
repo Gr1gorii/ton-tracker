@@ -38,7 +38,7 @@ def test_audit_reports_empty_state_as_valid_json(tmp_path, capsys):
     captured = capsys.readouterr()
     assert captured.err == ""
     assert json.loads(captured.out) == {
-        "schema": "gram_scope_deployment_audit_v1",
+        "schema": "gram_scope_deployment_audit_v2",
         "status": "empty",
         "active_release": None,
         "previous_release": None,
@@ -147,6 +147,7 @@ def test_audit_returns_interrupted_for_pending_rollout(tmp_path, capsys):
     assert report["pending_attempt"]["attempt_id"] == attempt.attempt_id
     assert report["pending_attempt"]["base_release"]["tag"] == "v0.63.0"
     assert report["pending_attempt"]["target_release"]["tag"] == "v0.64.0"
+    assert report["pending_attempt"]["rollout_phase"] == "prepared"
 
 
 def test_audit_observes_event_awaiting_receipt_without_reconciling(

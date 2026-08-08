@@ -183,6 +183,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--profile ops run --rm alertmanager-config-check" in commands
     assert "--profile deployment run --rm monitoring-smoke" in commands
     assert "--profile deployment run --rm notification-drill" in commands
+    assert "rehearse_database_bootstrap.py --mode resume" in commands
     assert (
         "--profile test up --detach --no-build --wait "
         "notification-receiver-fixture"
@@ -202,7 +203,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.68.0" in commands
+    assert "--tag v0.69.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     assert "python ops/inspect_deployment_state.py" in commands
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands
@@ -262,6 +263,23 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "ton_tracker_data:/data:ro",
         "ton_tracker_backups:/backups",
     ]
+    database_bootstrap = compose["services"]["database-bootstrap"]
+    assert database_bootstrap["profiles"] == ["deployment"]
+    assert database_bootstrap["command"] == [
+        "python",
+        "/app/ops/rehearse_database_bootstrap.py",
+        "--mode",
+        "fresh",
+    ]
+    assert database_bootstrap["environment"] == {
+        "BACKUP_RETENTION": "${BACKUP_RETENTION:-14}"
+    }
+    assert database_bootstrap["volumes"] == [
+        "ton_tracker_data:/data:ro",
+        "ton_tracker_backups:/backups",
+    ]
+    assert database_bootstrap["cap_drop"] == ["ALL"]
+    assert database_bootstrap["read_only"] is True
     assert compose["services"]["backup"]["healthcheck"]["start_interval"] == "10s"
     assert compose["services"]["restore-drill"]["profiles"] == [
         "recovery",

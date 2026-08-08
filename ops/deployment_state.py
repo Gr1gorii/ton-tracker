@@ -46,7 +46,7 @@ _RECEIPT_V4_KEYS = _RECEIPT_V3_KEYS | {
     "ledger_event_sha256",
     "ledger_sequence",
 }
-_ATTEMPT_KEYS = {
+_ATTEMPT_V1_KEYS = {
     "attempt_id",
     "base_release",
     "operation",
@@ -55,6 +55,8 @@ _ATTEMPT_KEYS = {
     "status",
     "target_release",
 }
+_ATTEMPT_V2_KEYS = _ATTEMPT_V1_KEYS | {"rollout_phase"}
+_ROLLOUT_PHASES = {"prepared", "initial_bootstrap_verified"}
 _OPERATIONS = {"deployment", "rollback"}
 _EVENT_KEYS = {
     "attempt_id",
@@ -88,6 +90,8 @@ class DeploymentIdentity:
 class DeploymentAttempt:
     attempt_id: str
     operation: str
+    initial_deployment: bool = False
+    rollout_phase: str = "prepared"
     already_completed: bool = False
 
 
@@ -173,7 +177,7 @@ class LockedDeploymentState:
         else:
             status = "ready"
         return {
-            "schema": "gram_scope_deployment_audit_v1",
+            "schema": "gram_scope_deployment_audit_v2",
             "status": status,
             "active_release": None if receipt is None else receipt["release"],
             "previous_release": (
@@ -204,6 +208,7 @@ class LockedDeploymentState:
                     "started_at": pending["started_at"],
                     "base_release": pending["base_release"],
                     "target_release": pending["target_release"],
+                    "rollout_phase": _attempt_rollout_phase(pending),
                 }
             ),
         }
@@ -337,6 +342,8 @@ class LockedDeploymentState:
                 return DeploymentAttempt(
                     attempt_id=attempt_id,
                     operation=operation,
+                    initial_deployment=pending["base_release"] is None,
+                    rollout_phase=_attempt_rollout_phase(pending),
                     already_completed=True,
                 )
             if (
@@ -349,6 +356,8 @@ class LockedDeploymentState:
                 return DeploymentAttempt(
                     attempt_id=attempt_id,
                     operation=operation,
+                    initial_deployment=pending["base_release"] is None,
+                    rollout_phase=_attempt_rollout_phase(pending),
                     already_completed=True,
                 )
             if pending["base_release"] != current_release:
@@ -359,6 +368,8 @@ class LockedDeploymentState:
             return DeploymentAttempt(
                 attempt_id=attempt_id,
                 operation=operation,
+                initial_deployment=pending["base_release"] is None,
+                rollout_phase=_attempt_rollout_phase(pending),
             )
 
         if resume:
@@ -373,20 +384,59 @@ class LockedDeploymentState:
             raise DeploymentStateError("deployment start time must be timezone-aware")
         attempt_id = secrets.token_hex(16)
         payload: dict[str, object] = {
-            "schema": "gram_scope_deployment_attempt_v1",
+            "schema": "gram_scope_deployment_attempt_v2",
             "status": "pending",
             "operation": operation,
             "attempt_id": attempt_id,
             "started_at": _utc_timestamp(started),
             "base_release": current_release,
             "target_release": target,
+            "rollout_phase": "prepared",
         }
         _validate_attempt(payload)
         _write_atomic_attempt(self.attempt_path, payload)
         return DeploymentAttempt(
             attempt_id=attempt_id,
             operation=operation,
+            initial_deployment=current_release is None,
+            rollout_phase="prepared",
         )
+
+    def mark_initial_bootstrap_verified(
+        self,
+        identity: DeploymentIdentity,
+        attempt: DeploymentAttempt,
+    ) -> None:
+        """Durably authorize an initial rollout to resume after its empty-volume gate."""
+        self._ensure_open()
+        _validate_identity(identity)
+        pending = self.current_attempt()
+        if pending is None:
+            raise DeploymentStateError("pending deployment attempt is unavailable")
+        if (
+            pending["attempt_id"] != attempt.attempt_id
+            or pending["operation"] != "deployment"
+            or pending["target_release"] != _identity_payload(identity)
+            or pending["base_release"] is not None
+        ):
+            raise DeploymentStateError("initial deployment attempt changed")
+        current = self.current_receipt()
+        ledger = _read_ledger(self.ledger_path)
+        _validate_state_consistency(current, pending, ledger)
+        if current is not None:
+            raise DeploymentStateError("initial deployment receipt changed")
+        phase = _attempt_rollout_phase(pending)
+        if phase == "initial_bootstrap_verified":
+            return
+        if phase != "prepared":
+            raise DeploymentStateError("deployment rollout phase is invalid")
+        checkpoint = {
+            **pending,
+            "schema": "gram_scope_deployment_attempt_v2",
+            "rollout_phase": "initial_bootstrap_verified",
+        }
+        _validate_attempt(checkpoint)
+        _write_atomic_attempt(self.attempt_path, checkpoint)
 
     def complete_attempt(
         self,
@@ -714,11 +764,19 @@ def _validate_receipt(payload: object) -> dict[str, object]:
 
 
 def _validate_attempt(payload: object) -> dict[str, object]:
-    if not isinstance(payload, dict) or set(payload) != _ATTEMPT_KEYS:
+    if not isinstance(payload, dict):
+        raise DeploymentStateError("deployment attempt contract is invalid")
+    schema = payload.get("schema")
+    if schema == "gram_scope_deployment_attempt_v1":
+        if set(payload) != _ATTEMPT_V1_KEYS:
+            raise DeploymentStateError("deployment attempt contract is invalid")
+    elif schema == "gram_scope_deployment_attempt_v2":
+        if set(payload) != _ATTEMPT_V2_KEYS:
+            raise DeploymentStateError("deployment attempt contract is invalid")
+    else:
         raise DeploymentStateError("deployment attempt contract is invalid")
     if (
-        payload["schema"] != "gram_scope_deployment_attempt_v1"
-        or payload["status"] != "pending"
+        payload["status"] != "pending"
         or not isinstance(payload["operation"], str)
         or payload["operation"] not in _OPERATIONS
         or not isinstance(payload["attempt_id"], str)
@@ -731,7 +789,28 @@ def _validate_attempt(payload: object) -> dict[str, object]:
         )
     ):
         raise DeploymentStateError("deployment attempt fields are invalid")
+    if schema == "gram_scope_deployment_attempt_v2":
+        phase = payload["rollout_phase"]
+        if (
+            not isinstance(phase, str)
+            or phase not in _ROLLOUT_PHASES
+            or (
+                phase == "initial_bootstrap_verified"
+                and (
+                    payload["base_release"] is not None
+                    or payload["operation"] != "deployment"
+                )
+            )
+        ):
+            raise DeploymentStateError("deployment attempt fields are invalid")
     return payload
+
+
+def _attempt_rollout_phase(payload: dict[str, object]) -> str:
+    phase = payload.get("rollout_phase", "prepared")
+    if not isinstance(phase, str) or phase not in _ROLLOUT_PHASES:
+        raise DeploymentStateError("deployment rollout phase is invalid")
+    return phase
 
 
 def _validate_event(payload: object) -> dict[str, object]:

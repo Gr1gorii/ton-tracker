@@ -1,3 +1,24 @@
+# GRAM Scope — v0.69.0 SAFE FIRST DEPLOYMENT
+
+v0.69.0 adds a dedicated fail-closed path for the first production deployment.
+An installation with no active deployment receipt no longer attempts to back up
+a database that does not exist. Instead, the exact target backend image proves
+that the named data and backup volumes are empty, builds and validates the
+current schema in private ephemeral storage, and records a durable bootstrap
+checkpoint before any application service can start.
+
+The application is activated separately, followed immediately by a verified
+backup, restore drill, and target-image migration verification. Only then are
+the backup, recovery, monitoring, and alert-delivery services activated. A
+non-empty volume without the checkpoint is rejected as unmanaged state. An
+explicit resume after the checkpoint accepts only two still-empty volumes or
+the exact SQLite database, known sidecars, and verified backup artifacts created
+by the interrupted attempt. An existing database is backed up and rehearsed
+before activation is retried.
+Upgrade and rollback sequencing remains unchanged.
+
+---
+
 # GRAM Scope — v0.68.0 TARGET DATABASE MIGRATION REHEARSAL
 
 v0.68.0 adds a fail-closed schema compatibility gate before production service
