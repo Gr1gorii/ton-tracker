@@ -61,6 +61,7 @@ class RolloutStep:
     name: str
     command: tuple[str, ...]
     timeout_seconds: int
+    checkpoint: str | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ class DeploymentResult:
 
 CommandRunner = Callable[[RolloutStep, Mapping[str, str]], None]
 SmokeChecker = Callable[[str, str], list[str]]
+CheckpointRecorder = Callable[[str], None]
 
 
 def run_guarded_rollout(
@@ -81,6 +83,9 @@ def run_guarded_rollout(
     smoke_url: str | None = None,
     command_runner: CommandRunner | None = None,
     smoke_checker: SmokeChecker | None = None,
+    initial_deployment: bool = False,
+    initial_bootstrap_verified: bool = False,
+    checkpoint_recorder: CheckpointRecorder | None = None,
 ) -> DeploymentResult:
     """Deploy one verified bundle after backup and recovery safety gates."""
     runner = command_runner or _run_command
@@ -99,8 +104,17 @@ def run_guarded_rollout(
                 "production environment is invalid: " + "; ".join(errors)
             )
 
-        for step in rollout_steps():
+        for step in rollout_steps(
+            initial_deployment=initial_deployment,
+            initial_bootstrap_verified=initial_bootstrap_verified,
+        ):
             runner(step, rollout_environment)
+            if step.checkpoint is not None:
+                if checkpoint_recorder is None:
+                    raise DeploymentRolloutError(
+                        "rollout checkpoint recorder is unavailable"
+                    )
+                checkpoint_recorder(step.checkpoint)
 
         expected_public_url = rollout_environment["PUBLIC_APP_URL"].strip()
         target = smoke_url or expected_public_url
@@ -167,6 +181,17 @@ def verify_and_deploy_release(
                     source_commit=identity.source_commit,
                     manifest_sha256=identity.manifest_sha256,
                 )
+
+            def record_checkpoint(checkpoint: str) -> None:
+                if checkpoint != "initial_bootstrap_verified":
+                    raise DeploymentRolloutError(
+                        f"rollout checkpoint is invalid: {checkpoint}"
+                    )
+                deployment_state.mark_initial_bootstrap_verified(
+                    identity,
+                    attempt,
+                )
+
             result = run_guarded_rollout(
                 bundle,
                 environment={
@@ -181,6 +206,11 @@ def verify_and_deploy_release(
                 smoke_url=smoke_url,
                 command_runner=command_runner,
                 smoke_checker=smoke_checker,
+                initial_deployment=attempt.initial_deployment,
+                initial_bootstrap_verified=(
+                    attempt.rollout_phase == "initial_bootstrap_verified"
+                ),
+                checkpoint_recorder=record_checkpoint,
             )
             try:
                 deployment_state.complete_attempt(
@@ -197,14 +227,22 @@ def verify_and_deploy_release(
         raise DeploymentRolloutError(f"deployment state gate failed: {exc}") from exc
 
 
-def rollout_steps() -> tuple[RolloutStep, ...]:
+def rollout_steps(
+    *,
+    initial_deployment: bool = False,
+    initial_bootstrap_verified: bool = False,
+) -> tuple[RolloutStep, ...]:
+    if initial_bootstrap_verified and not initial_deployment:
+        raise DeploymentRolloutError(
+            "initial bootstrap checkpoint requires an initial deployment"
+        )
     compose = (
         "docker",
         "compose",
         "--file",
         str(_COMPOSE_FILE),
     )
-    return (
+    common = (
         RolloutStep(
             "compose configuration",
             (*compose, "config", "--quiet"),
@@ -227,6 +265,129 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
             ),
             180,
         ),
+    )
+    activation_command = (
+        *compose,
+        "up",
+        "--detach",
+        "--no-build",
+        "--wait",
+        "--wait-timeout",
+        "180",
+        "frontend",
+        "prometheus",
+        "backup",
+        "recovery-watchdog",
+        "deployment-monitor",
+        "alertmanager",
+    )
+    monitoring_steps = (
+        RolloutStep(
+            "monitoring delivery smoke",
+            (
+                *compose,
+                "--profile",
+                "deployment",
+                "run",
+                "--rm",
+                "monitoring-smoke",
+            ),
+            180,
+        ),
+        RolloutStep(
+            "external notification drill",
+            (
+                *compose,
+                "--profile",
+                "deployment",
+                "run",
+                "--rm",
+                "notification-drill",
+            ),
+            180,
+        ),
+    )
+    if initial_deployment:
+        bootstrap_command = (
+            *compose,
+            "--profile",
+            "deployment",
+            "run",
+            "--rm",
+            "database-bootstrap",
+        )
+        if initial_bootstrap_verified:
+            bootstrap_command = (
+                *bootstrap_command,
+                "python",
+                "/app/ops/rehearse_database_bootstrap.py",
+                "--mode",
+                "resume",
+            )
+        return common + (
+            RolloutStep(
+                "release image pull",
+                (*compose, "pull", "backend", "frontend", "alertmanager"),
+                1_200,
+            ),
+            RolloutStep(
+                (
+                    "resumed initial database safety"
+                    if initial_bootstrap_verified
+                    else "initial database bootstrap rehearsal"
+                ),
+                bootstrap_command,
+                900,
+                (
+                    None
+                    if initial_bootstrap_verified
+                    else "initial_bootstrap_verified"
+                ),
+            ),
+            RolloutStep(
+                "initial application activation",
+                (
+                    *compose,
+                    "up",
+                    "--detach",
+                    "--no-build",
+                    "--wait",
+                    "--wait-timeout",
+                    "180",
+                    "frontend",
+                ),
+                300,
+            ),
+            RolloutStep(
+                "initial database backup",
+                (*compose, "--profile", "deployment", "run", "--rm", "backup-now"),
+                900,
+            ),
+            RolloutStep(
+                "initial backup restore drill",
+                (*compose, "--profile", "deployment", "run", "--rm", "restore-drill"),
+                900,
+            ),
+            RolloutStep(
+                "initial database migration verification",
+                (
+                    *compose,
+                    "--profile",
+                    "deployment",
+                    "run",
+                    "--rm",
+                    "migration-rehearsal",
+                ),
+                900,
+            ),
+            RolloutStep(
+                "operational services activation",
+                activation_command,
+                300,
+            ),
+        ) + monitoring_steps
+
+    return common + (
         RolloutStep(
             "pre-rollout backup",
             (*compose, "--profile", "deployment", "run", "--rm", "backup-now"),
@@ -256,48 +417,10 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
         ),
         RolloutStep(
             "service activation",
-            (
-                *compose,
-                "up",
-                "--detach",
-                "--no-build",
-                "--wait",
-                "--wait-timeout",
-                "180",
-                "frontend",
-                "prometheus",
-                "backup",
-                "recovery-watchdog",
-                "deployment-monitor",
-                "alertmanager",
-            ),
+            activation_command,
             300,
         ),
-        RolloutStep(
-            "monitoring delivery smoke",
-            (
-                *compose,
-                "--profile",
-                "deployment",
-                "run",
-                "--rm",
-                "monitoring-smoke",
-            ),
-            180,
-        ),
-        RolloutStep(
-            "external notification drill",
-            (
-                *compose,
-                "--profile",
-                "deployment",
-                "run",
-                "--rm",
-                "notification-drill",
-            ),
-            180,
-        ),
-    )
+    ) + monitoring_steps
 
 
 def _run_command(step: RolloutStep, environment: Mapping[str, str]) -> None:

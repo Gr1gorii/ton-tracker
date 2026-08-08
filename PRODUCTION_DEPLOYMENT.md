@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.68.0
+release=v0.69.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -85,15 +85,31 @@ verifies the signed bundle immediately before use, keeps a private snapshot of
 the verified manifest for the entire rollout, and injects only its two
 digest-pinned image references. After authorization and before any compose or
 container action, it atomically writes `pending-deployment.json` with a random
-attempt id, operation, start time, exact target identity, and active base
-identity. It then runs compose validation, the container preflight, the upstream
-Alertmanager configuration validator, an on-demand SQLite backup, a restore
-drill of that backup, the exact image pull, a target-image migration rehearsal
-on a second private restored copy, service activation, an internal
-Prometheus-to-Alertmanager delivery smoke gate, an active downstream
-notification drill, and the public smoke gate in order. No later step runs
-after an earlier failure. The tool discards command output on failure so
-provider or container diagnostics cannot leak through the release interface.
+attempt id, operation, start time, exact target identity, active base identity,
+and rollout phase.
+
+For an upgrade or rollback with an active receipt, it then runs compose
+validation, the container preflight, the upstream Alertmanager configuration
+validator, an on-demand SQLite backup, a restore drill of that backup, the exact
+image pull, a target-image migration rehearsal on a second private restored
+copy, service activation, an internal Prometheus-to-Alertmanager delivery smoke
+gate, an active downstream notification drill, and the public smoke gate in
+order.
+
+For a first deployment with no active receipt, the exact images are pulled and
+the target backend first requires genuinely empty database and backup volumes.
+It creates the full current schema only in private ephemeral storage, validates
+the schema revision and SQLite integrity, destroys that copy, and durably
+checkpoints the successful empty-volume gate before any application activation.
+The backend and frontend then start, followed immediately by an on-demand
+backup, restore drill, and target-image migration verification. The periodic
+backup, recovery, monitoring, and alert-delivery services start only after
+those database gates pass. A non-empty volume before that checkpoint is treated
+as unmanaged state and fails closed; it is never silently adopted.
+
+No later step runs after an earlier failure. The tool discards command output
+on failure so provider or container diagnostics cannot leak through the release
+interface.
 
 The migration rehearsal runs the target backend image against an ephemeral copy
 of the heartbeat-selected verified backup. It applies the same fail-closed
@@ -162,7 +178,7 @@ python ops/inspect_deployment_state.py --state-directory "$state"
 ```
 
 The command acquires the same non-blocking lock as a rollout and emits one
-compact `gram_scope_deployment_audit_v1` JSON object. It reports the active and
+compact `gram_scope_deployment_audit_v2` JSON object. It reports the active and
 previous signed release identities, receipt metadata, ledger event count and
 head digest, receipt binding, and any exact pending attempt. It contains no
 provider credential or command output. Use the exit code as a monitoring
@@ -170,7 +186,8 @@ contract:
 
 - `0`: the state is valid and either `ready` or `empty`;
 - `2`: the state is valid but an interrupted attempt requires inspection and an
-  explicit matching `--resume`;
+  explicit matching `--resume`; the pending record includes its durable rollout
+  phase;
 - `3`: the state is corrupt, unsafe, or otherwise fails validation;
 - `4`: another deployment currently holds the lock;
 - `64`: the audit command arguments are invalid.
@@ -247,11 +264,25 @@ python ops/deploy_release.py \
 
 The signed bundle, deployment or rollback operation, target identity, and base
 receipt must exactly match the journal. Otherwise the command fails before any
-compose action. A valid resume repeats the complete guarded rollout. If the
-success event was already durably published, the matching ledger attempt id
-proves that every rollout gate passed. `--resume` binds or confirms the v4 receipt
-and clears the stale journal without touching containers. To resume a rollback,
-pass both `--rollback` and `--resume`.
+compose action. A valid upgrade or rollback resume repeats the complete guarded
+rollout.
+
+For an interrupted first deployment, a journal still in the `prepared` phase
+repeats the strict empty-volume gate, so retrying cannot bypass rejection of an
+unmanaged database. After the durable `initial_bootstrap_verified` checkpoint,
+resume accepts either both still-empty volumes or exactly `ton_check.db` with
+its known SQLite journal/WAL sidecars and only recognized, verified retained
+backups. A backup without its database is treated as possible data loss and
+requires manual inspection. If the database exists, the target image
+creates and rehearses a verified backup before application activation is
+retried. Any other
+entry, link, non-regular file, corrupt database, unknown revision, or schema
+drift fails closed.
+
+If the success event was already durably published, the matching ledger attempt
+id proves that every rollout gate passed. `--resume` binds or confirms the v4
+receipt and clears the stale journal without touching containers. To resume a
+rollback, pass both `--rollback` and `--resume`.
 
 ## Rollback
 

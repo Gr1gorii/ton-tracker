@@ -204,7 +204,7 @@ def test_attempt_journal_blocks_other_work_and_resumes_exact_identity(tmp_path):
         )
         pending = state.current_attempt()
         assert pending == {
-            "schema": "gram_scope_deployment_attempt_v1",
+            "schema": "gram_scope_deployment_attempt_v2",
             "status": "pending",
             "operation": "deployment",
             "attempt_id": attempt.attempt_id,
@@ -219,6 +219,7 @@ def test_attempt_journal_blocks_other_work_and_resumes_exact_identity(tmp_path):
                 "source_commit": target.source_commit,
                 "manifest_sha256": target.manifest_sha256,
             },
+            "rollout_phase": "prepared",
         }
         assert state.attempt_path.stat().st_mode & 0o777 == 0o600
 
@@ -243,6 +244,35 @@ def test_attempt_journal_blocks_other_work_and_resumes_exact_identity(tmp_path):
     assert receipt["attempt_id"] == attempt.attempt_id
     assert receipt["ledger_sequence"] == 2
     assert not (directory / DEPLOYMENT_ATTEMPT).exists()
+
+
+def test_initial_bootstrap_checkpoint_is_durable_and_scoped_to_initial_attempt(
+    tmp_path,
+):
+    directory = tmp_path / "state"
+    target = _identity("v0.69.0", "b")
+
+    with locked_deployment_state(directory) as state:
+        attempt = state.prepare_attempt(target, rollback=False, resume=False)
+        assert attempt.initial_deployment is True
+        assert attempt.rollout_phase == "prepared"
+        state.mark_initial_bootstrap_verified(target, attempt)
+        checkpointed = state.current_attempt()
+        assert checkpointed["schema"] == "gram_scope_deployment_attempt_v2"
+        assert checkpointed["rollout_phase"] == "initial_bootstrap_verified"
+
+    with locked_deployment_state(directory) as state:
+        resumed = state.prepare_attempt(target, rollback=False, resume=True)
+        assert resumed.attempt_id == attempt.attempt_id
+        assert resumed.initial_deployment is True
+        assert resumed.rollout_phase == "initial_bootstrap_verified"
+
+    upgrade_directory = tmp_path / "upgrade-state"
+    with locked_deployment_state(upgrade_directory) as state:
+        state.record_success(_identity("v0.68.0", "a"))
+        upgrade = state.prepare_attempt(target, rollback=False, resume=False)
+        with pytest.raises(DeploymentStateError, match="initial deployment"):
+            state.mark_initial_bootstrap_verified(target, upgrade)
 
 
 def test_resume_reconciles_receipt_committed_before_journal_clear(tmp_path):

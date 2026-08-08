@@ -46,10 +46,14 @@ def collect_deployment_audit_metrics(
         return DeploymentAuditMetrics(status="invalid", valid=False)
 
     try:
+        schema = report["schema"]
         status = report["status"]
         ledger = report["ledger"]
         pending = report["pending_attempt"]
-        if status not in {"ready", "empty", "interrupted"}:
+        if (
+            schema != "gram_scope_deployment_audit_v2"
+            or status not in {"ready", "empty", "interrupted"}
+        ):
             raise ValueError
         if not isinstance(ledger, dict):
             raise ValueError

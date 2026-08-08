@@ -28,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.68.0"
+TAG = "v0.69.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -99,6 +99,17 @@ def _environment(tmp_path: Path | None = None) -> dict[str, str]:
     return environment
 
 
+def _record_previous_release(state_directory: Path) -> None:
+    with locked_deployment_state(state_directory) as state:
+        state.record_success(
+            DeploymentIdentity(
+                tag="v0.68.0",
+                source_commit="f" * 40,
+                manifest_sha256="f" * 64,
+            )
+        )
+
+
 def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     manifest, checksum, attestation = _release_assets(tmp_path)
     trusted_manifest = manifest.read_bytes()
@@ -138,11 +149,13 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "compose configuration",
         "container production preflight",
         "Alertmanager configuration",
-        "pre-rollout backup",
-        "pre-rollout restore drill",
         "release image pull",
-        "target database migration rehearsal",
-        "service activation",
+        "initial database bootstrap rehearsal",
+        "initial application activation",
+        "initial database backup",
+        "initial backup restore drill",
+        "initial database migration verification",
+        "operational services activation",
         "monitoring delivery smoke",
         "external notification drill",
     ]
@@ -161,23 +174,26 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "--rm",
         "alertmanager-config-check",
     )
-    assert commands[3][-5:] == (
+    assert commands[3][-4:] == ("pull", "backend", "frontend", "alertmanager")
+    assert commands[4][-5:] == (
         "--profile",
         "deployment",
         "run",
         "--rm",
-        "backup-now",
+        "database-bootstrap",
     )
-    assert commands[4][-1] == "restore-drill"
-    assert commands[5][-4:] == ("pull", "backend", "frontend", "alertmanager")
-    assert commands[6][-5:] == (
+    assert observed[4][0].checkpoint == "initial_bootstrap_verified"
+    assert commands[5][-1] == "frontend"
+    assert commands[6][-1] == "backup-now"
+    assert commands[7][-1] == "restore-drill"
+    assert commands[8][-5:] == (
         "--profile",
         "deployment",
         "run",
         "--rm",
         "migration-rehearsal",
     )
-    assert commands[7][-6:] == (
+    assert commands[9][-6:] == (
         "frontend",
         "prometheus",
         "backup",
@@ -185,14 +201,14 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "deployment-monitor",
         "alertmanager",
     )
-    assert commands[8][-5:] == (
+    assert commands[10][-5:] == (
         "--profile",
         "deployment",
         "run",
         "--rm",
         "monitoring-smoke",
     )
-    assert commands[9][-5:] == (
+    assert commands[11][-5:] == (
         "--profile",
         "deployment",
         "run",
@@ -299,6 +315,7 @@ def test_invalid_production_environment_runs_no_rollout_step(tmp_path):
 
 def test_rollout_stops_before_pull_when_backup_gate_fails(tmp_path):
     manifest, checksum, attestation = _release_assets(tmp_path)
+    _record_previous_release(tmp_path / "state")
     observed: list[str] = []
 
     def runner(step: RolloutStep, _environment_value: dict[str, str]) -> None:
@@ -326,6 +343,38 @@ def test_rollout_stops_before_pull_when_backup_gate_fails(tmp_path):
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
 
+def test_existing_deployment_keeps_recovery_first_upgrade_order(tmp_path):
+    manifest, checksum, attestation = _release_assets(tmp_path)
+    state_directory = tmp_path / "state"
+    _record_previous_release(state_directory)
+    observed: list[str] = []
+
+    verify_and_deploy_release(
+        manifest_path=manifest,
+        checksum_path=checksum,
+        attestation_path=attestation,
+        expected_tag=TAG,
+        environment=_environment(tmp_path),
+        state_directory=state_directory,
+        attestation_verifier=lambda *_args: None,
+        command_runner=lambda step, _environment_value: observed.append(step.name),
+        smoke_checker=lambda *_args: [],
+    )
+
+    assert observed == [
+        "compose configuration",
+        "container production preflight",
+        "Alertmanager configuration",
+        "pre-rollout backup",
+        "pre-rollout restore drill",
+        "release image pull",
+        "target database migration rehearsal",
+        "service activation",
+        "monitoring delivery smoke",
+        "external notification drill",
+    ]
+
+
 def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
     manifest, checksum, attestation = _release_assets(tmp_path)
     observed: list[str] = []
@@ -347,8 +396,64 @@ def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
 
+def test_failed_initial_volume_gate_cannot_be_bypassed_by_resume(tmp_path):
+    manifest, checksum, attestation = _release_assets(tmp_path)
+    state_directory = tmp_path / "state"
+
+    def reject_unmanaged_volume(
+        step: RolloutStep,
+        _environment_value: dict[str, str],
+    ) -> None:
+        if step.name == "initial database bootstrap rehearsal":
+            raise DeploymentRolloutError("initial database volume is not empty")
+
+    with pytest.raises(DeploymentRolloutError, match="not empty"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=TAG,
+            environment=_environment(tmp_path),
+            state_directory=state_directory,
+            attestation_verifier=lambda *_args: None,
+            command_runner=reject_unmanaged_volume,
+        )
+
+    pending = json.loads(
+        (state_directory / DEPLOYMENT_ATTEMPT).read_text(encoding="utf-8")
+    )
+    assert pending["rollout_phase"] == "prepared"
+
+    resumed_steps: list[str] = []
+
+    def reject_again(
+        step: RolloutStep,
+        _environment_value: dict[str, str],
+    ) -> None:
+        resumed_steps.append(step.name)
+        if step.name == "initial database bootstrap rehearsal":
+            raise DeploymentRolloutError("initial database volume is not empty")
+
+    with pytest.raises(DeploymentRolloutError, match="not empty"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=TAG,
+            environment=_environment(tmp_path),
+            state_directory=state_directory,
+            resume=True,
+            attestation_verifier=lambda *_args: None,
+            command_runner=reject_again,
+        )
+
+    assert resumed_steps[-1] == "initial database bootstrap rehearsal"
+    assert "resumed initial database safety" not in resumed_steps
+
+
 def test_migration_rehearsal_failure_stops_before_service_activation(tmp_path):
     manifest, checksum, attestation = _release_assets(tmp_path)
+    _record_previous_release(tmp_path / "state")
     observed: list[str] = []
 
     def runner(step: RolloutStep, _environment_value: dict[str, str]) -> None:
@@ -385,7 +490,7 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
 
     def fail_after_activation(step: RolloutStep, _environment: dict[str, str]) -> None:
         first_steps.append(step.name)
-        if step.name == "service activation":
+        if step.name == "initial application activation":
             raise DeploymentRolloutError("activation result is unknown")
 
     with pytest.raises(DeploymentRolloutError, match="unknown"):
@@ -402,7 +507,9 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
     pending_before = json.loads(
         (state_directory / DEPLOYMENT_ATTEMPT).read_text(encoding="utf-8")
     )
-    assert first_steps[-1] == "service activation"
+    assert first_steps[-1] == "initial application activation"
+    assert pending_before["schema"] == "gram_scope_deployment_attempt_v2"
+    assert pending_before["rollout_phase"] == "initial_bootstrap_verified"
 
     with pytest.raises(DeploymentRolloutError, match="--resume"):
         verify_and_deploy_release(
@@ -434,6 +541,8 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
         (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
     )
     assert result.tag == TAG
+    assert resumed_steps[4] == "resumed initial database safety"
+    assert "initial database bootstrap rehearsal" not in resumed_steps
     assert resumed_steps[-1] == "external notification drill"
     assert receipt["attempt_id"] == pending_before["attempt_id"]
     assert not (state_directory / DEPLOYMENT_ATTEMPT).exists()
