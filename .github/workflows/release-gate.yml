@@ -106,10 +106,14 @@ jobs:
           path.write_text(
               "route:\n"
               "  receiver: ci-webhook\n"
+              "  group_wait: 1s\n"
+              "  group_interval: 1s\n"
+              "  repeat_interval: 1h\n"
               "receivers:\n"
               "  - name: ci-webhook\n"
               "    webhook_configs:\n"
-              "      - url: http://127.0.0.1:9/alerts\n",
+              "      - url: http://notification-receiver-fixture:9199/alerts\n"
+              "        send_resolved: true\n",
               encoding="utf-8",
           )
           path.chmod(0o600)
@@ -125,7 +129,7 @@ jobs:
       - name: Create atomic deployment manifest fixture
         run: |
           python ops/create_release_manifest.py \
-            --tag v0.66.0 \
+            --tag v0.67.0 \
             --source-commit "$GITHUB_SHA" \
             --backend-digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --frontend-digest sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
@@ -160,10 +164,14 @@ jobs:
           docker compose --project-name "$project" --file compose.production.yml \
             --profile deployment run --rm restore-drill
           docker compose --project-name "$project" --file compose.production.yml \
+            --profile test up --detach --no-build --wait notification-receiver-fixture
+          docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 180 \
             frontend prometheus backup recovery-watchdog deployment-monitor alertmanager
           docker compose --project-name "$project" --file compose.production.yml \
             --profile deployment run --rm monitoring-smoke
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm notification-drill
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"

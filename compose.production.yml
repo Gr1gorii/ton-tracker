@@ -149,6 +149,7 @@ services:
       - --storage.path=/alertmanager
       - --data.retention=${ALERTMANAGER_RETENTION:-120h}
       - --cluster.listen-address=
+      - --enable-feature=receiver-name-in-metrics
     volumes:
       - type: bind
         source: "${ALERTMANAGER_CONFIG_FILE:?ALERTMANAGER_CONFIG_FILE is required}"
@@ -215,6 +216,62 @@ services:
     tmpfs:
       - /tmp
     restart: "no"
+
+  notification-drill:
+    profiles: ["deployment"]
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "/app/ops/check_alert_notification.py"]
+    depends_on:
+      alertmanager:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+
+  notification-receiver-fixture:
+    profiles: ["test"]
+    image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"
+    pull_policy: ${APP_PULL_POLICY:-always}
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command:
+      - python
+      - /app/ops/notification_receiver_fixture.py
+      - --listen
+      - 0.0.0.0
+      - --port
+      - "9199"
+    expose:
+      - "9199"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9199/healthz', timeout=3).read() == b'ok\\n' else 1)"
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      start_interval: 1s
+      retries: 3
 
   deployment-monitor:
     image: "${BACKEND_IMAGE:?BACKEND_IMAGE is required}"

@@ -1,3 +1,21 @@
+# GRAM Scope — v0.67.0 ACTIVE NOTIFICATION DRILL
+
+v0.67.0 closes the automated production alert-delivery path. Every guarded
+deployment now creates a unique synthetic Alertmanager API v2 alert after the
+passive Prometheus/Alertmanager smoke gate, confirms that the live route marks
+it active, and requires every selected receiver integration to record a
+successful downstream request before the deployment receipt can be committed.
+
+The drill compares receiver-scoped request and failure counters from the pinned
+Alertmanager v0.33.1 runtime, fails closed on suppression, metric drift,
+timeouts, or partial receiver failure, and always posts a matching resolved
+alert after a successful injection. The release gate uses a private bounded
+webhook fixture; production uses only the operator-owned receiver configuration.
+Receiver endpoints, credentials, provider diagnostics, response bodies, and
+drill identifiers are never printed by the rollout interface.
+
+---
+
 # TON Wallet Intelligence Dashboard — v0.26.0 MULTI-ASSET PNL READINESS
 
 v0.26.0 adds provider-free POST
