@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import pytest
 
 from ops.deployment_state import (
     DEPLOYMENT_ATTEMPT,
+    DEPLOYMENT_LEDGER,
     DEPLOYMENT_RECEIPT,
     DeploymentIdentity,
     DeploymentStateError,
@@ -23,6 +25,10 @@ def _identity(tag: str = "v0.60.0", marker: str = "a") -> DeploymentIdentity:
         source_commit=marker * 40,
         manifest_sha256=marker * 64,
     )
+
+
+def _event_files(directory: Path) -> list[Path]:
+    return sorted((directory / DEPLOYMENT_LEDGER).iterdir())
 
 
 def test_locked_state_records_private_atomic_current_and_previous_release(tmp_path):
@@ -42,7 +48,7 @@ def test_locked_state_records_private_atomic_current_and_previous_release(tmp_pa
     assert receipt_path.stat().st_mode & 0o777 == 0o600
     assert (directory / ".deployment.lock").stat().st_mode & 0o777 == 0o600
     assert first == {
-        "schema": "gram_scope_deployment_receipt_v3",
+        "schema": "gram_scope_deployment_receipt_v4",
         "status": "active",
         "operation": "deployment",
         "attempt_id": "1" * 32,
@@ -53,7 +59,18 @@ def test_locked_state_records_private_atomic_current_and_previous_release(tmp_pa
             "manifest_sha256": "a" * 64,
         },
         "previous_release": None,
+        "ledger_sequence": 1,
+        "ledger_event_sha256": first["ledger_event_sha256"],
     }
+    first_event_path = _event_files(directory)[0]
+    assert first_event_path.stat().st_mode & 0o777 == 0o600
+    assert first_event_path.name == (
+        f"{1:020d}-{first['ledger_event_sha256']}.json"
+    )
+    first_event = json.loads(first_event_path.read_text(encoding="utf-8"))
+    assert first_event["base_release"] is None
+    assert first_event["previous_event_sha256"] is None
+    assert first_event["release"] == first["release"]
     assert list(directory.glob(f".{DEPLOYMENT_RECEIPT}.*.tmp")) == []
 
     with locked_deployment_state(directory) as state:
@@ -70,6 +87,10 @@ def test_locked_state_records_private_atomic_current_and_previous_release(tmp_pa
     }
     assert second["previous_release"] == first["release"]
     assert second["operation"] == "deployment"
+    assert second["ledger_sequence"] == 2
+    second_event = json.loads(_event_files(directory)[1].read_text(encoding="utf-8"))
+    assert second_event["base_release"] == first["release"]
+    assert second_event["previous_event_sha256"] == first["ledger_event_sha256"]
 
 
 def test_redeploying_same_identity_preserves_true_previous_release(tmp_path):
@@ -121,6 +142,7 @@ def test_authorization_allows_forward_or_exact_previous_release_only(tmp_path):
     [
         ("gram_scope_deployment_receipt_v1", None),
         ("gram_scope_deployment_receipt_v2", "deployment"),
+        ("gram_scope_deployment_receipt_v3", "deployment"),
     ],
 )
 def test_legacy_receipt_is_accepted_and_upgraded_after_success(
@@ -144,6 +166,8 @@ def test_legacy_receipt_is_accepted_and_upgraded_after_success(
     }
     if operation is not None:
         legacy["operation"] = operation
+    if schema == "gram_scope_deployment_receipt_v3":
+        legacy["attempt_id"] = "1" * 32
     receipt_path = directory / DEPLOYMENT_RECEIPT
     receipt_path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
     receipt_path.chmod(0o600)
@@ -155,10 +179,13 @@ def test_legacy_receipt_is_accepted_and_upgraded_after_success(
         state.record_success(next_release)
         upgraded = state.current_receipt()
 
-    assert upgraded["schema"] == "gram_scope_deployment_receipt_v3"
+    assert upgraded["schema"] == "gram_scope_deployment_receipt_v4"
     assert upgraded["operation"] == "deployment"
     assert len(upgraded["attempt_id"]) == 32
     assert upgraded["previous_release"] == legacy["release"]
+    assert upgraded["ledger_sequence"] == 1
+    event = json.loads(_event_files(directory)[0].read_text(encoding="utf-8"))
+    assert event["base_release"] == legacy["release"]
 
 
 def test_attempt_journal_blocks_other_work_and_resumes_exact_identity(tmp_path):
@@ -212,8 +239,9 @@ def test_attempt_journal_blocks_other_work_and_resumes_exact_identity(tmp_path):
         receipt = state.current_receipt()
         assert state.current_attempt() is None
 
-    assert receipt["schema"] == "gram_scope_deployment_receipt_v3"
+    assert receipt["schema"] == "gram_scope_deployment_receipt_v4"
     assert receipt["attempt_id"] == attempt.attempt_id
+    assert receipt["ledger_sequence"] == 2
     assert not (directory / DEPLOYMENT_ATTEMPT).exists()
 
 
@@ -234,6 +262,163 @@ def test_resume_reconciles_receipt_committed_before_journal_clear(tmp_path):
         assert resumed.attempt_id == attempt.attempt_id
         assert state.current_attempt() is None
         assert state.current_receipt()["attempt_id"] == attempt.attempt_id
+
+
+def test_resume_reconciles_legacy_v3_receipt_with_stale_journal(tmp_path):
+    directory = tmp_path / "state"
+    directory.mkdir(mode=0o700)
+    base = _identity("v0.60.0", "a")
+    target = _identity("v0.61.0", "b")
+    attempt_id = "2" * 32
+    base_payload = {
+        "tag": base.tag,
+        "source_commit": base.source_commit,
+        "manifest_sha256": base.manifest_sha256,
+    }
+    target_payload = {
+        "tag": target.tag,
+        "source_commit": target.source_commit,
+        "manifest_sha256": target.manifest_sha256,
+    }
+    receipt = {
+        "schema": "gram_scope_deployment_receipt_v3",
+        "status": "active",
+        "operation": "deployment",
+        "attempt_id": attempt_id,
+        "completed_at": "2026-08-08T03:05:06Z",
+        "release": target_payload,
+        "previous_release": base_payload,
+    }
+    pending = {
+        "schema": "gram_scope_deployment_attempt_v1",
+        "status": "pending",
+        "operation": "deployment",
+        "attempt_id": attempt_id,
+        "started_at": "2026-08-08T03:04:05Z",
+        "base_release": base_payload,
+        "target_release": target_payload,
+    }
+    for name, payload in (
+        (DEPLOYMENT_RECEIPT, receipt),
+        (DEPLOYMENT_ATTEMPT, pending),
+    ):
+        path = directory / name
+        path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        path.chmod(0o600)
+
+    with locked_deployment_state(directory) as state:
+        resumed = state.prepare_attempt(target, rollback=False, resume=True)
+        assert resumed.already_completed is True
+        assert state.current_attempt() is None
+        assert state.current_receipt() == receipt
+        assert state.current_ledger_event() is None
+
+
+def test_resume_reconciles_ledger_event_committed_before_receipt(
+    tmp_path,
+    monkeypatch,
+):
+    directory = tmp_path / "state"
+    base = _identity("v0.60.0", "a")
+    target = _identity("v0.61.0", "b")
+    with locked_deployment_state(directory) as state:
+        state.record_success(base, attempt_id="1" * 32)
+        attempt = state.prepare_attempt(target, rollback=False, resume=False)
+
+        def fail_receipt(*_args, **_kwargs):
+            raise DeploymentStateError("simulated receipt interruption")
+
+        monkeypatch.setattr("ops.deployment_state._write_atomic_receipt", fail_receipt)
+        with pytest.raises(DeploymentStateError, match="interruption"):
+            state.complete_attempt(target, attempt)
+        assert len(_event_files(directory)) == 2
+        assert state.current_receipt()["release"]["tag"] == "v0.60.0"
+        assert state.current_attempt()["attempt_id"] == attempt.attempt_id
+
+    monkeypatch.undo()
+    with locked_deployment_state(directory) as state:
+        resumed = state.prepare_attempt(target, rollback=False, resume=True)
+        receipt = state.current_receipt()
+        assert resumed.already_completed is True
+        assert receipt["schema"] == "gram_scope_deployment_receipt_v4"
+        assert receipt["attempt_id"] == attempt.attempt_id
+        assert receipt["ledger_sequence"] == 2
+        assert state.current_attempt() is None
+
+
+def test_state_rejects_tampered_or_missing_ledger_event(tmp_path):
+    directory = tmp_path / "state"
+    with locked_deployment_state(directory) as state:
+        state.record_success(_identity("v0.60.0", "a"))
+        state.record_success(_identity("v0.61.0", "b"))
+
+    first_event, _second_event = _event_files(directory)
+    original = first_event.read_text(encoding="utf-8")
+    first_event.write_text(original.replace("v0.60.0", "v0.50.0"), encoding="utf-8")
+    with pytest.raises(DeploymentStateError, match="digest"):
+        with locked_deployment_state(directory):
+            raise AssertionError("unreachable")
+
+    first_event.write_text(original, encoding="utf-8")
+    first_event.unlink()
+    with pytest.raises(DeploymentStateError, match="sequence"):
+        with locked_deployment_state(directory):
+            raise AssertionError("unreachable")
+
+
+def test_state_rejects_rehashed_event_that_breaks_digest_chain(tmp_path):
+    directory = tmp_path / "state"
+    with locked_deployment_state(directory) as state:
+        state.record_success(_identity("v0.60.0", "a"))
+        state.record_success(_identity("v0.61.0", "b"))
+
+    first_event, _second_event = _event_files(directory)
+    payload = json.loads(first_event.read_text(encoding="utf-8"))
+    payload["completed_at"] = "2026-08-08T00:00:00Z"
+    raw = (
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("ascii")
+    digest = hashlib.sha256(raw).hexdigest()
+    rewritten = first_event.with_name(f"{1:020d}-{digest}.json")
+    first_event.write_bytes(raw)
+    first_event.rename(rewritten)
+
+    with pytest.raises(DeploymentStateError, match="chain"):
+        with locked_deployment_state(directory):
+            raise AssertionError("unreachable")
+
+
+def test_state_rejects_receipt_not_bound_to_ledger_head(tmp_path):
+    directory = tmp_path / "state"
+    with locked_deployment_state(directory) as state:
+        state.record_success(_identity("v0.60.0", "a"))
+
+    receipt_path = directory / DEPLOYMENT_RECEIPT
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["ledger_event_sha256"] = "f" * 64
+    receipt_path.write_text(json.dumps(receipt) + "\n", encoding="utf-8")
+    with pytest.raises(DeploymentStateError, match="not bound"):
+        with locked_deployment_state(directory):
+            raise AssertionError("unreachable")
+
+
+def test_state_rejects_public_or_symlinked_ledger_directory(tmp_path):
+    public_state = tmp_path / "public-state"
+    public_state.mkdir(mode=0o700)
+    public_ledger = public_state / DEPLOYMENT_LEDGER
+    public_ledger.mkdir(mode=0o755)
+    with pytest.raises(DeploymentStateError, match="private and owned"):
+        with locked_deployment_state(public_state):
+            raise AssertionError("unreachable")
+
+    linked_state = tmp_path / "linked-state"
+    linked_state.mkdir(mode=0o700)
+    target = tmp_path / "events"
+    target.mkdir(mode=0o700)
+    (linked_state / DEPLOYMENT_LEDGER).symlink_to(target, target_is_directory=True)
+    with pytest.raises(DeploymentStateError, match="private and owned"):
+        with locked_deployment_state(linked_state):
+            raise AssertionError("unreachable")
 
 
 def test_second_deployment_lock_fails_immediately(tmp_path):

@@ -13,6 +13,7 @@ import pytest
 from ops.create_release_manifest import create_release_manifest, write_release_manifest
 from ops.deployment_state import (
     DEPLOYMENT_ATTEMPT,
+    DEPLOYMENT_LEDGER,
     DEPLOYMENT_RECEIPT,
     DeploymentIdentity,
     DeploymentStateError,
@@ -27,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.62.0"
+TAG = "v0.63.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -166,7 +167,7 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     assert snapshot_paths and not snapshot_paths[0].exists()
     receipt_path = tmp_path / "state" / DEPLOYMENT_RECEIPT
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    assert receipt["schema"] == "gram_scope_deployment_receipt_v3"
+    assert receipt["schema"] == "gram_scope_deployment_receipt_v4"
     assert receipt["status"] == "active"
     assert receipt["operation"] == "deployment"
     assert len(receipt["attempt_id"]) == 32
@@ -176,6 +177,15 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "manifest_sha256": result.manifest_sha256,
     }
     assert receipt["previous_release"] is None
+    assert receipt["ledger_sequence"] == 1
+    events = list((tmp_path / "state" / DEPLOYMENT_LEDGER).iterdir())
+    assert len(events) == 1
+    assert events[0].name == (
+        f"{1:020d}-{receipt['ledger_event_sha256']}.json"
+    )
+    event = json.loads(events[0].read_text(encoding="utf-8"))
+    assert event["attempt_id"] == receipt["attempt_id"]
+    assert event["release"] == receipt["release"]
     assert receipt_path.stat().st_mode & 0o777 == 0o600
     assert not (tmp_path / "state" / DEPLOYMENT_ATTEMPT).exists()
 
@@ -502,6 +512,62 @@ def test_receipt_finalization_failure_reports_ambiguous_active_state(
     assert observed[-1] == "service activation"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
+
+
+def test_resume_finalizes_published_event_without_repeating_rollout(
+    tmp_path,
+    monkeypatch,
+):
+    manifest, checksum, attestation = _release_assets(tmp_path)
+    state_directory = tmp_path / "state"
+    observed: list[str] = []
+
+    def fail_receipt(*_args, **_kwargs):
+        raise DeploymentStateError("simulated receipt interruption")
+
+    monkeypatch.setattr("ops.deployment_state._write_atomic_receipt", fail_receipt)
+    with pytest.raises(
+        DeploymentRolloutError,
+        match="rollout succeeded but deployment state finalization failed",
+    ):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=TAG,
+            environment=_environment(),
+            state_directory=state_directory,
+            attestation_verifier=lambda *_args: None,
+            command_runner=lambda step, _env: observed.append(step.name),
+            smoke_checker=lambda *_args: [],
+        )
+
+    assert observed[-1] == "service activation"
+    assert len(list((state_directory / DEPLOYMENT_LEDGER).iterdir())) == 1
+    assert (state_directory / DEPLOYMENT_ATTEMPT).is_file()
+    assert not (state_directory / DEPLOYMENT_RECEIPT).exists()
+
+    monkeypatch.undo()
+    result = verify_and_deploy_release(
+        manifest_path=manifest,
+        checksum_path=checksum,
+        attestation_path=attestation,
+        expected_tag=TAG,
+        environment=_environment(),
+        state_directory=state_directory,
+        resume=True,
+        attestation_verifier=lambda *_args: None,
+        command_runner=lambda *_args: pytest.fail("rollout must not repeat"),
+        smoke_checker=lambda *_args: pytest.fail("smoke must not repeat"),
+    )
+
+    receipt = json.loads(
+        (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
+    )
+    assert result.tag == TAG
+    assert receipt["schema"] == "gram_scope_deployment_receipt_v4"
+    assert receipt["ledger_sequence"] == 1
+    assert not (state_directory / DEPLOYMENT_ATTEMPT).exists()
 
 
 def test_command_failure_does_not_expose_process_output(monkeypatch):
