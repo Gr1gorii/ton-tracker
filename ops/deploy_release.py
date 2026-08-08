@@ -13,6 +13,10 @@ import sys
 import tempfile
 
 try:
+    from .alertmanager_config import (
+        AlertmanagerConfigError,
+        prepare_alertmanager_data_directory,
+    )
     from .deployment_state import (
         DeploymentIdentity,
         DeploymentStateError,
@@ -26,6 +30,10 @@ try:
         verify_release_bundle,
     )
 except ImportError:  # pragma: no cover - direct script execution
+    from alertmanager_config import (
+        AlertmanagerConfigError,
+        prepare_alertmanager_data_directory,
+    )
     from deployment_state import (
         DeploymentIdentity,
         DeploymentStateError,
@@ -134,6 +142,15 @@ def verify_and_deploy_release(
                 expected_tag=expected_tag,
                 attestation_verifier=attestation_verifier,
             )
+            alertmanager_data_directory = state_directory.with_name(
+                f"{state_directory.name}-alertmanager"
+            )
+            try:
+                prepare_alertmanager_data_directory(alertmanager_data_directory)
+            except AlertmanagerConfigError as exc:
+                raise DeploymentRolloutError(
+                    "Alertmanager persistent state gate failed"
+                ) from exc
             identity = DeploymentIdentity(
                 tag=bundle.tag,
                 source_commit=bundle.source_commit,
@@ -157,6 +174,9 @@ def verify_and_deploy_release(
                     "DEPLOYMENT_STATE_DIRECTORY": str(state_directory),
                     "DEPLOYMENT_STATE_UID": str(os.getuid()),
                     "DEPLOYMENT_STATE_GID": str(os.getgid()),
+                    "ALERTMANAGER_DATA_DIRECTORY": str(
+                        alertmanager_data_directory
+                    ),
                 },
                 smoke_url=smoke_url,
                 command_runner=command_runner,
@@ -196,6 +216,18 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
             180,
         ),
         RolloutStep(
+            "Alertmanager configuration",
+            (
+                *compose,
+                "--profile",
+                "ops",
+                "run",
+                "--rm",
+                "alertmanager-config-check",
+            ),
+            180,
+        ),
+        RolloutStep(
             "pre-rollout backup",
             (*compose, "--profile", "deployment", "run", "--rm", "backup-now"),
             900,
@@ -207,7 +239,7 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
         ),
         RolloutStep(
             "release image pull",
-            (*compose, "pull", "backend", "frontend"),
+            (*compose, "pull", "backend", "frontend", "alertmanager"),
             1_200,
         ),
         RolloutStep(
@@ -225,8 +257,21 @@ def rollout_steps() -> tuple[RolloutStep, ...]:
                 "backup",
                 "recovery-watchdog",
                 "deployment-monitor",
+                "alertmanager",
             ),
             300,
+        ),
+        RolloutStep(
+            "monitoring delivery smoke",
+            (
+                *compose,
+                "--profile",
+                "deployment",
+                "run",
+                "--rm",
+                "monitoring-smoke",
+            ),
+            180,
         ),
     )
 

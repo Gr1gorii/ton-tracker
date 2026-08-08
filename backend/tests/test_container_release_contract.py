@@ -21,6 +21,7 @@ PYTHON_IMAGE = "python:3.10-slim@sha256:c1e4e6c01eb489c422288b2de34b0761ca316f7a
 NODE_IMAGE = "node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32"
 NGINX_IMAGE = "nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10"
 PROMETHEUS_IMAGE = "prom/prometheus:v2.54.1@sha256:f6639335d34a77d9d9db382b92eeb7fc00934be8eae81dbc03b31cfe90411a94"
+ALERTMANAGER_IMAGE = "prom/alertmanager:v0.33.1@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d"
 
 
 def test_docker_context_excludes_local_state_and_credentials():
@@ -167,11 +168,20 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "npm run build" in commands
     assert "npm audit --omit=dev" in commands
     assert "python ops/production_preflight.py" in commands
+    production_commands = "\n".join(
+        str(step.get("run", "")) for step in jobs["production"]["steps"]
+    )
+    assert (
+        "python -m pip install --require-hashes "
+        "-r backend/requirements.runtime.lock"
+    ) in production_commands
     assert "docker compose -f compose.production.yml config --quiet" in commands
     assert "backend/Dockerfile" in commands
     assert "frontend/Dockerfile" in commands
     assert "--entrypoint /bin/promtool" in commands
     assert "check config /etc/prometheus/prometheus.yml" in commands
+    assert "--profile ops run --rm alertmanager-config-check" in commands
+    assert "--profile deployment run --rm monitoring-smoke" in commands
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in commands
     assert "--smoke-url" in commands
     assert "--expected-public-url" in commands
@@ -187,12 +197,14 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.65.0" in commands
+    assert "--tag v0.66.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     assert "python ops/inspect_deployment_state.py" in commands
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands
     assert "DEPLOYMENT_STATE_UID=$(id -u)" in commands
     assert "DEPLOYMENT_STATE_GID=$(id -g)" in commands
+    assert "ALERTMANAGER_CONFIG_FILE=$alertmanager_config" in commands
+    assert "ALERTMANAGER_DATA_DIRECTORY=$alertmanager_data" in commands
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     )
@@ -209,8 +221,34 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert preflight["environment"]["DEPLOYMENT_STATE_GID"] == (
         "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
     )
+    assert preflight["environment"]["ALERTMANAGER_CONFIG_FILE"] == (
+        "/run/alertmanager/alertmanager.yml"
+    )
+    assert preflight["environment"]["ALERTMANAGER_DATA_DIRECTORY"] == (
+        "/alertmanager"
+    )
+    assert preflight["user"] == (
+        "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}:"
+        "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
+    )
     assert preflight["volumes"] == [
-        "${DEPLOYMENT_MANIFEST_FILE:?DEPLOYMENT_MANIFEST_FILE is required}:/app/deployment-manifest.json:ro"
+        "${DEPLOYMENT_MANIFEST_FILE:?DEPLOYMENT_MANIFEST_FILE is required}:/app/deployment-manifest.json:ro",
+        {
+            "type": "bind",
+            "source": (
+                "${ALERTMANAGER_CONFIG_FILE:?ALERTMANAGER_CONFIG_FILE is required}"
+            ),
+            "target": "/run/alertmanager/alertmanager.yml",
+            "read_only": True,
+        },
+        {
+            "type": "bind",
+            "source": (
+                "${ALERTMANAGER_DATA_DIRECTORY:?ALERTMANAGER_DATA_DIRECTORY is required}"
+            ),
+            "target": "/alertmanager",
+            "read_only": True,
+        },
     ]
     backup_now = compose["services"]["backup-now"]
     assert backup_now["profiles"] == ["deployment"]
@@ -247,15 +285,65 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert compose["services"]["prometheus"]["depends_on"][
         "deployment-monitor"
     ]["condition"] == "service_healthy"
+    assert compose["services"]["prometheus"]["depends_on"]["alertmanager"][
+        "condition"
+    ] == "service_healthy"
     assert "--profile deployment run --rm backup-now" in commands
     assert "--profile deployment run --rm restore-drill" in commands
     assert (
         "up --detach --no-build --wait --wait-timeout 180 \\\n"
-        "  frontend prometheus backup recovery-watchdog deployment-monitor"
+        "  frontend prometheus backup recovery-watchdog deployment-monitor alertmanager"
     ) in commands
     assert "/etc/nginx/conf.d" in compose["services"]["frontend"]["tmpfs"]
     assert compose["services"]["prometheus"]["image"] == PROMETHEUS_IMAGE
     assert PROMETHEUS_IMAGE in commands
+
+    alertmanager = compose["services"]["alertmanager"]
+    assert alertmanager["image"] == ALERTMANAGER_IMAGE
+    assert alertmanager["user"] == (
+        "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}:"
+        "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
+    )
+    assert "ports" not in alertmanager
+    assert alertmanager["expose"] == ["9093"]
+    assert alertmanager["cap_drop"] == ["ALL"]
+    assert alertmanager["read_only"] is True
+    assert alertmanager["command"][-1] == "--cluster.listen-address="
+    assert alertmanager["volumes"] == [
+        {
+            "type": "bind",
+            "source": (
+                "${ALERTMANAGER_CONFIG_FILE:?ALERTMANAGER_CONFIG_FILE is required}"
+            ),
+            "target": "/etc/alertmanager/alertmanager.yml",
+            "read_only": True,
+        },
+        {
+            "type": "bind",
+            "source": (
+                "${ALERTMANAGER_DATA_DIRECTORY:?ALERTMANAGER_DATA_DIRECTORY is required}"
+            ),
+            "target": "/alertmanager",
+        },
+    ]
+    config_check = compose["services"]["alertmanager-config-check"]
+    assert config_check["image"] == ALERTMANAGER_IMAGE
+    assert config_check["profiles"] == ["ops", "deployment"]
+    assert config_check["entrypoint"] == ["/bin/amtool"]
+    assert config_check["command"] == [
+        "check-config",
+        "/etc/alertmanager/alertmanager.yml",
+    ]
+    monitoring_smoke = compose["services"]["monitoring-smoke"]
+    assert monitoring_smoke["profiles"] == ["deployment"]
+    assert monitoring_smoke["command"] == [
+        "python",
+        "/app/ops/check_alert_delivery.py",
+    ]
+    assert monitoring_smoke["depends_on"] == {
+        "prometheus": {"condition": "service_healthy"},
+        "alertmanager": {"condition": "service_healthy"},
+    }
 
 
 def test_deployment_state_monitor_is_scraped_and_alerted_fail_closed():
@@ -269,6 +357,19 @@ def test_deployment_state_monitor_is_scraped_and_alerted_fail_closed():
         "job_name": "ton-tracker-deployment",
         "metrics_path": "/metrics",
         "static_configs": [{"targets": ["deployment-monitor:9101"]}],
+    }
+    assert scrape_jobs["ton-tracker-alertmanager"] == {
+        "job_name": "ton-tracker-alertmanager",
+        "metrics_path": "/metrics",
+        "static_configs": [{"targets": ["alertmanager:9093"]}],
+    }
+    assert prometheus["alerting"] == {
+        "alertmanagers": [
+            {
+                "scheme": "http",
+                "static_configs": [{"targets": ["alertmanager:9093"]}],
+            }
+        ]
     }
 
     alert_groups = yaml.safe_load(
@@ -295,6 +396,15 @@ def test_deployment_state_monitor_is_scraped_and_alerted_fail_closed():
     )
     assert rules["TonTrackerDeploymentStateEmpty"]["for"] == "30m"
     assert rules["TonTrackerDeploymentLockStuck"]["for"] == "45m"
+    assert rules["TonTrackerAlertmanagerDown"]["expr"] == (
+        'up{job="ton-tracker-alertmanager"} == 0'
+    )
+    assert rules["TonTrackerAlertNotificationFailures"]["expr"] == (
+        "sum(rate(alertmanager_notifications_failed_total[5m])) > 0"
+    )
+    assert rules["TonTrackerPrometheusAlertDeliveryFailures"]["expr"] == (
+        "sum(rate(prometheus_notifications_errors_total[5m])) > 0"
+    )
     assert all(
         rule["labels"]["severity"] in {"warning", "critical"}
         for name, rule in rules.items()
@@ -382,6 +492,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         "restore-drill",
         "recovery-watchdog",
         "deployment-monitor",
+        "monitoring-smoke",
     ):
         assert compose["services"][service_name]["image"] == backend_image
         assert compose["services"][service_name]["pull_policy"] == (
@@ -407,7 +518,12 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     verifier_actions = {
         step["uses"] for step in verifier["steps"] if "uses" in step
     }
-    assert verifier_actions == {CHECKOUT_ACTION, LOGIN_ACTION, ATTEST_ACTION}
+    assert verifier_actions == {
+        CHECKOUT_ACTION,
+        SETUP_PYTHON_ACTION,
+        LOGIN_ACTION,
+        ATTEST_ACTION,
+    }
     assert all(PINNED_ACTION.fullmatch(action) for action in verifier_actions)
     manifest_attester = next(
         step
@@ -421,6 +537,10 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     verifier_commands = "\n".join(
         str(step.get("run", "")) for step in verifier["steps"]
     )
+    assert (
+        "python -m pip install --require-hashes "
+        "-r backend/requirements.runtime.lock"
+    ) in verifier_commands
     assert "docker buildx imagetools inspect" in verifier_commands
     assert "--format '{{json .Manifest}}'" in verifier_commands
     assert "BACKEND_DIGEST=$digest" in verifier_commands
@@ -445,7 +565,11 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in verifier_commands
     assert "DEPLOYMENT_STATE_UID=$(id -u)" in verifier_commands
     assert "DEPLOYMENT_STATE_GID=$(id -g)" in verifier_commands
-    assert "pull backend frontend" in verifier_commands
+    assert "ALERTMANAGER_CONFIG_FILE=$alertmanager_config" in verifier_commands
+    assert "ALERTMANAGER_DATA_DIRECTORY=$alertmanager_data" in verifier_commands
+    assert "pull backend frontend alertmanager" in verifier_commands
+    assert "--profile ops run --rm alertmanager-config-check" in verifier_commands
+    assert "--profile deployment run --rm monitoring-smoke" in verifier_commands
     assert "up --detach --no-build --wait --wait-timeout 120 frontend" in (
         verifier_commands
     )
@@ -453,7 +577,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "--profile deployment run --rm restore-drill" in verifier_commands
     assert (
         "up --detach --no-build --wait --wait-timeout 180 \\\n"
-        "  frontend prometheus backup recovery-watchdog deployment-monitor"
+        "  frontend prometheus backup recovery-watchdog deployment-monitor alertmanager"
     ) in verifier_commands
     assert "--smoke-url" in verifier_commands
     assert "python ops/create_release_manifest.py" in verifier_commands

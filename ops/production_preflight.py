@@ -16,8 +16,18 @@ from urllib.parse import urljoin, urlsplit
 from urllib.request import Request, urlopen
 
 try:
+    from .alertmanager_config import (
+        AlertmanagerConfigError,
+        validate_alertmanager_config,
+        validate_alertmanager_data_directory,
+    )
     from .create_release_manifest import load_release_manifest
 except ImportError:  # pragma: no cover - direct script execution inside the image
+    from alertmanager_config import (
+        AlertmanagerConfigError,
+        validate_alertmanager_config,
+        validate_alertmanager_data_directory,
+    )
     from create_release_manifest import load_release_manifest
 
 
@@ -217,6 +227,43 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
     prometheus_retention = environment.get("PROMETHEUS_RETENTION", "15d").strip()
     if _RETENTION.fullmatch(prometheus_retention) is None:
         errors.append("PROMETHEUS_RETENTION must be a positive Prometheus duration")
+    alertmanager_retention = environment.get(
+        "ALERTMANAGER_RETENTION", "120h"
+    ).strip()
+    if _RETENTION.fullmatch(alertmanager_retention) is None:
+        errors.append(
+            "ALERTMANAGER_RETENTION must be a positive Prometheus duration"
+        )
+
+    alertmanager_config = environment.get("ALERTMANAGER_CONFIG_FILE", "")
+    if (
+        not alertmanager_config
+        or alertmanager_config != alertmanager_config.strip()
+        or len(alertmanager_config) > 4096
+        or "\x00" in alertmanager_config
+        or not Path(alertmanager_config).is_absolute()
+    ):
+        errors.append("ALERTMANAGER_CONFIG_FILE must be an absolute private file")
+    else:
+        try:
+            validate_alertmanager_config(Path(alertmanager_config))
+        except AlertmanagerConfigError:
+            errors.append("ALERTMANAGER_CONFIG_FILE is missing, unsafe, or invalid")
+
+    alertmanager_data = environment.get("ALERTMANAGER_DATA_DIRECTORY", "")
+    if (
+        not alertmanager_data
+        or alertmanager_data != alertmanager_data.strip()
+        or len(alertmanager_data) > 4096
+        or "\x00" in alertmanager_data
+        or not Path(alertmanager_data).is_absolute()
+    ):
+        errors.append("ALERTMANAGER_DATA_DIRECTORY must be an absolute private path")
+    else:
+        try:
+            validate_alertmanager_data_directory(Path(alertmanager_data))
+        except AlertmanagerConfigError:
+            errors.append("ALERTMANAGER_DATA_DIRECTORY is missing or unsafe")
     return errors
 
 

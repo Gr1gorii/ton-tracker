@@ -78,3 +78,24 @@ groups:
           severity: critical
         annotations:
           summary: Deployment lock has remained busy beyond the rollout window
+      - alert: TonTrackerAlertmanagerDown
+        expr: up{job="ton-tracker-alertmanager"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Alertmanager is unavailable to receive production alerts
+      - alert: TonTrackerAlertNotificationFailures
+        expr: sum(rate(alertmanager_notifications_failed_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Alertmanager cannot deliver one or more notifications
+      - alert: TonTrackerPrometheusAlertDeliveryFailures
+        expr: sum(rate(prometheus_notifications_errors_total[5m])) > 0
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: Prometheus cannot deliver alerts to Alertmanager

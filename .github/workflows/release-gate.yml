@@ -73,6 +73,7 @@ jobs:
       RECOVERY_RETRY_SECONDS: "300"
       RECOVERY_HEALTH_MAX_AGE_SECONDS: "691200"
       PROMETHEUS_RETENTION: 15d
+      ALERTMANAGER_RETENTION: 120h
       BACKEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-backend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       FRONTEND_IMAGE: ghcr.io/gr1gorii/ton-tracker-frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       DEPLOYMENT_MANIFEST_FILE: ${{ github.workspace }}/.release-gate-deployment.json
@@ -84,28 +85,54 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.10"
+          cache: pip
+          cache-dependency-path: backend/requirements.runtime.lock
+      - run: python -m pip install --require-hashes -r backend/requirements.runtime.lock
       - name: Prepare private deployment state fixture
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/gram-scope-deployment-state"
+          alertmanager_data="$RUNNER_TEMP/gram-scope-alertmanager"
+          alertmanager_config="$RUNNER_TEMP/gram-scope-alertmanager.yml"
           mkdir -p "$state"
+          mkdir -p "$alertmanager_data"
           chmod 700 "$state"
+          chmod 700 "$alertmanager_data"
+          python - "$alertmanager_config" <<'PY'
+          from pathlib import Path
+          import sys
+
+          path = Path(sys.argv[1])
+          path.write_text(
+              "route:\n"
+              "  receiver: ci-webhook\n"
+              "receivers:\n"
+              "  - name: ci-webhook\n"
+              "    webhook_configs:\n"
+              "      - url: http://127.0.0.1:9/alerts\n",
+              encoding="utf-8",
+          )
+          path.chmod(0o600)
+          PY
           python ops/inspect_deployment_state.py --state-directory "$state" >/dev/null
           {
             echo "DEPLOYMENT_STATE_DIRECTORY=$state"
             echo "DEPLOYMENT_STATE_UID=$(id -u)"
             echo "DEPLOYMENT_STATE_GID=$(id -g)"
+            echo "ALERTMANAGER_CONFIG_FILE=$alertmanager_config"
+            echo "ALERTMANAGER_DATA_DIRECTORY=$alertmanager_data"
           } >> "$GITHUB_ENV"
       - name: Create atomic deployment manifest fixture
         run: |
           python ops/create_release_manifest.py \
-            --tag v0.65.0 \
+            --tag v0.66.0 \
             --source-commit "$GITHUB_SHA" \
             --backend-digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --frontend-digest sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
             --output "$DEPLOYMENT_MANIFEST_FILE"
       - run: python ops/production_preflight.py
       - run: docker compose -f compose.production.yml config --quiet
+      - run: docker compose -f compose.production.yml --profile ops run --rm alertmanager-config-check
       - run: docker build --file backend/Dockerfile --tag gram-scope-backend:gate .
       - run: docker build --file frontend/Dockerfile --tag gram-scope-frontend:gate .
       - name: Smoke-test read-only production containers
@@ -134,7 +161,9 @@ jobs:
             --profile deployment run --rm restore-drill
           docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 180 \
-            frontend prometheus backup recovery-watchdog deployment-monitor
+            frontend prometheus backup recovery-watchdog deployment-monitor alertmanager
+          docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm monitoring-smoke
           python ops/production_preflight.py \
             --smoke-url "http://127.0.0.1:${APP_PORT}" \
             --expected-public-url "$PUBLIC_APP_URL"

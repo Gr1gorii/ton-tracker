@@ -25,6 +25,17 @@ def _environment(tmp_path) -> dict[str, str]:
         ),
         manifest,
     )
+    alertmanager_config = tmp_path / "alertmanager.yml"
+    alertmanager_config.write_text(
+        "route:\n  receiver: production\nreceivers:\n"
+        "  - name: production\n    webhook_configs:\n"
+        "      - url: https://alerts.example/production\n",
+        encoding="utf-8",
+    )
+    alertmanager_config.chmod(0o600)
+    alertmanager_data = tmp_path / "alertmanager-data"
+    alertmanager_data.mkdir(mode=0o700, exist_ok=True)
+    alertmanager_data.chmod(0o700)
     return {
         "PUBLIC_APP_URL": "https://gram.example",
         "TONCONNECT_EXPECTED_DOMAIN": "gram.example",
@@ -53,6 +64,9 @@ def _environment(tmp_path) -> dict[str, str]:
         "DEPLOYMENT_STATE_UID": "1000",
         "DEPLOYMENT_STATE_GID": "1000",
         "PROMETHEUS_RETENTION": "15d",
+        "ALERTMANAGER_RETENTION": "120h",
+        "ALERTMANAGER_CONFIG_FILE": str(alertmanager_config),
+        "ALERTMANAGER_DATA_DIRECTORY": str(alertmanager_data),
     }
 
 
@@ -117,6 +131,31 @@ def test_production_environment_requires_safe_deployment_monitor_identity(tmp_pa
     assert validate_environment(environment) == [
         "DEPLOYMENT_STATE_DIRECTORY must be an absolute host path",
         "DEPLOYMENT_STATE_UID must be a canonical numeric host identifier",
+    ]
+
+
+def test_production_environment_requires_private_notification_boundary(tmp_path):
+    environment = _environment(tmp_path)
+    environment["ALERTMANAGER_RETENTION"] = "forever"
+    config = tmp_path / "alertmanager.yml"
+    config.chmod(0o644)
+    data = tmp_path / "alertmanager-data"
+    data.chmod(0o755)
+
+    errors = validate_environment(environment)
+    assert errors == [
+        "ALERTMANAGER_RETENTION must be a positive Prometheus duration",
+        "ALERTMANAGER_CONFIG_FILE is missing, unsafe, or invalid",
+        "ALERTMANAGER_DATA_DIRECTORY is missing or unsafe",
+    ]
+    assert str(config) not in " ".join(errors)
+
+    environment = _environment(tmp_path)
+    environment["ALERTMANAGER_CONFIG_FILE"] = "relative.yml"
+    environment["ALERTMANAGER_DATA_DIRECTORY"] = "relative-data"
+    assert validate_environment(environment) == [
+        "ALERTMANAGER_CONFIG_FILE must be an absolute private file",
+        "ALERTMANAGER_DATA_DIRECTORY must be an absolute private path",
     ]
 
 

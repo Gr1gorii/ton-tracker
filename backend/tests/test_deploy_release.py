@@ -28,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.65.0"
+TAG = "v0.66.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -63,8 +63,8 @@ def _release_assets(
     return manifest, checksum, attestation
 
 
-def _environment() -> dict[str, str]:
-    return {
+def _environment(tmp_path: Path | None = None) -> dict[str, str]:
+    environment = {
         "PATH": os.environ.get("PATH", ""),
         "PUBLIC_APP_URL": "https://gram.example",
         "APP_PORT": "8080",
@@ -83,8 +83,20 @@ def _environment() -> dict[str, str]:
         "RECOVERY_RETRY_SECONDS": "300",
         "RECOVERY_HEALTH_MAX_AGE_SECONDS": "691200",
         "PROMETHEUS_RETENTION": "15d",
+        "ALERTMANAGER_RETENTION": "120h",
         "APP_PULL_POLICY": "always",
     }
+    if tmp_path is not None:
+        config = tmp_path / "alertmanager.yml"
+        config.write_text(
+            "route:\n  receiver: release-test\nreceivers:\n"
+            "  - name: release-test\n    webhook_configs:\n"
+            "      - url: https://alerts.example/release-test\n",
+            encoding="utf-8",
+        )
+        config.chmod(0o600)
+        environment["ALERTMANAGER_CONFIG_FILE"] = str(config)
+    return environment
 
 
 def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
@@ -114,7 +126,7 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         checksum_path=checksum,
         attestation_path=attestation,
         expected_tag=TAG,
-        environment=_environment(),
+        environment=_environment(tmp_path),
         state_directory=tmp_path / "state",
         smoke_url="http://127.0.0.1:18080",
         attestation_verifier=verify_attestation,
@@ -125,10 +137,12 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     assert [step.name for step, _environment_value in observed] == [
         "compose configuration",
         "container production preflight",
+        "Alertmanager configuration",
         "pre-rollout backup",
         "pre-rollout restore drill",
         "release image pull",
         "service activation",
+        "monitoring delivery smoke",
     ]
     commands = [step.command for step, _environment_value in observed]
     assert commands[1][-5:] == (
@@ -140,19 +154,34 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     )
     assert commands[2][-5:] == (
         "--profile",
+        "ops",
+        "run",
+        "--rm",
+        "alertmanager-config-check",
+    )
+    assert commands[3][-5:] == (
+        "--profile",
         "deployment",
         "run",
         "--rm",
         "backup-now",
     )
-    assert commands[3][-1] == "restore-drill"
-    assert commands[4][-3:] == ("pull", "backend", "frontend")
-    assert commands[5][-5:] == (
+    assert commands[4][-1] == "restore-drill"
+    assert commands[5][-4:] == ("pull", "backend", "frontend", "alertmanager")
+    assert commands[6][-6:] == (
         "frontend",
         "prometheus",
         "backup",
         "recovery-watchdog",
         "deployment-monitor",
+        "alertmanager",
+    )
+    assert commands[7][-5:] == (
+        "--profile",
+        "deployment",
+        "run",
+        "--rm",
+        "monitoring-smoke",
     )
     rollout_environment = observed[-1][1]
     assert rollout_environment["BACKEND_IMAGE"] == (
@@ -166,6 +195,10 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
     )
     assert rollout_environment["DEPLOYMENT_STATE_UID"] == str(os.getuid())
     assert rollout_environment["DEPLOYMENT_STATE_GID"] == str(os.getgid())
+    assert rollout_environment["ALERTMANAGER_DATA_DIRECTORY"] == str(
+        tmp_path / "state-alertmanager"
+    )
+    assert (tmp_path / "state-alertmanager").stat().st_mode & 0o777 == 0o700
     assert smoke == [("http://127.0.0.1:18080", "https://gram.example")]
     assert result.tag == TAG
     assert result.source_commit == SOURCE_COMMIT
@@ -213,7 +246,7 @@ def test_bundle_verification_failure_runs_no_rollout_step(tmp_path):
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=tmp_path / "state",
             attestation_verifier=reject,
             command_runner=runner,
@@ -224,7 +257,7 @@ def test_bundle_verification_failure_runs_no_rollout_step(tmp_path):
 
 def test_invalid_production_environment_runs_no_rollout_step(tmp_path):
     manifest, checksum, attestation = _release_assets(tmp_path)
-    environment = _environment()
+    environment = _environment(tmp_path)
     environment["TONAPI_API_KEY"] = "exposed invalid value"
     invoked = False
 
@@ -263,7 +296,7 @@ def test_rollout_stops_before_pull_when_backup_gate_fails(tmp_path):
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=tmp_path / "state",
             attestation_verifier=lambda *_args: None,
             command_runner=runner,
@@ -271,6 +304,7 @@ def test_rollout_stops_before_pull_when_backup_gate_fails(tmp_path):
     assert observed == [
         "compose configuration",
         "container production preflight",
+        "Alertmanager configuration",
         "pre-rollout backup",
     ]
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
@@ -286,13 +320,13 @@ def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=tmp_path / "state",
             attestation_verifier=lambda *_args: None,
             command_runner=lambda step, _env: observed.append(step.name),
             smoke_checker=lambda _target, _expected: ["/api/ready is unavailable"],
         )
-    assert observed[-1] == "service activation"
+    assert observed[-1] == "monitoring delivery smoke"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
@@ -313,7 +347,7 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=state_directory,
             attestation_verifier=lambda *_args: None,
             command_runner=fail_after_activation,
@@ -329,7 +363,7 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=state_directory,
             attestation_verifier=lambda *_args: None,
             command_runner=lambda *_args: pytest.fail("rollout must not restart"),
@@ -341,7 +375,7 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
         checksum_path=checksum,
         attestation_path=attestation,
         expected_tag=TAG,
-        environment=_environment(),
+        environment=_environment(tmp_path),
         state_directory=state_directory,
         resume=True,
         attestation_verifier=lambda *_args: None,
@@ -353,7 +387,7 @@ def test_interrupted_rollout_blocks_new_attempt_and_exact_resume_completes(tmp_p
         (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
     )
     assert result.tag == TAG
-    assert resumed_steps[-1] == "service activation"
+    assert resumed_steps[-1] == "monitoring delivery smoke"
     assert receipt["attempt_id"] == pending_before["attempt_id"]
     assert not (state_directory / DEPLOYMENT_ATTEMPT).exists()
 
@@ -373,7 +407,7 @@ def test_invalid_existing_receipt_runs_no_verification_or_rollout_step(tmp_path)
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=state_directory,
             attestation_verifier=lambda *_args: observed.append("verification"),
             command_runner=lambda step, _env: observed.append(step.name),
@@ -412,7 +446,7 @@ def test_explicit_rollback_requires_and_activates_exact_previous_bundle(tmp_path
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=rollback_tag,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=state_directory,
             attestation_verifier=lambda *_args: None,
             command_runner=lambda *_args: pytest.fail("rollout must not start"),
@@ -424,7 +458,7 @@ def test_explicit_rollback_requires_and_activates_exact_previous_bundle(tmp_path
         checksum_path=checksum,
         attestation_path=attestation,
         expected_tag=rollback_tag,
-        environment=_environment(),
+        environment=_environment(tmp_path),
         state_directory=state_directory,
         rollback=True,
         attestation_verifier=lambda *_args: None,
@@ -433,7 +467,7 @@ def test_explicit_rollback_requires_and_activates_exact_previous_bundle(tmp_path
     )
 
     assert result.tag == rollback_tag
-    assert observed[-1] == "service activation"
+    assert observed[-1] == "monitoring delivery smoke"
     receipt = json.loads(
         (state_directory / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
     )
@@ -477,7 +511,7 @@ def test_explicit_rollback_rejects_other_signed_release_before_rollout(tmp_path)
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag="v0.59.0",
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=state_directory,
             rollback=True,
             attestation_verifier=lambda *_args: None,
@@ -508,14 +542,14 @@ def test_receipt_finalization_failure_reports_ambiguous_active_state(
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=tmp_path / "state",
             attestation_verifier=lambda *_args: None,
             command_runner=lambda step, _env: observed.append(step.name),
             smoke_checker=lambda *_args: [],
         )
 
-    assert observed[-1] == "service activation"
+    assert observed[-1] == "monitoring delivery smoke"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
@@ -541,14 +575,14 @@ def test_resume_finalizes_published_event_without_repeating_rollout(
             checksum_path=checksum,
             attestation_path=attestation,
             expected_tag=TAG,
-            environment=_environment(),
+            environment=_environment(tmp_path),
             state_directory=state_directory,
             attestation_verifier=lambda *_args: None,
             command_runner=lambda step, _env: observed.append(step.name),
             smoke_checker=lambda *_args: [],
         )
 
-    assert observed[-1] == "service activation"
+    assert observed[-1] == "monitoring delivery smoke"
     assert len(list((state_directory / DEPLOYMENT_LEDGER).iterdir())) == 1
     assert (state_directory / DEPLOYMENT_ATTEMPT).is_file()
     assert not (state_directory / DEPLOYMENT_RECEIPT).exists()
@@ -559,7 +593,7 @@ def test_resume_finalizes_published_event_without_repeating_rollout(
         checksum_path=checksum,
         attestation_path=attestation,
         expected_tag=TAG,
-        environment=_environment(),
+        environment=_environment(tmp_path),
         state_directory=state_directory,
         resume=True,
         attestation_verifier=lambda *_args: None,
