@@ -168,6 +168,13 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "npm run build" in commands
     assert "npm audit --omit=dev" in commands
     assert "python ops/production_preflight.py" in commands
+    production_commands = "\n".join(
+        str(step.get("run", "")) for step in jobs["production"]["steps"]
+    )
+    assert (
+        "python -m pip install --require-hashes "
+        "-r backend/requirements.runtime.lock"
+    ) in production_commands
     assert "docker compose -f compose.production.yml config --quiet" in commands
     assert "backend/Dockerfile" in commands
     assert "frontend/Dockerfile" in commands
@@ -511,7 +518,12 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     verifier_actions = {
         step["uses"] for step in verifier["steps"] if "uses" in step
     }
-    assert verifier_actions == {CHECKOUT_ACTION, LOGIN_ACTION, ATTEST_ACTION}
+    assert verifier_actions == {
+        CHECKOUT_ACTION,
+        SETUP_PYTHON_ACTION,
+        LOGIN_ACTION,
+        ATTEST_ACTION,
+    }
     assert all(PINNED_ACTION.fullmatch(action) for action in verifier_actions)
     manifest_attester = next(
         step
@@ -525,6 +537,10 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     verifier_commands = "\n".join(
         str(step.get("run", "")) for step in verifier["steps"]
     )
+    assert (
+        "python -m pip install --require-hashes "
+        "-r backend/requirements.runtime.lock"
+    ) in verifier_commands
     assert "docker buildx imagetools inspect" in verifier_commands
     assert "--format '{{json .Manifest}}'" in verifier_commands
     assert "BACKEND_DIGEST=$digest" in verifier_commands
