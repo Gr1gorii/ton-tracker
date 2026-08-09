@@ -38,6 +38,10 @@ def create_database_engine(database_url: str) -> Engine:
             cursor = dbapi_connection.cursor()
             try:
                 cursor.execute("PRAGMA foreign_keys=ON")
+                # The local API and the single CaseSync worker use separate,
+                # deliberately short transactions. Give either writer a
+                # bounded chance to finish instead of failing immediately.
+                cursor.execute("PRAGMA busy_timeout=30000")
             finally:
                 cursor.close()
 

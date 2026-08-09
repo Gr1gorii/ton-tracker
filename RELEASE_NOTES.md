@@ -1,3 +1,43 @@
+# GRAM Scope — v0.72.0 DURABLE CASE SYNC
+
+v0.72.0 turns every Wallet Case synchronization into a persisted background
+job before provider work begins. The create-sync request returns immediately
+with a non-sequential sync identifier; case and job reads expose factual stage,
+progress, retry-attempt, cancellation, and timestamp state without publishing
+the compatibility ingestion-run identifier.
+
+Each job has a client idempotency key and canonical request fingerprint. One
+case can have only one active sync, duplicate submissions with the same key
+return the same job, and a reused key with different scope fails closed. A
+single local runner claims jobs with a fenced lease, maintains an independent
+heartbeat while the existing ingestion builder performs provider work, and
+atomically publishes the final ingestion run and terminal sync result.
+Expired work is recovered after restart instead of remaining permanently
+running. Retryable network/provider failures use a bounded deterministic
+backoff; invalid scope and protocol failures are not retried. Queued work can
+be cancelled immediately, while running work observes cancellation before or
+after the current monolithic provider crawl and discards unpublished results
+safely.
+
+The case response now separates the latest attempt, the active sync, and the
+latest usable partial/succeeded snapshot. A queued, cancelled, or failed
+attempt therefore cannot erase or impersonate the provenance of the last
+useful Summary. The Summary route resumes polling after refresh, avoids
+overlapping requests, shows real persisted progress and retry state, supports
+safe cancellation, and displays `Not available` before the first usable
+snapshot. The old case-to-legacy-Activity escape hatch is removed; a canonical
+Activity route remains the next vertical slice.
+
+This release deliberately reuses the existing monolithic ingestion builder.
+The lease heartbeat and bounded stage checkpoint are durable, but accepted
+provider pages are not yet committed incrementally: a crash during provider
+I/O repeats the bounded crawl, and cancellation waits for the current bounded
+crawl boundary. Per-page checkpoint/resume and canonical cross-sync Activity
+deduplication remain subsequent Roadmap 1 work. Wallet Cases are still
+direct-loopback only until authenticated owner scopes are implemented.
+
+---
+
 # GRAM Scope — v0.71.0 WALLET CASE FOUNDATION
 
 v0.71.0 introduces the first product-facing Wallet Case vertical slice. A

@@ -137,7 +137,7 @@ jobs:
       - name: Create atomic deployment manifest fixture
         run: |
           python ops/create_release_manifest.py \
-            --tag v0.71.0 \
+            --tag v0.72.0 \
             --source-commit "$GITHUB_SHA" \
             --backend-digest sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
             --frontend-digest sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \

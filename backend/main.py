@@ -17,8 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
+import database
 from adapters.stonfi import StonfiAdapter
 from adapters.tonapi import TonapiAdapter
 from adapters.wallet_activity import get_wallet_activity_provider_status
@@ -37,10 +38,12 @@ from routers.prices import router as prices_router
 from routers.stonfi import router as stonfi_router
 from routers.tonapi import router as tonapi_router
 from routers.wallet_activity import router as wallet_activity_router
+from routers.wallet_cases import jobs_router as wallet_case_jobs_router
 from routers.wallet_cases import router as wallet_cases_router
 from routers.wallet_ownership import router as wallet_ownership_router
 from services import export
 from services.analysis import analyze, get_providers_status
+from services.case_sync_jobs import CaseSyncWorker, LocalCaseSyncJobRunner
 from services.wallet_case_access import wallet_case_access_available
 from services.monitoring import (
     observe_http_request,
@@ -56,7 +59,28 @@ VERSION = "0.2.1"
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Apply schema migrations before the API begins serving requests."""
     init_db()
-    yield
+    runner = None
+    settings = get_settings()
+    if getattr(settings, "wallet_case_job_runner", "disabled") == "local":
+        worker_sessions = sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            bind=database.engine,
+        )
+        runner = LocalCaseSyncJobRunner(
+            CaseSyncWorker(worker_sessions),
+            poll_milliseconds=settings.wallet_case_job_poll_milliseconds,
+        )
+        _app.state.wallet_case_job_runner = runner
+        runner.start()
+    else:
+        _app.state.wallet_case_job_runner = None
+    try:
+        yield
+    finally:
+        if runner is not None:
+            runner.stop()
+        _app.state.wallet_case_job_runner = None
 
 
 app = FastAPI(
@@ -109,6 +133,7 @@ app.include_router(stonfi_router)
 app.include_router(tonapi_router)
 app.include_router(wallet_activity_router)
 app.include_router(wallet_cases_router)
+app.include_router(wallet_case_jobs_router)
 app.include_router(wallet_ownership_router)
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -191,8 +216,16 @@ def prometheus_metrics(session: Session = Depends(get_session)) -> Response:
 @app.get("/api/providers/status", response_model=ProvidersStatusResponse)
 def providers_status(request: Request) -> dict:
     return get_api_providers_status(
-        wallet_cases_available=wallet_case_access_available(request),
+        wallet_cases_available=(
+            wallet_case_access_available(request)
+            and _wallet_case_runner_available(request)
+        ),
     )
+
+
+def _wallet_case_runner_available(request: Request) -> bool:
+    runner = getattr(request.app.state, "wallet_case_job_runner", None)
+    return runner is not None and getattr(runner, "alive", False) is True
 
 
 def get_api_providers_status(

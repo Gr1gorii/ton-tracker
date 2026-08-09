@@ -49,7 +49,8 @@ DEX_PROTOCOL_IDENTITY_REVISION = "20260710_0013"
 OWNERSHIP_NETWORK_SCOPE_REVISION = "20260710_0014"
 WALLET_CASES_REVISION = "20260710_0015"
 WALLET_CASE_COMPACT_RESULTS_REVISION = "20260710_0016"
-CURRENT_REVISION = WALLET_CASE_COMPACT_RESULTS_REVISION
+CASE_SYNC_JOBS_REVISION = "20260710_0017"
+CURRENT_REVISION = CASE_SYNC_JOBS_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -63,6 +64,19 @@ JETTON_CONTRACT_VERIFICATIONS_TABLE = (
 )
 WALLET_CASES_TABLE = "wallet_cases"
 WALLET_CASE_SYNCS_TABLE = "wallet_case_syncs"
+CASE_SYNC_JOB_PARTIAL_COLUMNS = (
+    "status_version INTEGER DEFAULT 1 NOT NULL",
+    "idempotency_key VARCHAR(36)",
+    "request_fingerprint VARCHAR(64)",
+    "attempt_count INTEGER DEFAULT 0 NOT NULL",
+    "max_attempts INTEGER DEFAULT 4 NOT NULL",
+    "next_attempt_at DATETIME",
+    "cancel_requested_at DATETIME",
+    "lease_token VARCHAR(64)",
+    "lease_expires_at DATETIME",
+    "heartbeat_at DATETIME",
+    "checkpoint_json TEXT DEFAULT '{}' NOT NULL",
+)
 
 WALLET_CASE_CHECKS = {
     (
@@ -878,6 +892,11 @@ def _assert_wallet_case_schema(engine: Engine) -> None:
     assert sync_defaults["coverage_summary_json"] == "'{}'"
     assert sync_defaults["result_summary_json"] == "'{}'"
     assert sync_defaults["message_safe"] == "''"
+    if "status_version" in sync_defaults:
+        assert sync_defaults["status_version"] == "1"
+        assert sync_defaults["attempt_count"] == "0"
+        assert sync_defaults["max_attempts"] == "4"
+        assert sync_defaults["checkpoint_json"] == "'{}'"
 
 
 def _assert_wallet_identity_schema(engine: Engine) -> None:
@@ -1415,6 +1434,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -1463,6 +1483,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1513,6 +1534,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1655,6 +1677,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1805,6 +1828,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1959,6 +1983,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2394,6 +2419,7 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2489,6 +2515,7 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2691,6 +2718,7 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -2946,6 +2974,7 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_trace_boc_verification_schema(engine)
@@ -2970,6 +2999,7 @@ def test_upgrade_from_0007_reaches_current_model_parity(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert {
         "wallet_native_activity_ledgers",
@@ -2995,6 +3025,7 @@ def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert inspect(engine).get_table_names().count(
         JETTON_CONTRACT_VERIFICATIONS_TABLE
@@ -3023,6 +3054,7 @@ def test_wallet_ownership_challenge_upgrade_from_0009_reaches_model_parity(tmp_p
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -3056,6 +3088,7 @@ def test_account_state_inclusion_upgrade_from_0010_reaches_model_parity(tmp_path
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert "wallet_account_state_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3075,6 +3108,7 @@ def test_transaction_inclusion_upgrade_from_0011_reaches_model_parity(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert "wallet_transaction_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3093,6 +3127,7 @@ def test_dex_protocol_identity_upgrade_from_0012_reaches_model_parity(tmp_path):
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     columns = {
         column["name"]
@@ -3114,6 +3149,7 @@ def test_ownership_network_scope_upgrade_from_0013_reaches_model_parity(tmp_path
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -3164,6 +3200,7 @@ def test_wallet_cases_upgrade_from_0014_preserves_runs_without_backfill(tmp_path
     assert report.applied_revisions == (
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     assert _wallet_case_counts(engine) == (0, 0)
@@ -3193,7 +3230,7 @@ def test_wallet_cases_migration_repairs_exact_empty_partial_sqlite_ddl(tmp_path)
     assert "result_summary_json" not in sync_columns
     assert "message_safe" not in sync_columns
 
-    _upgrade_to_revision(engine, WALLET_CASE_COMPACT_RESULTS_REVISION)
+    _upgrade_to_revision(engine, CURRENT_REVISION)
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
     engine.dispose()
@@ -3342,7 +3379,10 @@ def test_wallet_case_compact_results_upgrade_from_0015_preserves_rows(tmp_path):
     assert report.action == "upgraded"
     assert report.revision_before == WALLET_CASES_REVISION
     assert report.revision_after == CURRENT_REVISION
-    assert report.applied_revisions == (WALLET_CASE_COMPACT_RESULTS_REVISION,)
+    assert report.applied_revisions == (
+        WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
+    )
     with engine.connect() as connection:
         row = connection.exec_driver_sql(
             "SELECT public_id, provider, coverage_summary_json, "
@@ -3380,6 +3420,7 @@ def test_wallet_case_compact_results_repairs_exact_partial_sqlite_ddl(tmp_path):
         assert connection.exec_driver_sql(
             "SELECT version_num FROM alembic_version"
         ).scalar_one() == WALLET_CASE_COMPACT_RESULTS_REVISION
+    _upgrade_to_revision(engine, CURRENT_REVISION)
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
     engine.dispose()
@@ -3460,6 +3501,196 @@ def test_wallet_case_compact_results_migration_is_forward_only(tmp_path):
         ).scalar_one() == WALLET_CASE_COMPACT_RESULTS_REVISION
     _assert_wallet_case_schema(engine)
     engine.dispose()
+
+
+def test_case_sync_jobs_upgrade_normalizes_legacy_active_rows_and_enforces_slots(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "case-sync-jobs-upgrade.db")
+    _upgrade_to_revision(engine, WALLET_CASE_COMPACT_RESULTS_REVISION)
+    metadata = MetaData()
+    wallet_cases = Table(WALLET_CASES_TABLE, metadata, autoload_with=engine)
+    case_syncs = Table(WALLET_CASE_SYNCS_TABLE, metadata, autoload_with=engine)
+    created_at = datetime(2026, 8, 9, tzinfo=timezone.utc)
+    with engine.begin() as connection:
+        case_id = connection.execute(
+            wallet_cases.insert().values(
+                public_id="33333333-3333-4333-8333-333333333333",
+                **_wallet_case_values(),
+                created_at=created_at,
+                updated_at=created_at,
+            )
+        ).inserted_primary_key[0]
+        connection.execute(
+            case_syncs.insert().values(
+                public_id="44444444-4444-4444-8444-444444444444",
+                **_wallet_case_sync_values(
+                    case_id,
+                    state="running",
+                    stage="ingesting",
+                    created_at=created_at,
+                    updated_at=created_at,
+                ),
+            )
+        )
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == WALLET_CASE_COMPACT_RESULTS_REVISION
+    assert report.revision_after == CASE_SYNC_JOBS_REVISION
+    assert report.applied_revisions == (CASE_SYNC_JOBS_REVISION,)
+    with engine.connect() as connection:
+        legacy = connection.exec_driver_sql(
+            "SELECT state, stage, error_code, completed_at, status_version "
+            "FROM wallet_case_syncs WHERE public_id = ?",
+            ("44444444-4444-4444-8444-444444444444",),
+        ).one()
+    assert legacy[0:3] == (
+        "failed",
+        "failed",
+        "legacy_sync_not_resumable",
+    )
+    assert legacy.completed_at is not None
+    assert legacy.status_version == 2
+
+    current = database.Base.metadata.tables[WALLET_CASE_SYNCS_TABLE]
+    active_values = _wallet_case_sync_values(
+        case_id,
+        public_id="55555555-5555-4555-8555-555555555555",
+        state="queued",
+        stage="queued",
+        next_attempt_at=created_at,
+        idempotency_key="66666666-6666-4666-8666-666666666666",
+        request_fingerprint="ab" * 32,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    with engine.begin() as connection:
+        connection.execute(current.insert().values(**active_values))
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                current.insert().values(
+                    **{
+                        **active_values,
+                        "public_id": "77777777-7777-4777-8777-777777777777",
+                        "idempotency_key": "88888888-8888-4888-8888-888888888888",
+                    }
+                )
+            )
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                current.insert().values(
+                    **{
+                        **active_values,
+                        "public_id": "99999999-9999-4999-8999-999999999999",
+                        "state": "failed",
+                        "stage": "failed",
+                        "completed_at": created_at,
+                    }
+                )
+            )
+    _assert_schema_matches_models(engine)
+    _assert_wallet_case_schema(engine)
+    engine.dispose()
+
+
+@pytest.mark.parametrize("prefix_count", range(1, 12))
+def test_case_sync_jobs_repairs_each_exact_partial_column_prefix(
+    tmp_path,
+    prefix_count,
+):
+    engine = _engine(tmp_path / f"partial-case-sync-jobs-{prefix_count}.db")
+    _upgrade_to_revision(engine, WALLET_CASE_COMPACT_RESULTS_REVISION)
+    with engine.begin() as connection:
+        for definition in CASE_SYNC_JOB_PARTIAL_COLUMNS[:prefix_count]:
+            connection.exec_driver_sql(
+                "ALTER TABLE wallet_case_syncs ADD COLUMN " + definition
+            )
+
+    _upgrade_to_revision(engine, CASE_SYNC_JOBS_REVISION)
+
+    _assert_schema_matches_models(engine)
+    _assert_wallet_case_schema(engine)
+    engine.dispose()
+
+
+@pytest.mark.parametrize("index_prefix_count", range(1, 4))
+def test_case_sync_jobs_repairs_each_exact_partial_index_prefix(
+    tmp_path,
+    index_prefix_count,
+):
+    engine = _engine(
+        tmp_path / f"partial-case-sync-job-indexes-{index_prefix_count}.db"
+    )
+    _upgrade_to_revision(engine, WALLET_CASE_COMPACT_RESULTS_REVISION)
+    index_statements = (
+        "CREATE UNIQUE INDEX uq_wallet_case_syncs_case_idempotency "
+        "ON wallet_case_syncs (case_id, idempotency_key)",
+        "CREATE UNIQUE INDEX uq_wallet_case_syncs_one_active "
+        "ON wallet_case_syncs (case_id) "
+        "WHERE state IN ('queued', 'running')",
+        "CREATE INDEX ix_wallet_case_syncs_queue "
+        "ON wallet_case_syncs (state, next_attempt_at, created_at, id)",
+    )
+    with engine.begin() as connection:
+        for definition in CASE_SYNC_JOB_PARTIAL_COLUMNS:
+            connection.exec_driver_sql(
+                "ALTER TABLE wallet_case_syncs ADD COLUMN " + definition
+            )
+        for statement in index_statements[:index_prefix_count]:
+            connection.exec_driver_sql(statement)
+
+    _upgrade_to_revision(engine, CASE_SYNC_JOBS_REVISION)
+
+    _assert_schema_matches_models(engine)
+    _assert_wallet_case_schema(engine)
+    engine.dispose()
+
+
+def test_case_sync_jobs_rejects_malformed_partial_column_and_is_forward_only(
+    tmp_path,
+):
+    malformed = _engine(tmp_path / "malformed-case-sync-jobs.db")
+    _upgrade_to_revision(malformed, WALLET_CASE_COMPACT_RESULTS_REVISION)
+    with malformed.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE wallet_case_syncs ADD COLUMN "
+            "status_version TEXT DEFAULT 'wrong' NOT NULL"
+        )
+    with pytest.raises(RuntimeError, match="do not match revision 0017"):
+        _upgrade_to_revision(malformed, CASE_SYNC_JOBS_REVISION)
+    malformed.dispose()
+
+    wrong_index = _engine(tmp_path / "wrong-case-sync-jobs-index.db")
+    _upgrade_to_revision(wrong_index, WALLET_CASE_COMPACT_RESULTS_REVISION)
+    with wrong_index.begin() as connection:
+        for definition in CASE_SYNC_JOB_PARTIAL_COLUMNS:
+            connection.exec_driver_sql(
+                "ALTER TABLE wallet_case_syncs ADD COLUMN " + definition
+            )
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX uq_wallet_case_syncs_case_idempotency "
+            "ON wallet_case_syncs (idempotency_key, case_id)"
+        )
+    with pytest.raises(RuntimeError, match="does not match revision 0017"):
+        _upgrade_to_revision(wrong_index, CASE_SYNC_JOBS_REVISION)
+    wrong_index.dispose()
+
+    forward_only = _engine(tmp_path / "case-sync-jobs-forward-only.db")
+    _upgrade_to_revision(forward_only, CASE_SYNC_JOBS_REVISION)
+    with forward_only.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                WALLET_CASE_COMPACT_RESULTS_REVISION,
+            )
+    with forward_only.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_SYNC_JOBS_REVISION
+    forward_only.dispose()
 
 
 def test_wallet_case_constraints_enforce_scope_bounds_progress_and_cascade(
@@ -4064,6 +4295,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         OWNERSHIP_NETWORK_SCOPE_REVISION,
         WALLET_CASES_REVISION,
         WALLET_CASE_COMPACT_RESULTS_REVISION,
+        CASE_SYNC_JOBS_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

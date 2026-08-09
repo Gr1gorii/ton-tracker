@@ -257,6 +257,25 @@ class CaseSync(Base):
             "case_id",
             "created_at",
         ),
+        Index(
+            "uq_wallet_case_syncs_case_idempotency",
+            "case_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_case_syncs_one_active",
+            "case_id",
+            unique=True,
+            sqlite_where=text("state IN ('queued', 'running')"),
+        ),
+        Index(
+            "ix_wallet_case_syncs_queue",
+            "state",
+            "next_attempt_at",
+            "created_at",
+            "id",
+        ),
     )
 
     id = Column(Integer, primary_key=True)
@@ -331,6 +350,37 @@ class CaseSync(Base):
         nullable=False,
         default="",
         server_default="",
+    )
+    status_version = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+    )
+    idempotency_key = Column(String(36), nullable=True)
+    request_fingerprint = Column(String(64), nullable=True)
+    attempt_count = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    max_attempts = Column(
+        Integer,
+        nullable=False,
+        default=4,
+        server_default=text("4"),
+    )
+    next_attempt_at = Column(DateTime, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
+    lease_token = Column(String(64), nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    heartbeat_at = Column(DateTime, nullable=True)
+    checkpoint_json = Column(
+        Text,
+        nullable=False,
+        default="{}",
+        server_default="{}",
     )
 
     case = relationship("WalletCase", back_populates="syncs")

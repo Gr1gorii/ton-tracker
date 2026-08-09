@@ -6,7 +6,7 @@ Combined comparison: `qa/landing-comparison.png`
 Internal workflow screenshot: `qa/gram-scope-activity-light.png`  
 Mobile screenshots: `qa/gram-scope-mobile-landing.png`, `qa/gram-scope-mobile-activity.png`  
 Viewport: 1280 × 720 desktop and 390 × 844 mobile  
-State: light landing; light Activity empty state; persisted-run and dark-theme states also exercised in the in-app browser.
+State: light landing; light Activity empty state; persisted-run, Wallet Case, durable-sync, and dark-theme states also exercised in the in-app browser.
 
 ## Full-view comparison evidence
 
@@ -49,6 +49,10 @@ No P3 findings are being carried into handoff. The chart package is lazy-loaded 
 ## Interaction and state verification
 
 - Landing wallet entry and address-free workspace entry.
+- Wallet Case creation from the landing and canonical Summary deep-link routing.
+- Persisted queued sync state (`0 of 3`), background completion, and immutable
+  snapshot publication without exposing a compatibility ingestion-run ID.
+- Direct Summary URL reload restored the same usable snapshot and metrics.
 - Light and dark theme toggles.
 - Desktop section navigation and top-of-page reset.
 - Coverage preview using the configured backend.
@@ -58,6 +62,21 @@ No P3 findings are being carried into handoff. The chart package is lazy-loaded 
 - Empty states and fail-closed mock-mode banner.
 - Responsive landing, Overview, and Activity layouts at 390 × 844.
 - Browser console checked after mobile and desktop interaction passes: no warnings or errors.
+
+### v0.72 durable Wallet Case pass
+
+- Desktop browser path: landing → create/open demo case → enqueue bounded 24-hour
+  sync → observe persisted queue → publish snapshot → reload the direct case URL.
+- The first unsynchronized Summary showed `Not available`; the completed mock
+  snapshot showed 7 returned activity rows, a source-labelled provider, bounded
+  interval, coverage limitations, and `Full history: Not proven`.
+- The 390 × 844 case layout collapsed metrics and details to one column, retained
+  accessible Home naming when its visible label was hidden, and had no horizontal
+  overflow (`scrollWidth === clientWidth`).
+- Light and dark theme tokens were applied to the document, and the new error and
+  destructive-control contrast is protected by an automated WCAG AA regression.
+- Browser console contained no warnings or errors after create, sync, reload,
+  theme, and responsive checks.
 
 ## Implementation checklist
 

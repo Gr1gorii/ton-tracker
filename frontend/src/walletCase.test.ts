@@ -1,192 +1,153 @@
 import { describe, expect, it } from "vitest";
+
 import {
   parseWalletCase,
   parseWalletCaseListResponse,
+  parseWalletCaseSync,
   parseWalletCaseUpsertResponse,
-  type WalletCase,
 } from "./walletCase";
-
-const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
-const SYNC_ID = "550e8400-e29b-41d4-b716-446655440001";
-
-export function walletCaseFixture(overrides: Partial<WalletCase> = {}): WalletCase {
-  return {
-    public_id: CASE_ID,
-    network: "ton-mainnet",
-    data_environment: "demo",
-    canonical_wallet_key: `0:${"a".repeat(64)}`,
-    identity_version: "ton_std_address_v1",
-    display_address: "EQC-demo-wallet",
-    label: null,
-    note: null,
-    created_at: "2026-08-09T12:00:00Z",
-    updated_at: "2026-08-09T12:01:00Z",
-    latest_sync: {
-      public_id: SYNC_ID,
-      state: "succeeded",
-      stage: "completed",
-      progress: { current: 1, total: 1 },
-      provider: "mock_wallet_activity",
-      data_mode: "mock",
-      requested_scope: {
-        time_window: "24h",
-        start_at: "2026-08-08T12:00:00Z",
-        end_at: "2026-08-09T12:00:00Z",
-        surfaces: ["transactions", "balances"],
-      },
-      coverage: {
-        state: "unknown",
-        requested_start_at: "2026-08-08T12:00:00Z",
-        requested_end_at: "2026-08-09T12:00:00Z",
-        requested_surfaces: ["transactions", "balances"],
-        unavailable_surfaces: [],
-        incomplete_surfaces: [],
-        streams: [],
-        full_history_proven: false,
-      },
-      summary: {
-        activity_counts: { transfers: 0, transactions: 3, swaps: 0, balances: 3 },
-        failed_transaction_count: 0,
-        warning_count: 1,
-        portfolio_snapshot: {
-          total_balance_usd: "950.42",
-          priced_assets: 3,
-          unpriced_assets: 0,
-        },
-      },
-      limitations: [
-        {
-          code: "bounded_interval_not_full_history",
-          message: "The selected interval is not full wallet history.",
-        },
-      ],
-      message: "Demo sync completed.",
-      created_at: "2026-08-09T12:00:00Z",
-      started_at: "2026-08-09T12:00:00Z",
-      completed_at: "2026-08-09T12:01:00Z",
-    },
-    summary: {
-      activity_counts: { transfers: 0, transactions: 3, swaps: 0, balances: 3 },
-      failed_transaction_count: 0,
-      warning_count: 1,
-      portfolio_snapshot: {
-        total_balance_usd: "950.42",
-        priced_assets: 3,
-        unpriced_assets: 0,
-      },
-    },
-    limitations: [
-      {
-        code: "bounded_interval_not_full_history",
-        message: "The selected interval is not full wallet history.",
-      },
-    ],
-    ...overrides,
-  };
-}
+import {
+  activeSyncFixture,
+  CASE_ID,
+  emptyWalletCaseFixture,
+  failedSyncFixture,
+  retryWaitSyncFixture,
+  succeededSyncFixture,
+  walletCaseFixture,
+  zeroSummaryFixture,
+} from "./test/walletCaseFixtures";
 
 describe("wallet case contracts", () => {
-  it("accepts a bounded demo case without promoting full history", () => {
+  it("accepts a terminal snapshot with explicit published-result provenance", () => {
     const parsed = parseWalletCase(walletCaseFixture());
-    expect(parsed.latest_sync?.coverage.full_history_proven).toBe(false);
-    expect(parsed.summary.activity_counts.transactions).toBe(3);
+    expect(parsed.current_snapshot?.result?.summary.activity_counts.transactions).toBe(3);
+    expect(parsed.current_snapshot?.coverage.full_history_proven).toBe(false);
+    expect(parsed.latest_sync).toEqual(parsed.latest_sync_attempt);
   });
 
-  it("fails closed when live case metadata contains mock evidence", () => {
-    const value = walletCaseFixture({ data_environment: "live" });
-    expect(() => parseWalletCase(value)).toThrow(/does not match/);
+  it("keeps an older usable snapshot while the latest attempt is running", () => {
+    const active = activeSyncFixture("running");
+    const snapshot = succeededSyncFixture({
+      public_id: "550e8400-e29b-41d4-b716-446655440002",
+      status_version: 7,
+    });
+    const parsed = parseWalletCase(walletCaseFixture({
+      latestAttempt: active,
+      currentSnapshot: snapshot,
+    }));
+
+    expect(parsed.active_sync?.public_id).toBe(active.public_id);
+    expect(parsed.current_snapshot?.public_id).toBe(snapshot.public_id);
+    expect(parsed.summary).toEqual(snapshot.result?.summary);
   });
 
-  it("fails closed when bounded coverage claims full history", () => {
-    const value = walletCaseFixture();
-    const unsafe = {
-      ...value,
-      latest_sync: {
-        ...value.latest_sync,
-        coverage: { ...value.latest_sync?.coverage, full_history_proven: true },
-      },
-    };
-    expect(() => parseWalletCase(unsafe)).toThrow(/cannot claim full wallet history/);
+  it("allows response-time polling hints to differ across equivalent case views", () => {
+    const active = retryWaitSyncFixture({ poll_after_ms: 900 });
+    expect(() => parseWalletCase({
+      ...walletCaseFixture({ latestAttempt: active, currentSnapshot: null }),
+      latest_sync: { ...active, poll_after_ms: 850 },
+      active_sync: { ...active, poll_after_ms: 800 },
+    })).not.toThrow();
   });
 
-  it("fails closed when coverage does not match the requested sync scope", () => {
-    const value = walletCaseFixture();
-    const unsafe = {
-      ...value,
-      latest_sync: {
-        ...value.latest_sync,
-        coverage: { ...value.latest_sync?.coverage, requested_surfaces: ["transactions"] },
-      },
-    };
-    expect(() => parseWalletCase(unsafe)).toThrow(/does not match/);
+  it("accepts an unsynchronized case only with unavailable compatibility data", () => {
+    const parsed = parseWalletCase(emptyWalletCaseFixture());
+    expect(parsed.current_snapshot).toBeNull();
+    expect(parsed.summary).toEqual(zeroSummaryFixture());
   });
 
-  it("fails closed when demo evidence claims bounded-complete coverage", () => {
-    const value = walletCaseFixture();
-    const unsafe = {
-      ...value,
-      latest_sync: {
-        ...value.latest_sync,
-        coverage: { ...value.latest_sync?.coverage, state: "bounded_complete" },
-      },
-    };
-    expect(() => parseWalletCase(unsafe)).toThrow(/contradicts its evidence mode/);
-  });
-
-  it("fails closed when complete coverage contains gaps or incomplete streams", () => {
-    const value = walletCaseFixture({ data_environment: "live" });
-    const unsafe = {
-      ...value,
-      latest_sync: {
-        ...value.latest_sync,
-        data_mode: "real",
-        coverage: {
-          ...value.latest_sync?.coverage,
-          state: "bounded_complete",
-          incomplete_surfaces: ["transactions"],
-          streams: [{
-            provider: "tonapi_wallet_activity_live",
-            stream_key: "account_transactions",
-            completion_state: "incomplete",
-            error_code: "page_cap_reached",
-          }],
-        },
-      },
-    };
-    expect(() => parseWalletCase(unsafe)).toThrow(/complete coverage cannot contain/);
-  });
-
-  it("fails closed when requested coverage is empty or its gaps are out of scope", () => {
-    const value = walletCaseFixture();
-    const empty = {
-      ...value,
-      latest_sync: {
-        ...value.latest_sync,
-        requested_scope: { ...value.latest_sync?.requested_scope, surfaces: [] },
-        coverage: { ...value.latest_sync?.coverage, requested_surfaces: [] },
-      },
-    };
-    const outOfScope = {
-      ...value,
-      latest_sync: {
-        ...value.latest_sync,
-        coverage: {
-          ...value.latest_sync?.coverage,
-          unavailable_surfaces: ["swaps"],
-        },
-      },
-    };
-    expect(() => parseWalletCase(empty)).toThrow(/requested scope is invalid/);
-    expect(() => parseWalletCase(outOfScope)).toThrow(/gaps do not match/);
-  });
-
-  it("fails closed when an unsynchronized case publishes non-zero evidence", () => {
-    expect(() => parseWalletCase(walletCaseFixture({ latest_sync: null }))).toThrow(
-      /unsynchronized wallet case/,
+  it("accepts retry_wait only as a queued job with bounded retry metadata", () => {
+    expect(parseWalletCaseSync(retryWaitSyncFixture()).retry?.attempt).toBe(2);
+    expect(() => parseWalletCaseSync(retryWaitSyncFixture({ state: "running" }))).toThrow(
+      /retry metadata contradicts/,
+    );
+    expect(() => parseWalletCaseSync(activeSyncFixture("queued", { stage: "retry_wait" }))).toThrow(
+      /retry metadata contradicts/,
     );
   });
 
-  it("fails closed when top-level summary is not from the latest sync", () => {
+  it("fails closed on invalid version, polling, progress, and timestamps", () => {
+    expect(() => parseWalletCaseSync(activeSyncFixture("queued", { status_version: 0 }))).toThrow(
+      /status version/,
+    );
+    expect(() => parseWalletCaseSync(activeSyncFixture("queued", { poll_after_ms: -1 }))).toThrow(
+      /poll interval/,
+    );
+    expect(() => parseWalletCaseSync(activeSyncFixture("running", {
+      progress: { current: 6, total: 5 },
+    }))).toThrow(/exceeds its total/);
+    expect(() => parseWalletCaseSync(activeSyncFixture("running", { started_at: null }))).toThrow(
+      /timestamps contradict/,
+    );
+  });
+
+  it("fails closed when nested result and flattened compatibility fields disagree", () => {
+    const sync = succeededSyncFixture();
+    expect(() => parseWalletCaseSync({
+      ...sync,
+      summary: {
+        ...sync.summary,
+        activity_counts: { ...sync.summary.activity_counts, transactions: 99 },
+      },
+    })).toThrow(/result does not match/);
+    expect(() => parseWalletCaseSync(activeSyncFixture("running", {
+      result: succeededSyncFixture().result,
+    }))).toThrow(/result contradicts/);
+  });
+
+  it("fails closed when error metadata is missing or attached outside failed state", () => {
+    expect(() => parseWalletCaseSync(failedSyncFixture({ error: null }))).toThrow(
+      /error metadata contradicts/,
+    );
+    expect(() => parseWalletCaseSync(activeSyncFixture("running", {
+      error: failedSyncFixture().error,
+    }))).toThrow(/error metadata contradicts/);
+  });
+
+  it("binds every sync to the case identity and evidence environment", () => {
+    const wrongCase = activeSyncFixture("running", {
+      case_public_id: "550e8400-e29b-41d4-a716-446655440099",
+    });
+    expect(() => parseWalletCase(walletCaseFixture({ latestAttempt: wrongCase }))).toThrow(
+      /identity does not match/,
+    );
+    expect(() => parseWalletCase(walletCaseFixture({
+      overrides: { data_environment: "live" },
+    }))).toThrow(/environment or identity/);
+  });
+
+  it("requires latest compatibility, active job, and snapshot lifecycle views to agree", () => {
+    const active = activeSyncFixture("running");
+    expect(() => parseWalletCase({
+      ...walletCaseFixture({ latestAttempt: active, currentSnapshot: null }),
+      latest_sync: activeSyncFixture("queued"),
+    })).toThrow(/compatibility view/);
+    expect(() => parseWalletCase({
+      ...walletCaseFixture({ latestAttempt: active, currentSnapshot: null }),
+      active_sync: null,
+    })).toThrow(/omits its active sync/);
+    expect(() => parseWalletCase({
+      ...walletCaseFixture(),
+      current_snapshot: failedSyncFixture(),
+    })).toThrow(/current snapshot is not publishable/);
+  });
+
+  it("rejects a snapshot without its latest attempt or behind a usable latest attempt", () => {
+    const olderSnapshot = succeededSyncFixture({
+      public_id: "550e8400-e29b-41d4-b716-446655440002",
+      status_version: 7,
+    });
+    expect(() => parseWalletCase(walletCaseFixture({
+      latestAttempt: null,
+      currentSnapshot: olderSnapshot,
+    }))).toThrow(/snapshot provenance/);
+    expect(() => parseWalletCase(walletCaseFixture({
+      latestAttempt: succeededSyncFixture(),
+      currentSnapshot: olderSnapshot,
+    }))).toThrow(/snapshot provenance/);
+  });
+
+  it("uses current_snapshot, never the latest active attempt, as summary provenance", () => {
     const value = walletCaseFixture();
     expect(() => parseWalletCase({
       ...value,
@@ -194,7 +155,23 @@ describe("wallet case contracts", () => {
         ...value.summary,
         activity_counts: { ...value.summary.activity_counts, transactions: 99 },
       },
-    })).toThrow(/summary provenance/);
+    })).toThrow(/current snapshot/);
+    expect(() => parseWalletCase({
+      ...emptyWalletCaseFixture(),
+      summary: { ...zeroSummaryFixture(), warning_count: 1 },
+    })).toThrow(/without a snapshot/);
+  });
+
+  it("rejects bounded coverage that claims full wallet history", () => {
+    const sync = succeededSyncFixture();
+    expect(() => parseWalletCaseSync({
+      ...sync,
+      coverage: { ...sync.coverage, full_history_proven: true },
+      result: sync.result && {
+        ...sync.result,
+        coverage: { ...sync.result.coverage, full_history_proven: true },
+      },
+    })).toThrow(/cannot claim full wallet history/);
   });
 
   it("validates upsert and list envelopes", () => {
@@ -202,5 +179,6 @@ describe("wallet case contracts", () => {
     expect(
       parseWalletCaseListResponse({ cases: [walletCaseFixture()], limit: 20, truncated: false }).cases,
     ).toHaveLength(1);
+    expect(parseWalletCase(walletCaseFixture()).public_id).toBe(CASE_ID);
   });
 });

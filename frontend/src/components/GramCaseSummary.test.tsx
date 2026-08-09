@@ -1,126 +1,64 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { WalletCase } from "../walletCase";
+import type { WalletCase, WalletCaseSync } from "../walletCase";
+import type { WalletCaseSyncJobController } from "../useWalletCaseSyncJob";
+import {
+  activeSyncFixture,
+  CASE_ID,
+  emptyWalletCaseFixture,
+  succeededSyncFixture,
+  walletCaseFixture,
+  zeroSummaryFixture,
+} from "../test/walletCaseFixtures";
 
-const apiMocks = vi.hoisted(() => ({
-  createWalletCaseSync: vi.fn(),
+const mocks = vi.hoisted(() => ({
   getWalletCase: vi.fn(),
+  useWalletCaseSyncJob: vi.fn(),
 }));
 
-vi.mock("../api", () => apiMocks);
+vi.mock("../walletCaseApi", () => ({ getWalletCase: mocks.getWalletCase }));
+vi.mock("../useWalletCaseSyncJob", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../useWalletCaseSyncJob")>();
+  return { ...actual, useWalletCaseSyncJob: mocks.useWalletCaseSyncJob };
+});
 
 import GramCaseSummary from "./GramCaseSummary";
 
-const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
-const SYNC_ID = "550e8400-e29b-41d4-b716-446655440001";
-const ALL_SURFACES = [
-  "transfers",
-  "transactions",
-  "swaps",
-  "balances",
-  "jettons",
-] as const;
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
-function walletCaseFixture(overrides: Partial<WalletCase> = {}): WalletCase {
+function controllerFixture(overrides: Partial<WalletCaseSyncJobController> = {}): WalletCaseSyncJobController {
   return {
-    public_id: CASE_ID,
-    network: "ton-mainnet",
-    data_environment: "demo",
-    canonical_wallet_key: `0:${"a".repeat(64)}`,
-    identity_version: "ton_std_address_v1",
-    display_address: "EQC-demo-wallet",
-    label: null,
-    note: null,
-    created_at: "2026-08-09T12:00:00Z",
-    updated_at: "2026-08-09T12:01:00Z",
-    latest_sync: {
-      public_id: SYNC_ID,
-      state: "succeeded",
-      stage: "completed",
-      progress: { current: 1, total: 1 },
-      provider: "mock_wallet_activity",
-      data_mode: "mock",
-      requested_scope: {
-        time_window: "24h",
-        start_at: "2026-08-08T12:00:00Z",
-        end_at: "2026-08-09T12:00:00Z",
-        surfaces: [...ALL_SURFACES],
-      },
-      coverage: {
-        state: "unknown",
-        requested_start_at: "2026-08-08T12:00:00Z",
-        requested_end_at: "2026-08-09T12:00:00Z",
-        requested_surfaces: [...ALL_SURFACES],
-        unavailable_surfaces: [],
-        incomplete_surfaces: [],
-        streams: [],
-        full_history_proven: false,
-      },
-      summary: {
-        activity_counts: { transfers: 2, transactions: 3, swaps: 1, balances: 2 },
-        failed_transaction_count: 1,
-        warning_count: 2,
-        portfolio_snapshot: {
-          total_balance_usd: "950.42",
-          priced_assets: 2,
-          unpriced_assets: 1,
-        },
-      },
-      limitations: [
-        {
-          code: "bounded_interval_not_full_history",
-          message: "The selected interval is not full wallet history.",
-        },
-      ],
-      message: "Demo sync completed.",
-      created_at: "2026-08-09T12:00:00Z",
-      started_at: "2026-08-09T12:00:00Z",
-      completed_at: "2026-08-09T12:01:00Z",
-    },
-    summary: {
-      activity_counts: { transfers: 2, transactions: 3, swaps: 1, balances: 2 },
-      failed_transaction_count: 1,
-      warning_count: 2,
-      portfolio_snapshot: {
-        total_balance_usd: "950.42",
-        priced_assets: 2,
-        unpriced_assets: 1,
-      },
-    },
-    limitations: [
-      {
-        code: "bounded_interval_not_full_history",
-        message: "The selected interval is not full wallet history.",
-      },
-    ],
+    sync: null,
+    transportState: "idle",
+    transportError: null,
+    start: vi.fn().mockResolvedValue(undefined),
+    retry: vi.fn().mockResolvedValue(undefined),
+    cancel: vi.fn().mockResolvedValue(undefined),
+    checkNow: vi.fn(),
     ...overrides,
   };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.useWalletCaseSyncJob.mockReturnValue(controllerFixture());
 });
 
 afterEach(cleanup);
 
 describe("GramCaseSummary", () => {
-  it("shows persisted case identity and honest empty bounded-sync state", async () => {
-    apiMocks.getWalletCase.mockResolvedValue(
-      walletCaseFixture({
-        latest_sync: null,
-        summary: {
-          activity_counts: { transfers: 0, transactions: 0, swaps: 0, balances: 0 },
-          failed_transaction_count: 0,
-          warning_count: 0,
-          portfolio_snapshot: { total_balance_usd: null, priced_assets: 0, unpriced_assets: 0 },
-        },
-        limitations: [{ code: "not_synchronized", message: "This case has not been synchronized yet." }],
-      }),
-    );
+  it("shows honest unavailable metrics until a usable snapshot exists", async () => {
+    mocks.getWalletCase.mockResolvedValue(emptyWalletCaseFixture());
 
     render(<GramCaseSummary caseId={CASE_ID} />);
 
@@ -128,96 +66,139 @@ describe("GramCaseSummary", () => {
     expect(screen.getAllByText("Demo data")).toHaveLength(2);
     expect(screen.getByText("TON mainnet")).toBeTruthy();
     expect(screen.getByText("Not proven")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Not started" })).toBeTruthy();
-    expect(screen.getByText(/No sync has been run for this case/)).toBeTruthy();
-    expect(screen.queryByText(/Run #/)).toBeNull();
+    expect(screen.getAllByText("Not available").length).toBeGreaterThanOrEqual(5);
+    expect(screen.getByText(/No usable snapshot exists yet/)).toBeTruthy();
+    expect(screen.queryByText("Compatibility view")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Open advanced activity/ })).toBeNull();
   });
 
-  it("runs the explicit 24-hour scope and refetches the case summary", async () => {
-    const empty = walletCaseFixture({
-      latest_sync: null,
-      summary: {
-        activity_counts: { transfers: 0, transactions: 0, swaps: 0, balances: 0 },
-        failed_transaction_count: 0,
-        warning_count: 0,
-        portfolio_snapshot: { total_balance_usd: null, priced_assets: 0, unpriced_assets: 0 },
-      },
-      limitations: [{ code: "not_synchronized", message: "This case has not been synchronized yet." }],
-    });
-    const synced = walletCaseFixture();
-    apiMocks.getWalletCase
-      .mockResolvedValueOnce(empty)
-      .mockResolvedValueOnce(synced);
-    apiMocks.createWalletCaseSync.mockResolvedValue(synced.latest_sync);
+  it("starts only the explicit bounded 24-hour scope through the durable controller", async () => {
+    const controller = controllerFixture();
+    mocks.useWalletCaseSyncJob.mockReturnValue(controller);
+    mocks.getWalletCase.mockResolvedValue(emptyWalletCaseFixture());
     const user = userEvent.setup();
 
     render(<GramCaseSummary caseId={CASE_ID} />);
-    await screen.findByRole("heading", { name: "Not started" });
-    await user.click(screen.getByRole("button", { name: "Sync last 24 hours" }));
+    await user.click(await screen.findByRole("button", { name: "Sync last 24 hours" }));
 
-    await waitFor(() => expect(apiMocks.createWalletCaseSync).toHaveBeenCalledWith(
-      CASE_ID,
-      { time_window: "24h", surfaces: [...ALL_SURFACES] },
-    ));
-    await waitFor(() => expect(apiMocks.getWalletCase).toHaveBeenCalledTimes(2));
-    expect(apiMocks.getWalletCase.mock.calls[0][0]).toBe(CASE_ID);
-    expect(apiMocks.getWalletCase.mock.calls[0][1]).toBeInstanceOf(AbortSignal);
-    expect(apiMocks.getWalletCase.mock.calls[1]).toEqual([CASE_ID, undefined]);
+    expect(controller.start).toHaveBeenCalledWith({
+      time_window: "24h",
+      surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
+    });
+  });
 
-    expect(await screen.findByRole("heading", { name: "succeeded" })).toBeTruthy();
-    expect(screen.getAllByText("Coverage not established").length).toBeGreaterThan(0);
-    const observedMetric = screen.getByText("Returned activity rows").closest("article");
-    expect(observedMetric?.textContent).toContain("6");
-    expect(screen.queryByText(/Run #/)).toBeNull();
+  it("keeps the previous usable snapshot visible while a newer job runs", async () => {
+    const running = activeSyncFixture("running");
+    const snapshot = succeededSyncFixture({
+      public_id: "550e8400-e29b-41d4-b716-446655440002",
+    });
+    mocks.useWalletCaseSyncJob.mockReturnValue(controllerFixture({
+      sync: running,
+      transportState: "polling",
+    }));
+    mocks.getWalletCase.mockResolvedValue(walletCaseFixture({
+      latestAttempt: running,
+      currentSnapshot: snapshot,
+    }));
+
+    render(<GramCaseSummary caseId={CASE_ID} />);
+
+    expect(await screen.findByRole("heading", { name: "Acquiring bounded evidence" })).toBeTruthy();
+    expect(screen.getByText(/previous usable snapshot stays visible/i)).toBeTruthy();
+    const metric = screen.getByText("Returned activity rows").closest("article");
+    expect(metric?.textContent).toContain("6");
+    expect(screen.getByText(snapshot.public_id)).toBeTruthy();
+  });
+
+  it("background-refetches the case when the durable controller reports terminal", async () => {
+    const running = activeSyncFixture("running");
+    const completed = walletCaseFixture();
+    mocks.getWalletCase
+      .mockResolvedValueOnce(walletCaseFixture({ latestAttempt: running, currentSnapshot: null }))
+      .mockResolvedValueOnce(completed);
+    let terminalCallback: ((sync: WalletCaseSync) => void | Promise<void>) | undefined;
+    mocks.useWalletCaseSyncJob.mockImplementation((options) => {
+      terminalCallback = options.onTerminal;
+      return controllerFixture({ sync: running, transportState: "polling" });
+    });
+
+    render(<GramCaseSummary caseId={CASE_ID} />);
+    await screen.findByRole("heading", { name: "Acquiring bounded evidence" });
+    await act(async () => {
+      await terminalCallback?.(succeededSyncFixture());
+    });
+
+    await waitFor(() => expect(mocks.getWalletCase).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("heading", { name: "Available" })).toBeTruthy();
+  });
+
+  it("cannot publish a late response from a previous case route", async () => {
+    const oldRequest = deferred<WalletCase>();
+    const nextRequest = deferred<WalletCase>();
+    const otherCaseId = "550e8400-e29b-41d4-a716-446655440099";
+    mocks.getWalletCase
+      .mockReturnValueOnce(oldRequest.promise)
+      .mockReturnValueOnce(nextRequest.promise);
+    const { rerender } = render(<GramCaseSummary caseId={CASE_ID} />);
+
+    rerender(<GramCaseSummary caseId={otherCaseId} />);
+    await act(async () => {
+      nextRequest.resolve(emptyWalletCaseFixture({
+        public_id: otherCaseId,
+        display_address: "EQC-other-wallet",
+      }));
+      await Promise.resolve();
+    });
+    expect(await screen.findByRole("heading", { name: "EQC-other-wallet" })).toBeTruthy();
+
+    await act(async () => {
+      oldRequest.resolve(walletCaseFixture());
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("heading", { name: "EQC-other-wallet" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "EQC-demo-wallet" })).toBeNull();
   });
 
   it("renders no summary metrics when case validation fails closed", async () => {
-    apiMocks.getWalletCase.mockRejectedValue(
-      new Error("wallet case environment does not match its latest sync evidence"),
+    mocks.getWalletCase.mockRejectedValue(
+      new Error("wallet case environment or identity does not match its sync evidence"),
     );
 
     render(<GramCaseSummary caseId={CASE_ID} />);
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain(
-      "wallet case environment does not match its latest sync evidence",
-    );
+    expect(alert.textContent).toContain("environment or identity");
     expect(screen.queryByText("Returned activity rows")).toBeNull();
     expect(screen.queryByRole("button", { name: "Sync last 24 hours" })).toBeNull();
   });
 
-  it("shows migrated compact-summary gaps as unavailable instead of zero activity", async () => {
-    const base = walletCaseFixture();
-    if (!base.latest_sync) throw new Error("fixture must include a sync");
-    const zeroSummary = {
-      activity_counts: { transfers: 0, transactions: 0, swaps: 0, balances: 0 },
-      failed_transaction_count: 0,
-      warning_count: 0,
-      portfolio_snapshot: { total_balance_usd: null, priced_assets: 0, unpriced_assets: 0 },
-    };
+  it("shows migrated compact-summary gaps as unavailable rather than zero", async () => {
+    const snapshot = succeededSyncFixture();
     const limitations = [
-      ...base.limitations,
-      {
-        code: "summary_unavailable",
-        message: "Zero placeholders are not evidence of no activity.",
-      },
+      ...snapshot.limitations,
+      { code: "summary_unavailable", message: "Zero placeholders are not evidence of no activity." },
     ];
-    apiMocks.getWalletCase.mockResolvedValue(walletCaseFixture({
-      latest_sync: {
-        ...base.latest_sync,
-        summary: zeroSummary,
-        limitations,
-        message: "Compact summary is unavailable for this pre-0016 synchronization.",
-      },
-      summary: zeroSummary,
+    const result = {
+      ...snapshot.result!,
+      summary: zeroSummaryFixture(),
       limitations,
+      message: "Compact summary is unavailable for this synchronization.",
+    };
+    const migrated = succeededSyncFixture({
+      summary: result.summary,
+      limitations,
+      message: result.message,
+      result,
+    });
+    mocks.getWalletCase.mockResolvedValue(walletCaseFixture({
+      latestAttempt: migrated,
+      currentSnapshot: migrated,
     }));
 
     render(<GramCaseSummary caseId={CASE_ID} />);
 
-    expect(await screen.findByRole("heading", { name: "succeeded" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Available" })).toBeTruthy();
     expect(screen.getAllByText("Not available").length).toBeGreaterThanOrEqual(4);
-    expect(screen.getByText(/Compact summary is unavailable/)).toBeTruthy();
     expect(screen.getByText(/Zero placeholders are not evidence/)).toBeTruthy();
   });
 });

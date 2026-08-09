@@ -82,6 +82,13 @@ class Settings:
     backup_health_max_age_seconds: int = 172800
     recovery_health_file: str = ""
     recovery_health_max_age_seconds: int = 691200
+    wallet_case_job_runner: str = "local"
+    wallet_case_job_poll_milliseconds: int = 500
+    wallet_case_job_lease_seconds: int = 60
+    wallet_case_job_heartbeat_seconds: int = 10
+    wallet_case_job_max_attempts: int = 4
+    wallet_case_job_retry_base_seconds: int = 2
+    wallet_case_job_retry_cap_seconds: int = 60
 
     @property
     def is_mock(self) -> bool:
@@ -138,6 +145,9 @@ def get_settings() -> Settings:
         else DEFAULT_TONAPI_BASE_URL
     )
     tonapi_base_url = _env("TONAPI_BASE_URL") or default_tonapi_base_url
+    wallet_case_job_runner = _env("WALLET_CASE_JOB_RUNNER", "local").lower()
+    if wallet_case_job_runner not in {"local", "disabled"}:
+        wallet_case_job_runner = "disabled"
 
     return Settings(
         data_mode=mode,
@@ -206,6 +216,25 @@ def get_settings() -> Settings:
         recovery_health_file=_env("RECOVERY_HEALTH_FILE"),
         recovery_health_max_age_seconds=_env_int(
             "RECOVERY_HEALTH_MAX_AGE_SECONDS", 691200, 3600, 2592000
+        ),
+        wallet_case_job_runner=wallet_case_job_runner,
+        wallet_case_job_poll_milliseconds=_env_int(
+            "WALLET_CASE_JOB_POLL_MILLISECONDS", 500, 100, 15000
+        ),
+        wallet_case_job_lease_seconds=_env_int(
+            "WALLET_CASE_JOB_LEASE_SECONDS", 60, 30, 3600
+        ),
+        wallet_case_job_heartbeat_seconds=_env_int(
+            "WALLET_CASE_JOB_HEARTBEAT_SECONDS", 10, 2, 300
+        ),
+        wallet_case_job_max_attempts=_env_int(
+            "WALLET_CASE_JOB_MAX_ATTEMPTS", 4, 1, 10
+        ),
+        wallet_case_job_retry_base_seconds=_env_int(
+            "WALLET_CASE_JOB_RETRY_BASE_SECONDS", 2, 1, 60
+        ),
+        wallet_case_job_retry_cap_seconds=_env_int(
+            "WALLET_CASE_JOB_RETRY_CAP_SECONDS", 60, 2, 900
         ),
     )
 

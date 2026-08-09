@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import datetime, timezone
+import hashlib
 import json
 from typing import Any
 
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -14,14 +16,8 @@ from adapters.wallet_activity import get_wallet_activity_provider_status
 from config import get_settings
 from models import CaseSync, LOCAL_SINGLE_USER_SCOPE, WalletCase
 from repositories.wallet_cases import WalletCaseRepository
-from schemas import WalletIngestionPreviewRequest
 from services.ton_address_identity import derive_ton_wallet_identity
 from services.wallet_acquisition_bounds import resolve_wallet_acquisition_bounds
-from services.wallet_activity_ingestion import (
-    WalletIngestionScopeMismatch,
-    build_wallet_ingestion_run,
-    wallet_ingestion_run_to_response,
-)
 from wallet_case_schemas import WalletCaseCreateRequest, WalletCaseSyncRequest
 
 
@@ -33,7 +29,21 @@ class WalletCaseRuntimeConflict(RuntimeError):
     """Raised when runtime configuration cannot satisfy a case contract."""
 
 
+class WalletCaseSyncAlreadyActive(RuntimeError):
+    """Raised when a different active synchronization owns the case slot."""
+
+    def __init__(self, public_id: str) -> None:
+        super().__init__("This Wallet Case already has an active synchronization.")
+        self.public_id = public_id
+
+
+class WalletCaseIdempotencyConflict(RuntimeError):
+    """Raised when an idempotency key is reused for another request body."""
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
+_SYNC_PROGRESS_TOTAL = 3
+_UNSET = object()
 _ZERO_SUMMARY: dict[str, Any] = {
     "activity_counts": {
         "transfers": 0,
@@ -160,11 +170,19 @@ class WalletCaseService:
         latest_syncs = self.repository.latest_syncs(
             [wallet_case.id for wallet_case in cases]
         )
+        active_syncs = self.repository.active_syncs(
+            [wallet_case.id for wallet_case in cases]
+        )
+        usable_syncs = self.repository.latest_usable_syncs(
+            [wallet_case.id for wallet_case in cases]
+        )
         return {
             "cases": [
                 self._case_response(
                     wallet_case,
                     latest_sync=latest_syncs.get(wallet_case.id),
+                    active_sync=active_syncs.get(wallet_case.id),
+                    current_snapshot=usable_syncs.get(wallet_case.id),
                 )
                 for wallet_case in cases
             ],
@@ -175,18 +193,44 @@ class WalletCaseService:
     def get_case(self, public_id: str) -> dict[str, Any]:
         wallet_case = self._required_case(public_id)
         latest_sync = self._latest_sync(wallet_case)
-        return self._case_response(wallet_case, latest_sync=latest_sync)
+        active_sync = self.repository.get_active_sync(case_id=wallet_case.id)
+        current_snapshot = self.repository.latest_usable_syncs(
+            [wallet_case.id]
+        ).get(wallet_case.id)
+        return self._case_response(
+            wallet_case,
+            latest_sync=latest_sync,
+            active_sync=active_sync,
+            current_snapshot=current_snapshot,
+        )
 
-    def synchronize_case(
+    def enqueue_sync(
         self,
         public_id: str,
         payload: WalletCaseSyncRequest,
+        idempotency_key: str,
         *,
         settings=None,
         now: datetime | None = None,
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], bool]:
         wallet_case = self._required_case(public_id)
-        started_at = _as_utc(now or _utc_now())
+        fingerprint = _sync_request_fingerprint(payload)
+        replay = self.repository.get_by_idempotency_key(
+            case_id=wallet_case.id,
+            idempotency_key=idempotency_key,
+        )
+        if replay is not None:
+            if replay.request_fingerprint != fingerprint:
+                raise WalletCaseIdempotencyConflict(
+                    "Idempotency-Key was already used for another sync scope."
+                )
+            return self._sync_response(replay, case_public_id=wallet_case.public_id), True
+
+        active = self.repository.get_active_sync(case_id=wallet_case.id)
+        if active is not None:
+            raise WalletCaseSyncAlreadyActive(active.public_id)
+
+        queued_at = _as_utc(now or _utc_now())
         ingestion_settings = self._settings_for_case(
             wallet_case,
             settings or get_settings(),
@@ -195,99 +239,75 @@ class WalletCaseService:
             time_window=payload.time_window,
             custom_start=payload.custom_start,
             custom_end=payload.custom_end,
-            now=started_at,
-        )
-        ingestion_payload = WalletIngestionPreviewRequest(
-            wallet_address=wallet_case.display_address,
-            time_window=payload.time_window,
-            custom_start=payload.custom_start,
-            custom_end=payload.custom_end,
-            surfaces=payload.surfaces,
+            now=queued_at,
         )
         expected_data_mode = _ENVIRONMENT_DATA_MODE[wallet_case.data_environment]
-        expected_scope = (
-            wallet_case.network,
-            wallet_case.data_environment,
-            wallet_case.canonical_wallet_key,
-            wallet_case.display_address,
-        )
-
-        # Release the read transaction and its connection before provider I/O.
-        # The case is reloaded and revalidated immediately before persistence.
-        self.session.rollback()
-
-        # Provider work happens before either record is attached to the session.
-        # A scope mismatch therefore cannot publish an orphan run.
-        try:
-            run = build_wallet_ingestion_run(
-                ingestion_payload,
-                ingestion_settings,
-                now=started_at,
-                expected_data_mode=expected_data_mode,
-                expected_network=expected_scope[0],
-                expected_canonical_wallet_key=expected_scope[2],
-            )
-        except WalletIngestionScopeMismatch as exc:
-            raise WalletCaseRuntimeConflict(str(exc)) from exc
-        wallet_case = self._required_case(public_id)
-        current_scope = (
-            wallet_case.network,
-            wallet_case.data_environment,
-            wallet_case.canonical_wallet_key,
-            wallet_case.display_address,
-        )
-        if current_scope != expected_scope:
-            self.session.rollback()
-            raise WalletCaseRuntimeConflict(
-                "Wallet Case scope changed during synchronization."
-            )
-        run_response = wallet_ingestion_run_to_response(run)
-        state, stage = _sync_state(run.status)
-        completed_at = _utc_now()
         coverage = _coverage_record(
-            run_response,
+            {"requested_surfaces": payload.surfaces, "data_mode": expected_data_mode},
             start_at=bounds.start,
             end_at=bounds.end,
-            state=state,
+            state="queued",
+            requested_surfaces=payload.surfaces,
         )
-        provider = _actual_provider(run_response, ingestion_settings)
-        summary = _summary_from_run(run_response)
-        message = _bounded_message(run_response.get("message"))
-        if not message:
-            message = "Wallet Case sync completed without a provider message."
         case_sync = CaseSync(
             case=wallet_case,
-            ingestion_run=run,
             time_window=payload.time_window,
-            data_mode=run.data_mode,
-            provider=provider,
+            data_mode=expected_data_mode,
+            provider=_queued_provider(ingestion_settings),
             requested_start=bounds.start,
             requested_end=bounds.end,
             requested_surfaces_json=_json_dumps(payload.surfaces),
-            state=state,
-            stage=stage,
-            progress_current=1,
-            progress_total=1,
+            state="queued",
+            stage="queued",
+            progress_current=0,
+            progress_total=_SYNC_PROGRESS_TOTAL,
             coverage_summary_json=_json_dumps(coverage),
-            result_summary_json=_json_dumps(summary),
-            message_safe=message,
-            error_code=("ingestion_failed" if state == "failed" else None),
-            error_detail_safe=(
-                _bounded_message(run_response.get("message"))
-                if state == "failed"
-                else None
+            result_summary_json="{}",
+            message_safe="Wallet Case synchronization is queued.",
+            created_at=queued_at,
+            updated_at=queued_at,
+            status_version=1,
+            idempotency_key=idempotency_key,
+            request_fingerprint=fingerprint,
+            attempt_count=0,
+            max_attempts=int(ingestion_settings.wallet_case_job_max_attempts),
+            next_attempt_at=queued_at,
+            checkpoint_json=_json_dumps(
+                {"version": "case_sync_monolithic_v1", "phase": "queued"}
             ),
-            created_at=started_at,
-            updated_at=completed_at,
-            started_at=started_at,
-            completed_at=completed_at,
         )
-        wallet_case.updated_at = completed_at
+        wallet_case.updated_at = queued_at
         self.repository.add_sync(case_sync)
-        self.session.add(run)
-        self.session.commit()
+        try:
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            replay = self.repository.get_by_idempotency_key(
+                case_id=wallet_case.id,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                if replay.request_fingerprint != fingerprint:
+                    raise WalletCaseIdempotencyConflict(
+                        "Idempotency-Key was already used for another sync scope."
+                    )
+                return self._sync_response(
+                    replay,
+                    case_public_id=wallet_case.public_id,
+                ), True
+            active = self.repository.get_active_sync(case_id=wallet_case.id)
+            if active is not None:
+                raise WalletCaseSyncAlreadyActive(active.public_id)
+            raise
         self.session.refresh(case_sync)
-        return self._sync_response(case_sync)
+        response = self._sync_response(
+            case_sync,
+            case_public_id=wallet_case.public_id,
+        )
+        # End the post-commit refresh transaction before the router wakes the
+        # detached worker. Provider I/O never inherits a request Session.
+        self.session.rollback()
+        return response, False
 
     def get_sync(self, case_public_id: str, sync_public_id: str) -> dict[str, Any]:
         wallet_case = self._required_case(case_public_id)
@@ -297,7 +317,93 @@ class WalletCaseService:
         )
         if case_sync is None:
             raise WalletCaseNotFound("Wallet Case sync not found")
+        return self._sync_response(case_sync, case_public_id=wallet_case.public_id)
+
+    def get_job(self, sync_public_id: str) -> dict[str, Any]:
+        case_sync = self.repository.get_sync_by_public_id_for_owner(
+            owner_scope_id=self.owner_scope_id,
+            public_id=sync_public_id,
+        )
+        if case_sync is None:
+            raise WalletCaseNotFound("Wallet Case synchronization job not found")
         return self._sync_response(case_sync)
+
+    def cancel_sync(
+        self,
+        case_public_id: str,
+        sync_public_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        wallet_case = self._required_case(case_public_id)
+        case_sync = self.repository.get_sync(
+            case_id=wallet_case.id,
+            public_id=sync_public_id,
+        )
+        if case_sync is None:
+            raise WalletCaseNotFound("Wallet Case sync not found")
+        if case_sync.state in {"partial", "succeeded", "failed", "cancelled"}:
+            return self._sync_response(
+                case_sync,
+                case_public_id=wallet_case.public_id,
+            ), False
+
+        cancelled_at = _as_utc(now or _utc_now())
+        queued_update = self.session.execute(
+            update(CaseSync)
+            .where(CaseSync.id == case_sync.id, CaseSync.state == "queued")
+            .values(
+                state="cancelled",
+                stage="cancelled",
+                cancel_requested_at=cancelled_at,
+                completed_at=cancelled_at,
+                updated_at=cancelled_at,
+                next_attempt_at=None,
+                message_safe="Wallet Case synchronization was cancelled before execution.",
+                status_version=CaseSync.status_version + 1,
+            )
+        )
+        if queued_update.rowcount == 1:
+            self.session.commit()
+            refreshed = self.repository.get_sync(
+                case_id=wallet_case.id,
+                public_id=sync_public_id,
+            )
+            assert refreshed is not None
+            return self._sync_response(
+                refreshed,
+                case_public_id=wallet_case.public_id,
+            ), False
+
+        running_update = self.session.execute(
+            update(CaseSync)
+            .where(
+                CaseSync.id == case_sync.id,
+                CaseSync.state == "running",
+                CaseSync.cancel_requested_at.is_(None),
+            )
+            .values(
+                stage="cancelling",
+                cancel_requested_at=cancelled_at,
+                updated_at=cancelled_at,
+                message_safe=(
+                    "Cancellation requested. The current bounded provider crawl "
+                    "will be discarded when it returns."
+                ),
+                status_version=CaseSync.status_version + 1,
+            )
+        )
+        self.session.commit()
+        refreshed = self.repository.get_sync(
+            case_id=wallet_case.id,
+            public_id=sync_public_id,
+        )
+        if refreshed is None:
+            raise WalletCaseNotFound("Wallet Case sync not found")
+        return self._sync_response(
+            refreshed,
+            case_public_id=wallet_case.public_id,
+        ), running_update.rowcount == 1
 
     def _required_case(self, public_id: str) -> WalletCase:
         wallet_case = self.repository.get_by_public_id(
@@ -364,9 +470,20 @@ class WalletCaseService:
         wallet_case: WalletCase,
         *,
         latest_sync: CaseSync | None = None,
+        active_sync: CaseSync | None | object = _UNSET,
+        current_snapshot: CaseSync | None | object = _UNSET,
     ) -> dict[str, Any]:
-        summary = _stored_summary(latest_sync)
-        if latest_sync is None:
+        if active_sync is _UNSET:
+            active_sync = self.repository.get_active_sync(case_id=wallet_case.id)
+        if current_snapshot is _UNSET:
+            current_snapshot = self.repository.latest_usable_syncs(
+                [wallet_case.id]
+            ).get(wallet_case.id)
+        snapshot_for_compatibility = (
+            current_snapshot if isinstance(current_snapshot, CaseSync) else None
+        )
+        summary = _stored_summary(snapshot_for_compatibility)
+        if snapshot_for_compatibility is None:
             limitations = [
                 _limitation(
                     "not_synchronized",
@@ -375,8 +492,8 @@ class WalletCaseService:
             ]
         else:
             limitations = _limitations_for_sync(
-                latest_sync,
-                _stored_coverage(latest_sync),
+                snapshot_for_compatibility,
+                _stored_coverage(snapshot_for_compatibility),
             )
         return {
             "public_id": wallet_case.public_id,
@@ -390,7 +507,36 @@ class WalletCaseService:
             "created_at": _isoformat(wallet_case.created_at),
             "updated_at": _isoformat(wallet_case.updated_at),
             "latest_sync": (
-                self._sync_response(latest_sync) if latest_sync is not None else None
+                self._sync_response(
+                    latest_sync,
+                    case_public_id=wallet_case.public_id,
+                )
+                if latest_sync is not None
+                else None
+            ),
+            "latest_sync_attempt": (
+                self._sync_response(
+                    latest_sync,
+                    case_public_id=wallet_case.public_id,
+                )
+                if latest_sync is not None
+                else None
+            ),
+            "active_sync": (
+                self._sync_response(
+                    active_sync,
+                    case_public_id=wallet_case.public_id,
+                )
+                if isinstance(active_sync, CaseSync)
+                else None
+            ),
+            "current_snapshot": (
+                self._sync_response(
+                    current_snapshot,
+                    case_public_id=wallet_case.public_id,
+                )
+                if isinstance(current_snapshot, CaseSync)
+                else None
             ),
             "summary": summary,
             "limitations": limitations,
@@ -399,22 +545,66 @@ class WalletCaseService:
     def _sync_response(
         self,
         case_sync: CaseSync,
+        *,
+        case_public_id: str | None = None,
     ) -> dict[str, Any]:
+        if case_public_id is None:
+            case_public_id = case_sync.case.public_id
         coverage = _stored_coverage(case_sync)
         summary = _stored_summary(case_sync)
+        limitations = _limitations_for_sync(case_sync, coverage)
         message = _bounded_message(case_sync.message_safe)
         if not message:
             message = _bounded_message(case_sync.error_detail_safe)
         if not message:
             message = "Wallet Case sync has no published result message."
+        checkpoint = _json_object(case_sync.checkpoint_json)
+        retry = None
+        if (
+            case_sync.state == "queued"
+            and case_sync.stage == "retry_wait"
+            and case_sync.next_attempt_at is not None
+            and case_sync.attempt_count > 0
+        ):
+            retry = {
+                "attempt": case_sync.attempt_count,
+                "max_attempts": case_sync.max_attempts,
+                "retry_at": _isoformat(case_sync.next_attempt_at),
+                "reason_code": case_sync.error_code or "provider_retry",
+                "message_safe": _bounded_message(case_sync.error_detail_safe)
+                or "A bounded retry is scheduled.",
+            }
+        terminal_error = None
+        if case_sync.state == "failed":
+            terminal_error = {
+                "code": case_sync.error_code or "sync_failed",
+                "message_safe": _bounded_message(case_sync.error_detail_safe)
+                or message,
+                "retryable": bool(checkpoint.get("last_error_retryable", False)),
+            }
+        result = None
+        if case_sync.state in {"partial", "succeeded"}:
+            result = {
+                "summary": summary,
+                "coverage": coverage,
+                "limitations": limitations,
+                "message": message,
+            }
         return {
+            "case_public_id": case_public_id,
             "public_id": case_sync.public_id,
+            "status_version": case_sync.status_version,
             "state": case_sync.state,
             "stage": case_sync.stage,
             "progress": {
                 "current": case_sync.progress_current,
                 "total": case_sync.progress_total,
             },
+            "poll_after_ms": _poll_after_ms(case_sync),
+            "cancel_requested": case_sync.cancel_requested_at is not None,
+            "retry": retry,
+            "error": terminal_error,
+            "result": result,
             "provider": case_sync.provider,
             "data_mode": case_sync.data_mode,
             "requested_scope": {
@@ -425,9 +615,10 @@ class WalletCaseService:
             },
             "coverage": coverage,
             "summary": summary,
-            "limitations": _limitations_for_sync(case_sync, coverage),
+            "limitations": limitations,
             "message": message,
             "created_at": _isoformat(case_sync.created_at),
+            "updated_at": _isoformat(case_sync.updated_at),
             "started_at": _isoformat(case_sync.started_at),
             "completed_at": _isoformat(case_sync.completed_at),
         }
@@ -443,6 +634,68 @@ def _sync_state(status: str) -> tuple[str, str]:
         "error": ("failed", "failed"),
         "stale": ("failed", "failed"),
     }.get(status, ("failed", "failed"))
+
+
+def _sync_request_fingerprint(payload: WalletCaseSyncRequest) -> str:
+    """Hash one semantic request body without persisting HTTP metadata."""
+    surface_order = {
+        name: index
+        for index, name in enumerate(
+            ("transfers", "transactions", "swaps", "balances", "jettons")
+        )
+    }
+    document = {
+        "contract": "wallet_case_sync_request_v1",
+        "time_window": payload.time_window,
+        "custom_start": (
+            _canonical_request_timestamp(payload.custom_start)
+            if payload.custom_start
+            else None
+        ),
+        "custom_end": (
+            _canonical_request_timestamp(payload.custom_end)
+            if payload.custom_end
+            else None
+        ),
+        "surfaces": sorted(payload.surfaces, key=surface_order.__getitem__),
+    }
+    canonical = json.dumps(
+        document,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _canonical_request_timestamp(value: str) -> str:
+    """Canonicalize one valid custom-bound instant for semantic idempotency."""
+    if value != value.strip():
+        raise ValueError("Custom sync bounds must be unpadded ISO datetimes.")
+    cleaned = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError as exc:
+        raise ValueError("Custom sync bounds must be valid ISO datetimes.") from exc
+    return _as_utc(parsed).isoformat().replace("+00:00", "Z")
+
+
+def _queued_provider(_settings) -> str:
+    # The compatibility field historically names observed provenance. A
+    # durable queued/retry job has configuration, but no provider observation
+    # yet; final publication replaces this sentinel atomically.
+    return "pending_provider_observation"
+
+
+def _poll_after_ms(case_sync: CaseSync) -> int:
+    if case_sync.state not in {"queued", "running"}:
+        return 15000
+    if case_sync.stage != "retry_wait" or case_sync.next_attempt_at is None:
+        return 1000
+    remaining = (
+        _as_utc(case_sync.next_attempt_at) - _utc_now()
+    ).total_seconds()
+    return max(500, min(15000, int(max(0.5, remaining) * 1000)))
 
 
 def _actual_provider(run_response: dict[str, Any], settings) -> str:
@@ -583,14 +836,24 @@ def _limitations_for_sync(
             "This sync covers a bounded requested interval and does not prove full wallet history.",
         )
     ]
-    if not _valid_summary(_json_object(case_sync.result_summary_json)):
+    pending = case_sync.state in {"queued", "running"}
+    if pending:
+        limitations.append(
+            _limitation(
+                "sync_in_progress",
+                "This synchronization has not published a result yet.",
+            )
+        )
+    if not pending and not _valid_summary(
+        _json_object(case_sync.result_summary_json)
+    ):
         limitations.append(
             _limitation(
                 "summary_unavailable",
                 "Activity and portfolio summary was not captured for this sync; zero placeholders are not evidence of no activity.",
             )
         )
-    if not _valid_coverage(
+    if not pending and not _valid_coverage(
         _json_object(case_sync.coverage_summary_json),
         case_sync,
     ):
