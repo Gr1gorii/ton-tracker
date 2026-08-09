@@ -21,7 +21,9 @@ _LOCK = threading.Lock()
 _REQUESTS: dict[tuple[str, str, int], int] = defaultdict(int)
 _DURATION_SUM: dict[tuple[str, str], float] = defaultdict(float)
 _DURATION_COUNT: dict[tuple[str, str], int] = defaultdict(int)
-_BACKUP_NAME = re.compile(r"^ton-check-[0-9]{8}T[0-9]{6}Z\.sqlite3$")
+_BACKUP_NAME = re.compile(
+    r"^ton-check-[0-9]{8}T[0-9]{6}(?:[0-9]{6})?Z\.sqlite3$"
+)
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SCHEMA_REVISION = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 _MAX_BACKUP_RECORD_BYTES = 16_384

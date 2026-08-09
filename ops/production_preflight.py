@@ -22,6 +22,10 @@ try:
         validate_alertmanager_data_directory,
     )
     from .create_release_manifest import load_release_manifest
+    from .recovery_point import (
+        RecoveryPointError,
+        validate_recovery_point_directory,
+    )
 except ImportError:  # pragma: no cover - direct script execution inside the image
     from alertmanager_config import (
         AlertmanagerConfigError,
@@ -29,6 +33,7 @@ except ImportError:  # pragma: no cover - direct script execution inside the ima
         validate_alertmanager_data_directory,
     )
     from create_release_manifest import load_release_manifest
+    from recovery_point import RecoveryPointError, validate_recovery_point_directory
 
 
 _MAX_RESPONSE_BYTES = 65_536
@@ -186,6 +191,56 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
         2_592_000,
         errors,
     )
+    recovery_point_interval = _bounded_integer(
+        environment,
+        "RECOVERY_POINT_INTERVAL_SECONDS",
+        86_400,
+        3_600,
+        604_800,
+        errors,
+    )
+    recovery_point_retry = _bounded_integer(
+        environment,
+        "RECOVERY_POINT_RETRY_SECONDS",
+        300,
+        60,
+        86_400,
+        errors,
+    )
+    recovery_point_max_age = _bounded_integer(
+        environment,
+        "RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS",
+        172_800,
+        3_600,
+        2_592_000,
+        errors,
+    )
+    _bounded_integer(
+        environment,
+        "RECOVERY_POINT_RETENTION",
+        14,
+        2,
+        365,
+        errors,
+    )
+    if (
+        recovery_point_retry is not None
+        and recovery_point_interval is not None
+        and recovery_point_retry >= recovery_point_interval
+    ):
+        errors.append(
+            "RECOVERY_POINT_RETRY_SECONDS must be shorter than the recovery point interval"
+        )
+    if (
+        recovery_point_max_age is not None
+        and recovery_point_interval is not None
+        and recovery_point_retry is not None
+        and recovery_point_max_age
+        < recovery_point_interval + recovery_point_retry
+    ):
+        errors.append(
+            "RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS must cover the interval and retry window"
+        )
     if backup_interval is not None and backup_max_age is not None:
         if backup_max_age < backup_interval * 2:
             errors.append("BACKUP_HEALTH_MAX_AGE_SECONDS must cover two backup intervals")
@@ -217,6 +272,21 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
         or not Path(deployment_state_directory).is_absolute()
     ):
         errors.append("DEPLOYMENT_STATE_DIRECTORY must be an absolute host path")
+    recovery_point_directory = environment.get("DISASTER_RECOVERY_DIRECTORY", "")
+    recovery_point_directory_valid = not (
+        not recovery_point_directory
+        or recovery_point_directory != recovery_point_directory.strip()
+        or len(recovery_point_directory) > 4096
+        or "\x00" in recovery_point_directory
+        or not Path(recovery_point_directory).is_absolute()
+    )
+    if not recovery_point_directory_valid:
+        errors.append("DISASTER_RECOVERY_DIRECTORY must be an absolute private path")
+    else:
+        try:
+            validate_recovery_point_directory(Path(recovery_point_directory))
+        except RecoveryPointError:
+            errors.append("DISASTER_RECOVERY_DIRECTORY is missing or unsafe")
     for name in ("DEPLOYMENT_STATE_UID", "DEPLOYMENT_STATE_GID"):
         value = environment.get(name, "")
         if (
@@ -264,6 +334,13 @@ def validate_environment(environment: Mapping[str, str]) -> list[str]:
             validate_alertmanager_data_directory(Path(alertmanager_data))
         except AlertmanagerConfigError:
             errors.append("ALERTMANAGER_DATA_DIRECTORY is missing or unsafe")
+    if recovery_point_directory_valid:
+        for name, value in (
+            ("DEPLOYMENT_STATE_DIRECTORY", deployment_state_directory),
+            ("ALERTMANAGER_DATA_DIRECTORY", alertmanager_data),
+        ):
+            if _same_directory(recovery_point_directory, value):
+                errors.append(f"DISASTER_RECOVERY_DIRECTORY must differ from {name}")
     return errors
 
 
@@ -425,6 +502,17 @@ def _bounded_integer(
         errors.append(f"{name} is outside the supported range")
         return None
     return value
+
+
+def _same_directory(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    try:
+        return os.path.samefile(left, right)
+    except OSError:
+        return False
 
 
 def _fetch(url: str) -> HttpProbe:

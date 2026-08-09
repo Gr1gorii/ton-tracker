@@ -28,7 +28,7 @@ from ops.deploy_release import (
 from ops.verify_release_bundle import ReleaseBundleVerificationError
 
 
-TAG = "v0.69.0"
+TAG = "v0.70.0"
 SOURCE_COMMIT = "1" * 40
 BACKEND_DIGEST = "sha256:" + "a" * 64
 FRONTEND_DIGEST = "sha256:" + "b" * 64
@@ -82,6 +82,10 @@ def _environment(tmp_path: Path | None = None) -> dict[str, str]:
         "RECOVERY_INTERVAL_SECONDS": "604800",
         "RECOVERY_RETRY_SECONDS": "300",
         "RECOVERY_HEALTH_MAX_AGE_SECONDS": "691200",
+        "RECOVERY_POINT_RETENTION": "14",
+        "RECOVERY_POINT_INTERVAL_SECONDS": "86400",
+        "RECOVERY_POINT_RETRY_SECONDS": "300",
+        "RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS": "172800",
         "PROMETHEUS_RETENTION": "15d",
         "ALERTMANAGER_RETENTION": "120h",
         "APP_PULL_POLICY": "always",
@@ -96,6 +100,10 @@ def _environment(tmp_path: Path | None = None) -> dict[str, str]:
         )
         config.chmod(0o600)
         environment["ALERTMANAGER_CONFIG_FILE"] = str(config)
+        recovery_points = tmp_path / "external-recovery"
+        recovery_points.mkdir(mode=0o700, exist_ok=True)
+        recovery_points.chmod(0o700)
+        environment["DISASTER_RECOVERY_DIRECTORY"] = str(recovery_points)
     return environment
 
 
@@ -156,6 +164,10 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "initial backup restore drill",
         "initial database migration verification",
         "operational services activation",
+        "post-activation database backup",
+        "post-activation backup restore drill",
+        "external recovery point",
+        "external recovery exporter activation",
         "monitoring delivery smoke",
         "external notification drill",
     ]
@@ -201,14 +213,25 @@ def test_guarded_rollout_uses_verified_snapshot_and_strict_step_order(tmp_path):
         "deployment-monitor",
         "alertmanager",
     )
-    assert commands[10][-5:] == (
+    assert commands[10][-1] == "backup-now"
+    assert commands[11][-1] == "restore-drill"
+    assert commands[12][-5:] == (
+        "--profile",
+        "deployment",
+        "run",
+        "--rm",
+        "recovery-point-now",
+    )
+    assert commands[13][-1] == "recovery-point-exporter"
+    assert commands[13][-3:-1] == ("--wait-timeout", "900")
+    assert commands[14][-5:] == (
         "--profile",
         "deployment",
         "run",
         "--rm",
         "monitoring-smoke",
     )
-    assert commands[11][-5:] == (
+    assert commands[15][-5:] == (
         "--profile",
         "deployment",
         "run",
@@ -370,6 +393,10 @@ def test_existing_deployment_keeps_recovery_first_upgrade_order(tmp_path):
         "release image pull",
         "target database migration rehearsal",
         "service activation",
+        "post-activation database backup",
+        "post-activation backup restore drill",
+        "external recovery point",
+        "external recovery exporter activation",
         "monitoring delivery smoke",
         "external notification drill",
     ]
@@ -393,6 +420,37 @@ def test_public_smoke_failure_is_fail_closed_after_activation(tmp_path):
         )
     assert observed[-1] == "external notification drill"
     assert not (tmp_path / "state" / DEPLOYMENT_RECEIPT).exists()
+    assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
+
+
+def test_external_recovery_point_failure_stops_before_monitoring_and_receipt(tmp_path):
+    manifest, checksum, attestation = _release_assets(tmp_path)
+    _record_previous_release(tmp_path / "state")
+    observed: list[str] = []
+
+    def runner(step: RolloutStep, _environment_value: dict[str, str]) -> None:
+        observed.append(step.name)
+        if step.name == "external recovery point":
+            raise DeploymentRolloutError("external recovery point is unavailable")
+
+    with pytest.raises(DeploymentRolloutError, match="recovery point"):
+        verify_and_deploy_release(
+            manifest_path=manifest,
+            checksum_path=checksum,
+            attestation_path=attestation,
+            expected_tag=TAG,
+            environment=_environment(tmp_path),
+            state_directory=tmp_path / "state",
+            attestation_verifier=lambda *_args: None,
+            command_runner=runner,
+        )
+
+    assert observed[-1] == "external recovery point"
+    assert "monitoring delivery smoke" not in observed
+    receipt = json.loads(
+        (tmp_path / "state" / DEPLOYMENT_RECEIPT).read_text(encoding="utf-8")
+    )
+    assert receipt["release"]["tag"] == "v0.68.0"
     assert (tmp_path / "state" / DEPLOYMENT_ATTEMPT).is_file()
 
 

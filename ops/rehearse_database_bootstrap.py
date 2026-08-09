@@ -40,7 +40,9 @@ _SQLITE_SIDECARS = {
 }
 _MAX_DATA_ENTRIES = 8
 _MAX_BACKUP_ENTRIES = 367
-_BACKUP_NAME = re.compile(r"^ton-check-[0-9]{8}T[0-9]{6}Z\.sqlite3$")
+_BACKUP_NAME = re.compile(
+    r"^ton-check-[0-9]{8}T[0-9]{6}(?:[0-9]{6})?Z\.sqlite3$"
+)
 
 
 @dataclass(frozen=True)

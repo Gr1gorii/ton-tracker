@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import sqlite3
 import time
 from urllib.parse import unquote
@@ -31,7 +32,7 @@ def create_backup(source: Path, destination_dir: Path, retention: int) -> Path:
     if not source.is_file():
         raise RuntimeError(f"SQLite source database does not exist: {source}")
     destination_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     final = destination_dir / f"ton-check-{timestamp}.sqlite3"
     temporary = final.with_suffix(".sqlite3.tmp")
     temporary.unlink(missing_ok=True)
@@ -84,7 +85,9 @@ def write_backup_health_record(
         "integrity_check": "ok",
     }
     destination = backup.parent / BACKUP_HEALTH_RECORD
-    temporary = destination.with_suffix(".json.tmp")
+    temporary = destination.with_name(
+        f".{destination.name}.{secrets.token_hex(8)}.tmp"
+    )
     temporary.unlink(missing_ok=True)
     with temporary.open("w", encoding="utf-8") as handle:
         json.dump(record, handle, sort_keys=True, separators=(",", ":"))

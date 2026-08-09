@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.69.0
+release=v0.70.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -64,6 +64,36 @@ durable sibling of the deployment state directory. For the example above it is
 `$HOME/.local/state/gram-scope-alertmanager`; it must remain owned by the same
 account with mode `0700` and be included in host backups.
 
+## Configure external recovery storage
+
+Mount an encrypted, independently replicated filesystem from a different
+failure domain, then create one dedicated empty directory owned by the
+deployment account. A directory on the application host's system disk does not
+protect against host loss.
+
+```sh
+recovery_points=/mnt/gram-scope-recovery-points
+install -d -m 700 "$recovery_points"
+export DISASTER_RECOVERY_DIRECTORY="$recovery_points"
+export RECOVERY_POINT_RETENTION=14
+export RECOVERY_POINT_INTERVAL_SECONDS=86400
+export RECOVERY_POINT_RETRY_SECONDS=300
+export RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS=172800
+```
+
+The guarded preflight requires an absolute, existing, non-symlink directory
+owned by the deployment account with no group or world permissions. It must be
+different from the deployment and Alertmanager state directories. Use the
+directory exclusively for GRAM Scope recovery points; unknown entries fail
+closed and are never deleted. Recovery points contain the application database
+and must be protected as sensitive production data. Encryption, remote
+replication, access auditing, and media lifecycle remain operator controls.
+The point's SHA-256 graph detects corruption and inconsistent substitution, and
+the original release attestation authenticates the executable manifest. It does
+not externally sign production database contents. Enforce write-once/versioned
+remote storage and protect its administrative credentials independently from
+the application host.
+
 ## Preflight and start
 
 Load the production variables from the host secret store, then run the guarded
@@ -92,9 +122,10 @@ For an upgrade or rollback with an active receipt, it then runs compose
 validation, the container preflight, the upstream Alertmanager configuration
 validator, an on-demand SQLite backup, a restore drill of that backup, the exact
 image pull, a target-image migration rehearsal on a second private restored
-copy, service activation, an internal Prometheus-to-Alertmanager delivery smoke
-gate, an active downstream notification drill, and the public smoke gate in
-order.
+copy, and service activation. It then creates a new backup, restores it, and
+publishes an external recovery point before the internal
+Prometheus-to-Alertmanager delivery smoke gate, active downstream notification
+drill, and public smoke gate run in order.
 
 For a first deployment with no active receipt, the exact images are pulled and
 the target backend first requires genuinely empty database and backup volumes.
@@ -106,6 +137,17 @@ backup, restore drill, and target-image migration verification. The periodic
 backup, recovery, monitoring, and alert-delivery services start only after
 those database gates pass. A non-empty volume before that checkpoint is treated
 as unmanaged state and fails closed; it is never silently adopted.
+
+After application and operational service activation, first deployments use
+the same post-activation backup, restore, and external recovery-point gate as
+upgrades and rollbacks. A recovery-point failure leaves the pending deployment
+journal intact and prevents the success receipt from being committed.
+The guarded rollout then starts `recovery-point-exporter` from the exact target
+backend image and waits for its healthcheck before monitoring delivery. The
+exporter serializes work with the deployment gate, waits until the current point
+is due, restores the newest verified backup, and atomically advances the health
+pointer. It never needs the original temporary deployment manifest because it
+inherits the exact embedded manifest from the last verified point.
 
 No later step runs after an earlier failure. The tool discards command output
 on failure so provider or container diagnostics cannot leak through the release
@@ -157,6 +199,52 @@ with no group or world permissions.
 The periodic backup and recovery watchdogs continue after activation. A rollout
 is complete only after the internal delivery and public smoke gates pass and
 backup/recovery health is confirmed through `/api/ops/ready` and monitoring.
+The external recovery exporter has a separate Docker healthcheck that performs
+a full point verification at startup and every six hours. Configure the host
+orchestrator to alert on an unhealthy `recovery-point-exporter`; do not treat
+the on-host backup and recovery readiness probes as proof of off-host freshness.
+The health gate checks both the point timestamp and its bound source-backup
+completion timestamp against the maximum age.
+
+## Verify or restore an external recovery point
+
+The destination root contains an atomic `.recovery-point-health.json` pointer
+to the latest verified directory. Every point has exactly
+`database.sqlite3`, `deployment.json`, and `recovery-point.json`. Copy the
+complete directory without changing names or contents, download the three
+original assets for its release tag, and verify both database integrity and
+signed release provenance:
+
+```sh
+point="$DISASTER_RECOVERY_DIRECTORY/$(python -c \
+  'import json,os; print(json.load(open(os.path.join(os.environ["DISASTER_RECOVERY_DIRECTORY"], ".recovery-point-health.json")))["recovery_point"])')"
+
+python ops/recovery_point.py verify \
+  --point "$point" \
+  --manifest "$assets/gram-scope-${release}-deployment.json" \
+  --checksum "$assets/gram-scope-${release}-deployment.json.sha256" \
+  --attestation-bundle "$assets/gram-scope-${release}-deployment.intoto.jsonl" \
+  --tag "$release"
+```
+
+On a clean recovery host, restore only to a new path on the database volume:
+
+```sh
+python ops/recovery_point.py restore \
+  --point "$point" \
+  --manifest "$assets/gram-scope-${release}-deployment.json" \
+  --checksum "$assets/gram-scope-${release}-deployment.json.sha256" \
+  --attestation-bundle "$assets/gram-scope-${release}-deployment.intoto.jsonl" \
+  --tag "$release" \
+  --destination /new-data/ton_check.db
+```
+
+The restore path and its parent must already be private. The command refuses an
+existing path or link, verifies the signed release, rechecks every digest and
+SQLite revision, restores atomically, and checks that the source point did not
+change during the operation. Start only the exact digest-pinned release from
+the verified point after the restored database passes the normal migration and
+public smoke gates.
 
 The rollout command also passes the absolute state directory and the operator's
 numeric uid/gid to Compose. The internal `deployment-monitor` and Alertmanager

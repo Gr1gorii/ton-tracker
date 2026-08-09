@@ -183,6 +183,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--profile ops run --rm alertmanager-config-check" in commands
     assert "--profile deployment run --rm monitoring-smoke" in commands
     assert "--profile deployment run --rm notification-drill" in commands
+    assert "--profile deployment run --rm recovery-point-now" in commands
     assert "rehearse_database_bootstrap.py --mode resume" in commands
     assert (
         "--profile test up --detach --no-build --wait "
@@ -203,7 +204,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.69.0" in commands
+    assert "--tag v0.70.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     assert "python ops/inspect_deployment_state.py" in commands
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands
@@ -211,6 +212,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "DEPLOYMENT_STATE_GID=$(id -g)" in commands
     assert "ALERTMANAGER_CONFIG_FILE=$alertmanager_config" in commands
     assert "ALERTMANAGER_DATA_DIRECTORY=$alertmanager_data" in commands
+    assert "DISASTER_RECOVERY_DIRECTORY=$recovery_points" in commands
     compose = yaml.safe_load(
         (ROOT / "compose.production.yml").read_text(encoding="utf-8")
     )
@@ -233,6 +235,21 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert preflight["environment"]["ALERTMANAGER_DATA_DIRECTORY"] == (
         "/alertmanager"
     )
+    assert preflight["environment"]["DISASTER_RECOVERY_DIRECTORY"] == (
+        "/recovery-points"
+    )
+    assert preflight["environment"]["RECOVERY_POINT_RETENTION"] == (
+        "${RECOVERY_POINT_RETENTION:-14}"
+    )
+    assert preflight["environment"]["RECOVERY_POINT_INTERVAL_SECONDS"] == (
+        "${RECOVERY_POINT_INTERVAL_SECONDS:-86400}"
+    )
+    assert preflight["environment"]["RECOVERY_POINT_RETRY_SECONDS"] == (
+        "${RECOVERY_POINT_RETRY_SECONDS:-300}"
+    )
+    assert preflight["environment"]["RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS"] == (
+        "${RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS:-172800}"
+    )
     assert preflight["user"] == (
         "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}:"
         "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
@@ -253,6 +270,14 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
                 "${ALERTMANAGER_DATA_DIRECTORY:?ALERTMANAGER_DATA_DIRECTORY is required}"
             ),
             "target": "/alertmanager",
+            "read_only": True,
+        },
+        {
+            "type": "bind",
+            "source": (
+                "${DISASTER_RECOVERY_DIRECTORY:?DISASTER_RECOVERY_DIRECTORY is required}"
+            ),
+            "target": "/recovery-points",
             "read_only": True,
         },
     ]
@@ -285,6 +310,62 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "recovery",
         "deployment",
     ]
+    recovery_point = compose["services"]["recovery-point-now"]
+    assert recovery_point["profiles"] == ["deployment"]
+    assert recovery_point["user"] == (
+        "${DEPLOYMENT_STATE_UID:?DEPLOYMENT_STATE_UID is required}:"
+        "${DEPLOYMENT_STATE_GID:?DEPLOYMENT_STATE_GID is required}"
+    )
+    assert recovery_point["command"] == [
+        "python",
+        "/app/ops/recovery_point.py",
+        "create",
+        "--heartbeat",
+        "/backups/.backup-health.json",
+        "--deployment-manifest",
+        "/app/deployment-manifest.json",
+        "--destination-directory",
+        "/recovery-points",
+        "--retention",
+        "${RECOVERY_POINT_RETENTION:-14}",
+    ]
+    assert recovery_point["environment"] == {
+        "RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS": (
+            "${RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS:-172800}"
+        )
+    }
+    assert recovery_point["volumes"] == [
+        "ton_tracker_backups:/backups:ro",
+        "${DEPLOYMENT_MANIFEST_FILE:?DEPLOYMENT_MANIFEST_FILE is required}:/app/deployment-manifest.json:ro",
+        {
+            "type": "bind",
+            "source": (
+                "${DISASTER_RECOVERY_DIRECTORY:?DISASTER_RECOVERY_DIRECTORY is required}"
+            ),
+            "target": "/recovery-points",
+        },
+    ]
+    assert recovery_point["cap_drop"] == ["ALL"]
+    assert recovery_point["read_only"] is True
+    recovery_exporter = compose["services"]["recovery-point-exporter"]
+    assert recovery_exporter["command"] == [
+        "python",
+        "/app/ops/recovery_point.py",
+        "loop",
+        "--heartbeat",
+        "/backups/.backup-health.json",
+        "--destination-directory",
+        "/recovery-points",
+        "--retention",
+        "${RECOVERY_POINT_RETENTION:-14}",
+    ]
+    assert recovery_exporter["depends_on"] == {
+        "backup": {"condition": "service_healthy"}
+    }
+    assert recovery_exporter["healthcheck"]["start_interval"] == "10s"
+    assert recovery_exporter["healthcheck"]["timeout"] == "15m"
+    assert recovery_exporter["cap_drop"] == ["ALL"]
+    assert recovery_exporter["read_only"] is True
     migration_rehearsal = compose["services"]["migration-rehearsal"]
     assert migration_rehearsal["profiles"] == ["deployment"]
     assert migration_rehearsal["entrypoint"] == ["/bin/sh", "-ec"]
@@ -330,10 +411,9 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert "--profile deployment run --rm backup-now" in commands
     assert "--profile deployment run --rm restore-drill" in commands
     assert "--profile deployment run --rm migration-rehearsal" in commands
-    assert (
-        "up --detach --no-build --wait --wait-timeout 180 \\\n"
-        "  frontend prometheus backup recovery-watchdog deployment-monitor alertmanager"
-    ) in commands
+    assert "--profile deployment run --rm recovery-point-now" in commands
+    assert "recovery-watchdog recovery-point-exporter" in commands
+    assert "deployment-monitor alertmanager" in commands
     assert "/etc/nginx/conf.d" in compose["services"]["frontend"]["tmpfs"]
     assert compose["services"]["prometheus"]["image"] == PROMETHEUS_IMAGE
     assert PROMETHEUS_IMAGE in commands
@@ -549,6 +629,8 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
         "backup-now",
         "restore-drill",
         "migration-rehearsal",
+        "recovery-point-now",
+        "recovery-point-exporter",
         "recovery-watchdog",
         "deployment-monitor",
         "monitoring-smoke",
@@ -628,6 +710,7 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "DEPLOYMENT_STATE_GID=$(id -g)" in verifier_commands
     assert "ALERTMANAGER_CONFIG_FILE=$alertmanager_config" in verifier_commands
     assert "ALERTMANAGER_DATA_DIRECTORY=$alertmanager_data" in verifier_commands
+    assert "DISASTER_RECOVERY_DIRECTORY=$recovery_points" in verifier_commands
     assert "pull backend frontend alertmanager" in verifier_commands
     assert "--profile ops run --rm alertmanager-config-check" in verifier_commands
     assert "--profile deployment run --rm monitoring-smoke" in verifier_commands
@@ -642,10 +725,9 @@ def test_tagged_release_publishes_bounded_ghcr_images_for_compose():
     assert "--profile deployment run --rm backup-now" in verifier_commands
     assert "--profile deployment run --rm restore-drill" in verifier_commands
     assert "--profile deployment run --rm migration-rehearsal" in verifier_commands
-    assert (
-        "up --detach --no-build --wait --wait-timeout 180 \\\n"
-        "  frontend prometheus backup recovery-watchdog deployment-monitor alertmanager"
-    ) in verifier_commands
+    assert "--profile deployment run --rm recovery-point-now" in verifier_commands
+    assert "recovery-watchdog recovery-point-exporter" in verifier_commands
+    assert "deployment-monitor alertmanager" in verifier_commands
     assert "--smoke-url" in verifier_commands
     assert "python ops/create_release_manifest.py" in verifier_commands
     assert "DEPLOYMENT_MANIFEST_FILE=$manifest" in verifier_commands

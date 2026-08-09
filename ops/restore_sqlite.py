@@ -24,7 +24,9 @@ except ImportError:  # pragma: no cover - direct script execution in the image
 
 _MAX_HEARTBEAT_BYTES = 16_384
 RECOVERY_HEALTH_RECORD = ".recovery-health.json"
-_BACKUP_NAME = re.compile(r"^ton-check-[0-9]{8}T[0-9]{6}Z\.sqlite3$")
+_BACKUP_NAME = re.compile(
+    r"^ton-check-[0-9]{8}T[0-9]{6}(?:[0-9]{6})?Z\.sqlite3$"
+)
 _COMPLETED_AT = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z$"
 )
@@ -60,6 +62,7 @@ class RecoveryDrillResult:
     schema_revision: str
     size_bytes: int
     sha256: str
+    source_completed_at: str
 
 
 def restore_from_heartbeat(heartbeat: Path, destination: Path) -> RecoveryDrillResult:
@@ -85,7 +88,7 @@ def restore_from_heartbeat(heartbeat: Path, destination: Path) -> RecoveryDrillR
     if source_revision != expected_revision:
         raise RuntimeError("Heartbeat-selected backup schema revision does not match.")
 
-    restored_revision = _restore_without_overwrite(source, destination)
+    restored_revision = restore_database_without_overwrite(source, destination)
     if restored_revision != expected_revision:
         destination.unlink(missing_ok=True)
         raise RuntimeError("Restored database schema revision does not match.")
@@ -98,6 +101,7 @@ def restore_from_heartbeat(heartbeat: Path, destination: Path) -> RecoveryDrillR
         schema_revision=restored_revision,
         size_bytes=expected_size,
         sha256=expected_sha256,
+        source_completed_at=str(record["completed_at"]),
     )
 
 
@@ -314,7 +318,8 @@ def _read_bounded_json(path: Path) -> object:
         os.close(descriptor)
 
 
-def _restore_without_overwrite(source: Path, destination: Path) -> str:
+def restore_database_without_overwrite(source: Path, destination: Path) -> str:
+    """Create one verified SQLite copy without replacing an existing path."""
     if destination.exists() or destination.is_symlink():
         raise RuntimeError("Recovery destination already exists.")
     if not destination.parent.is_dir():

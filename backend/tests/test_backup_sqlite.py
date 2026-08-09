@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
+import re
 import sqlite3
 
 import pytest
@@ -34,6 +35,11 @@ def test_backup_is_atomic_verified_and_retained(tmp_path):
     with sqlite3.connect(source) as connection:
         connection.execute("INSERT INTO evidence VALUES ('second')")
     second = create_backup(source, backups, retention=1)
+    assert first.name != second.name
+    assert re.fullmatch(
+        r"ton-check-[0-9]{8}T[0-9]{12}Z\.sqlite3",
+        second.name,
+    )
     assert verify_backup(second) == "20260710_0013"
     assert list(backups.glob("*.tmp")) == []
     assert list(backups.glob(".*.tmp")) == []
