@@ -101,7 +101,7 @@ def test_rehearsal_applies_pending_target_image_revision(tmp_path):
     backups = tmp_path / "backups"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    _database_at_revision(source, "20260710_0013")
+    _database_at_revision(source, "20260710_0015")
     backup = create_backup(source, backups, retention=2)
     digest_before = sha256_file(backup)
 
@@ -110,10 +110,10 @@ def test_rehearsal_applies_pending_target_image_revision(tmp_path):
         workspace=workspace,
     )
 
-    assert result.source_revision == "20260710_0013"
-    assert result.target_revision == "20260710_0014"
+    assert result.source_revision == "20260710_0015"
+    assert result.target_revision == "20260710_0016"
     assert result.action == "upgraded"
-    assert result.applied_revisions == ("20260710_0014",)
+    assert result.applied_revisions == ("20260710_0016",)
     assert sha256_file(backup) == digest_before
     assert list(workspace.iterdir()) == []
 

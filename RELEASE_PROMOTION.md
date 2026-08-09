@@ -1,4 +1,29 @@
-# TON Wallet Intelligence Dashboard — v0.26.0 Promotion Checklist
+# GRAM Scope — v0.71.0 Promotion Checklist
+
+Current promotion gates for the Wallet Case foundation:
+
+- Product label is `v0.71.0 WALLET CASE FOUNDATION`; backend API version stays
+  independently frozen at `0.2.1`.
+- Alembic must reach the current `0016` head with model parity from fresh,
+  legacy, current-0015, and interrupted-DDL paths.
+- Create/open is canonical and idempotent across friendly/raw address forms;
+  mainnet/testnet and demo/live identities never merge.
+- Case sync and its compatibility ingestion run commit atomically. Public case
+  payloads contain no sequential run identifier.
+- Case Summary, coverage, limitations, environment, and network all come from
+  the same latest bounded sync provenance.
+- Provider configuration makes no health claim. Live cases are advertised only
+  when the guarded TonAPI sync path is actually available; mock fallback is
+  rejected before persistence.
+- The pre-authentication facade is direct-loopback only. Hosted access remains
+  disabled until authentication supplies an owner scope; v0.71.0 must not be
+  promoted as a hosted Wallet Case release.
+- Backend, frontend, migration rehearsal, production contract, credential, and
+  prohibited-brand checks pass before tagging.
+
+---
+
+## Historical v0.26.0 evidence checklist
 
 Operational gates for multi-asset PnL-readiness evidence.
 

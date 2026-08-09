@@ -37,9 +37,11 @@ from routers.prices import router as prices_router
 from routers.stonfi import router as stonfi_router
 from routers.tonapi import router as tonapi_router
 from routers.wallet_activity import router as wallet_activity_router
+from routers.wallet_cases import router as wallet_cases_router
 from routers.wallet_ownership import router as wallet_ownership_router
 from services import export
 from services.analysis import analyze, get_providers_status
+from services.wallet_case_access import wallet_case_access_available
 from services.monitoring import (
     observe_http_request,
     read_backup_health_metrics,
@@ -106,6 +108,7 @@ app.include_router(prices_router)
 app.include_router(stonfi_router)
 app.include_router(tonapi_router)
 app.include_router(wallet_activity_router)
+app.include_router(wallet_cases_router)
 app.include_router(wallet_ownership_router)
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -186,11 +189,17 @@ def prometheus_metrics(session: Session = Depends(get_session)) -> Response:
 
 
 @app.get("/api/providers/status", response_model=ProvidersStatusResponse)
-def providers_status() -> dict:
-    return get_api_providers_status()
+def providers_status(request: Request) -> dict:
+    return get_api_providers_status(
+        wallet_cases_available=wallet_case_access_available(request),
+    )
 
 
-def get_api_providers_status(settings=None) -> dict:
+def get_api_providers_status(
+    settings=None,
+    *,
+    wallet_cases_available: bool = True,
+) -> dict:
     """Provider status payload for the public status endpoint.
 
     This intentionally augments the endpoint response without changing the
@@ -200,7 +209,20 @@ def get_api_providers_status(settings=None) -> dict:
     status = get_providers_status(settings)
     status["stonfi"] = StonfiAdapter(settings).status()
     status["tonapi"] = TonapiAdapter(settings).status()
-    status["wallet_activity"] = get_wallet_activity_provider_status(settings)
+    wallet_activity = get_wallet_activity_provider_status(settings)
+    live_case_sync_available = (
+        settings.is_real
+        and settings.wallet_activity_provider == "tonapi"
+        and settings.wallet_activity_live_enabled
+        and wallet_activity["configured"]
+        and wallet_activity["available"]
+    )
+    status["data_environment"] = (
+        "live" if live_case_sync_available else "demo"
+    )
+    status["ton_network"] = f"ton-{settings.ton_network}"
+    status["wallet_cases_available"] = wallet_cases_available
+    status["wallet_activity"] = wallet_activity
     return status
 
 

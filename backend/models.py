@@ -8,9 +8,11 @@ payload evolves.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -26,6 +28,13 @@ from sqlalchemy.orm import relationship
 from database import Base
 
 
+LOCAL_SINGLE_USER_SCOPE = "local-single-user"
+
+
+def _new_public_id() -> str:
+    return str(uuid4())
+
+
 class AnalysisRun(Base):
     __tablename__ = "analysis_runs"
 
@@ -37,6 +46,68 @@ class AnalysisRun(Base):
     )
     # Full analysis payload as JSON text (mock in v0.1).
     result_json = Column(Text, nullable=False)
+
+
+class WalletCase(Base):
+    """Durable, owner-scoped product identity for one canonical TON wallet."""
+
+    __tablename__ = "wallet_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "network IN ('ton-mainnet', 'ton-testnet')",
+            name="ck_wallet_cases_network",
+        ),
+        CheckConstraint(
+            "data_environment IN ('demo', 'live')",
+            name="ck_wallet_cases_data_environment",
+        ),
+        Index("uq_wallet_cases_public_id", "public_id", unique=True),
+        Index(
+            "uq_wallet_cases_scope_identity",
+            "owner_scope_id",
+            "network",
+            "data_environment",
+            "canonical_wallet_key",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_cases_scope_updated",
+            "owner_scope_id",
+            "updated_at",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(String(36), nullable=False, default=_new_public_id)
+    owner_scope_id = Column(
+        String(64),
+        nullable=False,
+        default=LOCAL_SINGLE_USER_SCOPE,
+        server_default=LOCAL_SINGLE_USER_SCOPE,
+    )
+    network = Column(String(16), nullable=False)
+    data_environment = Column(String(8), nullable=False)
+    canonical_wallet_key = Column(String(76), nullable=False)
+    canonical_identity_version = Column(String(24), nullable=False)
+    display_address = Column(String(128), nullable=False)
+    label = Column(String(120), nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    archived_at = Column(DateTime, nullable=True)
+
+    syncs = relationship(
+        "CaseSync",
+        back_populates="case",
+        cascade="all, delete-orphan",
+    )
 
 
 class WalletIngestionRun(Base):
@@ -133,6 +204,139 @@ class WalletIngestionRun(Base):
         "WalletJettonContractVerification",
         back_populates="run",
         cascade="all, delete-orphan",
+    )
+    case_sync = relationship(
+        "CaseSync",
+        back_populates="ingestion_run",
+        uselist=False,
+        passive_deletes="all",
+    )
+
+
+class CaseSync(Base):
+    """One persisted bounded synchronization attempt for a Wallet Case."""
+
+    __tablename__ = "wallet_case_syncs"
+    __table_args__ = (
+        CheckConstraint(
+            "time_window IN ('24h', '3d', '7d', 'custom')",
+            name="ck_wallet_case_syncs_time_window",
+        ),
+        CheckConstraint(
+            "data_mode IN ('mock', 'real')",
+            name="ck_wallet_case_syncs_data_mode",
+        ),
+        CheckConstraint(
+            "state IN ('queued', 'running', 'partial', 'succeeded', 'failed', 'cancelled')",
+            name="ck_wallet_case_syncs_state",
+        ),
+        CheckConstraint(
+            "requested_start < requested_end",
+            name="ck_wallet_case_syncs_requested_bounds",
+        ),
+        CheckConstraint(
+            "progress_current >= 0",
+            name="ck_wallet_case_syncs_progress_current",
+        ),
+        CheckConstraint(
+            "progress_total IS NULL OR progress_total >= 0",
+            name="ck_wallet_case_syncs_progress_total",
+        ),
+        CheckConstraint(
+            "progress_total IS NULL OR progress_current <= progress_total",
+            name="ck_wallet_case_syncs_progress_bounds",
+        ),
+        Index("uq_wallet_case_syncs_public_id", "public_id", unique=True),
+        Index(
+            "uq_wallet_case_syncs_ingestion_run",
+            "ingestion_run_id",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_case_syncs_case_created",
+            "case_id",
+            "created_at",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(String(36), nullable=False, default=_new_public_id)
+    case_id = Column(
+        Integer,
+        ForeignKey("wallet_cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    ingestion_run_id = Column(
+        Integer,
+        ForeignKey("wallet_ingestion_runs.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    time_window = Column(String(12), nullable=False)
+    data_mode = Column(String(8), nullable=False)
+    provider = Column(String(64), nullable=False)
+    requested_start = Column(DateTime, nullable=False)
+    requested_end = Column(DateTime, nullable=False)
+    requested_surfaces_json = Column(
+        Text,
+        nullable=False,
+        default="[]",
+        server_default="[]",
+    )
+    state = Column(
+        String(16),
+        nullable=False,
+        default="queued",
+        server_default="queued",
+    )
+    stage = Column(
+        String(32),
+        nullable=False,
+        default="queued",
+        server_default="queued",
+    )
+    progress_current = Column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    progress_total = Column(Integer, nullable=True)
+    coverage_summary_json = Column(
+        Text,
+        nullable=False,
+        default="{}",
+        server_default="{}",
+    )
+    error_code = Column(String(64), nullable=True)
+    error_detail_safe = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    result_summary_json = Column(
+        Text,
+        nullable=False,
+        default="{}",
+        server_default="{}",
+    )
+    message_safe = Column(
+        Text,
+        nullable=False,
+        default="",
+        server_default="",
+    )
+
+    case = relationship("WalletCase", back_populates="syncs")
+    ingestion_run = relationship(
+        "WalletIngestionRun",
+        back_populates="case_sync",
     )
 
 

@@ -1,0 +1,838 @@
+"""Wallet Case application service over the existing ingestion subsystem."""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import datetime, timezone
+import json
+from typing import Any
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from adapters.wallet_activity import get_wallet_activity_provider_status
+from config import get_settings
+from models import CaseSync, LOCAL_SINGLE_USER_SCOPE, WalletCase
+from repositories.wallet_cases import WalletCaseRepository
+from schemas import WalletIngestionPreviewRequest
+from services.ton_address_identity import derive_ton_wallet_identity
+from services.wallet_acquisition_bounds import resolve_wallet_acquisition_bounds
+from services.wallet_activity_ingestion import (
+    WalletIngestionScopeMismatch,
+    build_wallet_ingestion_run,
+    wallet_ingestion_run_to_response,
+)
+from wallet_case_schemas import WalletCaseCreateRequest, WalletCaseSyncRequest
+
+
+class WalletCaseNotFound(LookupError):
+    """Raised when an owner-scoped public case resource does not exist."""
+
+
+class WalletCaseRuntimeConflict(RuntimeError):
+    """Raised when runtime configuration cannot satisfy a case contract."""
+
+
+_ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
+_ZERO_SUMMARY: dict[str, Any] = {
+    "activity_counts": {
+        "transfers": 0,
+        "transactions": 0,
+        "swaps": 0,
+        "balances": 0,
+    },
+    "failed_transaction_count": 0,
+    "warning_count": 0,
+    "portfolio_snapshot": {
+        "total_balance_usd": None,
+        "priced_assets": 0,
+        "unpriced_assets": 0,
+    },
+}
+
+
+class WalletCaseService:
+    """Create, load, synchronize and summarize local Wallet Cases."""
+
+    def __init__(
+        self,
+        session: Session,
+        *,
+        owner_scope_id: str = LOCAL_SINGLE_USER_SCOPE,
+    ) -> None:
+        self.session = session
+        self.owner_scope_id = owner_scope_id
+        self.repository = WalletCaseRepository(session)
+
+    def create_or_open_case(
+        self,
+        payload: WalletCaseCreateRequest,
+        *,
+        settings=None,
+    ) -> dict[str, Any]:
+        identity = derive_ton_wallet_identity(
+            payload.wallet_address,
+            network_context=payload.network,
+        )
+        if identity.status != "network_scoped" or not identity.canonical_address:
+            raise ValueError("A valid canonical TON wallet address is required.")
+        if identity.network != payload.network:
+            raise ValueError(
+                "Wallet address network does not match the requested network."
+            )
+        if (
+            payload.data_environment == "live"
+            and identity.workchain_id not in (-1, 0)
+        ):
+            raise ValueError(
+                "Live TonAPI Wallet Cases support standard workchains -1 and 0 only."
+            )
+
+        existing = self.repository.get_by_identity(
+            owner_scope_id=self.owner_scope_id,
+            network=payload.network,
+            data_environment=payload.data_environment,
+            canonical_wallet_key=identity.canonical_address,
+        )
+        if existing is not None:
+            if existing.archived_at is not None:
+                existing.archived_at = None
+                existing.updated_at = _utc_now()
+                self.session.commit()
+            return {
+                "created": False,
+                "case": self._case_response(
+                    existing,
+                    latest_sync=self._latest_sync(existing),
+                ),
+            }
+
+        # Do not persist a new live case that this runtime cannot ever sync.
+        # Existing cases remain readable if operators later disable live access.
+        self._settings_for_scope(
+            network=payload.network,
+            data_environment=payload.data_environment,
+            settings=settings or get_settings(),
+        )
+
+        now = _utc_now()
+        wallet_case = WalletCase(
+            owner_scope_id=self.owner_scope_id,
+            network=payload.network,
+            data_environment=payload.data_environment,
+            canonical_wallet_key=identity.canonical_address,
+            canonical_identity_version=identity.version,
+            display_address=payload.wallet_address,
+            label=payload.label,
+            note=payload.note,
+            created_at=now,
+            updated_at=now,
+        )
+        self.repository.add_case(wallet_case)
+        try:
+            self.session.commit()
+        except IntegrityError:
+            # A concurrent create may have won the unique scope/identity race.
+            self.session.rollback()
+            existing = self.repository.get_by_identity(
+                owner_scope_id=self.owner_scope_id,
+                network=payload.network,
+                data_environment=payload.data_environment,
+                canonical_wallet_key=identity.canonical_address,
+            )
+            if existing is None:
+                raise
+            return {
+                "created": False,
+                "case": self._case_response(
+                    existing,
+                    latest_sync=self._latest_sync(existing),
+                ),
+            }
+        self.session.refresh(wallet_case)
+        return {"created": True, "case": self._case_response(wallet_case)}
+
+    def list_cases(self, *, limit: int) -> dict[str, Any]:
+        cases, truncated = self.repository.list_active(
+            owner_scope_id=self.owner_scope_id,
+            limit=limit,
+        )
+        latest_syncs = self.repository.latest_syncs(
+            [wallet_case.id for wallet_case in cases]
+        )
+        return {
+            "cases": [
+                self._case_response(
+                    wallet_case,
+                    latest_sync=latest_syncs.get(wallet_case.id),
+                )
+                for wallet_case in cases
+            ],
+            "limit": limit,
+            "truncated": truncated,
+        }
+
+    def get_case(self, public_id: str) -> dict[str, Any]:
+        wallet_case = self._required_case(public_id)
+        latest_sync = self._latest_sync(wallet_case)
+        return self._case_response(wallet_case, latest_sync=latest_sync)
+
+    def synchronize_case(
+        self,
+        public_id: str,
+        payload: WalletCaseSyncRequest,
+        *,
+        settings=None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        wallet_case = self._required_case(public_id)
+        started_at = _as_utc(now or _utc_now())
+        ingestion_settings = self._settings_for_case(
+            wallet_case,
+            settings or get_settings(),
+        )
+        bounds = resolve_wallet_acquisition_bounds(
+            time_window=payload.time_window,
+            custom_start=payload.custom_start,
+            custom_end=payload.custom_end,
+            now=started_at,
+        )
+        ingestion_payload = WalletIngestionPreviewRequest(
+            wallet_address=wallet_case.display_address,
+            time_window=payload.time_window,
+            custom_start=payload.custom_start,
+            custom_end=payload.custom_end,
+            surfaces=payload.surfaces,
+        )
+        expected_data_mode = _ENVIRONMENT_DATA_MODE[wallet_case.data_environment]
+        expected_scope = (
+            wallet_case.network,
+            wallet_case.data_environment,
+            wallet_case.canonical_wallet_key,
+            wallet_case.display_address,
+        )
+
+        # Release the read transaction and its connection before provider I/O.
+        # The case is reloaded and revalidated immediately before persistence.
+        self.session.rollback()
+
+        # Provider work happens before either record is attached to the session.
+        # A scope mismatch therefore cannot publish an orphan run.
+        try:
+            run = build_wallet_ingestion_run(
+                ingestion_payload,
+                ingestion_settings,
+                now=started_at,
+                expected_data_mode=expected_data_mode,
+                expected_network=expected_scope[0],
+                expected_canonical_wallet_key=expected_scope[2],
+            )
+        except WalletIngestionScopeMismatch as exc:
+            raise WalletCaseRuntimeConflict(str(exc)) from exc
+        wallet_case = self._required_case(public_id)
+        current_scope = (
+            wallet_case.network,
+            wallet_case.data_environment,
+            wallet_case.canonical_wallet_key,
+            wallet_case.display_address,
+        )
+        if current_scope != expected_scope:
+            self.session.rollback()
+            raise WalletCaseRuntimeConflict(
+                "Wallet Case scope changed during synchronization."
+            )
+        run_response = wallet_ingestion_run_to_response(run)
+        state, stage = _sync_state(run.status)
+        completed_at = _utc_now()
+        coverage = _coverage_record(
+            run_response,
+            start_at=bounds.start,
+            end_at=bounds.end,
+            state=state,
+        )
+        provider = _actual_provider(run_response, ingestion_settings)
+        summary = _summary_from_run(run_response)
+        message = _bounded_message(run_response.get("message"))
+        if not message:
+            message = "Wallet Case sync completed without a provider message."
+        case_sync = CaseSync(
+            case=wallet_case,
+            ingestion_run=run,
+            time_window=payload.time_window,
+            data_mode=run.data_mode,
+            provider=provider,
+            requested_start=bounds.start,
+            requested_end=bounds.end,
+            requested_surfaces_json=_json_dumps(payload.surfaces),
+            state=state,
+            stage=stage,
+            progress_current=1,
+            progress_total=1,
+            coverage_summary_json=_json_dumps(coverage),
+            result_summary_json=_json_dumps(summary),
+            message_safe=message,
+            error_code=("ingestion_failed" if state == "failed" else None),
+            error_detail_safe=(
+                _bounded_message(run_response.get("message"))
+                if state == "failed"
+                else None
+            ),
+            created_at=started_at,
+            updated_at=completed_at,
+            started_at=started_at,
+            completed_at=completed_at,
+        )
+        wallet_case.updated_at = completed_at
+        self.repository.add_sync(case_sync)
+        self.session.add(run)
+        self.session.commit()
+        self.session.refresh(case_sync)
+        return self._sync_response(case_sync)
+
+    def get_sync(self, case_public_id: str, sync_public_id: str) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        case_sync = self.repository.get_sync(
+            case_id=wallet_case.id,
+            public_id=sync_public_id,
+        )
+        if case_sync is None:
+            raise WalletCaseNotFound("Wallet Case sync not found")
+        return self._sync_response(case_sync)
+
+    def _required_case(self, public_id: str) -> WalletCase:
+        wallet_case = self.repository.get_by_public_id(
+            owner_scope_id=self.owner_scope_id,
+            public_id=public_id,
+        )
+        if wallet_case is None:
+            raise WalletCaseNotFound("Wallet Case not found")
+        return wallet_case
+
+    def _latest_sync(self, wallet_case: WalletCase) -> CaseSync | None:
+        return self.repository.latest_syncs([wallet_case.id]).get(wallet_case.id)
+
+    def _settings_for_case(self, wallet_case: WalletCase, settings):
+        return self._settings_for_scope(
+            network=wallet_case.network,
+            data_environment=wallet_case.data_environment,
+            settings=settings,
+        )
+
+    def _settings_for_scope(
+        self,
+        *,
+        network: str,
+        data_environment: str,
+        settings,
+    ):
+        runtime_network = network.removeprefix("ton-")
+        if data_environment == "demo":
+            return replace(
+                settings,
+                data_mode="mock",
+                wallet_activity_provider="mock",
+                wallet_activity_live_enabled=False,
+                ton_network=runtime_network,
+            )
+        if not settings.is_real:
+            raise WalletCaseRuntimeConflict(
+                "Live Wallet Case requires DATA_MODE=real."
+            )
+        if settings.ton_network != runtime_network:
+            raise WalletCaseRuntimeConflict(
+                "Live Wallet Case network does not match TON_NETWORK."
+            )
+        if (
+            settings.wallet_activity_provider != "tonapi"
+            or not settings.wallet_activity_live_enabled
+        ):
+            raise WalletCaseRuntimeConflict(
+                "Live Wallet Case requires the guarded TonAPI live adapter."
+            )
+        provider_status = get_wallet_activity_provider_status(settings)
+        if not (
+            provider_status.get("configured") is True
+            and provider_status.get("available") is True
+        ):
+            raise WalletCaseRuntimeConflict(
+                "Live Wallet Case requires an available TonAPI configuration."
+            )
+        return settings
+
+    def _case_response(
+        self,
+        wallet_case: WalletCase,
+        *,
+        latest_sync: CaseSync | None = None,
+    ) -> dict[str, Any]:
+        summary = _stored_summary(latest_sync)
+        if latest_sync is None:
+            limitations = [
+                _limitation(
+                    "not_synchronized",
+                    "This Wallet Case has not been synchronized yet.",
+                )
+            ]
+        else:
+            limitations = _limitations_for_sync(
+                latest_sync,
+                _stored_coverage(latest_sync),
+            )
+        return {
+            "public_id": wallet_case.public_id,
+            "network": wallet_case.network,
+            "data_environment": wallet_case.data_environment,
+            "canonical_wallet_key": wallet_case.canonical_wallet_key,
+            "identity_version": wallet_case.canonical_identity_version,
+            "display_address": wallet_case.display_address,
+            "label": wallet_case.label,
+            "note": wallet_case.note,
+            "created_at": _isoformat(wallet_case.created_at),
+            "updated_at": _isoformat(wallet_case.updated_at),
+            "latest_sync": (
+                self._sync_response(latest_sync) if latest_sync is not None else None
+            ),
+            "summary": summary,
+            "limitations": limitations,
+        }
+
+    def _sync_response(
+        self,
+        case_sync: CaseSync,
+    ) -> dict[str, Any]:
+        coverage = _stored_coverage(case_sync)
+        summary = _stored_summary(case_sync)
+        message = _bounded_message(case_sync.message_safe)
+        if not message:
+            message = _bounded_message(case_sync.error_detail_safe)
+        if not message:
+            message = "Wallet Case sync has no published result message."
+        return {
+            "public_id": case_sync.public_id,
+            "state": case_sync.state,
+            "stage": case_sync.stage,
+            "progress": {
+                "current": case_sync.progress_current,
+                "total": case_sync.progress_total,
+            },
+            "provider": case_sync.provider,
+            "data_mode": case_sync.data_mode,
+            "requested_scope": {
+                "time_window": case_sync.time_window,
+                "start_at": _isoformat(case_sync.requested_start),
+                "end_at": _isoformat(case_sync.requested_end),
+                "surfaces": _json_list(case_sync.requested_surfaces_json),
+            },
+            "coverage": coverage,
+            "summary": summary,
+            "limitations": _limitations_for_sync(case_sync, coverage),
+            "message": message,
+            "created_at": _isoformat(case_sync.created_at),
+            "started_at": _isoformat(case_sync.started_at),
+            "completed_at": _isoformat(case_sync.completed_at),
+        }
+
+
+def _sync_state(status: str) -> tuple[str, str]:
+    return {
+        "planned": ("queued", "queued"),
+        "queued": ("queued", "queued"),
+        "running": ("running", "ingesting"),
+        "success": ("succeeded", "completed"),
+        "partial": ("partial", "completed_with_limitations"),
+        "error": ("failed", "failed"),
+        "stale": ("failed", "failed"),
+    }.get(status, ("failed", "failed"))
+
+
+def _actual_provider(run_response: dict[str, Any], settings) -> str:
+    providers = sorted(
+        {
+            item.get("provider")
+            for item in run_response.get("provider_evidence", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("provider"), str)
+            and item["provider"]
+        }
+    )
+    if len(providers) == 1:
+        return providers[0][:64]
+    if providers:
+        return "multiple_wallet_activity_providers"
+    configured = str(getattr(settings, "wallet_activity_provider", "unknown"))
+    return (configured or "unknown")[:64]
+
+
+def _coverage_record(
+    run_response: dict[str, Any],
+    *,
+    start_at: datetime,
+    end_at: datetime,
+    state: str,
+    requested_surfaces: list[str] | None = None,
+) -> dict[str, Any]:
+    unavailable = _surface_list(run_response.get("unavailable_surfaces"))
+    incomplete = _surface_list(run_response.get("incomplete_surfaces"))
+    if run_response.get("data_mode") != "real" or state not in {
+        "partial",
+        "succeeded",
+    }:
+        coverage_state = "unknown"
+    elif state == "partial" or unavailable or incomplete:
+        coverage_state = "bounded_partial"
+    else:
+        coverage_state = "bounded_complete"
+    streams = _compact_coverage_streams(
+        run_response.get("acquisition_streams")
+    )
+    return {
+        "state": coverage_state,
+        "requested_start_at": _isoformat(start_at),
+        "requested_end_at": _isoformat(end_at),
+        "requested_surfaces": _surface_list(
+            requested_surfaces
+            if requested_surfaces is not None
+            else run_response.get("requested_surfaces")
+        ),
+        "unavailable_surfaces": unavailable,
+        "incomplete_surfaces": incomplete,
+        "streams": streams,
+        "full_history_proven": False,
+    }
+
+
+def _summary_from_run(run_response: dict[str, Any] | None) -> dict[str, Any]:
+    if not run_response:
+        return _zero_summary()
+    activity_summary = run_response.get("activity_summary")
+    if not isinstance(activity_summary, dict):
+        activity_summary = {}
+    counts = activity_summary.get("counts")
+    if not isinstance(counts, dict):
+        counts = {}
+    balances = activity_summary.get("balances")
+    if not isinstance(balances, dict):
+        balances = {}
+    portfolio = balances.get("portfolio")
+    if not isinstance(portfolio, dict):
+        portfolio = {}
+    transactions = run_response.get("transactions")
+    if not isinstance(transactions, list):
+        transactions = []
+    warnings = run_response.get("warnings")
+    if not isinstance(warnings, list):
+        warnings = []
+    return {
+        "activity_counts": {
+            key: _nonnegative_int(counts.get(key))
+            for key in ("transfers", "transactions", "swaps", "balances")
+        },
+        "failed_transaction_count": sum(
+            1
+            for row in transactions
+            if isinstance(row, dict) and row.get("success") == "failed"
+        ),
+        "warning_count": len(warnings),
+        "portfolio_snapshot": {
+            "total_balance_usd": (
+                str(portfolio["total_balance_usd"])
+                if portfolio.get("total_balance_usd") is not None
+                else None
+            ),
+            "priced_assets": _nonnegative_int(portfolio.get("priced_assets")),
+            "unpriced_assets": _nonnegative_int(
+                portfolio.get("unpriced_assets")
+            ),
+        },
+    }
+
+
+def _stored_summary(case_sync: CaseSync | None) -> dict[str, Any]:
+    if case_sync is None:
+        return _zero_summary()
+    summary = _json_object(case_sync.result_summary_json)
+    return summary if _valid_summary(summary) else _zero_summary()
+
+
+def _stored_coverage(case_sync: CaseSync) -> dict[str, Any]:
+    coverage = _json_object(case_sync.coverage_summary_json)
+    if not _valid_coverage(coverage, case_sync):
+        return _coverage_record(
+            {},
+            start_at=case_sync.requested_start,
+            end_at=case_sync.requested_end,
+            state=case_sync.state,
+            requested_surfaces=_json_list(
+                case_sync.requested_surfaces_json
+            ),
+        )
+    return {
+        **coverage,
+        "streams": _compact_coverage_streams(coverage.get("streams")),
+    }
+
+
+def _limitations_for_sync(
+    case_sync: CaseSync,
+    coverage: dict[str, Any],
+) -> list[dict[str, str]]:
+    requested = _json_list(case_sync.requested_surfaces_json)
+    limitations = [
+        _limitation(
+            "bounded_interval_not_full_history",
+            "This sync covers a bounded requested interval and does not prove full wallet history.",
+        )
+    ]
+    if not _valid_summary(_json_object(case_sync.result_summary_json)):
+        limitations.append(
+            _limitation(
+                "summary_unavailable",
+                "Activity and portfolio summary was not captured for this sync; zero placeholders are not evidence of no activity.",
+            )
+        )
+    if not _valid_coverage(
+        _json_object(case_sync.coverage_summary_json),
+        case_sync,
+    ):
+        limitations.append(
+            _limitation(
+                "coverage_unavailable",
+                "Stored coverage was missing or inconsistent; published coverage is reset to unknown.",
+            )
+        )
+    if case_sync.data_mode == "mock":
+        limitations.append(
+            _limitation(
+                "demo_fixture_not_chain_data",
+                "Demo results are deterministic fixtures and are not live TON chain observations.",
+            )
+        )
+    if {"transfers", "swaps"} & set(requested):
+        limitations.append(
+            _limitation(
+                "provider_display_events_not_authoritative",
+                "Provider display actions are observations, not an authoritative transaction ledger.",
+            )
+        )
+    if {"balances", "jettons"} & set(requested):
+        limitations.append(
+            _limitation(
+                "snapshot_not_historical_cost_basis",
+                "Balance and price snapshots do not establish historical cost basis or PnL.",
+            )
+        )
+    unavailable = _surface_list(coverage.get("unavailable_surfaces"))
+    incomplete = _surface_list(coverage.get("incomplete_surfaces"))
+    if case_sync.state == "partial" or unavailable or incomplete:
+        limitations.append(
+            _limitation(
+                "partial_or_unavailable_surfaces",
+                "One or more requested surfaces are incomplete or unavailable.",
+            )
+        )
+    if case_sync.state == "failed":
+        limitations.append(
+            _limitation(
+                "sync_failed",
+                "The synchronization attempt failed and produced no complete coverage claim.",
+            )
+        )
+    return limitations
+
+
+def _valid_coverage(value: dict[str, Any], case_sync: CaseSync) -> bool:
+    required = {
+        "state",
+        "requested_start_at",
+        "requested_end_at",
+        "requested_surfaces",
+        "unavailable_surfaces",
+        "incomplete_surfaces",
+        "streams",
+        "full_history_proven",
+    }
+    if (
+        set(value) != required
+        or value.get("state")
+        not in {"unknown", "bounded_partial", "bounded_complete"}
+        or value.get("full_history_proven") is not False
+        or value.get("requested_start_at")
+        != _isoformat(case_sync.requested_start)
+        or value.get("requested_end_at") != _isoformat(case_sync.requested_end)
+    ):
+        return False
+    raw_requested = value.get("requested_surfaces")
+    raw_unavailable = value.get("unavailable_surfaces")
+    raw_incomplete = value.get("incomplete_surfaces")
+    if not all(
+        isinstance(item, list)
+        and item == _surface_list(item)
+        for item in (raw_requested, raw_unavailable, raw_incomplete)
+    ):
+        return False
+    requested = _surface_list(raw_requested)
+    unavailable = _surface_list(raw_unavailable)
+    incomplete = _surface_list(raw_incomplete)
+    if (
+        not requested
+        or requested != _json_list(case_sync.requested_surfaces_json)
+        or not set(unavailable + incomplete).issubset(requested)
+        or set(unavailable) & set(incomplete)
+    ):
+        return False
+    raw_streams = value.get("streams")
+    streams = _compact_coverage_streams(raw_streams)
+    if not isinstance(raw_streams, list) or len(streams) != len(raw_streams):
+        return False
+    state = value["state"]
+    if case_sync.data_mode == "mock" and state != "unknown":
+        return False
+    if state in {"bounded_partial", "bounded_complete"} and case_sync.data_mode != "real":
+        return False
+    if state == "bounded_complete" and (
+        case_sync.state != "succeeded"
+        or unavailable
+        or incomplete
+        or any(
+            stream["completion_state"] != "complete"
+            or stream["error_code"] is not None
+            for stream in streams
+        )
+    ):
+        return False
+    return True
+
+
+def _valid_summary(value: dict[str, Any]) -> bool:
+    if set(value) != {
+        "activity_counts",
+        "failed_transaction_count",
+        "warning_count",
+        "portfolio_snapshot",
+    }:
+        return False
+    counts = value.get("activity_counts")
+    portfolio = value.get("portfolio_snapshot")
+    if not isinstance(counts, dict) or set(counts) != {
+        "transfers",
+        "transactions",
+        "swaps",
+        "balances",
+    }:
+        return False
+    if not isinstance(portfolio, dict) or set(portfolio) != {
+        "total_balance_usd",
+        "priced_assets",
+        "unpriced_assets",
+    }:
+        return False
+    integers = [
+        *counts.values(),
+        value.get("failed_transaction_count"),
+        value.get("warning_count"),
+        portfolio.get("priced_assets"),
+        portfolio.get("unpriced_assets"),
+    ]
+    return (
+        all(type(item) is int and item >= 0 for item in integers)
+        and (
+            portfolio.get("total_balance_usd") is None
+            or isinstance(portfolio.get("total_balance_usd"), str)
+        )
+    )
+
+
+def _limitation(code: str, message: str) -> dict[str, str]:
+    return {"code": code, "message": message}
+
+
+def _zero_summary() -> dict[str, Any]:
+    return json.loads(json.dumps(_ZERO_SUMMARY))
+
+
+def _surface_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    allowed = {"transfers", "transactions", "swaps", "balances", "jettons"}
+    return list(dict.fromkeys(item for item in value if item in allowed))
+
+
+def _compact_coverage_streams(value: Any) -> list[dict[str, Any]]:
+    """Publish only bounded stream state, never request/page diagnostics."""
+    if not isinstance(value, list):
+        return []
+    streams: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        provider = item.get("provider")
+        stream_key = item.get("stream_key")
+        completion_state = item.get("completion_state")
+        error_code = item.get("error_code")
+        if not all(
+            isinstance(field, str) and field
+            for field in (provider, stream_key, completion_state)
+        ) or completion_state not in {
+            "complete",
+            "incomplete",
+            "error",
+            "preview_only",
+        }:
+            continue
+        streams.append(
+            {
+                "provider": provider[:64],
+                "stream_key": stream_key[:64],
+                "completion_state": completion_state[:32],
+                "error_code": error_code[:64]
+                if isinstance(error_code, str) and error_code
+                else None,
+            }
+        )
+    return streams
+
+
+def _nonnegative_int(value: Any) -> int:
+    return value if type(value) is int and value >= 0 else 0
+
+
+def _json_dumps(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _json_object(value: str | None) -> dict[str, Any]:
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _json_list(value: str | None) -> list[str]:
+    try:
+        parsed = json.loads(value or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return _surface_list(parsed)
+
+
+def _bounded_message(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value.strip()[:1000]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _isoformat(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return _as_utc(value).isoformat().replace("+00:00", "Z")

@@ -28,6 +28,10 @@
   --chart-grid: rgba(23, 23, 29, 0.08);
 }
 
+[data-route-focus]:focus {
+  outline: none;
+}
+
 :root[data-theme="dark"] {
   color: #f4f3f0;
   background: #111217;
@@ -266,6 +270,58 @@ summary:focus-visible {
   text-align: center;
 }
 
+.landing-runtime-row {
+  display: flex;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.landing-runtime {
+  display: inline-flex;
+  padding: 7px 11px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.landing-runtime > span {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.landing-runtime.is-live > span {
+  background: var(--positive);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--positive) 12%, transparent);
+}
+
+.landing-runtime-retry {
+  display: inline-flex;
+  min-height: 32px;
+  padding: 0 10px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 720;
+}
+
 .landing-kicker {
   display: inline-flex;
   margin-bottom: 24px;
@@ -383,6 +439,15 @@ summary:focus-visible {
 .button-primary:hover {
   transform: translateY(-2px);
   box-shadow: 0 12px 30px rgba(23, 23, 29, 0.2);
+}
+
+.landing-search button:disabled,
+.button-primary:disabled,
+.button-secondary:disabled {
+  transform: none;
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 .landing-error {

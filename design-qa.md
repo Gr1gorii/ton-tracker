@@ -22,7 +22,7 @@ A separate crop was not required because the 1280 × 720 original-scale comparis
 - Spacing and layout rhythm: landing proportions match the reference's open composition. The application uses a stable 242 px navigation rail, compact sticky search header, 12–16 px card rhythm, and clear page-level separation.
 - Colors and visual tokens: off-white/charcoal foundations use restrained blue, coral, aqua, and lilac accents. Semantic success, warning, error, mock, and real states remain distinct in both themes.
 - Image quality and asset fidelity: the landing uses a project-local 1672 × 937 generated particle artwork with useful negative space. It is not stretched, substituted with CSS art, or used inside the dense application workflow.
-- Copy and content: GRAM is used for the native currency and TON for the blockchain. Provider observations, cryptographic proof, mock mode, canonical outputs, and run warnings remain explicitly differentiated.
+- Copy and content: GRAM Scope is the product brand; TON remains the blockchain and native asset. Provider observations, cryptographic proof, demo/live mode, canonical outputs, and run warnings remain explicitly differentiated.
 
 ## Findings
 

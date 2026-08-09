@@ -1,3 +1,39 @@
+# GRAM Scope — v0.71.0 WALLET CASE FOUNDATION
+
+v0.71.0 introduces the first product-facing Wallet Case vertical slice. A
+network-scoped TON address now creates or reopens one durable owner-scoped case
+with a non-sequential public URL. The new case facade exposes bounded syncs,
+coverage, compact activity and portfolio summaries, and explicit limitations
+without publishing the compatibility ingestion-run identifier.
+
+The first case sync reuses the existing ingestion implementation atomically:
+the case sync and its source run are committed together, and wallet identity,
+network, and demo/live mode are checked before persistence. Demo cases always
+use deterministic fixture evidence. Live cases require the guarded TonAPI
+runtime and reject mock fallback data. Mainnet, testnet, demo, and live cases
+remain distinct identities.
+
+The frontend now has a refresh-safe `/cases/:caseId/summary` route that bypasses
+the legacy multi-panel workspace. Its primary flow is create/open case, then an
+explicit 24-hour bounded sync. Runtime configuration, persisted case
+environment, bounded coverage, missing surfaces, snapshot semantics, and the
+fact that full history is not proven remain visible. GRAM Scope is the product
+brand; TON remains the blockchain and native asset throughout technical data
+and user-facing labels.
+
+Migration `20260710_0015` adds `wallet_cases` and `wallet_case_syncs`, and
+`20260710_0016` adds compact persisted case summaries/messages, without
+rewriting legacy evidence. Existing runs are intentionally not backfilled in
+this release because older records may lack a trustworthy canonical network or
+the exact resolved acquisition bounds. Sync execution is still synchronous;
+durable workers, retry/cancel, cross-sync activity deduplication, and the final
+four-screen replacement of legacy diagnostics remain subsequent Roadmap 1
+slices. Until authenticated owner scopes land, the facade accepts only direct
+loopback clients; hosted production access is disabled rather than exposing the
+shared local owner scope.
+
+---
+
 # GRAM Scope — v0.70.0 EXTERNAL RECOVERY POINT
 
 v0.70.0 closes the single-host backup gap. Every guarded deployment and

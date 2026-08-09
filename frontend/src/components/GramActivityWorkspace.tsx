@@ -38,7 +38,7 @@ const surfaceOptions: Array<{
   { id: "transfers", label: "Transfers", help: "Incoming and outgoing assets", icon: ArrowsLeftRight },
   { id: "transactions", label: "Transactions", help: "Ordered account history", icon: ListBullets },
   { id: "swaps", label: "DEX swaps", help: "Recognized protocol activity", icon: Swap },
-  { id: "balances", label: "GRAM balance", help: "Native currency snapshot", icon: Coins },
+  { id: "balances", label: "TON balance", help: "Native asset snapshot", icon: Coins },
   { id: "jettons", label: "Jettons", help: "Token balance snapshots", icon: Coins },
 ];
 
@@ -61,13 +61,11 @@ function shortHash(value?: string | null) {
 
 function displayAsset(value?: string | null) {
   if (!value) return "";
-  return value === "TON" ? "GRAM" : value;
+  return value;
 }
 
 function displayMessage(value: string) {
-  return value
-    .split("native TON").join("native GRAM")
-    .split("TON/jetton").join("GRAM/jetton");
+  return value;
 }
 
 export default function GramActivityWorkspace({
@@ -222,7 +220,7 @@ export default function GramActivityWorkspace({
         <div className="activity-builder-main">
           <header className="activity-card-head">
             <span className="step-number">1</span>
-            <div><h2>Choose what to inspect</h2><p>Keep the scope small or include every surface for a complete wallet view.</p></div>
+            <div><h2>Choose what to inspect</h2><p>Keep the scope small or include every available surface for this bounded interval.</p></div>
           </header>
 
           <label className="clean-field">
@@ -393,11 +391,11 @@ function assertRunMatchesRequest(
 }
 
 function TransferRows({ run }: { run: WalletIngestionRunResponse }) {
-  return <ResultTable columns={["Direction", "Asset", "Amount", "Counterparty", "Time"]} empty={!run.transfers.length}>{run.transfers.slice(0, 100).map((item, index) => <tr key={`${item.tx_hash}-${index}`}><td><span className={`direction-badge is-${item.direction}`}>{item.direction === "in" ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}{item.direction}</span></td><td><strong>{item.asset === "TON" ? "GRAM" : item.asset}</strong></td><td>{item.amount ?? "—"}</td><td>{shortHash(item.counterparty)}</td><td>{formatDate(item.timestamp)}</td></tr>)}</ResultTable>;
+  return <ResultTable columns={["Direction", "Asset", "Amount", "Counterparty", "Time"]} empty={!run.transfers.length}>{run.transfers.slice(0, 100).map((item, index) => <tr key={`${item.tx_hash}-${index}`}><td><span className={`direction-badge is-${item.direction}`}>{item.direction === "in" ? <ArrowDownLeft size={15} /> : <ArrowUpRight size={15} />}{item.direction}</span></td><td><strong>{item.asset}</strong></td><td>{item.amount ?? "—"}</td><td>{shortHash(item.counterparty)}</td><td>{formatDate(item.timestamp)}</td></tr>)}</ResultTable>;
 }
 
 function TransactionRows({ run }: { run: WalletIngestionRunResponse }) {
-  return <ResultTable columns={["Transaction", "Status", "Fee (GRAM)", "Provider", "Time"]} empty={!run.transactions.length}>{run.transactions.slice(0, 100).map((item) => <tr key={`${item.tx_hash}-${item.logical_time}`}><td><strong>{shortHash(item.tx_hash)}</strong></td><td><span className={`record-status is-${item.success}`}>{item.success}</span></td><td>{item.fee_ton ?? "—"}</td><td>{item.provider}</td><td>{formatDate(item.timestamp)}</td></tr>)}</ResultTable>;
+  return <ResultTable columns={["Transaction", "Status", "Fee (TON)", "Provider", "Time"]} empty={!run.transactions.length}>{run.transactions.slice(0, 100).map((item) => <tr key={`${item.tx_hash}-${item.logical_time}`}><td><strong>{shortHash(item.tx_hash)}</strong></td><td><span className={`record-status is-${item.success}`}>{item.success}</span></td><td>{item.fee_ton ?? "—"}</td><td>{item.provider}</td><td>{formatDate(item.timestamp)}</td></tr>)}</ResultTable>;
 }
 
 function SwapRows({ run }: { run: WalletIngestionRunResponse }) {

@@ -89,7 +89,7 @@ describe("GramInsightsView", () => {
 
     await waitFor(() => expect(apiMocks.getWalletRunSignals).toHaveBeenCalledWith(25, expect.any(AbortSignal)));
     expect(await screen.findByText("1 heuristic pattern matched")).toBeTruthy();
-    expect(screen.getByText("The wallet holds 14 distinct non-GRAM jettons.")).toBeTruthy();
+    expect(screen.getByText("The wallet holds 14 distinct non-TON jettons.")).toBeTruthy();
     expect(screen.getByText("medium confidence")).toBeTruthy();
     expect(screen.getByText("Only 2 transactions were ingested.")).toBeTruthy();
     expect(screen.getByText("Risk score disabled")).toBeTruthy();

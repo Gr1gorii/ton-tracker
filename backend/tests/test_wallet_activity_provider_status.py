@@ -17,6 +17,9 @@ def test_providers_status_includes_wallet_activity_default(monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
+    assert body["data_environment"] == "demo"
+    assert body["ton_network"] == "ton-mainnet"
+    assert body["wallet_cases_available"] is True
     assert "wallet_activity" in body
     assert body["wallet_activity"]["configured"] is True
     assert body["wallet_activity"]["available"] is True
@@ -32,6 +35,7 @@ def test_providers_status_real_mode_mock_provider_stays_data_honest(
     body = _client().get("/api/providers/status").json()
     status = body["wallet_activity"]
 
+    assert body["data_environment"] == "demo"
     assert status["configured"] is True
     assert status["available"] is True
     assert "pinned to the deterministic mock adapter" in status["message"]
@@ -46,6 +50,7 @@ def test_providers_status_real_mode_tonapi_scaffold_is_limited(monkeypatch):
     body = _client().get("/api/providers/status").json()
     status = body["wallet_activity"]
 
+    assert body["data_environment"] == "demo"
     assert status["configured"] is True
     assert status["available"] is False
     assert "TonAPI wallet activity scaffold" in status["message"]
@@ -61,6 +66,7 @@ def test_providers_status_real_mode_tonapi_live_guard(monkeypatch):
     body = _client().get("/api/providers/status").json()
     status = body["wallet_activity"]
 
+    assert body["data_environment"] == "live"
     assert status["configured"] is True
     assert status["available"] is True
     assert "guarded live TonAPI" in status["message"]
@@ -100,3 +106,16 @@ def test_get_api_providers_status_reports_wallet_activity_without_network(
     assert status["configured"] is True
     assert status["available"] is False
     assert "scaffold" in status["message"]
+
+
+def test_providers_status_exposes_configured_live_testnet_scope(monkeypatch):
+    monkeypatch.setenv("DATA_MODE", "real")
+    monkeypatch.setenv("TON_NETWORK", "testnet")
+    monkeypatch.setenv("WALLET_ACTIVITY_PROVIDER", "tonapi")
+    monkeypatch.setenv("WALLET_ACTIVITY_LIVE_ENABLED", "true")
+    monkeypatch.setenv("TONAPI_BASE_URL", "https://testnet.tonapi.io")
+
+    body = _client().get("/api/providers/status").json()
+
+    assert body["data_environment"] == "live"
+    assert body["ton_network"] == "ton-testnet"

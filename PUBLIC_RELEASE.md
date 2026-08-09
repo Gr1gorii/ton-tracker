@@ -1,9 +1,14 @@
-# TON Wallet Intelligence Dashboard - v0.26.0 Public Release
+# GRAM Scope - v0.71.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
 ## Public Scope
 
+- Durable Wallet Cases keyed by canonical TON identity, network, and demo/live
+  environment.
+- Refresh-safe case Summary URLs with an explicit bounded 24-hour sync action.
+- Compact case activity, portfolio snapshot, coverage, and limitation summaries
+  that keep internal compatibility run IDs out of the primary workflow.
 - Responsive TON wallet evidence workspace with guarded real TonAPI ingestion.
 - Bounded transaction/event pagination and network-scoped identities.
 - Immutable trace capture and local transaction/message BOC verification.
@@ -16,10 +21,15 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.26.0 MULTI-ASSET PNL READINESS`.
+- Product release label: `v0.71.0 WALLET CASE FOUNDATION`.
 - Backend API `VERSION` remains `0.2.1`.
 - `DATA_MODE=mock` remains the default.
 - Guarded live wallet ingestion requires explicit real/TonAPI/live settings.
+- Demo syncs are deterministic fixtures; live syncs reject mock fallback
+  evidence and network/identity mismatches before persistence.
+- Wallet Cases are direct-loopback only in this pre-authentication slice.
+  Hosted production access remains disabled until authentication derives the
+  owner scope.
 - Multi-asset readiness performs no provider request and never returns BOC or
   message-body contents.
 - Provider snapshot matches are not local jetton-master proofs. Exact fee
@@ -28,6 +38,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 ## Known Limitations
 
 - Selected bounded intervals and captures do not establish complete history.
+- Sync execution is synchronous; durable retry/cancel workers are deferred.
+- Legacy ingestion runs are not automatically backfilled into cases when their
+  canonical identity or exact acquisition bounds cannot be proven.
+- Hosted Wallet Cases are a release blocker, not an accepted anonymous mode.
 - TEP-74 layouts do not alone prove successful economic execution or a trade.
 - Historical trade prices, ordered acquisition lots, and fee allocation are
   not established by the multi-asset readiness contract.
@@ -36,13 +50,16 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.26.0`, confirm:
+Before tagging `v0.71.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `RELEASE v0.26.0 MULTI-ASSET PNL READINESS`.
+- UI shows `v0.71.0` and keeps GRAM Scope branding distinct from TON asset and
+  blockchain terminology.
+- Create/open case, bounded sync, summary refresh, and direct URL restoration
+  pass the frontend and backend vertical-slice tests.
 - Real stored-run multi-asset readiness is provider-free, digest-stable, and
   fail-closed for unavailable/malformed evidence.
 - Credential and prohibited-brand scans are clean.
