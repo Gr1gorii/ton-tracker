@@ -112,6 +112,10 @@ jobs:
       RECOVERY_INTERVAL_SECONDS: "604800"
       RECOVERY_RETRY_SECONDS: "300"
       RECOVERY_HEALTH_MAX_AGE_SECONDS: "691200"
+      RECOVERY_POINT_RETENTION: "14"
+      RECOVERY_POINT_INTERVAL_SECONDS: "86400"
+      RECOVERY_POINT_RETRY_SECONDS: "300"
+      RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS: "172800"
       PROMETHEUS_RETENTION: 15d
       ALERTMANAGER_RETENTION: 120h
     steps:
@@ -129,11 +133,14 @@ jobs:
           set -euo pipefail
           state="$RUNNER_TEMP/gram-scope-deployment-state"
           alertmanager_data="$RUNNER_TEMP/gram-scope-alertmanager"
+          recovery_points="$RUNNER_TEMP/gram-scope-external-recovery"
           alertmanager_config="$RUNNER_TEMP/gram-scope-alertmanager.yml"
           mkdir -p "$state"
           mkdir -p "$alertmanager_data"
+          mkdir -p "$recovery_points"
           chmod 700 "$state"
           chmod 700 "$alertmanager_data"
+          chmod 700 "$recovery_points"
           python - "$alertmanager_config" <<'PY'
           from pathlib import Path
           import sys
@@ -161,6 +168,7 @@ jobs:
             echo "DEPLOYMENT_STATE_GID=$(id -g)"
             echo "ALERTMANAGER_CONFIG_FILE=$alertmanager_config"
             echo "ALERTMANAGER_DATA_DIRECTORY=$alertmanager_data"
+            echo "DISASTER_RECOVERY_DIRECTORY=$recovery_points"
           } >> "$GITHUB_ENV"
       - name: Select exact release images
         env:
@@ -287,13 +295,16 @@ jobs:
           docker compose --project-name "$project" --file compose.production.yml \
             --profile deployment run --rm migration-rehearsal
           docker compose --project-name "$project" --file compose.production.yml \
+            --profile deployment run --rm recovery-point-now
+          docker compose --project-name "$project" --file compose.production.yml \
             --profile deployment run --rm database-bootstrap \
             python /app/ops/rehearse_database_bootstrap.py --mode resume
           docker compose --project-name "$project" --file compose.production.yml \
             --profile test up --detach --no-build --wait notification-receiver-fixture
           docker compose --project-name "$project" --file compose.production.yml \
             up --detach --no-build --wait --wait-timeout 180 \
-            frontend prometheus backup recovery-watchdog deployment-monitor alertmanager
+            frontend prometheus backup recovery-watchdog recovery-point-exporter \
+            deployment-monitor alertmanager
           docker compose --project-name "$project" --file compose.production.yml \
             --profile deployment run --rm monitoring-smoke
           docker compose --project-name "$project" --file compose.production.yml \

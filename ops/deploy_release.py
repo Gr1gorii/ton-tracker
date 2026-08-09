@@ -307,6 +307,44 @@ def rollout_steps(
             180,
         ),
     )
+    recovery_point_steps = (
+        RolloutStep(
+            "post-activation database backup",
+            (*compose, "--profile", "deployment", "run", "--rm", "backup-now"),
+            900,
+        ),
+        RolloutStep(
+            "post-activation backup restore drill",
+            (*compose, "--profile", "deployment", "run", "--rm", "restore-drill"),
+            900,
+        ),
+        RolloutStep(
+            "external recovery point",
+            (
+                *compose,
+                "--profile",
+                "deployment",
+                "run",
+                "--rm",
+                "recovery-point-now",
+            ),
+            900,
+        ),
+        RolloutStep(
+            "external recovery exporter activation",
+            (
+                *compose,
+                "up",
+                "--detach",
+                "--no-build",
+                "--wait",
+                "--wait-timeout",
+                "900",
+                "recovery-point-exporter",
+            ),
+            1_000,
+        ),
+    )
     if initial_deployment:
         bootstrap_command = (
             *compose,
@@ -385,7 +423,7 @@ def rollout_steps(
                 activation_command,
                 300,
             ),
-        ) + monitoring_steps
+        ) + recovery_point_steps + monitoring_steps
 
     return common + (
         RolloutStep(
@@ -420,7 +458,7 @@ def rollout_steps(
             activation_command,
             300,
         ),
-    ) + monitoring_steps
+    ) + recovery_point_steps + monitoring_steps
 
 
 def _run_command(step: RolloutStep, environment: Mapping[str, str]) -> None:

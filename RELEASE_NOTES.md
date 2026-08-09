@@ -1,3 +1,35 @@
+# GRAM Scope — v0.70.0 EXTERNAL RECOVERY POINT
+
+v0.70.0 closes the single-host backup gap. Every guarded deployment and
+rollback now creates a new post-activation SQLite backup, restores and verifies
+it, and atomically publishes a release-bound recovery point to a required
+private host directory before monitoring, notification, public smoke, or the
+deployment receipt can succeed. The destination is intended to be a separately
+mounted and independently replicated failure domain, never the application
+Docker volumes.
+
+After that gate, a read-only-root periodic exporter reuses the latest embedded
+release binding and writes a new point from the newest verified backup every 24
+hours by default. A private non-blocking filesystem lock serializes scheduled
+and deployment exports. Its bounded age healthcheck fails when the last point
+is stale or invalid, while configurable retry, maximum-age, and retention
+windows are validated together by production preflight. Freshness covers both
+point publication time and the source backup's bound completion time, so a new
+wrapper around stale data cannot report healthy.
+
+Each recovery point contains only a restored database, the exact verified
+deployment manifest, and a canonical integrity manifest. SHA-256 bindings cover
+the database, source backup, deployment manifest, release tag, and source
+commit. Publication is directory-atomic, the latest health pointer is atomic,
+retention removes only fully verified recognized points, and links, public
+permissions, hard links, unknown files, corruption, revision drift, or a
+mismatched signed release fail closed. The recovery command requires the
+original checksum and signed attestation and never overwrites an existing
+database. Backup names now include microseconds to prevent concurrent
+deployment and sidecar backups from colliding while legacy names remain valid.
+
+---
+
 # GRAM Scope — v0.69.0 SAFE FIRST DEPLOYMENT
 
 v0.69.0 adds a dedicated fail-closed path for the first production deployment.

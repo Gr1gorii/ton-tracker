@@ -36,6 +36,9 @@ def _environment(tmp_path) -> dict[str, str]:
     alertmanager_data = tmp_path / "alertmanager-data"
     alertmanager_data.mkdir(mode=0o700, exist_ok=True)
     alertmanager_data.chmod(0o700)
+    recovery_points = tmp_path / "external-recovery"
+    recovery_points.mkdir(mode=0o700, exist_ok=True)
+    recovery_points.chmod(0o700)
     return {
         "PUBLIC_APP_URL": "https://gram.example",
         "TONCONNECT_EXPECTED_DOMAIN": "gram.example",
@@ -60,6 +63,11 @@ def _environment(tmp_path) -> dict[str, str]:
         "RECOVERY_INTERVAL_SECONDS": "604800",
         "RECOVERY_RETRY_SECONDS": "300",
         "RECOVERY_HEALTH_MAX_AGE_SECONDS": "691200",
+        "RECOVERY_POINT_RETENTION": "14",
+        "RECOVERY_POINT_INTERVAL_SECONDS": "86400",
+        "RECOVERY_POINT_RETRY_SECONDS": "300",
+        "RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS": "172800",
+        "DISASTER_RECOVERY_DIRECTORY": str(recovery_points),
         "DEPLOYMENT_STATE_DIRECTORY": str(tmp_path / "deployment-state"),
         "DEPLOYMENT_STATE_UID": "1000",
         "DEPLOYMENT_STATE_GID": "1000",
@@ -131,6 +139,41 @@ def test_production_environment_requires_safe_deployment_monitor_identity(tmp_pa
     assert validate_environment(environment) == [
         "DEPLOYMENT_STATE_DIRECTORY must be an absolute host path",
         "DEPLOYMENT_STATE_UID must be a canonical numeric host identifier",
+    ]
+
+
+def test_production_environment_requires_private_distinct_recovery_points(tmp_path):
+    environment = _environment(tmp_path)
+    recovery_points = tmp_path / "external-recovery"
+    recovery_points.chmod(0o755)
+    environment["RECOVERY_POINT_RETENTION"] = "1"
+    assert validate_environment(environment) == [
+        "RECOVERY_POINT_RETENTION is outside the supported range",
+        "DISASTER_RECOVERY_DIRECTORY is missing or unsafe",
+    ]
+
+    recovery_points.chmod(0o700)
+    environment = _environment(tmp_path)
+    environment["DISASTER_RECOVERY_DIRECTORY"] = environment[
+        "ALERTMANAGER_DATA_DIRECTORY"
+    ]
+    assert validate_environment(environment) == [
+        "DISASTER_RECOVERY_DIRECTORY must differ from ALERTMANAGER_DATA_DIRECTORY"
+    ]
+
+    environment = _environment(tmp_path)
+    environment["DISASTER_RECOVERY_DIRECTORY"] = "relative/recovery"
+    assert validate_environment(environment) == [
+        "DISASTER_RECOVERY_DIRECTORY must be an absolute private path"
+    ]
+
+    environment = _environment(tmp_path)
+    environment["RECOVERY_POINT_INTERVAL_SECONDS"] = "3600"
+    environment["RECOVERY_POINT_RETRY_SECONDS"] = "3600"
+    environment["RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS"] = "3600"
+    assert validate_environment(environment) == [
+        "RECOVERY_POINT_RETRY_SECONDS must be shorter than the recovery point interval",
+        "RECOVERY_POINT_HEALTH_MAX_AGE_SECONDS must cover the interval and retry window",
     ]
 
 
