@@ -52,6 +52,7 @@ def test_docker_context_excludes_local_state_and_credentials():
 def test_dockerfiles_copy_only_required_application_trees():
     backend = (ROOT / "backend/Dockerfile").read_text(encoding="utf-8")
     frontend = (ROOT / "frontend/Dockerfile").read_text(encoding="utf-8")
+    nginx = (ROOT / "frontend/nginx.conf").read_text(encoding="utf-8")
     assert "COPY . " not in backend
     assert "COPY . " not in frontend
     assert "COPY backend/ /app/backend/" in backend
@@ -70,6 +71,10 @@ def test_dockerfiles_copy_only_required_application_trees():
         "pip install --no-cache-dir --require-hashes -r requirements.runtime.lock"
         in backend
     )
+    assert '"--no-proxy-headers"' in backend
+    assert "--forwarded-allow-ips" not in backend
+    assert "X-Forwarded-For $remote_addr" in nginx
+    assert "$proxy_add_x_forwarded_for" not in nginx
 
 
 def test_backend_dependency_lock_is_complete_and_used_by_ci():
@@ -204,7 +209,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.70.0" in commands
+    assert "--tag v0.71.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     assert "python ops/inspect_deployment_state.py" in commands
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands

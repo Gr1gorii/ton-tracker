@@ -56,6 +56,10 @@ from models import (
 from schemas import WalletIngestionPreviewRequest
 
 
+class WalletIngestionScopeMismatch(ValueError):
+    """Raised before persistence when a requested product scope would drift."""
+
+
 def build_wallet_ingestion_preview(
     payload: WalletIngestionPreviewRequest,
     settings=None,
@@ -83,14 +87,21 @@ def build_wallet_ingestion_preview(
     }
 
 
-def persist_mock_wallet_ingestion(
+def build_wallet_ingestion_run(
     payload: WalletIngestionPreviewRequest,
-    session: Session,
     settings=None,
     *,
     now: datetime | None = None,
-) -> dict[str, Any]:
-    """Persist one adapter-backed mock wallet ingestion run and return it."""
+    expected_data_mode: str | None = None,
+    expected_network: str | None = None,
+    expected_canonical_wallet_key: str | None = None,
+) -> WalletIngestionRun:
+    """Build one validated adapter-backed run without publishing it.
+
+    The caller owns the transaction. Expected case scope is checked before a
+    model can be added to the session, so a mock fallback or wallet/network
+    mismatch cannot be published under a Live Wallet Case.
+    """
     settings = settings or get_settings()
     start, end = _validate_window(payload)
     bounds = _resolve_acquisition_bounds(payload, now=now)
@@ -98,8 +109,23 @@ def persist_mock_wallet_ingestion(
         payload.wallet_address,
         settings,
     )
+    if expected_network is not None and wallet_identity.network != expected_network:
+        raise WalletIngestionScopeMismatch(
+            "Wallet identity network does not match the Wallet Case."
+        )
+    if (
+        expected_canonical_wallet_key is not None
+        and wallet_identity.canonical_address != expected_canonical_wallet_key
+    ):
+        raise WalletIngestionScopeMismatch(
+            "Wallet identity does not match the Wallet Case."
+        )
     adapter = build_wallet_activity_adapter(settings)
     result = adapter.ingest(_adapter_request(payload, settings, bounds))
+    if expected_data_mode is not None and result.data_mode != expected_data_mode:
+        raise WalletIngestionScopeMismatch(
+            "Configured wallet activity adapter does not match the Wallet Case data environment."
+        )
 
     run = WalletIngestionRun(
         wallet_address=payload.wallet_address,
@@ -152,11 +178,33 @@ def persist_mock_wallet_ingestion(
         _acquisition_stream_models(result.acquisition_streams)
     )
 
+    return run
+
+
+def persist_wallet_ingestion(
+    payload: WalletIngestionPreviewRequest,
+    session: Session,
+    settings=None,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Persist one adapter-backed wallet ingestion run and return it."""
+    run = build_wallet_ingestion_run(
+        payload,
+        settings,
+        now=now,
+    )
+
     session.add(run)
     session.commit()
     session.refresh(run)
 
     return wallet_ingestion_run_to_response(run)
+
+
+# Compatibility name retained for existing imports and callers. The function
+# has supported both mock and guarded live adapters since v0.12.
+persist_mock_wallet_ingestion = persist_wallet_ingestion
 
 
 def get_wallet_ingestion_run(run_id: int, session: Session) -> dict[str, Any] | None:

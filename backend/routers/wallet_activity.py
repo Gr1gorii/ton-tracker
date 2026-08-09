@@ -51,7 +51,7 @@ from services.wallet_activity_ingestion import (
     build_wallet_ingestion_preview,
     get_wallet_ingestion_run,
     list_wallet_ingestion_runs,
-    persist_mock_wallet_ingestion,
+    persist_wallet_ingestion,
 )
 from services.wallet_trace_evidence import (
     WalletTraceEvidenceIneligible,
@@ -278,7 +278,7 @@ def run_wallet_ingestion(
 ) -> dict:
     """Persist one deterministic mock-normalized wallet ingestion run."""
     try:
-        return persist_mock_wallet_ingestion(payload, session)
+        return persist_wallet_ingestion(payload, session)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

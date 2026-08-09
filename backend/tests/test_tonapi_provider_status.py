@@ -45,6 +45,9 @@ def test_providers_status_endpoint_includes_tonapi(monkeypatch):
     body = response.json()
     assert set(body) == {
         "data_mode",
+        "data_environment",
+        "ton_network",
+        "wallet_cases_available",
         "geckoterminal",
         "ton_provider",
         "bitquery",

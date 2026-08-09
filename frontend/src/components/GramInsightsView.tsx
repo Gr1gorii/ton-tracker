@@ -188,5 +188,5 @@ function humanizeCode(value: string): string {
 }
 
 function brandText(value: string): string {
-  return value.replace(/\bTON\b/g, "GRAM");
+  return value;
 }

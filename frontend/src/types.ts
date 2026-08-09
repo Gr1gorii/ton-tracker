@@ -109,6 +109,9 @@ export interface ProviderStatusInfo {
 
 export interface ProvidersStatus {
   data_mode: string;
+  data_environment: "demo" | "live";
+  ton_network: "ton-mainnet" | "ton-testnet";
+  wallet_cases_available: boolean;
   geckoterminal: ProviderStatusInfo;
   ton_provider: ProviderStatusInfo;
   bitquery: ProviderStatusInfo;

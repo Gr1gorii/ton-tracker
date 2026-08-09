@@ -13,6 +13,7 @@ import {
   FileText,
   Gauge,
   HardDrives,
+  House,
   MagnifyingGlass,
   Moon,
   Planet,
@@ -25,6 +26,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import {
+  createWalletCase,
   getWalletCanonicalReportAvailability,
   getProvidersStatus,
   walletCanonicalReportCsvExportUrl,
@@ -33,11 +35,13 @@ import {
   walletRunExportUrl,
 } from "./api";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
+import { caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
+import GramCaseSummary from "./components/GramCaseSummary";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.70.0";
+const RELEASE_LABEL = "v0.71.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
@@ -100,6 +104,7 @@ function providerItems(providers: ProvidersStatus | null) {
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location.pathname));
   const [entered, setEntered] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [workspaceAccount, setWorkspaceAccount] = useState("");
@@ -113,15 +118,54 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    getProvidersStatus()
-      .then(setProviders)
-      .catch((error) => {
-        setProvidersError(error instanceof Error ? error.message : "Provider status unavailable");
-      });
+    function restoreRoute() {
+      setRoute(parseAppRoute(window.location.pathname));
+      window.scrollTo({ top: 0, behavior: "auto" });
+    }
+    window.addEventListener("popstate", restoreRoute);
+    return () => window.removeEventListener("popstate", restoreRoute);
   }, []);
+
+  useEffect(() => {
+    document.title = route.kind === "case-summary"
+      ? "Wallet Case Summary · GRAM Scope"
+      : route.kind === "not-found"
+        ? "Page not found · GRAM Scope"
+        : entered
+          ? "Advanced diagnostics · GRAM Scope"
+          : "GRAM Scope · TON Wallet Evidence";
+    const focusTimer = window.setTimeout(() => {
+      document.querySelector<HTMLElement>("[data-route-focus]")?.focus();
+    }, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, [entered, route]);
+
+  const loadProviders = useCallback(async (signal?: AbortSignal) => {
+    setProviders(null);
+    setProvidersError(null);
+    try {
+      const result = await getProvidersStatus(signal);
+      if (!signal?.aborted) setProviders(result);
+    } catch (error) {
+      if (signal?.aborted) return;
+      setProvidersError(error instanceof Error ? error.message : "Provider status unavailable");
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadProviders(controller.signal);
+    return () => controller.abort();
+  }, [loadProviders]);
 
   const handleRunChange = useCallback((result: WalletIngestionRunResponse | null) => {
     setActiveRun(result);
+  }, []);
+
+  const setAppRoute = useCallback((nextRoute: AppRoute, path: string) => {
+    window.history.pushState({}, "", path);
+    setRoute(nextRoute);
+    window.scrollTo({ top: 0, behavior: "auto" });
   }, []);
 
   function enterWorkspace(address: string) {
@@ -129,6 +173,33 @@ export default function App() {
     setEntered(true);
     setActiveSection("overview");
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function openWalletCase(address: string) {
+    if (!providers) {
+      throw new Error(providersError ?? "Runtime configuration is still loading.");
+    }
+    if (!providers.wallet_cases_available) {
+      throw new Error("Wallet Cases are available only in the local workspace until authenticated owner scopes are implemented.");
+    }
+    const result = await createWalletCase({
+      wallet_address: address.trim(),
+      network: providers.ton_network,
+      data_environment: providers.data_environment,
+    });
+    const path = caseSummaryPath(result.case.public_id);
+    setAppRoute({ kind: "case-summary", caseId: result.case.public_id }, path);
+  }
+
+  function goHome() {
+    setEntered(false);
+    setAppRoute({ kind: "home" }, "/");
+  }
+
+  function openLegacyActivity(address: string) {
+    enterWorkspace(address);
+    setActiveSection("activity");
+    setAppRoute({ kind: "home" }, "/");
   }
 
   function navigate(section: SectionId) {
@@ -140,12 +211,50 @@ export default function App() {
     navigate("activity");
   }
 
+  if (route.kind === "case-summary") {
+    return (
+      <div className="case-route-shell">
+        <header className="case-route-header">
+          <Brand compact />
+          <div className="case-route-header-actions">
+            <button className="case-route-home" type="button" aria-label="Return to home" onClick={goHome}>
+              <House size={17} /><span>Home</span>
+            </button>
+            <ThemeToggle theme={theme} onChange={setTheme} />
+          </div>
+        </header>
+        <main className="case-route-main" data-route-focus tabIndex={-1} aria-label="Wallet Case summary">
+          <GramCaseSummary caseId={route.caseId} onOpenLegacyActivity={openLegacyActivity} />
+        </main>
+      </div>
+    );
+  }
+
+  if (route.kind === "not-found") {
+    return (
+      <div className="case-route-shell">
+        <header className="case-route-header"><Brand compact /><ThemeToggle theme={theme} onChange={setTheme} /></header>
+        <main className="case-route-main" data-route-focus tabIndex={-1} aria-labelledby="not-found-title">
+          <section className="case-state-panel is-error" role="alert">
+            <WarningCircle size={27} weight="fill" />
+            <div><h1 id="not-found-title">Page not found</h1><p>This URL is not a valid GRAM Scope workspace route.</p></div>
+            <button type="button" className="button-secondary" onClick={goHome}>Return home <ArrowRight size={17} /></button>
+          </section>
+        </main>
+      </div>
+    );
+  }
+
   if (!entered) {
     return (
       <Landing
         theme={theme}
         onThemeChange={setTheme}
-        onEnter={enterWorkspace}
+        providers={providers}
+        providersError={providersError}
+        onRetryProviders={() => void loadProviders()}
+        onOpenCase={openWalletCase}
+        onOpenAdvanced={() => enterWorkspace("")}
         atmosphere={atmosphere}
       />
     );
@@ -183,7 +292,7 @@ export default function App() {
         <div className="gram-sidebar-foot">
           <div className={`mode-indicator mode-${dataMode}`}>
             <span aria-hidden="true" />
-            {dataMode === "real" ? "Live provider mode" : dataMode === "mock" ? "Safe preview mode" : "Checking data mode"}
+            {dataMode === "real" ? "Live runtime configuration" : dataMode === "mock" ? "Demo runtime" : "Checking runtime"}
           </div>
           <small>{RELEASE_LABEL} · TON blockchain</small>
         </div>
@@ -196,7 +305,7 @@ export default function App() {
           <div className="topbar-actions">
             <span className="provider-pill">
               <span className={availableProviders > 0 ? "status-dot is-live" : "status-dot"} />
-              {providers ? `${availableProviders}/${providersList.length} sources` : "Checking sources"}
+              {providers ? `${availableProviders}/${providersList.length} sources configured` : "Checking configuration"}
             </span>
             <ThemeToggle theme={theme} onChange={setTheme} />
           </div>
@@ -219,14 +328,14 @@ export default function App() {
           })}
         </nav>
 
-        <main className="gram-page">
+        <main className="gram-page" data-route-focus tabIndex={-1} aria-label="Advanced wallet diagnostics">
           {dataMode !== "real" && (
             <div className="context-banner" role="status">
               <WarningCircle size={19} weight="fill" />
               <span>
                 {dataMode === "mock"
-                  ? "Production data is disabled. The interface remains fail-closed until real providers are enabled."
-                  : "Provider status is still loading. Evidence-dependent actions stay unavailable until verified."}
+                  ? "Demo runtime is active. Fixture evidence stays visibly separate from live on-chain observations."
+                  : "Runtime configuration is still loading. Evidence-dependent actions stay unavailable until it is known."}
               </span>
             </div>
           )}
@@ -307,25 +416,59 @@ export default function App() {
 function Landing({
   theme,
   onThemeChange,
-  onEnter,
+  providers,
+  providersError,
+  onRetryProviders,
+  onOpenCase,
+  onOpenAdvanced,
   atmosphere: background,
 }: {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
-  onEnter: (address: string) => void;
+  providers: ProvidersStatus | null;
+  providersError: string | null;
+  onRetryProviders: () => void;
+  onOpenCase: (address: string) => Promise<void>;
+  onOpenAdvanced: () => void;
   atmosphere: string;
 }) {
   const [address, setAddress] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
     if (!address.trim()) {
       setError("Enter a TON wallet address to start.");
       return;
     }
-    onEnter(address);
+    if (!providers) {
+      setError(providersError ?? "Runtime configuration is still loading. Try again shortly.");
+      return;
+    }
+    if (!providers.wallet_cases_available) {
+      setError("Wallet Cases are local-only until authenticated owner scopes are available.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onOpenCase(address);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Wallet Case could not be opened.");
+    } finally {
+      setSubmitting(false);
+    }
   }
+
+  const runtimeLabel = providers
+    ? !providers.wallet_cases_available
+      ? "Wallet Cases are disabled on hosted access until authentication is available"
+      : providers.data_environment === "live"
+      ? "Live runtime configured — sync rejects demo fallback evidence"
+      : "Demo runtime — cases use deterministic preview evidence"
+    : providersError
+      ? "Runtime configuration unavailable — case creation is disabled"
+      : "Checking runtime configuration before case creation";
 
   return (
     <div className="gram-landing" style={{ "--atmosphere": `url(${background})` } as React.CSSProperties}>
@@ -336,11 +479,21 @@ function Landing({
         <ThemeToggle theme={theme} onChange={onThemeChange} />
       </header>
 
-      <main className="landing-main">
+      <main className="landing-main" data-route-focus tabIndex={-1} aria-labelledby="landing-title">
+        <div className="landing-runtime-row">
+          <div className={`landing-runtime is-${providers?.data_environment ?? "unknown"}`} role="status">
+            <span aria-hidden="true" />{runtimeLabel}
+          </div>
+          {providersError && (
+            <button className="landing-runtime-retry" type="button" onClick={onRetryProviders}>
+              Retry runtime check <ArrowsClockwise size={15} />
+            </button>
+          )}
+        </div>
         <div className="landing-kicker"><Sparkle size={17} weight="fill" /> Evidence, without the noise</div>
-        <h1>See the full story behind every <em>GRAM</em> wallet.</h1>
+        <h1 id="landing-title">See a clearer evidence trail behind every <em>TON</em> wallet.</h1>
         <p className="landing-lead">
-          Follow activity, verify on-chain evidence and turn complex wallet history into a clear, canonical report.
+          Follow bounded activity, verify on-chain evidence and turn complex wallet observations into a clear, evidence-aware report.
         </p>
 
         <form className="landing-search" onSubmit={submit} noValidate>
@@ -354,12 +507,15 @@ function Landing({
             placeholder="Paste a TON wallet address"
             aria-label="TON wallet address"
             aria-describedby={error ? "landing-address-error" : undefined}
+            aria-invalid={error ? true : undefined}
           />
-          <button type="submit">Explore wallet <ArrowRight size={18} weight="bold" /></button>
+          <button type="submit" disabled={submitting || !providers || !providers.wallet_cases_available}>
+            {submitting ? <SpinnerGap className="spin" size={18} /> : <>Explore wallet <ArrowRight size={18} weight="bold" /></>}
+          </button>
         </form>
-        {error && <p className="landing-error" id="landing-address-error">{error}</p>}
-        <button className="browse-link" type="button" onClick={() => onEnter("")}>
-          Open workspace without an address
+        {error && <p className="landing-error" id="landing-address-error" role="alert" aria-atomic="true">{error}</p>}
+        <button className="browse-link" type="button" onClick={onOpenAdvanced}>
+          Open advanced diagnostics without an address
         </button>
 
         <div className="landing-value-grid">
@@ -370,8 +526,8 @@ function Landing({
       </main>
 
       <footer className="landing-footer">
-        <span>GRAM is the native currency</span>
-        <span>TON remains the blockchain</span>
+        <span>GRAM Scope is the product</span>
+        <span>TON is the blockchain and native asset</span>
         <span>{RELEASE_LABEL}</span>
       </footer>
     </div>
@@ -473,8 +629,8 @@ function Overview({
       <div className="metric-grid">
         <Metric icon={<Database size={21} />} label="Records in active run" value={activeRun ? String(totalRecords) : "—"} detail={activeRun ? `Run #${activeRun.run_id}` : "No persisted run loaded"} tone="blue" />
         <Metric icon={<Wallet size={21} />} label="Portfolio snapshot" value={portfolio ? `$${Number(portfolio).toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—"} detail={portfolio ? "Provider-priced assets" : "Available after balance coverage"} tone="coral" />
-        <Metric icon={<HardDrives size={21} />} label="Available sources" value={providerTotal ? `${availableProviders}/${providerTotal}` : "—"} detail={dataMode === "real" ? "Live provider mode" : "Configuration required"} tone="aqua" />
-        <Metric icon={<ShieldCheck size={21} />} label="Evidence state" value={activeRun ? (activeRun.status === "success" ? "Ready" : activeRun.status) : "Not started"} detail={activeRun ? `${activeRun.warnings.length} run warnings` : "Fail-closed by default"} tone="lilac" />
+        <Metric icon={<HardDrives size={21} />} label="Sources by configuration" value={providerTotal ? `${availableProviders}/${providerTotal}` : "—"} detail={dataMode === "real" ? "Live runtime configured" : "Demo runtime configured"} tone="aqua" />
+        <Metric icon={<ShieldCheck size={21} />} label="Evidence state" value={activeRun ? (activeRun.status === "success" ? "Recorded" : activeRun.status) : "Not started"} detail={activeRun ? `${activeRun.warnings.length} run warnings` : "Proof level remains explicit"} tone="lilac" />
       </div>
 
       <Suspense fallback={<div className="charts-loading"><SpinnerGap className="spin" size={24} />Preparing wallet charts…</div>}>
@@ -503,7 +659,7 @@ function GeneralOverview({
   const capabilities = [
     { icon: <ChartLineUp size={24} weight="duotone" />, tone: "blue", title: "Activity map", text: "Transfers, transactions, DEX swaps and balance snapshots stay organized by one selected wallet and time window." },
     { icon: <ShieldCheck size={24} weight="duotone" />, tone: "lilac", title: "Proof center", text: "Provider observations, block inclusion, account state and ownership verification are shown as separate evidence levels." },
-    { icon: <Atom size={24} weight="duotone" />, tone: "aqua", title: "Asset & DEX context", text: "GRAM, jettons and recognized protocols are grouped so users can understand what moved and where." },
+    { icon: <Atom size={24} weight="duotone" />, tone: "aqua", title: "Asset & DEX context", text: "TON, jettons and recognized protocols are grouped so users can understand what moved and where." },
     { icon: <FileText size={24} weight="duotone" />, tone: "coral", title: "Canonical outputs", text: "Ledger exports and reports use the same normalized source instead of rebuilding different answers for every screen." },
   ];
   return (
@@ -535,8 +691,8 @@ function GeneralOverview({
       </div>
 
       <section className="workspace-status-card">
-        <div><span className={`large-status-dot mode-${dataMode}`} /><div><span className="eyebrow">Workspace status</span><h2>{dataMode === "real" ? "Live provider mode is active" : "Safe preview mode is active"}</h2><p>{dataMode === "real" ? "New runs can use configured live sources; proof-dependent outputs still remain explicit." : "You can explore the complete workflow while production-only evidence stays fail-closed."}</p></div></div>
-        <dl><div><dt>Sources online</dt><dd>{providerTotal ? `${availableProviders} of ${providerTotal}` : "Checking"}</dd></div><div><dt>Native currency</dt><dd>GRAM</dd></div><div><dt>Blockchain</dt><dd>TON</dd></div><div><dt>Release</dt><dd>{RELEASE_LABEL}</dd></div></dl>
+        <div><span className={`large-status-dot mode-${dataMode}`} /><div><span className="eyebrow">Workspace status</span><h2>{dataMode === "real" ? "Live runtime is configured" : "Demo runtime is active"}</h2><p>{dataMode === "real" ? "New syncs still validate the acquired evidence and reject demo fallback data." : "You can explore the workflow with deterministic fixture evidence kept visibly separate."}</p></div></div>
+        <dl><div><dt>Configured sources</dt><dd>{providerTotal ? `${availableProviders} of ${providerTotal}` : "Checking"}</dd></div><div><dt>Native asset</dt><dd>TON</dd></div><div><dt>Blockchain</dt><dd>TON</dd></div><div><dt>Release</dt><dd>{RELEASE_LABEL}</dd></div></dl>
       </section>
     </>
   );
@@ -589,27 +745,27 @@ function AssetsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestionR
   if (!activeRun) {
     return (
       <>
-        <PageHeading eyebrow="Assets & protocols" title="Understand what moved — and where" description="Create or open a wallet run first. This section will group native GRAM, jettons and recognized DEX activity without mixing observation with proof." action={<button className="button-primary" type="button" onClick={onOpenActivity}>Open activity <ArrowRight size={18} /></button>} />
+        <PageHeading eyebrow="Assets & protocols" title="Understand what moved — and where" description="Create or open a wallet run first. This section will group native TON, jettons and recognized DEX activity without mixing observation with proof." action={<button className="button-primary" type="button" onClick={onOpenActivity}>Open activity <ArrowRight size={18} /></button>} />
         <section className="clean-empty-state"><span><Atom size={30} weight="duotone" /></span><h2>No wallet activity selected</h2><p>Asset balances and protocol distribution will appear here after a run is loaded.</p></section>
       </>
     );
   }
   const transferAssets = activeRun.activity_summary?.transfers_by_asset ?? [];
   const dexRows = activeRun.activity_summary?.swaps_by_dex ?? [];
-  const nativeBalance = activeRun.balances.find((item) => item.asset === "TON" || item.asset === "GRAM");
-  const jettonBalances = activeRun.balances.filter((item) => item.asset !== "TON" && item.asset !== "GRAM");
+  const nativeBalance = activeRun.balances.find((item) => item.asset === "TON");
+  const jettonBalances = activeRun.balances.filter((item) => item.asset !== "TON");
   return (
     <>
       <PageHeading eyebrow="Assets & protocols" title="Understand what moved — and where" description="Native currency, jettons and recognized DEX activity from the active source-labelled run." />
       <div className="asset-metrics">
-        <Metric icon={<Wallet size={21} />} label="Native balance" value={nativeBalance?.balance ? formatTokenAmount(nativeBalance.balance) : "—"} detail={nativeBalance ? `GRAM · Snapshot from ${nativeBalance.provider}` : "No native balance snapshot"} tone="blue" />
+        <Metric icon={<Wallet size={21} />} label="Native balance" value={nativeBalance?.balance ? formatTokenAmount(nativeBalance.balance) : "—"} detail={nativeBalance ? `TON · Snapshot from ${nativeBalance.provider}` : "No native balance snapshot"} tone="blue" />
         <Metric icon={<Coins size={21} />} label="Jetton snapshots" value={String(jettonBalances.length)} detail="Distinct returned balance rows" tone="coral" />
         <Metric icon={<Swap size={21} />} label="DEX swaps" value={String(activeRun.swaps.length)} detail={`${dexRows.length} recognized labels`} tone="aqua" />
       </div>
       <div className="asset-grid">
         <article className="asset-table-card">
           <header><div><h2>Asset movement</h2><p>Counts and net amounts reported for this run.</p></div><ArrowsClockwise size={21} /></header>
-          {transferAssets.length ? <div className="asset-list">{transferAssets.map((asset) => <div key={asset.asset}><span className="asset-symbol">{asset.asset === "TON" ? "G" : asset.asset.slice(0, 2).toUpperCase()}</span><div><strong>{asset.asset === "TON" ? "GRAM" : asset.asset}</strong><small>{asset.in_count} in · {asset.out_count} out</small></div><span><small>Net amount</small><strong>{asset.net_amount}</strong></span></div>)}</div> : <div className="mini-empty">No transfer assets in this run.</div>}
+          {transferAssets.length ? <div className="asset-list">{transferAssets.map((asset) => <div key={asset.asset}><span className="asset-symbol">{asset.asset === "TON" ? "T" : asset.asset.slice(0, 2).toUpperCase()}</span><div><strong>{asset.asset}</strong><small>{asset.in_count} in · {asset.out_count} out</small></div><span><small>Net amount</small><strong>{asset.net_amount}</strong></span></div>)}</div> : <div className="mini-empty">No transfer assets in this run.</div>}
         </article>
         <article className="asset-table-card">
           <header><div><h2>DEX distribution</h2><p>Provider-recognized protocol labels.</p></div><Atom size={21} /></header>
@@ -618,7 +774,7 @@ function AssetsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestionR
       </div>
       <article className="asset-table-card balance-card">
         <header><div><h2>Balance snapshots</h2><p>Source-labelled snapshots; they are not historical cost basis.</p></div><Database size={21} /></header>
-        {activeRun.balances.length ? <div className="clean-table-wrap"><table className="clean-table"><thead><tr><th>Asset</th><th>Balance</th><th>USD value</th><th>Provider</th><th>Captured</th></tr></thead><tbody>{activeRun.balances.map((item, index) => <tr key={`${item.asset}-${index}`}><td><strong>{item.asset === "TON" ? "GRAM" : item.asset}</strong></td><td>{formatTokenAmount(item.balance)}</td><td>{item.balance_usd ? `$${formatTokenAmount(item.balance_usd)}` : "—"}</td><td>{item.provider}</td><td>{item.snapshot_at ? new Date(item.snapshot_at).toLocaleString() : "—"}</td></tr>)}</tbody></table></div> : <div className="mini-empty">No balance snapshots in this run.</div>}
+        {activeRun.balances.length ? <div className="clean-table-wrap"><table className="clean-table"><thead><tr><th>Asset</th><th>Balance</th><th>USD value</th><th>Provider</th><th>Captured</th></tr></thead><tbody>{activeRun.balances.map((item, index) => <tr key={`${item.asset}-${index}`}><td><strong>{item.asset}</strong></td><td>{formatTokenAmount(item.balance)}</td><td>{item.balance_usd ? `$${formatTokenAmount(item.balance_usd)}` : "—"}</td><td>{item.provider}</td><td>{item.snapshot_at ? new Date(item.snapshot_at).toLocaleString() : "—"}</td></tr>)}</tbody></table></div> : <div className="mini-empty">No balance snapshots in this run.</div>}
       </article>
     </>
   );
@@ -628,16 +784,16 @@ function SourcesView({ providers, error }: { providers: ProvidersStatus | null; 
   const items = providerItems(providers);
   return (
     <>
-      <PageHeading eyebrow="Data sources" title="Know exactly what the system can see" description="Every provider keeps its own availability and limitation message, so a missing source never looks like complete coverage." />
+      <PageHeading eyebrow="Data sources" title="Know what the runtime is configured to use" description="This screen reports configuration only. Actual provider health and evidence coverage are established by each bounded sync." />
       {error && <div className="activity-error" role="alert"><WarningCircle size={18} weight="fill" />{error}</div>}
       <div className="source-grid">
         {items.length ? items.map(([name, provider]) => (
           <article className="source-card" key={name}>
-            <header><span className={provider.available ? "source-icon is-live" : "source-icon"}><HardDrives size={21} /></span><span className={provider.available ? "source-state is-live" : "source-state"}>{provider.available ? "Available" : "Unavailable"}</span></header>
+            <header><span className={provider.available ? "source-icon is-live" : "source-icon"}><HardDrives size={21} /></span><span className={provider.available ? "source-state is-live" : "source-state"}>{provider.available ? "Available by configuration" : "Unavailable by configuration"}</span></header>
             <h2>{name}</h2><p>{provider.message}</p>
             <footer><span className={provider.configured ? "configured" : ""}>{provider.configured ? "Configured" : "Not configured"}</span></footer>
           </article>
-        )) : <div className="clean-empty-state source-empty"><SpinnerGap className="spin" size={28} /><h2>Checking providers</h2><p>Source health will appear as soon as the backend responds.</p></div>}
+        )) : <div className="clean-empty-state source-empty"><SpinnerGap className="spin" size={28} /><h2>Checking configuration</h2><p>Configured source capabilities will appear as soon as the backend responds.</p></div>}
       </div>
       <section className="source-policy-card"><ShieldCheck size={27} weight="duotone" /><div><span className="eyebrow">Evidence policy</span><h2>Unavailable means unavailable.</h2><p>GRAM Scope does not fill missing live data with invented rows. Preview data, provider observations and cryptographic proof remain visibly distinct throughout the product.</p></div></section>
     </>

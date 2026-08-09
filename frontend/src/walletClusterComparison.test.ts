@@ -52,7 +52,7 @@ describe("validateWalletClusterComparison", () => {
     expect(validateWalletClusterComparison(value, [1, 2])).toEqual(value);
   });
 
-  it("accepts a canonical real comparison with signed net GRAM flow", () => {
+  it("accepts a canonical real comparison with signed net TON flow", () => {
     const value = response();
     value.signal_basis = "canonical_native_activity_ledger";
     value.wallets.forEach((row, index) => {

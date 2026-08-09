@@ -74,6 +74,9 @@ class ProviderStatus(BaseModel):
 
 class ProvidersStatusResponse(BaseModel):
     data_mode: str
+    data_environment: Literal["demo", "live"]
+    ton_network: Literal["ton-mainnet", "ton-testnet"]
+    wallet_cases_available: bool
     geckoterminal: ProviderStatus
     ton_provider: ProviderStatus
     bitquery: ProviderStatus

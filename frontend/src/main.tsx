@@ -5,6 +5,7 @@ import { TonConnectUIProvider } from "@tonconnect/ui-react";
 import App from "./App";
 import "./gram-design.css";
 import "./gram-workspace.css";
+import "./case-summary.css";
 
 const tonConnectManifestUrl =
   (import.meta.env.VITE_TONCONNECT_MANIFEST_URL as string | undefined) ??
