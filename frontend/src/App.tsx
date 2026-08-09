@@ -26,7 +26,6 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import {
-  createWalletCase,
   getWalletCanonicalReportAvailability,
   getProvidersStatus,
   walletCanonicalReportCsvExportUrl,
@@ -34,6 +33,7 @@ import {
   walletRunExportCsvUrl,
   walletRunExportUrl,
 } from "./api";
+import { createWalletCase } from "./walletCaseApi";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
 import { caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
@@ -41,7 +41,7 @@ import GramCaseSummary from "./components/GramCaseSummary";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.71.0";
+const RELEASE_LABEL = "v0.72.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
@@ -196,12 +196,6 @@ export default function App() {
     setAppRoute({ kind: "home" }, "/");
   }
 
-  function openLegacyActivity(address: string) {
-    enterWorkspace(address);
-    setActiveSection("activity");
-    setAppRoute({ kind: "home" }, "/");
-  }
-
   function navigate(section: SectionId) {
     setActiveSection(section);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -224,7 +218,7 @@ export default function App() {
           </div>
         </header>
         <main className="case-route-main" data-route-focus tabIndex={-1} aria-label="Wallet Case summary">
-          <GramCaseSummary caseId={route.caseId} onOpenLegacyActivity={openLegacyActivity} />
+          <GramCaseSummary key={route.caseId} caseId={route.caseId} />
         </main>
       </div>
     );

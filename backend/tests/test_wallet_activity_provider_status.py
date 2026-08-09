@@ -19,7 +19,8 @@ def test_providers_status_includes_wallet_activity_default(monkeypatch):
     body = response.json()
     assert body["data_environment"] == "demo"
     assert body["ton_network"] == "ton-mainnet"
-    assert body["wallet_cases_available"] is True
+    # A TestClient used without its lifespan has no durable sync consumer.
+    assert body["wallet_cases_available"] is False
     assert "wallet_activity" in body
     assert body["wallet_activity"]["configured"] is True
     assert body["wallet_activity"]["available"] is True

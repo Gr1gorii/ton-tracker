@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowClockwise,
-  ArrowRight,
   CalendarBlank,
   ChartLineUp,
   Coins,
@@ -11,20 +10,21 @@ import {
   WarningCircle,
   Wallet,
 } from "@phosphor-icons/react";
-import { createWalletCaseSync, getWalletCase } from "../api";
+
+import { getWalletCase } from "../walletCaseApi";
 import {
   walletCaseEnvironmentLabel,
   type WalletCase,
   type WalletCaseCoverageState,
+  type WalletCaseSyncRequest,
 } from "../walletCase";
+import { useWalletCaseSyncJob } from "../useWalletCaseSyncJob";
+import CaseSyncPanel from "./CaseSyncPanel";
 
-const DEFAULT_SURFACES = [
-  "transfers",
-  "transactions",
-  "swaps",
-  "balances",
-  "jettons",
-] as const;
+const DEFAULT_SYNC_REQUEST: WalletCaseSyncRequest = {
+  time_window: "24h",
+  surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
+};
 
 function shortAddress(value: string): string {
   if (value.length <= 24) return value;
@@ -56,55 +56,78 @@ function coverageLabel(state: WalletCaseCoverageState | undefined): string {
   }
 }
 
-export default function GramCaseSummary({
-  caseId,
-  onOpenLegacyActivity,
-}: {
-  caseId: string;
-  onOpenLegacyActivity?: (walletAddress: string) => void;
-}) {
+function snapshotStateLabel(state: string | undefined): string {
+  if (state === "succeeded") return "Available";
+  if (state === "partial") return "Available with limitations";
+  return "Not available";
+}
+
+export default function GramCaseSummary({ caseId }: { caseId: string }) {
   const [walletCase, setWalletCase] = useState<WalletCase | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  const requestGenerationRef = useRef(0);
+  const requestControllersRef = useRef(new Set<AbortController>());
 
-  const load = useCallback(async (signal?: AbortSignal) => {
-    setLoading(true);
-    setError(null);
+  const load = useCallback(async (background = false) => {
+    requestControllersRef.current.forEach((controller) => controller.abort());
+    requestControllersRef.current.clear();
+    const controller = new AbortController();
+    requestControllersRef.current.add(controller);
+    const generation = ++requestGenerationRef.current;
+    if (background) {
+      setRefreshing(true);
+      setRefreshError(null);
+    } else {
+      setLoading(true);
+      setRefreshError(null);
+    }
+    if (!background) setError(null);
     try {
-      const result = await getWalletCase(caseId, signal);
+      const result = await getWalletCase(caseId, controller.signal);
+      if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
       setWalletCase(result);
+      setError(null);
     } catch (caught) {
-      if (signal?.aborted) return;
-      setError(caught instanceof Error ? caught.message : "Wallet Case is unavailable");
+      if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
+      if (background) {
+        setRefreshError(
+          caught instanceof Error
+            ? caught.message
+            : "The updated Wallet Case snapshot is unavailable.",
+        );
+      } else {
+        setError(caught instanceof Error ? caught.message : "Wallet Case is unavailable");
+      }
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      requestControllersRef.current.delete(controller);
+      if (!controller.signal.aborted && generation === requestGenerationRef.current) {
+        if (background) setRefreshing(false);
+        else setLoading(false);
+      }
     }
   }, [caseId]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void load(controller.signal);
-    return () => controller.abort();
+    void load();
+    return () => {
+      requestGenerationRef.current += 1;
+      requestControllersRef.current.forEach((controller) => controller.abort());
+      requestControllersRef.current.clear();
+    };
   }, [load]);
 
-  async function syncLastDay() {
-    if (!walletCase || syncing) return;
-    setSyncing(true);
-    setSyncError(null);
-    try {
-      await createWalletCaseSync(walletCase.public_id, {
-        time_window: "24h",
-        surfaces: [...DEFAULT_SURFACES],
-      });
-      await load();
-    } catch (caught) {
-      setSyncError(caught instanceof Error ? caught.message : "Wallet Case sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  }
+  const refreshAfterTerminal = useCallback(async () => {
+    await load(true);
+  }, [load]);
+
+  const syncController = useWalletCaseSyncJob({
+    caseId,
+    initialSync: walletCase?.latest_sync_attempt ?? null,
+    onTerminal: refreshAfterTerminal,
+  });
 
   if (loading) {
     return (
@@ -127,12 +150,17 @@ export default function GramCaseSummary({
     );
   }
 
-  const latest = walletCase.latest_sync;
-  const counts = walletCase.summary.activity_counts;
-  const activityTotal = counts.transfers + counts.transactions + counts.swaps;
+  const snapshot = walletCase.current_snapshot;
+  const result = snapshot?.result ?? null;
+  const summary = result?.summary ?? null;
+  const counts = summary?.activity_counts ?? null;
+  const activityTotal = counts
+    ? counts.transfers + counts.transactions + counts.swaps
+    : null;
   const environmentLabel = walletCaseEnvironmentLabel(walletCase.data_environment);
-  const coverage = latest?.coverage;
-  const summaryUnavailable = walletCase.limitations.some(
+  const coverage = result?.coverage;
+  const limitations = result?.limitations ?? walletCase.limitations;
+  const summaryUnavailable = result === null || limitations.some(
     (item) => item.code === "summary_unavailable",
   );
 
@@ -156,43 +184,56 @@ export default function GramCaseSummary({
           </p>
           <code title={walletCase.canonical_wallet_key}>{walletCase.canonical_wallet_key}</code>
         </div>
-        <button className="button-primary case-sync-button" type="button" onClick={syncLastDay} disabled={syncing}>
-          {syncing ? <SpinnerGap className="spin" size={18} /> : <ArrowClockwise size={18} />}
-          {syncing ? "Syncing bounded data…" : "Sync last 24 hours"}
-        </button>
+        {refreshing && (
+          <span className="case-refreshing" role="status">
+            <SpinnerGap className="spin" size={17} /> Publishing the new snapshot…
+          </span>
+        )}
       </header>
 
-      {syncError && <div className="case-inline-error" role="alert"><WarningCircle size={18} weight="fill" />{syncError}</div>}
+      <CaseSyncPanel
+        controller={syncController}
+        hasSnapshot={snapshot !== null}
+        defaultRequest={DEFAULT_SYNC_REQUEST}
+      />
+
+      {refreshError && (
+        <div className="case-inline-error" role="alert">
+          <WarningCircle size={18} weight="fill" />
+          <span>Sync finished, but the updated case could not be loaded: {refreshError}</span>
+          <button type="button" onClick={() => void load(true)}>Try again</button>
+        </div>
+      )}
 
       <section className="case-trust-strip" aria-label="Case trust boundaries">
         <div><Database size={19} /><span><small>Environment</small><strong>{environmentLabel}</strong></span></div>
         <div><CalendarBlank size={19} /><span><small>Coverage</small><strong>{coverageLabel(coverage?.state)}</strong></span></div>
         <div><ShieldCheck size={19} /><span><small>Full history</small><strong>Not proven</strong></span></div>
-        <div><ArrowClockwise size={19} /><span><small>Last sync</small><strong>{formatDate(latest?.completed_at)}</strong></span></div>
+        <div><ArrowClockwise size={19} /><span><small>Published snapshot</small><strong>{formatDate(snapshot?.completed_at)}</strong></span></div>
       </section>
 
       <section className="case-metric-grid" aria-label="Wallet Case summary metrics">
-        <CaseMetric icon={<ChartLineUp size={22} />} label="Returned activity rows" value={summaryUnavailable ? "Not available" : String(activityTotal)} detail={summaryUnavailable ? "This sync predates compact summary capture" : `${counts.transactions} transactions · ${counts.swaps} provider-derived swaps; surfaces may overlap`} tone="blue" />
-        <CaseMetric icon={<Coins size={22} />} label="Portfolio snapshot" value={summaryUnavailable ? "Not available" : formatUsd(walletCase.summary.portfolio_snapshot.total_balance_usd)} detail={summaryUnavailable ? "No portfolio aggregate was captured for this sync" : `${walletCase.summary.portfolio_snapshot.priced_assets} priced · ${walletCase.summary.portfolio_snapshot.unpriced_assets} unpriced assets`} tone="coral" />
-        <CaseMetric icon={<WarningCircle size={22} />} label="Data warnings" value={summaryUnavailable ? "Not available" : String(walletCase.summary.warning_count)} detail={summaryUnavailable ? "Warning totals are unavailable for this sync" : `${walletCase.summary.failed_transaction_count} failed transactions in the selected evidence`} tone="orange" />
-        <CaseMetric icon={<Wallet size={22} />} label="Balance rows" value={summaryUnavailable ? "Not available" : String(counts.balances)} detail={summaryUnavailable ? "Balance-row totals were not captured" : "Point-in-time observations, not historical cost basis"} tone="aqua" />
+        <CaseMetric icon={<ChartLineUp size={22} />} label="Returned activity rows" value={summaryUnavailable || activityTotal === null ? "Not available" : String(activityTotal)} detail={summaryUnavailable || !counts ? "No usable snapshot has published this metric" : `${counts.transactions} transactions · ${counts.swaps} provider-derived swaps; surfaces may overlap`} tone="blue" />
+        <CaseMetric icon={<Coins size={22} />} label="Portfolio snapshot" value={summaryUnavailable || !summary ? "Not available" : formatUsd(summary.portfolio_snapshot.total_balance_usd)} detail={summaryUnavailable || !summary ? "No usable portfolio snapshot has been published" : `${summary.portfolio_snapshot.priced_assets} priced · ${summary.portfolio_snapshot.unpriced_assets} unpriced assets`} tone="coral" />
+        <CaseMetric icon={<WarningCircle size={22} />} label="Data warnings" value={summaryUnavailable || !summary ? "Not available" : String(summary.warning_count)} detail={summaryUnavailable || !summary ? "Warning totals are not available without a usable snapshot" : `${summary.failed_transaction_count} failed transactions in the selected evidence`} tone="orange" />
+        <CaseMetric icon={<Wallet size={22} />} label="Balance rows" value={summaryUnavailable || !counts ? "Not available" : String(counts.balances)} detail={summaryUnavailable || !counts ? "Balance-row totals have not been published" : "Point-in-time observations, not historical cost basis"} tone="aqua" />
       </section>
 
       <div className="case-detail-grid">
         <article className="case-detail-card">
-          <header><div><span className="eyebrow">Latest bounded sync</span><h2>{latest ? latest.state : "Not started"}</h2></div><ArrowClockwise size={22} /></header>
-          {latest ? (
+          <header><div><span className="eyebrow">Current usable snapshot</span><h2>{snapshotStateLabel(snapshot?.state)}</h2></div><ArrowClockwise size={22} /></header>
+          {snapshot && result ? (
             <dl className="case-definition-list">
-              <div><dt>Provider</dt><dd>{latest.provider}</dd></div>
-              <div><dt>Requested window</dt><dd>{latest.requested_scope.time_window}</dd></div>
-              <div><dt>Interval start</dt><dd>{formatDate(latest.requested_scope.start_at)}</dd></div>
-              <div><dt>Interval end</dt><dd>{formatDate(latest.requested_scope.end_at)}</dd></div>
-              <div><dt>Surfaces</dt><dd>{latest.requested_scope.surfaces.join(", ")}</dd></div>
-              <div><dt>Stage</dt><dd>{latest.stage}</dd></div>
-              <div><dt>Result note</dt><dd>{latest.message}</dd></div>
+              <div><dt>Snapshot ID</dt><dd><code>{snapshot.public_id}</code></dd></div>
+              <div><dt>Provider</dt><dd>{snapshot.provider}</dd></div>
+              <div><dt>Requested window</dt><dd>{snapshot.requested_scope.time_window}</dd></div>
+              <div><dt>Interval start</dt><dd>{formatDate(snapshot.requested_scope.start_at)}</dd></div>
+              <div><dt>Interval end</dt><dd>{formatDate(snapshot.requested_scope.end_at)}</dd></div>
+              <div><dt>Surfaces</dt><dd>{snapshot.requested_scope.surfaces.join(", ")}</dd></div>
+              <div><dt>Result note</dt><dd>{result.message}</dd></div>
             </dl>
           ) : (
-            <div className="case-card-empty"><p>No sync has been run for this case. Start with a bounded 24-hour interval.</p></div>
+            <div className="case-card-empty"><p>No usable snapshot exists yet. Metrics remain unavailable until a sync completes or publishes a partial result.</p></div>
           )}
         </article>
 
@@ -206,19 +247,14 @@ export default function GramCaseSummary({
               <div className="case-coverage-row"><span>Provider streams</span><strong>{coverage.streams.length}</strong></div>
             </>
           ) : (
-            <div className="case-card-empty"><p>Coverage will be calculated from the first persisted sync.</p></div>
+            <div className="case-card-empty"><p>Coverage will be published with the first usable snapshot.</p></div>
           )}
         </article>
       </div>
 
       <section className="case-limitations">
         <header><WarningCircle size={22} weight="duotone" /><div><span className="eyebrow">Known limitations</span><h2>What this case does not prove</h2></div></header>
-        <ul>{walletCase.limitations.map((item) => <li key={item.code}><strong>{item.code.replace(/_/g, " ")}</strong><span>{item.message}</span></li>)}</ul>
-      </section>
-
-      <section className="case-next-slice">
-        <div><span className="eyebrow">Compatibility view</span><h2>Need the detailed run tools?</h2><p>The new Summary keeps run IDs internal. The existing Activity workspace remains available during the migration window.</p></div>
-        {onOpenLegacyActivity && <button type="button" className="button-secondary" onClick={() => onOpenLegacyActivity(walletCase.display_address)}>Open advanced activity <ArrowRight size={17} /></button>}
+        <ul>{limitations.map((item) => <li key={item.code}><strong>{item.code.replace(/_/g, " ")}</strong><span>{item.message}</span></li>)}</ul>
       </section>
     </div>
   );

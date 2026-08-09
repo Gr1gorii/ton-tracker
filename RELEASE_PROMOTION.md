@@ -1,22 +1,27 @@
-# GRAM Scope — v0.71.0 Promotion Checklist
+# GRAM Scope — v0.72.0 Promotion Checklist
 
-Current promotion gates for the Wallet Case foundation:
+Current promotion gates for durable Wallet Case synchronization:
 
-- Product label is `v0.71.0 WALLET CASE FOUNDATION`; backend API version stays
+- Product label is `v0.72.0 DURABLE CASE SYNC`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic must reach the current `0016` head with model parity from fresh,
-  legacy, current-0015, and interrupted-DDL paths.
+- Alembic must reach the current `0017` head with model parity from fresh,
+  legacy, current-0016, and every accepted interrupted-DDL/index path.
 - Create/open is canonical and idempotent across friendly/raw address forms;
   mainnet/testnet and demo/live identities never merge.
-- Case sync and its compatibility ingestion run commit atomically. Public case
-  payloads contain no sequential run identifier.
-- Case Summary, coverage, limitations, environment, and network all come from
-  the same latest bounded sync provenance.
+- Case sync is persisted before provider I/O. Claiming is lease-fenced, retry
+  is bounded, one case has at most one active sync, and idempotency-key replay
+  cannot create duplicate jobs.
+- Final sync state and its compatibility ingestion run commit atomically.
+  Public case/job payloads contain no sequential run identifier.
+- Latest attempt, active sync, and latest usable snapshot are separate
+  provenance objects; queued/failed work cannot masquerade as snapshot data.
+- Restart recovery, heartbeat, cancel-before/after-provider, retry exhaustion,
+  and stale-writer fencing tests pass. No page-level resume claim is made.
 - Provider configuration makes no health claim. Live cases are advertised only
   when the guarded TonAPI sync path is actually available; mock fallback is
   rejected before persistence.
 - The pre-authentication facade is direct-loopback only. Hosted access remains
-  disabled until authentication supplies an owner scope; v0.71.0 must not be
+  disabled until authentication supplies an owner scope; v0.72.0 must not be
   promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, credential, and
   prohibited-brand checks pass before tagging.

@@ -1,4 +1,4 @@
-# GRAM Scope - v0.71.0 Public Release
+# GRAM Scope - v0.72.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -6,7 +6,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 - Durable Wallet Cases keyed by canonical TON identity, network, and demo/live
   environment.
-- Refresh-safe case Summary URLs with an explicit bounded 24-hour sync action.
+- Persisted, idempotent bounded sync jobs with polling, factual progress,
+  bounded retry, cooperative cancellation, lease fencing, and restart recovery.
+- Refresh-safe case Summary URLs that resume active-job status and preserve the
+  latest usable partial/succeeded snapshot with explicit sync provenance.
 - Compact case activity, portfolio snapshot, coverage, and limitation summaries
   that keep internal compatibility run IDs out of the primary workflow.
 - Responsive TON wallet evidence workspace with guarded real TonAPI ingestion.
@@ -21,7 +24,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.71.0 WALLET CASE FOUNDATION`.
+- Product release label: `v0.72.0 DURABLE CASE SYNC`.
 - Backend API `VERSION` remains `0.2.1`.
 - `DATA_MODE=mock` remains the default.
 - Guarded live wallet ingestion requires explicit real/TonAPI/live settings.
@@ -38,7 +41,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 ## Known Limitations
 
 - Selected bounded intervals and captures do not establish complete history.
-- Sync execution is synchronous; durable retry/cancel workers are deferred.
+- The local worker replays the whole bounded crawl after an in-flight crash;
+  accepted provider pages are not yet committed as resumable checkpoints.
+- Cancellation is immediate while queued and cooperative around the current
+  monolithic bounded provider crawl while running.
 - Legacy ingestion runs are not automatically backfilled into cases when their
   canonical identity or exact acquisition bounds cannot be proven.
 - Hosted Wallet Cases are a release blocker, not an accepted anonymous mode.
@@ -50,16 +56,17 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.71.0`, confirm:
+Before tagging `v0.72.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.71.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.72.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
-- Create/open case, bounded sync, summary refresh, and direct URL restoration
-  pass the frontend and backend vertical-slice tests.
+- Create/open case, enqueue/idempotency, polling, retry/cancel, restart
+  recovery, snapshot preservation, and direct URL restoration pass the
+  frontend and backend vertical-slice tests.
 - Real stored-run multi-asset readiness is provider-free, digest-stable, and
   fail-closed for unavailable/malformed evidence.
 - Credential and prohibited-brand scans are clean.

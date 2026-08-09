@@ -57,10 +57,35 @@ export interface WalletCaseCoverage {
   full_history_proven: false;
 }
 
+export interface WalletCaseSyncRetry {
+  attempt: number;
+  max_attempts: number;
+  retry_at: string;
+  reason_code: string;
+  message_safe: string;
+}
+
+export interface WalletCaseSyncError {
+  code: string;
+  message_safe: string;
+  retryable: boolean;
+}
+
+export interface WalletCaseSyncResult {
+  summary: WalletCaseSummary;
+  coverage: WalletCaseCoverage;
+  limitations: WalletCaseLimitation[];
+  message: string;
+}
+
 export interface WalletCaseSync {
   public_id: string;
+  case_public_id: string;
   state: WalletCaseSyncState;
   stage: string;
+  status_version: number;
+  poll_after_ms: number;
+  cancel_requested: boolean;
   progress: { current: number; total: number | null };
   provider: string;
   data_mode: "mock" | "real";
@@ -74,7 +99,11 @@ export interface WalletCaseSync {
   summary: WalletCaseSummary;
   limitations: WalletCaseLimitation[];
   message: string;
+  retry: WalletCaseSyncRetry | null;
+  error: WalletCaseSyncError | null;
+  result: WalletCaseSyncResult | null;
   created_at: string;
+  updated_at: string;
   started_at: string | null;
   completed_at: string | null;
 }
@@ -91,6 +120,9 @@ export interface WalletCase {
   created_at: string;
   updated_at: string;
   latest_sync: WalletCaseSync | null;
+  latest_sync_attempt: WalletCaseSync | null;
+  active_sync: WalletCaseSync | null;
+  current_snapshot: WalletCaseSync | null;
   summary: WalletCaseSummary;
   limitations: WalletCaseLimitation[];
 }
@@ -160,6 +192,28 @@ function nonNegativeInteger(value: unknown, label: string): number {
     throw new Error(`${label} is invalid`);
   }
   return value as number;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  const parsed = nonNegativeInteger(value, label);
+  if (parsed === 0) throw new Error(`${label} is invalid`);
+  return parsed;
+}
+
+function boolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`${label} is invalid`);
+  return value;
+}
+
+function timestamp(value: unknown, label: string): string {
+  const parsed = string(value, label);
+  if (!Number.isFinite(Date.parse(parsed))) throw new Error(`${label} is invalid`);
+  return parsed;
+}
+
+function nullableTimestamp(value: unknown, label: string): string | null {
+  if (value === null) return null;
+  return timestamp(value, label);
 }
 
 function nullableString(value: unknown, label: string): string | null {
@@ -293,14 +347,24 @@ function parseCoverage(value: unknown): WalletCaseCoverage {
   }
   return {
     state,
-    requested_start_at: string(coverage.requested_start_at, "coverage start"),
-    requested_end_at: string(coverage.requested_end_at, "coverage end"),
+    requested_start_at: timestamp(coverage.requested_start_at, "coverage start"),
+    requested_end_at: timestamp(coverage.requested_end_at, "coverage end"),
     requested_surfaces: requestedSurfaces,
     unavailable_surfaces: unavailableSurfaces,
     incomplete_surfaces: incompleteSurfaces,
     streams,
     full_history_proven: false,
   };
+}
+
+function samePersistedSyncView(
+  left: WalletCaseSync | null,
+  right: WalletCaseSync | null,
+): boolean {
+  if (left === null || right === null) return left === right;
+  const { poll_after_ms: _leftPollAfter, ...leftPersisted } = left;
+  const { poll_after_ms: _rightPollAfter, ...rightPersisted } = right;
+  return JSON.stringify(leftPersisted) === JSON.stringify(rightPersisted);
 }
 
 export function parseWalletCaseSync(value: unknown): WalletCaseSync {
@@ -317,8 +381,10 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   }
   const timeWindow = string(requestedScope.time_window, "case sync window") as TimeWindow;
   if (!TIME_WINDOWS.has(timeWindow)) throw new Error("case sync window is invalid");
-  const startAt = string(requestedScope.start_at, "case sync start");
-  const endAt = string(requestedScope.end_at, "case sync end");
+  const casePublicId = string(sync.case_public_id, "case sync case id");
+  if (!UUID_V4.test(casePublicId)) throw new Error("case sync case id is invalid");
+  const startAt = timestamp(requestedScope.start_at, "case sync start");
+  const endAt = timestamp(requestedScope.end_at, "case sync end");
   const surfaces = surfaceArray(requestedScope.surfaces, "case sync surfaces");
   const startTime = Date.parse(startAt);
   const endTime = Date.parse(endAt);
@@ -353,10 +419,97 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   if (progressTotal !== null && progressCurrent > progressTotal) {
     throw new Error("case sync progress exceeds its total");
   }
+  const stage = string(sync.stage, "case sync stage");
+  const statusVersion = positiveInteger(sync.status_version, "case sync status version");
+  const pollAfterMs = nonNegativeInteger(sync.poll_after_ms, "case sync poll interval");
+  if (pollAfterMs < 500 || pollAfterMs > 15_000) {
+    throw new Error("case sync poll interval is outside the supported range");
+  }
+  const cancelRequested = boolean(sync.cancel_requested, "case sync cancel flag");
+  const retry = sync.retry === null
+    ? null
+    : (() => {
+        const item = record(sync.retry, "case sync retry");
+        const attempt = positiveInteger(item.attempt, "case sync retry attempt");
+        const maxAttempts = positiveInteger(item.max_attempts, "case sync retry maximum");
+        if (attempt > maxAttempts) throw new Error("case sync retry attempt exceeds its maximum");
+        return {
+          attempt,
+          max_attempts: maxAttempts,
+          retry_at: timestamp(item.retry_at, "case sync retry time"),
+          reason_code: string(item.reason_code, "case sync retry reason"),
+          message_safe: string(item.message_safe, "case sync retry message"),
+        };
+      })();
+  if ((retry !== null) !== (state === "queued" && stage === "retry_wait")) {
+    throw new Error("case sync retry metadata contradicts its lifecycle");
+  }
+  const error = sync.error === null
+    ? null
+    : (() => {
+        const item = record(sync.error, "case sync error");
+        return {
+          code: string(item.code, "case sync error code"),
+          message_safe: string(item.message_safe, "case sync error message"),
+          retryable: boolean(item.retryable, "case sync error retryable flag"),
+        };
+      })();
+  if ((error !== null) !== (state === "failed")) {
+    throw new Error("case sync error metadata contradicts its lifecycle");
+  }
+  const summary = parseSummary(sync.summary);
+  const limitations = parseLimitations(sync.limitations);
+  const coverageResult = coverage;
+  const message = string(sync.message, "case sync message");
+  const result = sync.result === null
+    ? null
+    : (() => {
+        const item = record(sync.result, "case sync result");
+        return {
+          summary: parseSummary(item.summary),
+          coverage: parseCoverage(item.coverage),
+          limitations: parseLimitations(item.limitations),
+          message: string(item.message, "case sync result message"),
+        };
+      })();
+  const publishesResult = state === "partial" || state === "succeeded";
+  if ((result !== null) !== publishesResult) {
+    throw new Error("case sync result contradicts its lifecycle");
+  }
+  if (
+    result &&
+    (JSON.stringify(result.summary) !== JSON.stringify(summary) ||
+      JSON.stringify(result.coverage) !== JSON.stringify(coverageResult) ||
+      JSON.stringify(result.limitations) !== JSON.stringify(limitations) ||
+      result.message !== message)
+  ) {
+    throw new Error("case sync result does not match compatibility fields");
+  }
+  const createdAt = timestamp(sync.created_at, "case sync created time");
+  const updatedAt = timestamp(sync.updated_at, "case sync updated time");
+  const startedAt = nullableTimestamp(sync.started_at, "case sync started time");
+  const completedAt = nullableTimestamp(sync.completed_at, "case sync completion time");
+  if (Date.parse(updatedAt) < Date.parse(createdAt)) {
+    throw new Error("case sync update predates creation");
+  }
+  if (startedAt && Date.parse(startedAt) < Date.parse(createdAt)) {
+    throw new Error("case sync start predates creation");
+  }
+  if (completedAt && Date.parse(completedAt) < Date.parse(createdAt)) {
+    throw new Error("case sync completion predates creation");
+  }
+  const terminal = ["partial", "succeeded", "failed", "cancelled"].includes(state);
+  if ((completedAt !== null) !== terminal || (state === "running" && startedAt === null)) {
+    throw new Error("case sync timestamps contradict its lifecycle");
+  }
   return {
     public_id: publicId,
+    case_public_id: casePublicId,
     state,
-    stage: string(sync.stage, "case sync stage"),
+    stage,
+    status_version: statusVersion,
+    poll_after_ms: pollAfterMs,
+    cancel_requested: cancelRequested,
     progress: {
       current: progressCurrent,
       total: progressTotal,
@@ -370,12 +523,16 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
       surfaces,
     },
     coverage,
-    summary: parseSummary(sync.summary),
-    limitations: parseLimitations(sync.limitations),
-    message: string(sync.message, "case sync message"),
-    created_at: string(sync.created_at, "case sync created time"),
-    started_at: nullableString(sync.started_at, "case sync start time"),
-    completed_at: nullableString(sync.completed_at, "case sync completion time"),
+    summary,
+    limitations,
+    message,
+    retry,
+    error,
+    result,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    started_at: startedAt,
+    completed_at: completedAt,
   };
 }
 
@@ -393,27 +550,73 @@ export function parseWalletCase(value: unknown): WalletCase {
     throw new Error("wallet case data environment is invalid");
   }
   const latestSync = item.latest_sync === null ? null : parseWalletCaseSync(item.latest_sync);
+  const latestSyncAttempt = item.latest_sync_attempt === null
+    ? null
+    : parseWalletCaseSync(item.latest_sync_attempt);
+  const activeSync = item.active_sync === null ? null : parseWalletCaseSync(item.active_sync);
+  const currentSnapshot = item.current_snapshot === null
+    ? null
+    : parseWalletCaseSync(item.current_snapshot);
+  const syncs = [latestSync, latestSyncAttempt, activeSync, currentSnapshot].filter(
+    (sync): sync is WalletCaseSync => sync !== null,
+  );
   if (
-    latestSync &&
-    ((environment === "demo" && latestSync.data_mode !== "mock") ||
-      (environment === "live" && latestSync.data_mode !== "real"))
+    syncs.some(
+      (sync) =>
+        sync.case_public_id !== publicId ||
+        (environment === "demo" ? sync.data_mode !== "mock" : sync.data_mode !== "real"),
+    )
   ) {
-    throw new Error("wallet case environment does not match its latest sync evidence");
+    throw new Error("wallet case environment or identity does not match its sync evidence");
+  }
+  if (!samePersistedSyncView(latestSync, latestSyncAttempt)) {
+    throw new Error("wallet case latest sync compatibility view is inconsistent");
+  }
+  if (
+    activeSync &&
+    (!latestSyncAttempt ||
+      !["queued", "running"].includes(activeSync.state) ||
+      !samePersistedSyncView(activeSync, latestSyncAttempt))
+  ) {
+    throw new Error("wallet case active sync is inconsistent");
+  }
+  if (
+    !activeSync &&
+    latestSyncAttempt &&
+    ["queued", "running"].includes(latestSyncAttempt.state)
+  ) {
+    throw new Error("wallet case omits its active sync");
+  }
+  if (
+    currentSnapshot &&
+    (!["partial", "succeeded"].includes(currentSnapshot.state) ||
+      currentSnapshot.result === null)
+  ) {
+    throw new Error("wallet case current snapshot is not publishable");
+  }
+  if (currentSnapshot && !latestSyncAttempt) {
+    throw new Error("wallet case snapshot provenance has no latest sync attempt");
+  }
+  if (
+    latestSyncAttempt &&
+    ["partial", "succeeded"].includes(latestSyncAttempt.state) &&
+    !samePersistedSyncView(currentSnapshot, latestSyncAttempt)
+  ) {
+    throw new Error("wallet case snapshot provenance does not match its latest usable sync");
   }
   const summary = parseSummary(item.summary);
   const limitations = parseLimitations(item.limitations);
   if (
-    latestSync !== null &&
-    (JSON.stringify(summary) !== JSON.stringify(latestSync.summary) ||
-      JSON.stringify(limitations) !== JSON.stringify(latestSync.limitations))
+    currentSnapshot !== null &&
+    (JSON.stringify(summary) !== JSON.stringify(currentSnapshot.result?.summary) ||
+      JSON.stringify(limitations) !== JSON.stringify(currentSnapshot.result?.limitations))
   ) {
-    throw new Error("wallet case summary provenance does not match its latest sync");
+    throw new Error("wallet case summary provenance does not match its current snapshot");
   }
   if (
-    latestSync === null &&
-    (!isZeroSummary(summary) || !limitations.some((item) => item.code === "not_synchronized"))
+    currentSnapshot === null && !isZeroSummary(summary)
   ) {
-    throw new Error("unsynchronized wallet case cannot publish evidence summary data");
+    throw new Error("wallet case without a snapshot cannot publish evidence summary data");
   }
   return {
     public_id: publicId,
@@ -427,6 +630,9 @@ export function parseWalletCase(value: unknown): WalletCase {
     created_at: string(item.created_at, "wallet case created time"),
     updated_at: string(item.updated_at, "wallet case updated time"),
     latest_sync: latestSync,
+    latest_sync_attempt: latestSyncAttempt,
+    active_sync: activeSync,
+    current_snapshot: currentSnapshot,
     summary,
     limitations,
   };

@@ -30,23 +30,18 @@ import type {
   WalletOwnershipProofRequest,
   WalletOwnershipProofResponse,
 } from "./types";
-import {
-  parseWalletCase,
-  parseWalletCaseListResponse,
-  parseWalletCaseSync,
-  parseWalletCaseUpsertResponse,
-  type WalletCase,
-  type WalletCaseCreateRequest,
-  type WalletCaseListResponse,
-  type WalletCaseSync,
-  type WalletCaseSyncRequest,
-  type WalletCaseUpsertResponse,
-} from "./walletCase";
+import { API_BASE } from "./apiBase";
 
-// API base URL. Override with VITE_API_BASE at build/dev time.
-export const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) ??
-  (import.meta.env.DEV ? "http://localhost:8000" : "");
+export { API_BASE } from "./apiBase";
+export {
+  WalletCaseApiError,
+  cancelWalletCaseSync,
+  createWalletCase,
+  createWalletCaseSync,
+  getWalletCase,
+  getWalletCaseSync,
+  listWalletCases,
+} from "./walletCaseApi";
 
 export async function analyze(
   req: AnalyzeRequest,
@@ -93,96 +88,6 @@ export async function getProvidersStatus(signal?: AbortSignal): Promise<Provider
     throw new Error(`Provider status request failed (${res.status})`);
   }
   return (await res.json()) as ProvidersStatus;
-}
-
-export async function createWalletCase(
-  req: WalletCaseCreateRequest,
-  signal?: AbortSignal,
-): Promise<WalletCaseUpsertResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/cases`, {
-    method: "POST",
-    cache: "no-store",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-    signal,
-  });
-  if (!res.ok) {
-    throw new Error(await responseError(res, "Wallet Case creation failed"));
-  }
-  return parseWalletCaseUpsertResponse(await res.json());
-}
-
-export async function listWalletCases(
-  limit = 20,
-  signal?: AbortSignal,
-): Promise<WalletCaseListResponse> {
-  const params = new URLSearchParams({ limit: String(limit) });
-  const res = await fetch(`${API_BASE}/api/v1/cases?${params}`, {
-    cache: "no-store",
-    signal,
-  });
-  if (!res.ok) {
-    throw new Error(await responseError(res, "Wallet Case list failed"));
-  }
-  return parseWalletCaseListResponse(await res.json());
-}
-
-export async function getWalletCase(
-  caseId: string,
-  signal?: AbortSignal,
-): Promise<WalletCase> {
-  const res = await fetch(`${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}`, {
-    cache: "no-store",
-    signal,
-  });
-  if (!res.ok) {
-    throw new Error(await responseError(res, "Wallet Case read failed"));
-  }
-  const walletCase = parseWalletCase(await res.json());
-  if (walletCase.public_id !== caseId) {
-    throw new Error("Wallet Case response does not match the requested case id");
-  }
-  return walletCase;
-}
-
-export async function createWalletCaseSync(
-  caseId: string,
-  req: WalletCaseSyncRequest,
-  signal?: AbortSignal,
-): Promise<WalletCaseSync> {
-  const res = await fetch(
-    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/syncs`,
-    {
-      method: "POST",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
-      signal,
-    },
-  );
-  if (!res.ok) {
-    throw new Error(await responseError(res, "Wallet Case sync failed"));
-  }
-  return parseWalletCaseSync(await res.json());
-}
-
-export async function getWalletCaseSync(
-  caseId: string,
-  syncId: string,
-  signal?: AbortSignal,
-): Promise<WalletCaseSync> {
-  const res = await fetch(
-    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/syncs/${encodeURIComponent(syncId)}`,
-    { cache: "no-store", signal },
-  );
-  if (!res.ok) {
-    throw new Error(await responseError(res, "Wallet Case sync read failed"));
-  }
-  const sync = parseWalletCaseSync(await res.json());
-  if (sync.public_id !== syncId) {
-    throw new Error("Wallet Case sync response does not match the requested sync id");
-  }
-  return sync;
 }
 
 export async function previewImportedTrades(

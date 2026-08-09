@@ -158,11 +158,39 @@ class WalletCaseCoverage(_StrictModel):
     full_history_proven: Literal[False] = False
 
 
+class WalletCaseSyncRetry(_StrictModel):
+    attempt: int = Field(ge=1)
+    max_attempts: int = Field(ge=1)
+    retry_at: str
+    reason_code: str = Field(min_length=1, max_length=64)
+    message_safe: str = Field(min_length=1, max_length=1000)
+
+
+class WalletCaseSyncError(_StrictModel):
+    code: str = Field(min_length=1, max_length=64)
+    message_safe: str = Field(min_length=1, max_length=1000)
+    retryable: bool
+
+
+class WalletCaseSyncResult(_StrictModel):
+    summary: WalletCaseSummary
+    coverage: WalletCaseCoverage
+    limitations: list[WalletCaseLimitation]
+    message: str = Field(min_length=1, max_length=1000)
+
+
 class WalletCaseSyncResponse(_StrictModel):
+    case_public_id: CanonicalPublicId
     public_id: CanonicalPublicId
+    status_version: int = Field(ge=1)
     state: CaseSyncState
     stage: str = Field(min_length=1, max_length=32)
     progress: WalletCaseSyncProgress
+    poll_after_ms: int = Field(ge=500, le=15000)
+    cancel_requested: bool
+    retry: WalletCaseSyncRetry | None = None
+    error: WalletCaseSyncError | None = None
+    result: WalletCaseSyncResult | None = None
     provider: str = Field(min_length=1, max_length=64)
     data_mode: Literal["mock", "real"]
     requested_scope: WalletCaseRequestedScope
@@ -171,8 +199,34 @@ class WalletCaseSyncResponse(_StrictModel):
     limitations: list[WalletCaseLimitation]
     message: str = Field(min_length=1, max_length=1000)
     created_at: str
+    updated_at: str
     started_at: str | None = None
     completed_at: str | None = None
+
+    @model_validator(mode="after")
+    def _validate_job_state(self):
+        terminal = self.state in {"partial", "succeeded", "failed", "cancelled"}
+        if terminal != (self.completed_at is not None):
+            raise ValueError("terminal sync state must match completed_at")
+        if self.state in {"partial", "succeeded"}:
+            if self.result is None or self.error is not None:
+                raise ValueError("usable terminal sync requires only a result")
+        elif self.result is not None:
+            raise ValueError("only partial or succeeded sync may publish a result")
+        if self.state == "failed":
+            if self.error is None:
+                raise ValueError("failed sync requires a safe error")
+        elif self.error is not None:
+            raise ValueError("only failed sync may publish a terminal error")
+        if self.retry is not None and not (
+            self.state == "queued" and self.stage == "retry_wait"
+        ):
+            raise ValueError("retry metadata requires queued retry_wait state")
+        if self.state == "queued" and self.started_at is None:
+            return self
+        if self.state == "running" and self.started_at is None:
+            raise ValueError("running sync requires started_at")
+        return self
 
 
 class WalletCaseResponse(_StrictModel):
@@ -187,6 +241,9 @@ class WalletCaseResponse(_StrictModel):
     created_at: str
     updated_at: str
     latest_sync: WalletCaseSyncResponse | None = None
+    latest_sync_attempt: WalletCaseSyncResponse | None = None
+    active_sync: WalletCaseSyncResponse | None = None
+    current_snapshot: WalletCaseSyncResponse | None = None
     summary: WalletCaseSummary
     limitations: list[WalletCaseLimitation]
 

@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from database import get_session
 from services.wallet_cases import (
     WalletCaseNotFound,
+    WalletCaseIdempotencyConflict,
     WalletCaseRuntimeConflict,
     WalletCaseService,
+    WalletCaseSyncAlreadyActive,
 )
 from services.wallet_case_access import require_local_wallet_case_access
 from wallet_case_schemas import (
@@ -26,6 +28,11 @@ from wallet_case_schemas import (
 router = APIRouter(
     prefix="/api/v1/cases",
     tags=["wallet-cases"],
+    dependencies=[Depends(require_local_wallet_case_access)],
+)
+jobs_router = APIRouter(
+    prefix="/api/v1/jobs",
+    tags=["wallet-case-jobs"],
     dependencies=[Depends(require_local_wallet_case_access)],
 )
 _PUBLIC_ID_PATTERN = (
@@ -136,17 +143,58 @@ def read_wallet_case(
 @router.post(
     "/{public_id}/syncs",
     response_model=WalletCaseSyncResponse,
+    status_code=202,
 )
-def synchronize_wallet_case(
+def enqueue_wallet_case_sync(
     payload: WalletCaseSyncRequest,
+    request: Request,
     response: Response,
     public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+        max_length=36,
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
-    """Run one bounded synchronous compatibility sync for a Wallet Case."""
+    """Persist one bounded job before any provider I/O and return 202."""
     response.headers["Cache-Control"] = "no-store"
+    runner = getattr(request.app.state, "wallet_case_job_runner", None)
+    if runner is None or getattr(runner, "alive", False) is not True:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "case_sync_runner_unavailable",
+                "message_safe": (
+                    "Wallet Case synchronization is temporarily unavailable."
+                ),
+                "retryable": True,
+            },
+            headers={"Cache-Control": "no-store", "Retry-After": "5"},
+        )
+    if len(request.headers.getlist("idempotency-key")) != 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key must be provided exactly once.",
+            headers={"Cache-Control": "no-store"},
+        )
     try:
-        return WalletCaseService(session).synchronize_case(public_id, payload)
+        result, replayed = WalletCaseService(session).enqueue_sync(
+            public_id,
+            payload,
+            idempotency_key,
+        )
+        response.headers["Location"] = (
+            f"/api/v1/cases/{public_id}/syncs/{result['public_id']}"
+        )
+        response.headers["Retry-After"] = "1"
+        if not replayed:
+            runner.notify()
+        return result
     except WalletCaseNotFound as exc:
         raise HTTPException(
             status_code=404,
@@ -157,6 +205,27 @@ def synchronize_wallet_case(
         raise HTTPException(
             status_code=409,
             detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseIdempotencyConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "idempotency_conflict",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseSyncAlreadyActive as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_sync_already_active",
+                "message_safe": str(exc),
+                "retryable": False,
+                "active_sync_public_id": exc.public_id,
+            },
             headers={"Cache-Control": "no-store"},
         ) from exc
     except ValueError as exc:
@@ -203,5 +272,74 @@ def read_wallet_case_sync(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case sync storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.post(
+    "/{public_id}/syncs/{sync_public_id}/cancel",
+    response_model=WalletCaseSyncResponse,
+)
+def cancel_wallet_case_sync(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    sync_public_id: str = Path(
+        ...,
+        pattern=_PUBLIC_ID_PATTERN,
+        max_length=36,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Idempotently cancel queued work or request cooperative cancellation."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        result, accepted = WalletCaseService(session).cancel_sync(
+            public_id,
+            sync_public_id,
+        )
+        response.status_code = 202 if accepted else 200
+        if accepted:
+            response.headers["Retry-After"] = "1"
+        return result
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case sync storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@jobs_router.get("/{sync_public_id}", response_model=WalletCaseSyncResponse)
+def read_wallet_case_job(
+    response: Response,
+    sync_public_id: str = Path(
+        ...,
+        pattern=_PUBLIC_ID_PATTERN,
+        max_length=36,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read one owner-scoped CaseSync through the generic job polling path."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_job(sync_public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case job storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc

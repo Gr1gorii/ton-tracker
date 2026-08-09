@@ -75,7 +75,42 @@
 .case-heading h1 { margin: 0; color: var(--text); font-size: clamp(2rem, 5vw, 4.4rem); font-weight: 560; letter-spacing: -0.055em; line-height: 0.98; }
 .case-heading p { max-width: 690px; margin: 18px 0 0; color: var(--text-soft); font-size: 0.9375rem; line-height: 1.65; }
 .case-heading code { display: block; max-width: 720px; margin-top: 18px; overflow: hidden; color: var(--text-muted); font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-refreshing { display: inline-flex; align-items: center; gap: 8px; color: var(--text-soft); font-size: 0.8125rem; font-weight: 700; }
 .case-sync-button { min-width: 205px; justify-content: center; }
+
+.case-sync-panel {
+  display: grid;
+  padding: 24px;
+  gap: 17px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+.case-sync-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.case-sync-panel-heading h2 { margin: 3px 0 0; color: var(--text); font-size: 1.125rem; letter-spacing: -0.025em; }
+.case-sync-panel-heading p { max-width: 720px; margin: 7px 0 0; color: var(--text-muted); font-size: 0.875rem; line-height: 1.55; }
+.case-sync-progress-block { display: grid; gap: 8px; }
+.case-sync-progress-copy { display: flex; align-items: center; justify-content: space-between; gap: 15px; color: var(--text-muted); font-size: 0.8125rem; }
+.case-sync-progress-copy strong { color: var(--text); }
+.case-sync-progress-block progress { width: 100%; height: 9px; overflow: hidden; border: 0; border-radius: 999px; color: var(--accent); background: var(--surface-soft); }
+.case-sync-progress-block progress::-webkit-progress-bar { border-radius: 999px; background: var(--surface-soft); }
+.case-sync-progress-block progress::-webkit-progress-value { border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--aqua)); }
+.case-sync-progress-block progress::-moz-progress-bar { border-radius: 999px; background: linear-gradient(90deg, var(--accent), var(--aqua)); }
+.case-sync-progress-block progress:indeterminate { background: linear-gradient(90deg, var(--surface-soft) 0 35%, var(--accent) 50%, var(--surface-soft) 65% 100%); background-size: 220% 100%; animation: case-progress-pulse 1.5s linear infinite; }
+@keyframes case-progress-pulse { to { background-position: -220% 0; } }
+.case-sync-message { display: flex; padding: 12px 14px; align-items: flex-start; gap: 9px; border: 1px solid var(--border); border-radius: 13px; color: var(--text-soft); background: var(--surface-solid); font-size: 0.8125rem; line-height: 1.55; }
+.case-sync-message svg { flex: 0 0 auto; margin-top: 1px; }
+.case-sync-message span { display: grid; gap: 2px; }
+.case-sync-message.is-waiting { border-color: color-mix(in srgb, var(--warning) 28%, var(--border)); color: var(--text-soft); background: color-mix(in srgb, var(--warning) 7%, var(--surface-solid)); }
+.case-sync-message.is-snapshot { border-color: color-mix(in srgb, var(--positive) 25%, var(--border)); color: var(--text-soft); background: color-mix(in srgb, var(--positive) 7%, var(--surface-solid)); }
+.case-sync-message.is-error { border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); color: var(--case-danger-text); background: color-mix(in srgb, var(--danger) 7%, var(--surface-solid)); }
+.case-sync-message button { margin-left: auto; padding: 0; border: 0; color: var(--accent); background: transparent; cursor: pointer; font: inherit; font-weight: 750; white-space: nowrap; }
+.case-sync-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.case-cancel-confirm { display: flex; width: 100%; padding: 13px; align-items: center; justify-content: flex-end; gap: 9px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border)); border-radius: 13px; background: color-mix(in srgb, var(--danger) 6%, var(--surface-solid)); }
+.case-cancel-confirm p { margin: 0 auto 0 0; color: var(--text-soft); font-size: 0.8125rem; line-height: 1.5; }
+.button-danger { display: inline-flex; min-height: 44px; padding: 0 15px; align-items: center; justify-content: center; border: 1px solid color-mix(in srgb, var(--case-danger-button-bg) 60%, transparent); border-radius: 15px; color: var(--case-danger-button-text); background: var(--case-danger-button-bg); cursor: pointer; font-size: 0.8125rem; font-weight: 720; }
+.button-danger:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .case-trust-strip {
   display: grid;
@@ -113,7 +148,6 @@
 .case-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .case-detail-card,
 .case-limitations,
-.case-next-slice,
 .case-state-panel {
   border: 1px solid var(--border);
   border-radius: 20px;
@@ -124,7 +158,6 @@
 .case-detail-card > header { display: flex; margin-bottom: 20px; align-items: flex-start; justify-content: space-between; gap: 16px; color: var(--accent); }
 .case-detail-card h2,
 .case-limitations h2,
-.case-next-slice h2,
 .case-state-panel h1 { margin: 3px 0 0; color: var(--text); font-size: 16px; font-weight: 690; letter-spacing: -0.025em; }
 .case-definition-list { display: grid; margin: 0; gap: 1px; overflow: hidden; border: 1px solid var(--border); border-radius: 13px; background: var(--border); }
 .case-definition-list div { display: grid; min-height: 49px; padding: 11px 13px; align-items: center; grid-template-columns: minmax(110px, 0.35fr) minmax(0, 1fr); gap: 14px; background: var(--surface-solid); }
@@ -143,15 +176,16 @@
 .case-limitations li strong { color: var(--text-soft); font-size: 0.75rem; text-transform: capitalize; }
 .case-limitations li span { color: var(--text-muted); font-size: 0.875rem; line-height: 1.55; }
 
-.case-next-slice { display: flex; padding: 22px 24px; align-items: center; justify-content: space-between; gap: 25px; }
-.case-next-slice p { max-width: 680px; margin: 6px 0 0; color: var(--text-muted); font-size: 0.875rem; line-height: 1.6; }
-.case-inline-error { display: flex; padding: 13px 15px; align-items: center; gap: 9px; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border)); border-radius: 13px; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); font-size: 0.875rem; }
+.case-inline-error { display: flex; padding: 13px 15px; align-items: center; gap: 9px; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border)); border-radius: 13px; color: var(--case-danger-text); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); font-size: 0.875rem; }
+.case-inline-error span { flex: 1; }
+.case-inline-error button { padding: 0; border: 0; color: var(--accent); background: transparent; cursor: pointer; font: inherit; font-weight: 750; }
 .case-state-panel { display: flex; min-height: 320px; padding: 35px; align-items: center; justify-content: center; gap: 14px; color: var(--accent); }
 .case-state-panel p { margin: 5px 0 0; color: var(--text-muted); font-size: 0.875rem; }
 .case-state-panel.is-error { color: var(--danger); }
 
 @media (max-width: 960px) {
   .case-heading { grid-template-columns: 1fr; align-items: start; }
+  .case-sync-panel-heading { align-items: stretch; flex-direction: column; }
   .case-sync-button { width: 100%; }
   .case-trust-strip,
   .case-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -173,6 +207,8 @@
   .case-definition-list div { grid-template-columns: 1fr; gap: 4px; }
   .case-definition-list dd { text-align: left; }
   .case-limitations li { grid-template-columns: 1fr; gap: 5px; }
-  .case-next-slice { align-items: stretch; flex-direction: column; }
-  .case-next-slice .button-secondary { width: 100%; justify-content: center; }
+  .case-cancel-confirm { align-items: stretch; flex-direction: column; }
+  .case-cancel-confirm p { margin: 0 0 5px; }
+  .case-cancel-confirm .button-secondary,
+  .case-cancel-confirm .button-danger { width: 100%; }
 }

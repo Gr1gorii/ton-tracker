@@ -74,6 +74,74 @@ class WalletCaseRepository:
         syncs = self.session.scalars(statement).unique()
         return {case_sync.case_id: case_sync for case_sync in syncs}
 
+    def active_syncs(self, case_ids: list[int]) -> dict[int, CaseSync]:
+        """Load the single queued/running attempt allowed for each case."""
+        if not case_ids:
+            return {}
+        statement = select(CaseSync).where(
+            CaseSync.case_id.in_(case_ids),
+            CaseSync.state.in_(("queued", "running")),
+        )
+        return {
+            case_sync.case_id: case_sync
+            for case_sync in self.session.scalars(statement).unique()
+        }
+
+    def latest_usable_syncs(self, case_ids: list[int]) -> dict[int, CaseSync]:
+        """Load the newest partial/succeeded immutable result per case."""
+        if not case_ids:
+            return {}
+        latest_ids = (
+            select(func.max(CaseSync.id))
+            .where(
+                CaseSync.case_id.in_(case_ids),
+                CaseSync.state.in_(("partial", "succeeded")),
+            )
+            .group_by(CaseSync.case_id)
+        )
+        statement = select(CaseSync).where(CaseSync.id.in_(latest_ids))
+        return {
+            case_sync.case_id: case_sync
+            for case_sync in self.session.scalars(statement).unique()
+        }
+
+    def get_by_idempotency_key(
+        self,
+        *,
+        case_id: int,
+        idempotency_key: str,
+    ) -> CaseSync | None:
+        return self.session.scalar(
+            select(CaseSync).where(
+                CaseSync.case_id == case_id,
+                CaseSync.idempotency_key == idempotency_key,
+            )
+        )
+
+    def get_active_sync(self, *, case_id: int) -> CaseSync | None:
+        return self.session.scalar(
+            select(CaseSync).where(
+                CaseSync.case_id == case_id,
+                CaseSync.state.in_(("queued", "running")),
+            )
+        )
+
+    def get_sync_by_public_id_for_owner(
+        self,
+        *,
+        owner_scope_id: str,
+        public_id: str,
+    ) -> CaseSync | None:
+        return self.session.scalar(
+            select(CaseSync)
+            .join(WalletCase, WalletCase.id == CaseSync.case_id)
+            .where(
+                WalletCase.owner_scope_id == owner_scope_id,
+                WalletCase.archived_at.is_(None),
+                CaseSync.public_id == public_id,
+            )
+        )
+
     def get_sync(
         self,
         *,

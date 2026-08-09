@@ -1,101 +1,37 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { getProvidersStatus } from "./api";
+import { API_BASE } from "./apiBase";
 import {
-  API_BASE,
+  WalletCaseApiError,
+  cancelWalletCaseSync,
   createWalletCase,
   createWalletCaseSync,
-  getProvidersStatus,
   getWalletCase,
   getWalletCaseSync,
   listWalletCases,
-} from "./api";
-import type { WalletCase } from "./walletCase";
+} from "./walletCaseApi";
+import {
+  activeSyncFixture,
+  CASE_ID,
+  emptyWalletCaseFixture,
+  IDEMPOTENCY_KEY,
+  succeededSyncFixture,
+  SYNC_ID,
+  walletCaseFixture,
+} from "./test/walletCaseFixtures";
 
-const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
-const SYNC_ID = "550e8400-e29b-41d4-b716-446655440001";
 const OTHER_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
 const OTHER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440099";
 
-function walletCaseFixture(overrides: Partial<WalletCase> = {}): WalletCase {
-  return {
-    public_id: CASE_ID,
-    network: "ton-mainnet",
-    data_environment: "demo",
-    canonical_wallet_key: `0:${"a".repeat(64)}`,
-    identity_version: "ton_std_address_v1",
-    display_address: "EQC-demo-wallet",
-    label: null,
-    note: null,
-    created_at: "2026-08-09T12:00:00Z",
-    updated_at: "2026-08-09T12:01:00Z",
-    latest_sync: {
-      public_id: SYNC_ID,
-      state: "succeeded",
-      stage: "completed",
-      progress: { current: 1, total: 1 },
-      provider: "mock_wallet_activity",
-      data_mode: "mock",
-      requested_scope: {
-        time_window: "24h",
-        start_at: "2026-08-08T12:00:00Z",
-        end_at: "2026-08-09T12:00:00Z",
-        surfaces: ["transactions", "balances"],
-      },
-      coverage: {
-        state: "unknown",
-        requested_start_at: "2026-08-08T12:00:00Z",
-        requested_end_at: "2026-08-09T12:00:00Z",
-        requested_surfaces: ["transactions", "balances"],
-        unavailable_surfaces: [],
-        incomplete_surfaces: [],
-        streams: [],
-        full_history_proven: false,
-      },
-      summary: {
-        activity_counts: { transfers: 2, transactions: 3, swaps: 1, balances: 2 },
-        failed_transaction_count: 1,
-        warning_count: 2,
-        portfolio_snapshot: {
-          total_balance_usd: "950.42",
-          priced_assets: 2,
-          unpriced_assets: 1,
-        },
-      },
-      limitations: [
-        {
-          code: "bounded_interval_not_full_history",
-          message: "The selected interval is not full wallet history.",
-        },
-      ],
-      message: "Demo sync completed.",
-      created_at: "2026-08-09T12:00:00Z",
-      started_at: "2026-08-09T12:00:00Z",
-      completed_at: "2026-08-09T12:01:00Z",
-    },
-    summary: {
-      activity_counts: { transfers: 2, transactions: 3, swaps: 1, balances: 2 },
-      failed_transaction_count: 1,
-      warning_count: 2,
-      portfolio_snapshot: {
-        total_balance_usd: "950.42",
-        priced_assets: 2,
-        unpriced_assets: 1,
-      },
-    },
-    limitations: [
-      {
-        code: "bounded_interval_not_full_history",
-        message: "The selected interval is not full wallet history.",
-      },
-    ],
-    ...overrides,
-  };
-}
-
-function jsonResponse(payload: unknown, status = 200): Response {
+function jsonResponse(
+  payload: unknown,
+  status = 200,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(payload), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -115,20 +51,13 @@ describe("Wallet Case API", () => {
     });
   });
 
-  it("creates or opens a case with an abortable no-store request", async () => {
-    const walletCase = walletCaseFixture({
-      latest_sync: null,
-      summary: {
-        activity_counts: { transfers: 0, transactions: 0, swaps: 0, balances: 0 },
-        failed_transaction_count: 0,
-        warning_count: 0,
-        portfolio_snapshot: { total_balance_usd: null, priced_assets: 0, unpriced_assets: 0 },
-      },
-      limitations: [{ code: "not_synchronized", message: "This case has not been synchronized yet." }],
-    });
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({ created: false, case: walletCase }),
-    );
+  it("creates, lists, and reads strictly bound no-store cases", async () => {
+    const empty = emptyWalletCaseFixture();
+    const populated = walletCaseFixture();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ created: false, case: empty }, 200))
+      .mockResolvedValueOnce(jsonResponse({ cases: [populated], limit: 7, truncated: false }))
+      .mockResolvedValueOnce(jsonResponse(populated));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
     const request = {
@@ -140,54 +69,27 @@ describe("Wallet Case API", () => {
 
     await expect(createWalletCase(request, controller.signal)).resolves.toEqual({
       created: false,
-      case: walletCase,
+      case: empty,
     });
-    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/cases`, {
-      method: "POST",
-      cache: "no-store",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
-  });
-
-  it("lists and reads cases without caching server state", async () => {
-    const walletCase = walletCaseFixture();
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({ cases: [walletCase], limit: 7, truncated: false }),
-      )
-      .mockResolvedValueOnce(jsonResponse(walletCase));
-    vi.stubGlobal("fetch", fetchMock);
-    const controller = new AbortController();
-
     await expect(listWalletCases(7, controller.signal)).resolves.toEqual({
-      cases: [walletCase],
-      limit: 7,
-      truncated: false,
+      cases: [populated], limit: 7, truncated: false,
     });
-    await expect(getWalletCase(CASE_ID, controller.signal)).resolves.toEqual(walletCase);
-
-    expect(fetchMock.mock.calls).toEqual([
-      [
-        `${API_BASE}/api/v1/cases?limit=7`,
-        { cache: "no-store", signal: controller.signal },
-      ],
-      [
-        `${API_BASE}/api/v1/cases/${CASE_ID}`,
-        { cache: "no-store", signal: controller.signal },
-      ],
+    await expect(getWalletCase(CASE_ID, controller.signal)).resolves.toEqual(populated);
+    expect(fetchMock.mock.calls[0]).toEqual([
+      `${API_BASE}/api/v1/cases`,
+      {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      },
     ]);
   });
 
-  it("creates and reads the explicit bounded sync contract", async () => {
-    const sync = walletCaseFixture().latest_sync;
-    if (!sync) throw new Error("fixture must include a sync");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(sync, 201))
-      .mockResolvedValueOnce(jsonResponse(sync));
+  it("starts a durable sync only from 202 with one explicit UUIDv4 idempotency key", async () => {
+    const queued = activeSyncFixture("queued");
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(queued, 202));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
     const request = {
@@ -195,66 +97,99 @@ describe("Wallet Case API", () => {
       surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"] as const,
     };
 
-    await expect(
-      createWalletCaseSync(
-        CASE_ID,
-        { ...request, surfaces: [...request.surfaces] },
-        controller.signal,
-      ),
-    ).resolves.toEqual(sync);
-    await expect(getWalletCaseSync(CASE_ID, SYNC_ID, controller.signal)).resolves.toEqual(sync);
-
-    expect(fetchMock.mock.calls[0]).toEqual([
-      `${API_BASE}/api/v1/cases/${CASE_ID}/syncs`,
-      {
-        method: "POST",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...request, surfaces: [...request.surfaces] }),
-        signal: controller.signal,
+    await expect(createWalletCaseSync(
+      CASE_ID,
+      { ...request, surfaces: [...request.surfaces] },
+      IDEMPOTENCY_KEY,
+      controller.signal,
+    )).resolves.toEqual(queued);
+    expect(fetchMock).toHaveBeenCalledWith(`${API_BASE}/api/v1/cases/${CASE_ID}/syncs`, {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": IDEMPOTENCY_KEY,
       },
-    ]);
-    expect(fetchMock.mock.calls[1]).toEqual([
-      `${API_BASE}/api/v1/cases/${CASE_ID}/syncs/${SYNC_ID}`,
-      { cache: "no-store", signal: controller.signal },
+      body: JSON.stringify({ ...request, surfaces: [...request.surfaces] }),
+      signal: controller.signal,
+    });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(queued, 201));
+    await expect(createWalletCaseSync(CASE_ID, { ...request, surfaces: [...request.surfaces] }, IDEMPOTENCY_KEY))
+      .rejects.toMatchObject({ status: 201 });
+  });
+
+  it("polls and cancels with strict URL identity binding", async () => {
+    const running = activeSyncFixture("running");
+    const cancelled = {
+      ...running,
+      state: "cancelled" as const,
+      stage: "cancelled",
+      status_version: 3,
+      cancel_requested: true,
+      message: "Sync cancelled safely.",
+      updated_at: "2026-08-09T12:00:30Z",
+      completed_at: "2026-08-09T12:00:30Z",
+    };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(running))
+      .mockResolvedValueOnce(jsonResponse(cancelled, 200));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseSync(CASE_ID, SYNC_ID, controller.signal)).resolves.toEqual(running);
+    await expect(cancelWalletCaseSync(CASE_ID, SYNC_ID, controller.signal)).resolves.toEqual(cancelled);
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        `${API_BASE}/api/v1/cases/${CASE_ID}/syncs/${SYNC_ID}`,
+        { cache: "no-store", signal: controller.signal },
+      ],
+      [
+        `${API_BASE}/api/v1/cases/${CASE_ID}/syncs/${SYNC_ID}/cancel`,
+        { method: "POST", cache: "no-store", signal: controller.signal },
+      ],
     ]);
   });
 
-  it("preserves backend errors and fails closed on mixed case evidence", async () => {
-    const unsafe = walletCaseFixture({ data_environment: "live" });
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(unsafe))
-      .mockResolvedValueOnce(
-        jsonResponse({ detail: "The requested live case cannot use demo evidence." }, 409),
-      );
+  it("exposes structured conflict and retry metadata without leaking raw bodies", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        detail: {
+          code: "active_sync_exists",
+          message_safe: "This case already has an active synchronization.",
+          retryable: true,
+          active_sync_public_id: SYNC_ID,
+        },
+      }, 409))
+      .mockResolvedValueOnce(jsonResponse({ detail: "Please wait." }, 429, { "Retry-After": "3" }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(getWalletCase(CASE_ID)).rejects.toThrow(
-      "wallet case environment does not match its latest sync evidence",
+    const conflict = await createWalletCaseSync(CASE_ID, {
+      time_window: "24h", surfaces: ["transactions"],
+    }, IDEMPOTENCY_KEY).catch((error: unknown) => error);
+    expect(conflict).toBeInstanceOf(WalletCaseApiError);
+    expect(conflict).toMatchObject({
+      status: 409,
+      code: "active_sync_exists",
+      retryable: true,
+      activeSyncPublicId: SYNC_ID,
+    });
+
+    const throttled = await getWalletCaseSync(CASE_ID, SYNC_ID).catch(
+      (error: unknown) => error,
     );
-    await expect(
-      createWalletCase({
-        wallet_address: "EQC-demo-wallet",
-        network: "ton-mainnet",
-        data_environment: "live",
-      }),
-    ).rejects.toThrow("The requested live case cannot use demo evidence.");
+    expect(throttled).toMatchObject({ status: 429, retryAfterMs: 3_000 });
   });
 
-  it("binds read responses to the case and sync ids in the requested URL", async () => {
-    const mismatchedCase = walletCaseFixture({ public_id: OTHER_CASE_ID });
-    const sync = walletCaseFixture().latest_sync;
-    if (!sync) throw new Error("fixture must include a sync");
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(mismatchedCase))
-      .mockResolvedValueOnce(jsonResponse({ ...sync, public_id: OTHER_SYNC_ID }));
+  it("fails closed before fetch for invalid ids and after fetch for mismatched ids", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(emptyWalletCaseFixture({ public_id: OTHER_CASE_ID })))
+      .mockResolvedValueOnce(jsonResponse(succeededSyncFixture({ public_id: OTHER_SYNC_ID })));
     vi.stubGlobal("fetch", fetchMock);
 
+    await expect(getWalletCase("not-a-uuid")).rejects.toThrow(/canonical UUIDv4/);
+    expect(fetchMock).not.toHaveBeenCalled();
     await expect(getWalletCase(CASE_ID)).rejects.toThrow(/requested case id/);
-    await expect(getWalletCaseSync(CASE_ID, SYNC_ID)).rejects.toThrow(
-      /requested sync id/,
-    );
+    await expect(getWalletCaseSync(CASE_ID, SYNC_ID)).rejects.toThrow(/requested sync id/);
   });
 });

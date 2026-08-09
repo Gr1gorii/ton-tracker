@@ -13,18 +13,17 @@ vi.mock("@tonconnect/ui-react", () => ({
 import App from "./App";
 import { API_BASE } from "./api";
 import type { ProvidersStatus } from "./types";
-import type { WalletCase } from "./walletCase";
+import {
+  activeSyncFixture,
+  ALL_SURFACES,
+  CASE_ID,
+  emptyWalletCaseFixture,
+  succeededSyncFixture,
+  SYNC_ID,
+  walletCaseFixture,
+} from "./test/walletCaseFixtures";
 
-const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
-const SYNC_ID = "550e8400-e29b-41d4-b716-446655440001";
 const WALLET = "EQC-demo-wallet";
-const ALL_SURFACES = [
-  "transfers",
-  "transactions",
-  "swaps",
-  "balances",
-  "jettons",
-] as const;
 
 function providersFixture(): ProvidersStatus {
   const configured = {
@@ -43,82 +42,6 @@ function providersFixture(): ProvidersStatus {
     stonfi: configured,
     tonapi: configured,
     wallet_activity: configured,
-  };
-}
-
-function walletCaseFixture(overrides: Partial<WalletCase> = {}): WalletCase {
-  return {
-    public_id: CASE_ID,
-    network: "ton-mainnet",
-    data_environment: "demo",
-    canonical_wallet_key: `0:${"a".repeat(64)}`,
-    identity_version: "ton_std_address_v1",
-    display_address: WALLET,
-    label: null,
-    note: null,
-    created_at: "2026-08-09T12:00:00Z",
-    updated_at: "2026-08-09T12:01:00Z",
-    latest_sync: {
-      public_id: SYNC_ID,
-      state: "succeeded",
-      stage: "completed",
-      progress: { current: 1, total: 1 },
-      provider: "mock_wallet_activity",
-      data_mode: "mock",
-      requested_scope: {
-        time_window: "24h",
-        start_at: "2026-08-08T12:00:00Z",
-        end_at: "2026-08-09T12:00:00Z",
-        surfaces: [...ALL_SURFACES],
-      },
-      coverage: {
-        state: "unknown",
-        requested_start_at: "2026-08-08T12:00:00Z",
-        requested_end_at: "2026-08-09T12:00:00Z",
-        requested_surfaces: [...ALL_SURFACES],
-        unavailable_surfaces: [],
-        incomplete_surfaces: [],
-        streams: [],
-        full_history_proven: false,
-      },
-      summary: {
-        activity_counts: { transfers: 2, transactions: 3, swaps: 1, balances: 2 },
-        failed_transaction_count: 1,
-        warning_count: 2,
-        portfolio_snapshot: {
-          total_balance_usd: "950.42",
-          priced_assets: 2,
-          unpriced_assets: 1,
-        },
-      },
-      limitations: [
-        {
-          code: "bounded_interval_not_full_history",
-          message: "The selected interval is not full wallet history.",
-        },
-      ],
-      message: "Demo sync completed.",
-      created_at: "2026-08-09T12:00:00Z",
-      started_at: "2026-08-09T12:00:00Z",
-      completed_at: "2026-08-09T12:01:00Z",
-    },
-    summary: {
-      activity_counts: { transfers: 2, transactions: 3, swaps: 1, balances: 2 },
-      failed_transaction_count: 1,
-      warning_count: 2,
-      portfolio_snapshot: {
-        total_balance_usd: "950.42",
-        priced_assets: 2,
-        unpriced_assets: 1,
-      },
-    },
-    limitations: [
-      {
-        code: "bounded_interval_not_full_history",
-        message: "The selected interval is not full wallet history.",
-      },
-    ],
-    ...overrides,
   };
 }
 
@@ -181,17 +104,9 @@ afterEach(() => {
 
 describe("Wallet Case application flow", () => {
   it("creates or opens a canonical case URL, syncs a bounded interval, and restores it after remount", async () => {
-    const emptyCase = walletCaseFixture({
-      latest_sync: null,
-      summary: {
-        activity_counts: { transfers: 0, transactions: 0, swaps: 0, balances: 0 },
-        failed_transaction_count: 0,
-        warning_count: 0,
-        portfolio_snapshot: { total_balance_usd: null, priced_assets: 0, unpriced_assets: 0 },
-      },
-      limitations: [{ code: "not_synchronized", message: "This case has not been synchronized yet." }],
-    });
+    const emptyCase = emptyWalletCaseFixture();
     const syncedCase = walletCaseFixture();
+    const queuedSync = activeSyncFixture("queued", { poll_after_ms: 500 });
     let caseReadCount = 0;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
@@ -207,7 +122,10 @@ describe("Wallet Case application flow", () => {
         return jsonResponse(caseReadCount === 1 ? emptyCase : syncedCase);
       }
       if (url.pathname === `/api/v1/cases/${CASE_ID}/syncs` && method === "POST") {
-        return jsonResponse(syncedCase.latest_sync, 201);
+        return jsonResponse(queuedSync, 202);
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/syncs/${SYNC_ID}` && method === "GET") {
+        return jsonResponse(succeededSyncFixture());
       }
       throw new Error(`Unexpected request: ${method} ${url.pathname}`);
     });
@@ -233,7 +151,7 @@ describe("Wallet Case application flow", () => {
       data_environment: "demo",
     });
 
-    expect(await screen.findByRole("heading", { name: "Not started" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Build the first usable snapshot" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Sync last 24 hours" }));
 
     await waitFor(() => {
@@ -246,8 +164,13 @@ describe("Wallet Case application flow", () => {
         time_window: "24h",
         surfaces: [...ALL_SURFACES],
       });
+      expect(syncCall?.[1]?.headers).toMatchObject({
+        "Idempotency-Key": expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+        ),
+      });
     });
-    expect(await screen.findByRole("heading", { name: "succeeded" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Snapshot ready" })).toBeTruthy();
     expect(screen.getAllByText("Coverage not established").length).toBeGreaterThan(0);
     expect(screen.queryByText(/Run #/)).toBeNull();
 
@@ -255,7 +178,7 @@ describe("Wallet Case application flow", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: WALLET })).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "succeeded" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Snapshot ready" })).toBeTruthy();
     expect(window.location.pathname).toBe(`/cases/${CASE_ID}/summary`);
     expect(screen.queryByLabelText("TON wallet address")).toBeNull();
     expect(caseReadCount).toBe(3);
@@ -263,7 +186,7 @@ describe("Wallet Case application flow", () => {
 
   it("fails closed when a deep-linked live case contains demo sync evidence", async () => {
     window.history.replaceState({}, "", `/cases/${CASE_ID}/summary`);
-    const unsafeCase = walletCaseFixture({ data_environment: "live" });
+    const unsafeCase = walletCaseFixture({ overrides: { data_environment: "live" } });
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       const method = init?.method ?? "GET";
@@ -281,11 +204,58 @@ describe("Wallet Case application flow", () => {
 
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain(
-      "wallet case environment does not match its latest sync evidence",
+      "wallet case environment or identity does not match its sync evidence",
     );
     expect(screen.queryByText("Returned activity rows")).toBeNull();
     expect(screen.queryByRole("button", { name: "Sync last 24 hours" })).toBeNull();
     expect(window.location.pathname).toBe(`/cases/${CASE_ID}/summary`);
+  });
+
+  it("resumes a persisted active sync after refresh without creating another job", async () => {
+    window.history.replaceState({}, "", `/cases/${CASE_ID}/summary`);
+    const queued = activeSyncFixture("queued", { poll_after_ms: 500 });
+    const activeCase = walletCaseFixture({ latestAttempt: queued, currentSnapshot: null });
+    const completedCase = walletCaseFixture();
+    let caseReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}` && method === "GET") {
+        caseReads += 1;
+        return jsonResponse(caseReads === 1 ? activeCase : completedCase);
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/syncs/${SYNC_ID}` && method === "GET") {
+        return jsonResponse(succeededSyncFixture());
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Queued safely" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Snapshot ready" }, { timeout: 2_000 })).toBeTruthy();
+    expect(caseReads).toBe(2);
+    expect(fetchMock.mock.calls.some(([input, init]) =>
+      requestUrl(input).pathname.endsWith("/syncs") && init?.method === "POST"
+    )).toBe(false);
+  });
+
+  it("keeps the unsupported case Activity URL fail-closed without legacy requests", async () => {
+    window.history.replaceState({}, "", `/cases/${CASE_ID}/activity`);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeTruthy();
+    expect(screen.queryByText("Compatibility view")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the pre-authentication case facade disabled on hosted access", async () => {
