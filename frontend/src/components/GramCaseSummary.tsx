@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import {
   ArrowClockwise,
   CalendarBlank,
@@ -6,14 +6,11 @@ import {
   Coins,
   Database,
   ShieldCheck,
-  SpinnerGap,
   WarningCircle,
   Wallet,
 } from "@phosphor-icons/react";
 
-import { getWalletCase } from "../walletCaseApi";
 import {
-  walletCaseEnvironmentLabel,
   type WalletCase,
   type WalletCaseCoverageState,
   type WalletCaseSyncRequest,
@@ -25,11 +22,6 @@ const DEFAULT_SYNC_REQUEST: WalletCaseSyncRequest = {
   time_window: "24h",
   surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
 };
-
-function shortAddress(value: string): string {
-  if (value.length <= 24) return value;
-  return `${value.slice(0, 12)}…${value.slice(-9)}`;
-}
 
 function formatDate(value: string | null | undefined): string {
   if (!value) return "Not yet";
@@ -62,93 +54,25 @@ function snapshotStateLabel(state: string | undefined): string {
   return "Not available";
 }
 
-export default function GramCaseSummary({ caseId }: { caseId: string }) {
-  const [walletCase, setWalletCase] = useState<WalletCase | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const requestGenerationRef = useRef(0);
-  const requestControllersRef = useRef(new Set<AbortController>());
-
-  const load = useCallback(async (background = false) => {
-    requestControllersRef.current.forEach((controller) => controller.abort());
-    requestControllersRef.current.clear();
-    const controller = new AbortController();
-    requestControllersRef.current.add(controller);
-    const generation = ++requestGenerationRef.current;
-    if (background) {
-      setRefreshing(true);
-      setRefreshError(null);
-    } else {
-      setLoading(true);
-      setRefreshError(null);
-    }
-    if (!background) setError(null);
-    try {
-      const result = await getWalletCase(caseId, controller.signal);
-      if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-      setWalletCase(result);
-      setError(null);
-    } catch (caught) {
-      if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-      if (background) {
-        setRefreshError(
-          caught instanceof Error
-            ? caught.message
-            : "The updated Wallet Case snapshot is unavailable.",
-        );
-      } else {
-        setError(caught instanceof Error ? caught.message : "Wallet Case is unavailable");
-      }
-    } finally {
-      requestControllersRef.current.delete(controller);
-      if (!controller.signal.aborted && generation === requestGenerationRef.current) {
-        if (background) setRefreshing(false);
-        else setLoading(false);
-      }
-    }
-  }, [caseId]);
-
-  useEffect(() => {
-    void load();
-    return () => {
-      requestGenerationRef.current += 1;
-      requestControllersRef.current.forEach((controller) => controller.abort());
-      requestControllersRef.current.clear();
-    };
-  }, [load]);
-
+export default function GramCaseSummary({
+  walletCase,
+  refreshError,
+  onRefresh,
+}: {
+  walletCase: WalletCase;
+  refreshError: string | null;
+  onRefresh: (background?: boolean) => Promise<void>;
+}) {
+  const caseId = walletCase.public_id;
   const refreshAfterTerminal = useCallback(async () => {
-    await load(true);
-  }, [load]);
+    await onRefresh(true);
+  }, [onRefresh]);
 
   const syncController = useWalletCaseSyncJob({
     caseId,
     initialSync: walletCase?.latest_sync_attempt ?? null,
     onTerminal: refreshAfterTerminal,
   });
-
-  if (loading) {
-    return (
-      <section className="case-state-panel" aria-live="polite">
-        <SpinnerGap className="spin" size={25} />
-        <div><h1>Opening Wallet Case</h1><p>Loading persisted scope and evidence summary…</p></div>
-      </section>
-    );
-  }
-
-  if (error || !walletCase) {
-    return (
-      <section className="case-state-panel is-error" role="alert">
-        <WarningCircle size={27} weight="fill" />
-        <div><h1>Wallet Case unavailable</h1><p>{error ?? "The response did not contain a Wallet Case."}</p></div>
-        <button type="button" className="button-secondary" onClick={() => void load()}>
-          Try again <ArrowClockwise size={17} />
-        </button>
-      </section>
-    );
-  }
 
   const snapshot = walletCase.current_snapshot;
   const result = snapshot?.result ?? null;
@@ -157,7 +81,7 @@ export default function GramCaseSummary({ caseId }: { caseId: string }) {
   const activityTotal = counts
     ? counts.transfers + counts.transactions + counts.swaps
     : null;
-  const environmentLabel = walletCaseEnvironmentLabel(walletCase.data_environment);
+  const environmentLabel = walletCase.data_environment === "live" ? "Live data" : "Demo data";
   const coverage = result?.coverage;
   const limitations = result?.limitations ?? walletCase.limitations;
   const summaryUnavailable = result === null || limitations.some(
@@ -166,31 +90,6 @@ export default function GramCaseSummary({ caseId }: { caseId: string }) {
 
   return (
     <div className="case-summary-page">
-      <header className="case-heading">
-        <div>
-          <div className="case-eyebrow-row">
-            <span>Wallet Case</span>
-            <strong className={`case-mode-badge is-${walletCase.data_environment}`}>
-              {environmentLabel}
-            </strong>
-            <strong className="case-network-badge">
-              {walletCase.network === "ton-mainnet" ? "TON mainnet" : "TON testnet"}
-            </strong>
-          </div>
-          <h1>{walletCase.label ?? shortAddress(walletCase.display_address)}</h1>
-          <p>
-            One persistent case for this canonical TON address. Every result below remains
-            bounded by its selected interval and evidence source.
-          </p>
-          <code title={walletCase.canonical_wallet_key}>{walletCase.canonical_wallet_key}</code>
-        </div>
-        {refreshing && (
-          <span className="case-refreshing" role="status">
-            <SpinnerGap className="spin" size={17} /> Publishing the new snapshot…
-          </span>
-        )}
-      </header>
-
       <CaseSyncPanel
         controller={syncController}
         hasSnapshot={snapshot !== null}
@@ -201,7 +100,7 @@ export default function GramCaseSummary({ caseId }: { caseId: string }) {
         <div className="case-inline-error" role="alert">
           <WarningCircle size={18} weight="fill" />
           <span>Sync finished, but the updated case could not be loaded: {refreshError}</span>
-          <button type="button" onClick={() => void load(true)}>Try again</button>
+          <button type="button" onClick={() => void onRefresh(true)}>Try again</button>
         </div>
       )}
 

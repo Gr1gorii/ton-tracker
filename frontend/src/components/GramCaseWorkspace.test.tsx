@@ -1,0 +1,51 @@
+// @vitest-environment jsdom
+
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { CASE_ID, walletCaseFixture } from "../test/walletCaseFixtures";
+
+const apiMocks = vi.hoisted(() => ({ getWalletCase: vi.fn() }));
+vi.mock("../walletCaseApi", () => apiMocks);
+vi.mock("./GramCaseSummary", () => ({ default: () => <div>Summary surface</div> }));
+vi.mock("./GramCaseActivity", () => ({ default: () => <div>Activity surface</div> }));
+
+import GramCaseWorkspace from "./GramCaseWorkspace";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  apiMocks.getWalletCase.mockResolvedValue(walletCaseFixture());
+});
+afterEach(() => cleanup());
+
+describe("GramCaseWorkspace", () => {
+  it("offers real Summary and Activity links with one current view and SPA plain-click navigation", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    const { rerender } = render(<GramCaseWorkspace caseId={CASE_ID} view="summary" onNavigate={onNavigate} />);
+    await screen.findByText("Summary surface");
+
+    const summary = screen.getByRole("link", { name: /SummarySnapshot and coverage/ });
+    const activity = screen.getByRole("link", { name: /ActivityFiltered snapshot rows/ });
+    expect(summary.getAttribute("href")).toBe(`/cases/${CASE_ID}/summary`);
+    expect(activity.getAttribute("href")).toBe(`/cases/${CASE_ID}/activity`);
+    expect(summary.getAttribute("aria-current")).toBe("page");
+    expect(activity.getAttribute("aria-current")).toBeNull();
+    await user.click(activity);
+    expect(onNavigate).toHaveBeenCalledWith("activity");
+
+    rerender(<GramCaseWorkspace caseId={CASE_ID} view="activity" onNavigate={onNavigate} />);
+    await waitFor(() => expect(screen.getByText("Activity surface")).toBeTruthy());
+    expect(activity.getAttribute("aria-current")).toBe("page");
+    expect(apiMocks.getWalletCase).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a retryable shell error and never mounts a case surface without a bound case", async () => {
+    apiMocks.getWalletCase.mockRejectedValueOnce(new Error("Case scope rejected"));
+    render(<GramCaseWorkspace caseId={CASE_ID} view="activity" onNavigate={vi.fn()} />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Case scope rejected");
+    expect(screen.queryByText("Activity surface")).toBeNull();
+  });
+});

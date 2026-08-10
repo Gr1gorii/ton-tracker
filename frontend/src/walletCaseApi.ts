@@ -11,9 +11,28 @@ import {
   type WalletCaseSyncRequest,
   type WalletCaseUpsertResponse,
 } from "./walletCase";
+import {
+  isWalletCaseAssetPublicId,
+  isWalletCaseActivityPublicId,
+  parseWalletCaseActivityDetailResponse,
+  parseWalletCaseActivityResponse,
+  type WalletCaseActivityDetailResponse,
+  type WalletCaseActivityQuery,
+  type WalletCaseActivityResponse,
+} from "./walletCaseActivity";
+import {
+  CASE_ACTIVITY_PROTOCOL_IDS,
+  canonicalizeCaseActivityFilters,
+} from "./caseActivityQuery";
+import { isCanonicalRawTonAddress } from "./tonAddress";
+import { parseRfc3339Instant } from "./rfc3339";
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const ACTIVITY_KINDS = ["transaction", "transfer", "swap"] as const;
+const ACTIVITY_DIRECTIONS = ["in", "out", "unknown"] as const;
+const ACTIVITY_OUTCOMES = ["success", "failed", "unknown"] as const;
+const ACTIVITY_ORIGINS = ["demo_fixture", "provider_observed"] as const;
 
 interface StructuredApiDetail {
   code?: unknown;
@@ -104,6 +123,158 @@ export async function getWalletCase(
     throw new Error("Wallet Case response does not match the requested case id");
   }
   return walletCase;
+}
+
+export async function getWalletCaseActivity(
+  caseId: string,
+  query: WalletCaseActivityQuery,
+  signal?: AbortSignal,
+): Promise<WalletCaseActivityResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  if (query.snapshot !== null) assertPublicId(query.snapshot, "Wallet Case snapshot id");
+  if (!Number.isInteger(query.limit) || query.limit < 1 || query.limit > 100) {
+    throw new Error("Wallet Case Activity limit must be between 1 and 100");
+  }
+  if (query.cursor !== null && query.cursor !== undefined && (!query.cursor || query.cursor.length > 1024)) {
+    throw new Error("Wallet Case Activity cursor is invalid");
+  }
+  if (query.cursor && query.snapshot === null) {
+    throw new Error("Wallet Case Activity pagination requires a pinned snapshot");
+  }
+  assertActivityChoices(query.kinds, ACTIVITY_KINDS, "kind");
+  assertActivityChoices(query.directions, ACTIVITY_DIRECTIONS, "direction");
+  assertActivityChoices(query.outcomes, ACTIVITY_OUTCOMES, "outcome");
+  assertActivityChoices(query.data_origins, ACTIVITY_ORIGINS, "data origin");
+  if (query.sort !== "newest" && query.sort !== "oldest") throw new Error("Wallet Case Activity sort is invalid");
+  if ((query.from_at === null) !== (query.to_at === null)) {
+    throw new Error("Wallet Case Activity period must include both bounds");
+  }
+  if (query.from_at !== null && query.to_at !== null) {
+    const fromInstant = parseRfc3339Instant(query.from_at, { requireUtc: true, maximumFractionDigits: 6 });
+    const toInstant = parseRfc3339Instant(query.to_at, { requireUtc: true, maximumFractionDigits: 6 });
+    if (
+      fromInstant === null || toInstant === null || fromInstant >= toInstant
+    ) throw new Error("Wallet Case Activity period is invalid");
+  }
+  if (query.asset_id !== null && !isWalletCaseAssetPublicId(query.asset_id)) {
+    throw new Error("Wallet Case Activity asset id is invalid");
+  }
+  if (query.protocol_id !== null && !(CASE_ACTIVITY_PROTOCOL_IDS as readonly string[]).includes(query.protocol_id)) {
+    throw new Error("Wallet Case Activity protocol id is not recognized");
+  }
+  if (query.counterparty !== null && !isCanonicalRawTonAddress(query.counterparty)) {
+    throw new Error("Wallet Case Activity counterparty is not canonical");
+  }
+  const requestQuery: WalletCaseActivityQuery = {
+    ...query,
+    ...canonicalizeCaseActivityFilters(query),
+  };
+  const params = new URLSearchParams();
+  if (requestQuery.snapshot) params.set("snapshot", requestQuery.snapshot);
+  params.set("limit", String(requestQuery.limit));
+  if (requestQuery.cursor) params.set("cursor", requestQuery.cursor);
+  requestQuery.kinds.forEach((value) => params.append("kind", value));
+  requestQuery.directions.forEach((value) => params.append("direction", value));
+  requestQuery.outcomes.forEach((value) => params.append("outcome", value));
+  if (requestQuery.from_at) params.set("from_at", requestQuery.from_at);
+  if (requestQuery.to_at) params.set("to_at", requestQuery.to_at);
+  if (requestQuery.asset_id) params.set("asset_id", requestQuery.asset_id);
+  if (requestQuery.protocol_id) params.set("protocol_id", requestQuery.protocol_id);
+  if (requestQuery.counterparty) params.set("counterparty", requestQuery.counterparty);
+  requestQuery.data_origins.forEach((value) => params.append("data_origin", value));
+  params.set("sort", requestQuery.sort);
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/activity?${params}`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) throw await walletCaseResponseError(response, "Wallet Case Activity read failed");
+  const result = parseWalletCaseActivityResponse(await response.json());
+  if (result.case_public_id !== caseId) {
+    throw new Error("Wallet Case Activity response does not match the requested case id");
+  }
+  if (requestQuery.snapshot !== null && result.snapshot?.public_id !== requestQuery.snapshot) {
+    throw new Error("Wallet Case Activity response does not match the requested snapshot id");
+  }
+  const expectedFilters = {
+    kinds: requestQuery.kinds,
+    directions: requestQuery.directions,
+    outcomes: requestQuery.outcomes,
+    from_at: requestQuery.from_at,
+    to_at: requestQuery.to_at,
+    asset_id: requestQuery.asset_id,
+    protocol_id: requestQuery.protocol_id,
+    counterparty: requestQuery.counterparty,
+    data_origins: requestQuery.data_origins,
+    sort: requestQuery.sort,
+  };
+  if (!activityFiltersMatch(result.filters, expectedFilters)) {
+    throw new Error("Wallet Case Activity response filters do not match the request");
+  }
+  return result;
+}
+
+function assertActivityChoices<T extends string>(
+  values: T[],
+  allowed: readonly T[],
+  label: string,
+): void {
+  if (
+    values.length > allowed.length || new Set(values).size !== values.length ||
+    values.some((value) => !allowed.includes(value))
+  ) throw new Error(`Wallet Case Activity ${label} filters are invalid`);
+}
+
+function activityFiltersMatch(
+  actual: WalletCaseActivityResponse["filters"],
+  expected: WalletCaseActivityResponse["filters"],
+): boolean {
+  const sameInstant = (left: string | null, right: string | null) =>
+    left === right || (
+      left !== null && right !== null &&
+      activityInstantNanoseconds(left) === activityInstantNanoseconds(right)
+    );
+  return (
+    JSON.stringify(actual.kinds) === JSON.stringify(expected.kinds) &&
+    JSON.stringify(actual.directions) === JSON.stringify(expected.directions) &&
+    JSON.stringify(actual.outcomes) === JSON.stringify(expected.outcomes) &&
+    sameInstant(actual.from_at, expected.from_at) && sameInstant(actual.to_at, expected.to_at) &&
+    actual.asset_id === expected.asset_id && actual.protocol_id === expected.protocol_id &&
+    actual.counterparty === expected.counterparty &&
+    JSON.stringify(actual.data_origins) === JSON.stringify(expected.data_origins) &&
+    actual.sort === expected.sort
+  );
+}
+
+function activityInstantNanoseconds(value: string): bigint {
+  const parsed = parseRfc3339Instant(value, { requireUtc: true, maximumFractionDigits: 6 });
+  if (parsed === null) throw new Error("Wallet Case Activity timestamp is invalid");
+  return parsed;
+}
+
+export async function getWalletCaseActivityDetail(
+  caseId: string,
+  snapshotId: string,
+  activityId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseActivityDetailResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  assertPublicId(snapshotId, "Wallet Case snapshot id");
+  if (!isWalletCaseActivityPublicId(activityId)) throw new Error("Wallet Case Activity id is invalid");
+  const params = new URLSearchParams({ snapshot: snapshotId });
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/activity/${encodeURIComponent(activityId)}?${params}`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) throw await walletCaseResponseError(response, "Wallet Case Activity detail failed");
+  const result = parseWalletCaseActivityDetailResponse(await response.json());
+  if (
+    result.case_public_id !== caseId ||
+    result.snapshot_public_id !== snapshotId ||
+    result.item.public_id !== activityId
+  ) {
+    throw new Error("Wallet Case Activity detail does not match the requested resource");
+  }
+  return result;
 }
 
 export async function createWalletCaseSync(

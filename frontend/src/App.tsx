@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowRight,
   ArrowsClockwise,
@@ -35,13 +35,13 @@ import {
 } from "./api";
 import { createWalletCase } from "./walletCaseApi";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
-import { caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
+import { caseActivityPath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
-import GramCaseSummary from "./components/GramCaseSummary";
+import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWorkspace";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.72.0";
+const RELEASE_LABEL = "v0.73.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
@@ -105,6 +105,7 @@ function providerItems(providers: ProvidersStatus | null) {
 export default function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location.pathname));
+  const routeRef = useRef(route);
   const [entered, setEntered] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
   const [workspaceAccount, setWorkspaceAccount] = useState("");
@@ -119,7 +120,10 @@ export default function App() {
 
   useEffect(() => {
     function restoreRoute() {
-      setRoute(parseAppRoute(window.location.pathname));
+      const nextRoute = parseAppRoute(window.location.pathname);
+      if (sameAppRoute(routeRef.current, nextRoute)) return;
+      routeRef.current = nextRoute;
+      setRoute(nextRoute);
       window.scrollTo({ top: 0, behavior: "auto" });
     }
     window.addEventListener("popstate", restoreRoute);
@@ -127,14 +131,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.title = route.kind === "case-summary"
-      ? "Wallet Case Summary · GRAM Scope"
+    document.title = route.kind === "case-summary" || route.kind === "case-activity"
+      ? `Wallet Case ${route.kind === "case-summary" ? "Summary" : "Activity"} · GRAM Scope`
       : route.kind === "not-found"
         ? "Page not found · GRAM Scope"
         : entered
           ? "Advanced diagnostics · GRAM Scope"
           : "GRAM Scope · TON Wallet Evidence";
     const focusTimer = window.setTimeout(() => {
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       document.querySelector<HTMLElement>("[data-route-focus]")?.focus();
     }, 0);
     return () => window.clearTimeout(focusTimer);
@@ -164,6 +169,7 @@ export default function App() {
 
   const setAppRoute = useCallback((nextRoute: AppRoute, path: string) => {
     window.history.pushState({}, "", path);
+    routeRef.current = nextRoute;
     setRoute(nextRoute);
     window.scrollTo({ top: 0, behavior: "auto" });
   }, []);
@@ -205,7 +211,13 @@ export default function App() {
     navigate("activity");
   }
 
-  if (route.kind === "case-summary") {
+  function openCaseView(caseId: string, view: WalletCaseView) {
+    const path = view === "summary" ? caseSummaryPath(caseId) : caseActivityPath(caseId);
+    setAppRoute({ kind: view === "summary" ? "case-summary" : "case-activity", caseId }, path);
+  }
+
+  if (route.kind === "case-summary" || route.kind === "case-activity") {
+    const view: WalletCaseView = route.kind === "case-summary" ? "summary" : "activity";
     return (
       <div className="case-route-shell">
         <header className="case-route-header">
@@ -217,8 +229,13 @@ export default function App() {
             <ThemeToggle theme={theme} onChange={setTheme} />
           </div>
         </header>
-        <main className="case-route-main" data-route-focus tabIndex={-1} aria-label="Wallet Case summary">
-          <GramCaseSummary key={route.caseId} caseId={route.caseId} />
+        <main className="case-route-main" data-route-focus tabIndex={-1} aria-label={`Wallet Case ${view}`}>
+          <GramCaseWorkspace
+            key={route.caseId}
+            caseId={route.caseId}
+            view={view}
+            onNavigate={(nextView) => openCaseView(route.caseId, nextView)}
+          />
         </main>
       </div>
     );
@@ -405,6 +422,14 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+function sameAppRoute(left: AppRoute, right: AppRoute): boolean {
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "case-summary" || left.kind === "case-activity") {
+    return right.kind === left.kind && right.caseId === left.caseId;
+  }
+  return true;
 }
 
 function Landing({

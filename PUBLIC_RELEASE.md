@@ -1,4 +1,4 @@
-# GRAM Scope - v0.72.0 Public Release
+# GRAM Scope - v0.73.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -10,6 +10,11 @@ Public release handoff for the current TON wallet intelligence workspace.
   bounded retry, cooperative cancellation, lease fencing, and restart recovery.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
+- A snapshot-pinned Wallet Case Activity facade with cross-sync identity
+  revalidation, overlap deduplication, stable cursor pagination, server-side
+  filters, bounded aggregates, coverage gaps, and sanitized provenance.
+- A shared Summary/Activity case shell with refresh-safe filters, sorting,
+  selected-record details, keyboard focus management, and responsive cards.
 - Compact case activity, portfolio snapshot, coverage, and limitation summaries
   that keep internal compatibility run IDs out of the primary workflow.
 - Responsive TON wallet evidence workspace with guarded real TonAPI ingestion.
@@ -24,7 +29,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.72.0 DURABLE CASE SYNC`.
+- Product release label: `v0.73.0 CASE ACTIVITY`.
 - Backend API `VERSION` remains `0.2.1`.
 - `DATA_MODE=mock` remains the default.
 - Guarded live wallet ingestion requires explicit real/TonAPI/live settings.
@@ -41,6 +46,15 @@ Public release handoff for the current TON wallet intelligence workspace.
 ## Known Limitations
 
 - Selected bounded intervals and captures do not establish complete history.
+- Activity combines only usable case syncs up to its pinned revision. Rows
+  without a fully revalidated identity are intentionally not deduplicated, and
+  semantic identity conflicts are published as gaps rather than guessed.
+- The compact Summary remains based on the case's latest usable run while
+  Activity publishes a separately labelled cross-sync aggregate at an explicit
+  pinned revision. The counts are not claimed to be equivalent; unified
+  Summary aggregation is deferred.
+- Native proof ledgers remain a separate manually initiated evidence subset and
+  are not presented as the complete or authoritative general timeline.
 - The local worker replays the whole bounded crawl after an in-flight crash;
   accepted provider pages are not yet committed as resumable checkpoints.
 - Cancellation is immediate while queued and cooperative around the current
@@ -56,17 +70,20 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.72.0`, confirm:
+Before tagging `v0.73.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.72.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.73.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
   frontend and backend vertical-slice tests.
+- Activity overlap deduplication, unavailable-identity separation, semantic
+  conflict gaps, token-symbol collision, snapshot-stable cursors, filters,
+  direct URL restoration, and sanitized-detail tests pass.
 - Real stored-run multi-asset readiness is provider-free, digest-stable, and
   fail-closed for unavailable/malformed evidence.
 - Credential and prohibited-brand scans are clean.

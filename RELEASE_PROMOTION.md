@@ -1,11 +1,11 @@
-# GRAM Scope — v0.72.0 Promotion Checklist
+# GRAM Scope — v0.73.0 Promotion Checklist
 
-Current promotion gates for durable Wallet Case synchronization:
+Current promotion gates for canonical Wallet Case Activity:
 
-- Product label is `v0.72.0 DURABLE CASE SYNC`; backend API version stays
+- Product label is `v0.73.0 CASE ACTIVITY`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic must reach the current `0017` head with model parity from fresh,
-  legacy, current-0016, and every accepted interrupted-DDL/index path.
+- Alembic must reach the current migration head with model parity from fresh,
+  legacy, current-0017, and every accepted interrupted-DDL/index path.
 - Create/open is canonical and idempotent across friendly/raw address forms;
   mainnet/testnet and demo/live identities never merge.
 - Case sync is persisted before provider I/O. Claiming is lease-fenced, retry
@@ -15,13 +15,27 @@ Current promotion gates for durable Wallet Case synchronization:
   Public case/job payloads contain no sequential run identifier.
 - Latest attempt, active sync, and latest usable snapshot are separate
   provenance objects; queued/failed work cannot masquerade as snapshot data.
+- Activity is pinned to one usable snapshot. Cursor state binds the case,
+  snapshot, filters, sort, and keyset position; later syncs cannot alter the
+  remaining pages of an existing traversal.
+- Cross-sync deduplication requires fully revalidated transaction or shared
+  provider event-action identities. Unavailable identities remain separate,
+  while semantic conflicts fail closed as explicit gaps.
+- Native TON has a network-scoped identity. Jetton identity requires the
+  canonical network and master-contract address; symbols never merge assets.
+- Activity responses expose bounded aggregates, observed period, coverage,
+  gaps, and sanitized provenance without raw payloads, internal row/run IDs,
+  worker fields, or chain-proof claims.
+- Summary labels the case's latest usable snapshot while Activity labels its
+  explicit pinned revision. Their latest-run versus cross-sync aggregate
+  distinction remains visible until the next unification slice.
 - Restart recovery, heartbeat, cancel-before/after-provider, retry exhaustion,
   and stale-writer fencing tests pass. No page-level resume claim is made.
 - Provider configuration makes no health claim. Live cases are advertised only
   when the guarded TonAPI sync path is actually available; mock fallback is
   rejected before persistence.
 - The pre-authentication facade is direct-loopback only. Hosted access remains
-  disabled until authentication supplies an owner scope; v0.72.0 must not be
+  disabled until authentication supplies an owner scope; v0.73.0 must not be
   promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, credential, and
   prohibited-brand checks pass before tagging.
