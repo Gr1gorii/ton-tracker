@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -22,6 +22,11 @@ import {
   SYNC_ID,
   walletCaseFixture,
 } from "./test/walletCaseFixtures";
+import {
+  ACTIVITY_ID,
+  activityDetailFixture,
+  activityResponseFixture,
+} from "./test/walletCaseActivityFixtures";
 
 const WALLET = "EQC-demo-wallet";
 
@@ -242,20 +247,89 @@ describe("Wallet Case application flow", () => {
     )).toBe(false);
   });
 
-  it("keeps the unsupported case Activity URL fail-closed without legacy requests", async () => {
+  it("deep-links the modern case Activity route and never requests the legacy Activity facade", async () => {
     window.history.replaceState({}, "", `/cases/${CASE_ID}/activity`);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
-      throw new Error(`Unexpected request: ${url.pathname}`);
+      if (url.pathname === `/api/v1/cases/${CASE_ID}`) return jsonResponse(walletCaseFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/activity` && (init?.method ?? "GET") === "GET") {
+        return jsonResponse(activityResponseFixture());
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/activity/${ACTIVITY_ID}` && (init?.method ?? "GET") === "GET") {
+        return jsonResponse(activityDetailFixture());
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
 
     render(<App />);
 
-    expect(await screen.findByRole("heading", { name: "Page not found" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "1 Activity rows" })).toBeTruthy();
+    const activityMain = screen.getByRole("main", { name: "Wallet Case activity" });
+    await waitFor(() => expect(document.activeElement).toBe(activityMain));
+    expect(screen.getByRole("link", { name: /ActivityFiltered snapshot rows/ }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: /SummarySnapshot and coverage/ }).getAttribute("href")).toBe(`/cases/${CASE_ID}/summary`);
+    await waitFor(() => expect(document.title).toBe("Wallet Case Activity · GRAM Scope"));
     expect(screen.queryByText("Compatibility view")).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).pathname === "/api/wallets/ingest")).toBe(false);
+
+    const activityRow = screen.getByRole("link", { name: "Open Transaction Activity detail" });
+    await user.click(activityRow);
+    expect(await screen.findByRole("dialog", { name: "Activity detail" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(activityRow));
+
+    await user.click(screen.getByRole("link", { name: /SummarySnapshot and coverage/ }));
+    expect(await screen.findByRole("heading", { name: "Snapshot ready" })).toBeTruthy();
+    expect(window.location.pathname).toBe(`/cases/${CASE_ID}/summary`);
+  });
+
+  it("keeps initial deep-linked Activity detail focus inside the modal after route focus runs", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      `/cases/${CASE_ID}/activity?snapshot=${SYNC_ID}&sort=newest&activity=${ACTIVITY_ID}`,
+    );
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}`) return jsonResponse(walletCaseFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/activity` && (init?.method ?? "GET") === "GET") {
+        return jsonResponse(activityResponseFixture());
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/activity/${ACTIVITY_ID}` && (init?.method ?? "GET") === "GET") {
+        return jsonResponse(activityDetailFixture());
+      }
+      throw new Error(`Unexpected request: ${init?.method ?? "GET"} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    let routeFocusCallback: (() => void) | null = null;
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    const timerSpy = vi.spyOn(window, "setTimeout").mockImplementation((handler, timeout, ...args) => {
+      if (timeout === 0 && routeFocusCallback === null && typeof handler === "function") {
+        routeFocusCallback = () => handler(...args);
+        return 987_654_321;
+      }
+      return nativeSetTimeout(handler, timeout, ...args);
+    });
+
+    try {
+      render(<App />);
+
+      const dialog = await screen.findByRole("dialog", { name: "Activity detail" });
+      const close = screen.getByRole("button", { name: "Close Activity detail" });
+      await waitFor(() => expect(document.activeElement).toBe(close));
+      const callback = routeFocusCallback;
+      expect(callback).not.toBeNull();
+      act(() => (callback as unknown as () => void)());
+      expect(dialog.contains(document.activeElement)).toBe(true);
+      expect(document.activeElement).toBe(close);
+    } finally {
+      timerSpy.mockRestore();
+    }
   });
 
   it("keeps the pre-authentication case facade disabled on hosted access", async () => {

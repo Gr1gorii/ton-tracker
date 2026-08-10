@@ -2094,6 +2094,16 @@ class TonapiAdapter:
         token_out, amount_out, decimals_out, address_out = cls._swap_side(
             detail, "out"
         )
+        token_in_standard = (
+            "native"
+            if detail.get("ton_in") not in (None, "")
+            else "jetton"
+        )
+        token_out_standard = (
+            "native"
+            if detail.get("ton_out") not in (None, "")
+            else "jetton"
+        )
         return {
             "event_id": event_id,
             "utime": utime,
@@ -2102,10 +2112,12 @@ class TonapiAdapter:
             "action_index": action_index,
             "dex": cls._optional_string(detail.get("dex")),
             "token_in": token_in,
+            "token_in_standard": token_in_standard,
             "token_in_address": address_in,
             "raw_amount_in": amount_in,
             "decimals_in": decimals_in,
             "token_out": token_out,
+            "token_out_standard": token_out_standard,
             "token_out_address": address_out,
             "raw_amount_out": amount_out,
             "decimals_out": decimals_out,

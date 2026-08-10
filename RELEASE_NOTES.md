@@ -1,3 +1,48 @@
+# GRAM Scope — v0.73.0 CASE ACTIVITY
+
+v0.73.0 adds the first canonical Wallet Case Activity facade and replaces the
+case workflow's former Activity dead end with a refresh-safe, filterable
+timeline. Activity is pinned to one usable case snapshot revision and combines
+only eligible partial/succeeded syncs up to that revision. Overlapping source
+rows collapse only when their persisted transaction or provider event-action
+identity fully revalidates; observations without a trustworthy identity remain
+separate, and conflicting semantics fail closed with an explicit data gap.
+
+The public API exposes opaque activity and asset identifiers, stable keyset
+pagination, server-side filters, bounded aggregates, requested and observed
+periods, stream coverage, gaps, and sanitized provenance. Cursors bind the
+case, snapshot, normalized filters, ordering, and position so a later sync
+cannot change an in-progress traversal. Public responses contain no sequential
+database IDs, compatibility run IDs, raw provider payloads, worker lease data,
+or unsupported chain-proof claims.
+
+TON is identified as the network-scoped native asset. Jettons receive an asset
+identity only from a canonical `(network, contract address)` pair; symbol and
+name remain display metadata, so two contracts sharing a symbol never merge.
+Transactions are normalized provider observations. Transfer and swap actions
+remain mutable provider-derived display observations unless a future evidence
+pipeline proves a stronger relationship. Demo fixtures are visibly separated
+from live provider observations.
+
+The case UI now shares one wallet header and Summary/Activity navigation.
+Activity filters, sort, pinned snapshot, and selected record survive direct
+URLs, refresh, back, and forward navigation. Desktop rows become compact mobile
+cards, expanded details preserve keyboard focus, and unavailable coverage or
+partial data stays visible instead of being rendered as zero or complete
+history.
+
+This release intentionally leaves the compact Summary on the case's latest
+usable-run basis while Activity publishes its own cross-sync deduplicated
+aggregate at an explicit pinned revision. The views label those different
+snapshot semantics and make no count-equivalence claim.
+Native proof ledgers are not silently mixed into the general timeline because
+they are still a separately initiated subset. Per-page ingestion resume,
+unified Summary aggregates, automated evidence verification, authenticated
+hosted owner scopes, Findings, and Evidence screens remain later Roadmap 1
+slices.
+
+---
+
 # GRAM Scope — v0.72.0 DURABLE CASE SYNC
 
 v0.72.0 turns every Wallet Case synchronization into a persisted background

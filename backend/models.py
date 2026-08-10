@@ -258,6 +258,13 @@ class CaseSync(Base):
             "created_at",
         ),
         Index(
+            "ix_wallet_case_syncs_case_activity",
+            "case_id",
+            "state",
+            "id",
+            "ingestion_run_id",
+        ),
+        Index(
             "uq_wallet_case_syncs_case_idempotency",
             "case_id",
             "idempotency_key",
@@ -586,6 +593,12 @@ class WalletTransfer(Base):
             "event_action_logical_time_canonical",
             "event_action_index",
         ),
+        Index(
+            "ix_wallet_transfers_run_timeline",
+            "run_id",
+            "timestamp",
+            "id",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
@@ -652,6 +665,12 @@ class WalletTransaction(Base):
             "transaction_account_canonical",
             "transaction_logical_time_canonical",
             "transaction_hash_canonical",
+        ),
+        Index(
+            "ix_wallet_transactions_run_timeline",
+            "run_id",
+            "timestamp",
+            "id",
         ),
     )
 
@@ -1195,6 +1214,12 @@ class WalletSwap(Base):
             "event_action_event_id_canonical",
             "event_action_logical_time_canonical",
             "event_action_index",
+        ),
+        Index(
+            "ix_wallet_swaps_run_timeline",
+            "run_id",
+            "timestamp",
+            "id",
         ),
     )
 

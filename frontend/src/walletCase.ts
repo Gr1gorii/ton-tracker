@@ -283,7 +283,7 @@ function parseLimitations(value: unknown): WalletCaseLimitation[] {
   });
 }
 
-function parseCoverage(value: unknown): WalletCaseCoverage {
+export function parseWalletCaseCoverage(value: unknown): WalletCaseCoverage {
   const coverage = record(value, "case coverage");
   const state = string(coverage.state, "coverage state") as WalletCaseCoverageState;
   if (!["unknown", "bounded_partial", "bounded_complete"].includes(state)) {
@@ -396,7 +396,7 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   ) {
     throw new Error("case sync requested scope is invalid");
   }
-  const coverage = parseCoverage(sync.coverage);
+  const coverage = parseWalletCaseCoverage(sync.coverage);
   if (
     coverage.requested_start_at !== startAt ||
     coverage.requested_end_at !== endAt ||
@@ -467,7 +467,7 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
         const item = record(sync.result, "case sync result");
         return {
           summary: parseSummary(item.summary),
-          coverage: parseCoverage(item.coverage),
+          coverage: parseWalletCaseCoverage(item.coverage),
           limitations: parseLimitations(item.limitations),
           message: string(item.message, "case sync result message"),
         };

@@ -38,6 +38,7 @@ from routers.prices import router as prices_router
 from routers.stonfi import router as stonfi_router
 from routers.tonapi import router as tonapi_router
 from routers.wallet_activity import router as wallet_activity_router
+from routers.wallet_case_activity import router as wallet_case_activity_router
 from routers.wallet_cases import jobs_router as wallet_case_jobs_router
 from routers.wallet_cases import router as wallet_cases_router
 from routers.wallet_ownership import router as wallet_ownership_router
@@ -133,6 +134,7 @@ app.include_router(stonfi_router)
 app.include_router(tonapi_router)
 app.include_router(wallet_activity_router)
 app.include_router(wallet_cases_router)
+app.include_router(wallet_case_activity_router)
 app.include_router(wallet_case_jobs_router)
 app.include_router(wallet_ownership_router)
 

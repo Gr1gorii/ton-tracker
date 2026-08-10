@@ -8,6 +8,8 @@ import {
   createWalletCase,
   createWalletCaseSync,
   getWalletCase,
+  getWalletCaseActivity,
+  getWalletCaseActivityDetail,
   getWalletCaseSync,
   listWalletCases,
 } from "./walletCaseApi";
@@ -20,6 +22,12 @@ import {
   SYNC_ID,
   walletCaseFixture,
 } from "./test/walletCaseFixtures";
+import {
+  ACTIVITY_ID,
+  activityDetailFixture,
+  activityFiltersFixture,
+  activityResponseFixture,
+} from "./test/walletCaseActivityFixtures";
 
 const OTHER_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
 const OTHER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440099";
@@ -149,6 +157,160 @@ describe("Wallet Case API", () => {
         { method: "POST", cache: "no-store", signal: controller.signal },
       ],
     ]);
+  });
+
+  it("reads pinned Activity pages with exact repeatable server filters and no cache", async () => {
+    const payload = activityResponseFixture({
+      filters: {
+        ...activityFiltersFixture(),
+        kinds: ["transaction", "swap"],
+        directions: ["in"],
+        outcomes: ["success"],
+        data_origins: ["demo_fixture"],
+        sort: "oldest",
+      },
+      aggregate: {
+        total_items: 0,
+        transactions: 0,
+        transfers: 0,
+        swaps: 0,
+        failed_transactions: 0,
+        source_sync_count: 1,
+        suppressed_duplicate_observations: 0,
+        conflicted_identity_count: 0,
+      },
+      observed_period: null,
+      items: [],
+    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseActivity(CASE_ID, {
+      snapshot: SYNC_ID,
+      limit: 25,
+      cursor: null,
+      ...payload.filters,
+    }, controller.signal)).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/activity?snapshot=${SYNC_ID}&limit=25&kind=transaction&kind=swap&direction=in&outcome=success&data_origin=demo_fixture&sort=oldest`,
+      { cache: "no-store", signal: controller.signal },
+    );
+  });
+
+  it("canonicalizes reordered repeatable filters before fetch and response binding", async () => {
+    const payload = activityResponseFixture({
+      filters: {
+        ...activityFiltersFixture(),
+        kinds: ["transaction", "swap"],
+        directions: ["in", "unknown"],
+        outcomes: ["success", "unknown"],
+        data_origins: ["demo_fixture", "provider_observed"],
+      },
+      aggregate: {
+        total_items: 0,
+        transactions: 0,
+        transfers: 0,
+        swaps: 0,
+        failed_transactions: 0,
+        source_sync_count: 1,
+        suppressed_duplicate_observations: 0,
+        conflicted_identity_count: 0,
+      },
+      observed_period: null,
+      items: [],
+    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getWalletCaseActivity(CASE_ID, {
+      snapshot: SYNC_ID,
+      limit: 50,
+      cursor: null,
+      ...payload.filters,
+      kinds: ["swap", "transaction"],
+      directions: ["unknown", "in"],
+      outcomes: ["unknown", "success"],
+      data_origins: ["provider_observed", "demo_fixture"],
+    })).resolves.toEqual(payload);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/activity?snapshot=${SYNC_ID}&limit=50&kind=transaction&kind=swap&direction=in&direction=unknown&outcome=success&outcome=unknown&data_origin=demo_fixture&data_origin=provider_observed&sort=newest`,
+    );
+  });
+
+  it("reads sanitized Activity detail bound to case, snapshot and public Activity id", async () => {
+    const payload = activityDetailFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getWalletCaseActivityDetail(CASE_ID, SYNC_ID, ACTIVITY_ID)).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/activity/${ACTIVITY_ID}?snapshot=${SYNC_ID}`,
+      { cache: "no-store", signal: undefined },
+    );
+  });
+
+  it("rejects missing detail snapshot and malformed list scope before issuing a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getWalletCaseActivityDetail(CASE_ID, null as unknown as string, ACTIVITY_ID))
+      .rejects.toThrow(/snapshot id must be a canonical UUIDv4/);
+    await expect(getWalletCaseActivity(CASE_ID, {
+      snapshot: null,
+      limit: 50,
+      cursor: "opaque-next",
+      ...activityFiltersFixture(),
+    })).rejects.toThrow(/pagination requires a pinned snapshot/);
+    await expect(getWalletCaseActivity(CASE_ID, {
+      snapshot: SYNC_ID,
+      limit: 50,
+      cursor: null,
+      ...activityFiltersFixture(),
+      protocol_id: "invented-dex",
+    })).rejects.toThrow(/protocol id is not recognized/);
+    for (const counterparty of [
+      `-0:${"a".repeat(64)}`,
+      `2147483648:${"a".repeat(64)}`,
+      `-2147483649:${"a".repeat(64)}`,
+    ]) {
+      await expect(getWalletCaseActivity(CASE_ID, {
+        snapshot: SYNC_ID,
+        limit: 50,
+        cursor: null,
+        ...activityFiltersFixture(),
+        counterparty,
+      })).rejects.toThrow(/counterparty is not canonical/);
+    }
+    for (const fromAt of [
+      "2026-02-30T00:00:00Z",
+      "2026-08-01T24:00:00Z",
+      "0000-01-01T00:00:00Z",
+      "2026-08-01T00:00:00.0000001Z",
+    ]) {
+      await expect(getWalletCaseActivity(CASE_ID, {
+        snapshot: SYNC_ID,
+        limit: 50,
+        cursor: null,
+        ...activityFiltersFixture(),
+        from_at: fromAt,
+        to_at: "2026-08-02T00:00:00Z",
+      })).rejects.toThrow(/period is invalid/);
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves typed Activity errors", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      detail: { code: "invalid_activity_cursor", message_safe: "Cursor is invalid.", retryable: false },
+    }, 422)));
+    const caught = await getWalletCaseActivity(CASE_ID, {
+      snapshot: SYNC_ID,
+      limit: 50,
+      cursor: "tampered",
+      ...activityFiltersFixture(),
+    }).catch((error: unknown) => error);
+    expect(caught).toMatchObject({ status: 422, code: "invalid_activity_cursor", retryable: false });
   });
 
   it("exposes structured conflict and retry metadata without leaking raw bodies", async () => {
