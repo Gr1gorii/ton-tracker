@@ -18,6 +18,7 @@ import {
   succeededEvidenceVerificationFixture,
   VERIFICATION_ID,
 } from "../test/walletCaseEvidenceFixtures";
+import { walletCaseReportFixture } from "../test/walletCaseReportFixtures";
 
 const evidenceApiMocks = vi.hoisted(() => ({
   getWalletCaseEvidence: vi.fn(),
@@ -26,6 +27,7 @@ const evidenceApiMocks = vi.hoisted(() => ({
   cancelWalletCaseEvidenceVerification: vi.fn(),
 }));
 const caseApiMocks = vi.hoisted(() => ({ getWalletCaseActivityDetail: vi.fn() }));
+const reportApiMocks = vi.hoisted(() => ({ getWalletCaseReport: vi.fn() }));
 
 vi.mock("../walletCaseEvidenceApi", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../walletCaseEvidenceApi")>()),
@@ -34,6 +36,10 @@ vi.mock("../walletCaseEvidenceApi", async (importOriginal) => ({
 vi.mock("../walletCaseApi", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../walletCaseApi")>()),
   ...caseApiMocks,
+}));
+vi.mock("../walletCaseReportApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../walletCaseReportApi")>()),
+  ...reportApiMocks,
 }));
 
 import GramCaseEvidence from "./GramCaseEvidence";
@@ -63,6 +69,7 @@ beforeEach(() => {
   window.history.replaceState({}, "", selectedPath());
   evidenceApiMocks.getWalletCaseEvidence.mockResolvedValue(evidenceCatalogFixture());
   caseApiMocks.getWalletCaseActivityDetail.mockResolvedValue(liveEvidenceActivityDetailFixture());
+  reportApiMocks.getWalletCaseReport.mockResolvedValue(walletCaseReportFixture());
   evidenceApiMocks.createWalletCaseEvidenceVerification.mockResolvedValue(queuedEvidenceVerificationFixture());
   evidenceApiMocks.getWalletCaseEvidenceVerification.mockResolvedValue(succeededEvidenceVerificationFixture());
 });
@@ -90,7 +97,6 @@ describe("GramCaseEvidence", () => {
       transactionVerificationAvailable: false,
       limitations: [
         { code: "evidence_runner_unavailable", message: "The local evidence runner is unavailable." },
-        { code: "report_not_built", message: "A Wallet Case report is not built yet." },
       ],
     }));
     render(<GramCaseEvidence walletCase={liveWalletCase()} onOpenActivity={vi.fn()} />);
@@ -98,7 +104,8 @@ describe("GramCaseEvidence", () => {
     expect(await screen.findByText("Unavailable")).toBeTruthy();
     expect(screen.getAllByText("The local evidence runner is unavailable.").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Verify transaction evidence" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "Report not built yet" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Normalized report" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Export JSON" }).getAttribute("href")).toContain(`/report/export.json?snapshot=${SYNC_ID}`);
     expect(evidenceApiMocks.createWalletCaseEvidenceVerification).not.toHaveBeenCalled();
   });
 
@@ -229,7 +236,7 @@ describe("GramCaseEvidence", () => {
     expect(screen.getAllByText("Locally verified").length).toBeGreaterThan(0);
     expect(screen.queryByText("Unsafe")).toBeNull();
     expect(screen.queryByText("Pinned checkpoint")).toBeNull();
-    expect(screen.getByText(/does not create a canonical case report/)).toBeTruthy();
+    expect(screen.getByText(/does not establish complete wallet history, cost basis or PnL/)).toBeTruthy();
   });
 
   it("shows the pinned policy while disclosing the missing checkpoint transcript", async () => {

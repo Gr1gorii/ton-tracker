@@ -32,6 +32,8 @@ import {
   type WalletCaseEvidenceStepCode,
 } from "../walletCaseEvidence";
 import { useWalletCaseEvidence } from "../useWalletCaseEvidence";
+import type { WalletCaseReport } from "../walletCaseReport";
+import { walletCaseReportExportUrl } from "../walletCaseReportApi";
 
 export default function GramCaseEvidence({
   walletCase,
@@ -143,6 +145,7 @@ export default function GramCaseEvidence({
   const existingForActivity = controller.catalog?.verifications.filter(
     (entry) => entry.activity_public_id === urlState.activity,
   ).length ?? 0;
+  const caseReport = controller.report?.report ?? null;
 
   function selectVerification(entry: WalletCaseEvidenceVerification) {
     commitUrlState({ snapshot: entry.snapshot_public_id, activity: entry.activity_public_id, verification: entry.public_id });
@@ -162,6 +165,7 @@ export default function GramCaseEvidence({
       </section>
 
       {controller.catalogError && <InlineError message={controller.catalogError} onRetry={controller.reload} />}
+      {controller.reportError && <InlineError message={controller.reportError} onRetry={controller.reload} />}
 
       {controller.catalogLoading && !controller.catalog ? (
         <section className="case-state-panel" aria-live="polite"><SpinnerGap className="spin" size={25} /><div><h2>Loading Evidence</h2><p>Reading the pinned snapshot and durable verification catalog…</p></div></section>
@@ -171,7 +175,12 @@ export default function GramCaseEvidence({
             <TrustFact label="Pinned snapshot" value={snapshot ? short(snapshot.public_id) : "Not available"} icon={<Database size={19} />} />
             <TrustFact label="Data origin" value={snapshot?.data_mode === "real" ? "Live provider" : snapshot?.data_mode === "mock" ? "Demo fixture" : "Not synchronized"} icon={<Info size={19} />} />
             <TrustFact label="Returned snapshot-history peak" value={levelLabel(controller.catalog?.readiness.highest_evidence_level ?? null)} icon={<ShieldCheck size={19} />} />
-            <TrustFact label="Case report" value="Not built yet" icon={<FileText size={19} />} warning />
+            <TrustFact
+              label="Case report"
+              value={controller.reportLoading ? "Building revision…" : caseReport ? reportAssuranceLabel(caseReport.assurance_level) : "Unavailable"}
+              icon={<FileText size={19} />}
+              warning={!caseReport || caseReport.assurance_level !== "canonical"}
+            />
           </section>
 
           {!snapshot ? (
@@ -328,11 +337,12 @@ export default function GramCaseEvidence({
             </section>
           )}
 
-          <section className="case-evidence-report-boundary" aria-labelledby="case-report-boundary-title">
-            <FileText size={24} />
-            <div><span className="eyebrow">Report boundary</span><h2 id="case-report-boundary-title">Report not built yet</h2><p>Transaction verification can raise the evidence level of this selected fact. It does not create a canonical case report, prove complete wallet history, establish cost basis or calculate PnL.</p></div>
-            <span>Unavailable in v0.74</span>
-          </section>
+          <CaseReportPanel
+            report={caseReport}
+            loading={controller.reportLoading}
+            caseId={walletCase.public_id}
+            snapshotId={snapshot?.public_id ?? null}
+          />
 
           {controller.catalog && controller.catalog.limitations.length > 0 && (
             <section className="case-limitations">
@@ -343,6 +353,62 @@ export default function GramCaseEvidence({
         </>
       )}
     </div>
+  );
+}
+
+function CaseReportPanel({
+  report,
+  loading,
+  caseId,
+  snapshotId,
+}: {
+  report: WalletCaseReport | null;
+  loading: boolean;
+  caseId: string;
+  snapshotId: string | null;
+}) {
+  if (loading && !report) {
+    return (
+      <section className="case-evidence-report-boundary" aria-labelledby="case-report-boundary-title" aria-live="polite">
+        <SpinnerGap className="spin" size={24} />
+        <div><span className="eyebrow">Case report</span><h2 id="case-report-boundary-title">Building the pinned report revision</h2><p>Activity and stored Evidence are being revalidated against one snapshot.</p></div>
+        <span>Loading</span>
+      </section>
+    );
+  }
+  if (!report || snapshotId === null) {
+    return (
+      <section className="case-evidence-report-boundary" aria-labelledby="case-report-boundary-title">
+        <FileText size={24} />
+        <div><span className="eyebrow">Case report</span><h2 id="case-report-boundary-title">Report unavailable</h2><p>A synchronized snapshot is required before GRAM Scope can build a content-addressed report.</p></div>
+        <span>Not synchronized</span>
+      </section>
+    );
+  }
+  return (
+    <section className="case-evidence-report-boundary is-report-ready" aria-labelledby="case-report-boundary-title">
+      <FileText size={24} />
+      <div>
+        <span className="eyebrow">Content-addressed Case Report</span>
+        <h2 id="case-report-boundary-title">{reportAssuranceLabel(report.assurance_level)}</h2>
+        <p>
+          {report.activity_revision.aggregate.total_items} Activity records and {report.evidence_revision.returned_revalidated} revalidated Evidence attempts are bound to snapshot {short(report.snapshot_public_id)}. This revision does not establish complete wallet history, cost basis or PnL.
+        </p>
+        <dl className="case-definition-list">
+          <div><dt>Report ID</dt><dd><code title={report.public_id}>{short(report.public_id)}</code></dd></div>
+          <div><dt>Content hash</dt><dd><code title={report.content_hash_sha256}>{short(report.content_hash_sha256)}</code></dd></div>
+          <div><dt>Canonical gate</dt><dd>{report.canonical_gate.eligible ? "All published gates met" : `${report.canonical_gate.unmet.length} gates remain`}</dd></div>
+          <div><dt>Evidence coverage</dt><dd>{report.evidence_revision.selected_activity_count} selected activities · {report.evidence_revision.chain_inclusion_proven_activity_count} chain proven</dd></div>
+        </dl>
+        {report.unverified_claims.length > 0 && (
+          <div className="case-evidence-job-limitations">
+            <strong>Claims this revision does not verify</strong>
+            <ul>{report.unverified_claims.map((claim) => <li key={claim.code}>{claim.message}{claim.affected_count === null ? "" : ` (${claim.affected_count})`}</li>)}</ul>
+          </div>
+        )}
+      </div>
+      <a className="button-secondary" href={walletCaseReportExportUrl(caseId, snapshotId)} download>Export JSON</a>
+    </section>
   );
 }
 
@@ -439,6 +505,13 @@ function levelLabel(level: WalletCaseEvidenceLevel | null): string {
   if (level === "locally_verified") return "Locally verified";
   if (level === "normalized") return "Normalized observation";
   return "No verification yet";
+}
+
+function reportAssuranceLabel(level: WalletCaseReport["assurance_level"]): string {
+  if (level === "canonical") return "Canonical report";
+  if (level === "partially_verified") return "Partially verified report";
+  if (level === "normalized") return "Normalized report";
+  return "Observed report";
 }
 
 function activityTitle(kind: string, hash: string | null): string {

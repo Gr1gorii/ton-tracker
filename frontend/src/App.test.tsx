@@ -33,6 +33,7 @@ import {
   partialEvidenceVerificationFixture,
   VERIFICATION_ID,
 } from "./test/walletCaseEvidenceFixtures";
+import { walletCaseReportFixture } from "./test/walletCaseReportFixtures";
 
 const WALLET = "EQC-demo-wallet";
 
@@ -370,6 +371,10 @@ describe("Wallet Case application flow", () => {
       if (url.pathname === `/api/v1/cases/${CASE_ID}/evidence/verifications/${VERIFICATION_ID}` && method === "GET") {
         return jsonResponse(partial);
       }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/report` && method === "GET") {
+        expect(url.searchParams.getAll("snapshot")).toEqual([SYNC_ID]);
+        return jsonResponse(walletCaseReportFixture());
+      }
       throw new Error(`Unexpected request: ${method} ${url.pathname}`);
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -380,7 +385,8 @@ describe("Wallet Case application flow", () => {
     const evidenceMain = screen.getByRole("main", { name: "Wallet Case evidence" });
     await waitFor(() => expect(document.activeElement).toBe(evidenceMain));
     expect(screen.getByRole("link", { name: /EvidenceTransaction verification/ }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("heading", { name: "Report not built yet" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Normalized report" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Export JSON" })).toBeTruthy();
     expect(screen.queryByText(/canonical case ledger/i)).toBeNull();
     await waitFor(() => expect(document.title).toBe("Wallet Case Evidence · GRAM Scope"));
     expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).pathname.includes("/runs/"))).toBe(false);

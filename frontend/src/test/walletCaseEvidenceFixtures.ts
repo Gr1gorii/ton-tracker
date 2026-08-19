@@ -245,12 +245,11 @@ export function evidenceCatalogFixture({
     aggregate,
     readiness: {
       transaction_verification_available: transactionVerificationAvailable,
-      report_available: false,
+      report_available: true,
       highest_evidence_level: highest,
     },
     limitations: limitations ?? [
       { code: "selective_transaction_evidence", message: "Only selected transactions are verified." },
-      { code: "report_not_built", message: "A Wallet Case report is not built yet." },
       ...(total > verifications.length ? [{ code: "catalog_history_not_revalidated", message: "Aggregate counts cover only returned revalidated attempts." }] : []),
     ],
     verifications,

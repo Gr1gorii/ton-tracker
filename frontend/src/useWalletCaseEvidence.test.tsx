@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CaseEvidenceUrlState } from "./caseEvidenceQuery";
 import { ACTIVITY_ID } from "./test/walletCaseActivityFixtures";
-import { CASE_ID, IDEMPOTENCY_KEY, SYNC_ID } from "./test/walletCaseFixtures";
+import { CASE_ID, IDEMPOTENCY_KEY, OLDER_SYNC_ID, SYNC_ID } from "./test/walletCaseFixtures";
 import {
   evidenceCatalogFixture,
   liveEvidenceActivityDetailFixture,
@@ -17,6 +17,7 @@ import {
   succeededEvidenceVerificationFixture,
   VERIFICATION_ID,
 } from "./test/walletCaseEvidenceFixtures";
+import { walletCaseReportFixture } from "./test/walletCaseReportFixtures";
 
 const evidenceApiMocks = vi.hoisted(() => ({
   getWalletCaseEvidence: vi.fn(),
@@ -25,6 +26,7 @@ const evidenceApiMocks = vi.hoisted(() => ({
   cancelWalletCaseEvidenceVerification: vi.fn(),
 }));
 const caseApiMocks = vi.hoisted(() => ({ getWalletCaseActivityDetail: vi.fn() }));
+const reportApiMocks = vi.hoisted(() => ({ getWalletCaseReport: vi.fn() }));
 
 vi.mock("./walletCaseEvidenceApi", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./walletCaseEvidenceApi")>()),
@@ -33,6 +35,10 @@ vi.mock("./walletCaseEvidenceApi", async (importOriginal) => ({
 vi.mock("./walletCaseApi", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./walletCaseApi")>()),
   ...caseApiMocks,
+}));
+vi.mock("./walletCaseReportApi", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./walletCaseReportApi")>()),
+  ...reportApiMocks,
 }));
 
 import { useWalletCaseEvidence } from "./useWalletCaseEvidence";
@@ -60,6 +66,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   evidenceApiMocks.getWalletCaseEvidence.mockResolvedValue(evidenceCatalogFixture());
   caseApiMocks.getWalletCaseActivityDetail.mockResolvedValue(liveEvidenceActivityDetailFixture());
+  reportApiMocks.getWalletCaseReport.mockResolvedValue(walletCaseReportFixture());
   evidenceApiMocks.createWalletCaseEvidenceVerification.mockResolvedValue(queuedEvidenceVerificationFixture());
   evidenceApiMocks.cancelWalletCaseEvidenceVerification.mockResolvedValue(queuedEvidenceVerificationFixture({
     state: "cancelled",
@@ -97,7 +104,6 @@ describe("useWalletCaseEvidence", () => {
       transactionVerificationAvailable: false,
       limitations: [
         { code: "evidence_runner_unavailable", message: "The local evidence runner is unavailable." },
-        { code: "report_not_built", message: "A Wallet Case report is not built yet." },
       ],
     }));
     const { result } = renderHook(() => useWalletCaseEvidence({
@@ -311,6 +317,44 @@ describe("useWalletCaseEvidence", () => {
     await waitFor(() => expect(result.current.catalogLoading).toBe(false));
     expect(result.current.catalog).toBeNull();
     expect(result.current.catalogError).toMatch(/Snapshot B/);
+  });
+
+  it("never renders snapshot A report while snapshot B report is pending or rejected", async () => {
+    const pendingB = deferred<ReturnType<typeof walletCaseReportFixture>>();
+    const catalogB = structuredClone(evidenceCatalogFixture());
+    catalogB.snapshot!.public_id = OLDER_SYNC_ID;
+    catalogB.snapshot!.coverage.requested_start_at = "2026-08-07T12:00:00Z";
+    catalogB.snapshot!.coverage.requested_end_at = "2026-08-08T12:00:00Z";
+    catalogB.snapshot!.requested_period = {
+      start_at: "2026-08-07T12:00:00Z",
+      end_at: "2026-08-08T12:00:00Z",
+    };
+    evidenceApiMocks.getWalletCaseEvidence
+      .mockResolvedValueOnce(evidenceCatalogFixture())
+      .mockResolvedValueOnce(catalogB);
+    reportApiMocks.getWalletCaseReport
+      .mockResolvedValueOnce(walletCaseReportFixture())
+      .mockReturnValueOnce(pendingB.promise);
+    const { result, rerender } = renderHook(
+      ({ snapshot }) => useWalletCaseEvidence({
+        caseId: CASE_ID,
+        urlState: { snapshot, activity: null, verification: null },
+        onSnapshotPinned,
+        onVerificationPinned,
+      }),
+      { initialProps: { snapshot: SYNC_ID } },
+    );
+    await waitFor(() => expect(result.current.report?.snapshot_public_id).toBe(SYNC_ID));
+
+    rerender({ snapshot: OLDER_SYNC_ID });
+    expect(result.current.report).toBeNull();
+    await waitFor(() => expect(result.current.reportLoading).toBe(true));
+    expect(result.current.report).toBeNull();
+
+    act(() => pendingB.reject(new Error("Snapshot B report failed")));
+    await waitFor(() => expect(result.current.reportLoading).toBe(false));
+    expect(result.current.report).toBeNull();
+    expect(result.current.reportError).toMatch(/Snapshot B report failed/);
   });
 
   it("Check now starts exactly one immediate request after a completed failed poll", async () => {

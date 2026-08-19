@@ -16,6 +16,8 @@ import {
   getWalletCaseEvidenceVerification,
   WalletCaseEvidenceApiError,
 } from "./walletCaseEvidenceApi";
+import type { WalletCaseReportResponse } from "./walletCaseReport";
+import { getWalletCaseReport } from "./walletCaseReportApi";
 
 export type WalletCaseEvidenceTransportState =
   | "idle"
@@ -28,6 +30,9 @@ export interface WalletCaseEvidenceController {
   catalog: WalletCaseEvidenceCatalog | null;
   catalogLoading: boolean;
   catalogError: string | null;
+  report: WalletCaseReportResponse | null;
+  reportLoading: boolean;
+  reportError: string | null;
   activityDetail: WalletCaseActivityDetailResponse | null;
   activityLoading: boolean;
   activityError: string | null;
@@ -67,6 +72,10 @@ export function useWalletCaseEvidence({
   const [catalogScope, setCatalogScope] = useState<string | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [report, setReport] = useState<WalletCaseReportResponse | null>(null);
+  const [reportScope, setReportScope] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [activityDetail, setActivityDetail] = useState<WalletCaseActivityDetailResponse | null>(null);
   const [activityScope, setActivityScope] = useState<string | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
@@ -80,10 +89,12 @@ export function useWalletCaseEvidence({
   const [verificationVersion, setVerificationVersion] = useState(0);
   const [pollEpoch, setPollEpoch] = useState(0);
   const catalogController = useRef<AbortController | null>(null);
+  const reportController = useRef<AbortController | null>(null);
   const activityController = useRef<AbortController | null>(null);
   const verificationController = useRef<AbortController | null>(null);
   const actionController = useRef<AbortController | null>(null);
   const catalogGeneration = useRef(0);
+  const reportGeneration = useRef(0);
   const activityGeneration = useRef(0);
   const verificationGeneration = useRef(0);
   const verificationRef = useRef<WalletCaseEvidenceVerification | null>(null);
@@ -96,6 +107,7 @@ export function useWalletCaseEvidence({
     [urlState.activity, urlState.snapshot, urlState.verification],
   );
   const catalogRequestKey = `${caseId}:${urlState.snapshot ?? "latest"}`;
+  const reportRequestKey = `${caseId}:${urlState.snapshot ?? ""}`;
   const activityRequestKey = `${caseId}:${urlState.snapshot ?? ""}:${urlState.activity ?? ""}`;
   const scopeRef = useRef(selectedScopeKey);
   scopeRef.current = selectedScopeKey;
@@ -182,6 +194,39 @@ export function useWalletCaseEvidence({
   }, [caseId, catalogRequestKey, catalogVersion, enabled, onSnapshotPinned, onVerificationPinned, urlState.activity, urlState.snapshot, urlState.verification]);
 
   useEffect(() => {
+    reportController.current?.abort();
+    reportGeneration.current += 1;
+    setReport(null);
+    setReportScope(null);
+    setReportError(null);
+    if (!enabled || urlState.snapshot === null || catalogScope !== catalogRequestKey || catalog?.readiness.report_available !== true) {
+      setReportLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    reportController.current = controller;
+    const generation = ++reportGeneration.current;
+    setReportLoading(true);
+    void getWalletCaseReport(caseId, urlState.snapshot, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted && generation === reportGeneration.current) {
+          setReport(result);
+          setReportScope(reportRequestKey);
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted && generation === reportGeneration.current) {
+          setReportError(message(error, "Wallet Case report is unavailable."));
+        }
+      })
+      .finally(() => {
+        if (reportController.current === controller) reportController.current = null;
+        if (!controller.signal.aborted && generation === reportGeneration.current) setReportLoading(false);
+      });
+    return () => controller.abort();
+  }, [caseId, catalog, catalogRequestKey, catalogScope, catalogVersion, enabled, reportRequestKey, urlState.snapshot]);
+
+  useEffect(() => {
     activityController.current?.abort();
     setActivityDetail(null);
     setActivityScope(null);
@@ -258,6 +303,7 @@ export function useWalletCaseEvidence({
     ? verification
     : null;
   const scopedCatalog = catalogScope === catalogRequestKey ? catalog : null;
+  const scopedReport = reportScope === reportRequestKey ? report : null;
   const scopedActivityDetail = activityScope === activityRequestKey ? activityDetail : null;
   const activeVerificationId = scopedVerification && isActiveWalletCaseEvidenceVerification(scopedVerification)
     ? scopedVerification.public_id
@@ -351,6 +397,7 @@ export function useWalletCaseEvidence({
 
   useEffect(() => () => {
     catalogController.current?.abort();
+    reportController.current?.abort();
     activityController.current?.abort();
     verificationController.current?.abort();
     actionController.current?.abort();
@@ -443,6 +490,9 @@ export function useWalletCaseEvidence({
     catalog: scopedCatalog,
     catalogLoading,
     catalogError,
+    report: scopedReport,
+    reportLoading,
+    reportError,
     activityDetail: scopedActivityDetail,
     activityLoading,
     activityError,

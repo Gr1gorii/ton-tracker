@@ -416,6 +416,10 @@
 .case-evidence-report-boundary { display: grid; padding: 22px; align-items: center; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; color: var(--warning); }
 .case-evidence-report-boundary p { max-width: 780px; margin: 6px 0 0; color: var(--text-muted); font-size: 0.8125rem; line-height: 1.6; }
 .case-evidence-report-boundary > span { display: inline-flex; min-height: 29px; padding: 5px 10px; align-items: center; border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border)); border-radius: 999px; color: var(--warning); background: color-mix(in srgb, var(--warning) 7%, var(--surface-solid)); font-size: 0.72rem; font-weight: 750; white-space: nowrap; }
+.case-evidence-report-boundary.is-report-ready { align-items: start; }
+.case-evidence-report-boundary.is-report-ready > div { display: grid; gap: 13px; }
+.case-evidence-report-boundary.is-report-ready p { margin: 0; }
+.case-evidence-report-boundary.is-report-ready > a { align-self: start; white-space: nowrap; }
 
 @media (max-width: 960px) {
   .case-heading { grid-template-columns: 1fr; align-items: start; }
@@ -476,6 +480,7 @@
   .case-detail-verification .button-primary,
   .case-evidence-selection > header .case-evidence-eligibility,
   .case-evidence-report-boundary > span { grid-column: 1 / -1; justify-self: stretch; justify-content: center; }
+  .case-evidence-report-boundary.is-report-ready > a { grid-column: 1 / -1; justify-self: stretch; justify-content: center; }
   .case-evidence-toolbar,
   .case-evidence-progress > header { align-items: stretch; flex-direction: column; }
   .case-evidence-toolbar > button { width: 100%; }

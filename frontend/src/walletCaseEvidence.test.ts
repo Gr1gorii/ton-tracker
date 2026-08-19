@@ -217,7 +217,6 @@ describe("Wallet Case Evidence parser", () => {
       transactionVerificationAvailable: false,
       limitations: [
         { code: "evidence_runner_unavailable", message: "The durable runner is unavailable." },
-        { code: "report_not_built", message: "A Wallet Case report is not built yet." },
       ],
     });
     expect(parseWalletCaseEvidenceCatalog(unavailable).readiness.transaction_verification_available).toBe(false);
@@ -231,7 +230,6 @@ describe("Wallet Case Evidence parser", () => {
       transactionVerificationAvailable: false,
       limitations: [
         { code: "demo_evidence_not_verifiable", message: "Demo evidence cannot enter live verification." },
-        { code: "report_not_built", message: "A Wallet Case report is not built yet." },
       ],
     });
     mock.snapshot!.data_mode = "mock";
@@ -247,7 +245,7 @@ describe("Wallet Case Evidence parser", () => {
     ["truncation", (value: any) => { value.truncated = false; }],
     ["state totals", (value: any) => { value.aggregate.queued += 1; }],
     ["highest level", (value: any) => { value.readiness.highest_evidence_level = "locally_verified"; }],
-    ["report boundary", (value: any) => { value.limitations = value.limitations.filter((item: any) => item.code !== "report_not_built"); }],
+    ["report availability", (value: any) => { value.readiness.report_available = false; }],
   ])("rejects an inconsistent catalog %s", (_label, mutate) => {
     const value = structuredClone(evidenceCatalogFixture({
       verifications: [succeededEvidenceVerificationFixture()],

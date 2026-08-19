@@ -137,7 +137,7 @@ export interface WalletCaseEvidenceCatalog {
   };
   readiness: {
     transaction_verification_available: boolean;
-    report_available: false;
+    report_available: boolean;
     highest_evidence_level: WalletCaseEvidenceLevel | null;
   };
   limitations: WalletCaseLimitation[];
@@ -412,15 +412,12 @@ export function parseWalletCaseEvidenceCatalog(value: unknown): WalletCaseEviden
   ], "Evidence readiness");
   const readiness = {
     transaction_verification_available: boolean(readinessValue.transaction_verification_available, "Evidence availability"),
-    report_available: literal(readinessValue.report_available, false, "Evidence report availability"),
+    report_available: boolean(readinessValue.report_available, "Evidence report availability"),
     highest_evidence_level: readinessValue.highest_evidence_level === null
       ? null
       : enumValue(readinessValue.highest_evidence_level, LEVELS, "Catalog highest Evidence level"),
   };
   const limitations = parseLimitations(response.limitations);
-  if (!limitations.some((item) => item.code === "report_not_built")) {
-    fail("Evidence catalog must keep report generation unavailable");
-  }
   if (!Array.isArray(response.verifications)) fail("Evidence catalog verifications are invalid");
   const verifications = response.verifications.map(parseWalletCaseEvidenceVerification);
   const limit = literal(response.limit, 50, "Evidence catalog limit");
@@ -435,10 +432,10 @@ export function parseWalletCaseEvidenceCatalog(value: unknown): WalletCaseEviden
   ) fail("Evidence catalog entries are inconsistent");
   if (snapshot === null) {
     if (
-      aggregate.total !== 0 || verifications.length !== 0 || readiness.transaction_verification_available ||
+      aggregate.total !== 0 || verifications.length !== 0 || readiness.transaction_verification_available || readiness.report_available ||
       !limitations.some((item) => item.code === "not_synchronized")
     ) fail("Unsynchronized Evidence catalog published verification state");
-  } else if (
+  } else if (!readiness.report_available ||
     (snapshot.data_mode === "mock" && (
       readiness.transaction_verification_available ||
       !limitations.some((item) => item.code === "demo_evidence_not_verifiable")
