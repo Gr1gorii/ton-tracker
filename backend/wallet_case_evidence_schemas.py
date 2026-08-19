@@ -398,7 +398,7 @@ class CaseEvidenceAggregate(_StrictModel):
 
 class CaseEvidenceReadiness(_StrictModel):
     transaction_verification_available: bool
-    report_available: Literal[False] = False
+    report_available: bool
     highest_evidence_level: EvidenceLevel | None = None
 
 
@@ -440,8 +440,6 @@ class CaseEvidenceCatalogResponse(_StrictModel):
             raise ValueError("evidence catalog contains another snapshot")
         if len({item.code for item in self.limitations}) != len(self.limitations):
             raise ValueError("evidence catalog limitation codes must be unique")
-        if not any(item.code == "report_not_built" for item in self.limitations):
-            raise ValueError("v0.74 evidence catalog must disclose report limitation")
         limitation_codes = {item.code for item in self.limitations}
         unavailable_codes = {
             "demo_evidence_not_verifiable",
@@ -464,9 +462,12 @@ class CaseEvidenceCatalogResponse(_StrictModel):
                 self.aggregate.total != 0
                 or self.aggregate.returned_count != 0
                 or self.readiness.transaction_verification_available
+                or self.readiness.report_available
                 or "not_synchronized" not in limitation_codes
             ):
                 raise ValueError("unsynchronized evidence catalog is incoherent")
+        elif not self.readiness.report_available:
+            raise ValueError("a synchronized Evidence catalog must expose its report")
         elif self.snapshot.data_mode == "mock":
             if (
                 self.readiness.transaction_verification_available

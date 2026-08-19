@@ -482,13 +482,7 @@ class CaseEvidenceService:
                 settings=self.settings_factory(),
             )
         )
-        limitations = [{
-            "code": "report_not_built",
-            "message": (
-                "v0.74 verifies selected transaction evidence but does not build "
-                "a Wallet Case report."
-            ),
-        }]
+        limitations: list[dict[str, str]] = []
         if snapshot is None:
             limitations.insert(0, {
                 "code": "not_synchronized",
@@ -535,7 +529,7 @@ class CaseEvidenceService:
                     and wallet_case.data_environment == "live"
                     and runtime_limitation is None
                 ),
-                "report_available": False,
+                "report_available": snapshot is not None,
                 "highest_evidence_level": highest,
             },
             "limitations": limitations,
