@@ -1,4 +1,4 @@
-# GRAM Scope - v0.75.0 Public Release
+# GRAM Scope - v0.76.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -22,7 +22,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   its coverage and gaps, and the returned revalidated Evidence window. Useful
   observed, normalized, and partially verified revisions remain exportable;
   canonical assurance is separately hard-gated.
-- A shared Summary/Activity/Evidence case shell with refresh-safe filters,
+- A deterministic, content-addressed Wallet Case Findings facade with canonical
+  asset flows, bounded counterparty/protocol groups, versioned explainable rules,
+  public Activity support links, and explicit no-risk-score truth boundaries.
+- A shared Summary/Activity/Findings/Evidence case shell with refresh-safe filters,
   selected-record details, verification progress, keyboard focus management,
   responsive cards, report assurance, canonical gates, and exact JSON export.
 - Compact case activity, portfolio snapshot, coverage, and limitation summaries
@@ -39,7 +42,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.75.0 CASE REPORT`.
+- Product release label: `v0.76.0 CASE FINDINGS`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260710_0022`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -77,6 +80,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Case Report contract `wallet_case_report_v1` is a deterministic read model;
   its `rpt_…` ID is the SHA-256 of the exact public payload projection. It adds
   no migration, so the Alembic head remains `20260710_0022`.
+- Case Findings contract `wallet_case_findings_v1` is a deterministic read model;
+  its `fset_…` ID binds the exact public payload projection. It adds no migration,
+  never merges assets by symbol, and never publishes an opaque risk or safety
+  classification.
 
 ## Known Limitations
 
@@ -104,6 +111,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 - The selected native-TON artifact and the Case Report do not establish
   complete wallet history, cost basis, or PnL eligibility. Noncanonical report
   assurance and every unmet hard gate remain visible.
+- Findings cover only returned observations in the pinned Activity revision.
+  Empty findings are not a safe-wallet result; flow totals cannot be compared
+  across canonical assets, and counterparty observations do not establish an
+  actor, owner, beneficiary, or intent.
 - The service recomputes the content-addressed revision from its pinned snapshot
   and persisted Evidence. Exported documents remain independently identifiable,
   but the server does not yet keep a browsable historical report-revision
@@ -132,13 +143,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.75.0`, confirm:
+Before tagging `v0.76.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.75.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.76.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -153,6 +164,9 @@ Before tagging `v0.75.0`, confirm:
 - Case Report reproducibility, content-ID binding, snapshot/Evidence scope,
   assurance transitions, canonical negative gates, response redaction, export,
   refresh invalidation, and cross-snapshot race tests pass.
+- Case Findings reproducibility, content-ID binding, same-symbol asset
+  separation, flow conservation, rule support, weakest-evidence labelling,
+  strict URL state, response redaction, and Activity deep links pass.
 - Migration 0021, current-policy selection, legacy trust-0 rejection,
   checkpoint/digest binding, whole-operation timeout, terminate/kill cleanup,
   cancellation bound, and locked persistent-cache tests pass.

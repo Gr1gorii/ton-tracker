@@ -41,7 +41,7 @@ import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWor
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.75.0";
+const RELEASE_LABEL = "v0.76.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
@@ -546,7 +546,7 @@ function Landing({
 
         <div className="landing-value-grid">
           <LandingValue icon={<ShieldCheck size={24} weight="duotone" />} title="Proof-first" text="Block inclusion, account state and wallet ownership stay separate and explicit." />
-          <LandingValue icon={<Database size={24} weight="duotone" />} title="Explicit trust levels" text="Observed Activity and cryptographically verified evidence stay separate until a reproducible Case Report is built." />
+          <LandingValue icon={<Database size={24} weight="duotone" />} title="Explicit trust levels" text="Observed Activity, explainable Findings and verified Evidence stay distinct inside a reproducible Case Report." />
           <LandingValue icon={<Atom size={24} weight="duotone" />} title="Protocol-aware" text="Recognized DEX identities make swaps easier to understand without overclaiming." />
         </div>
       </main>
@@ -693,7 +693,7 @@ function GeneralOverview({
       <PageHeading
         eyebrow="Workspace overview"
         title="Everything you need to understand a TON wallet"
-        description="GRAM Scope turns fragmented blockchain activity into a guided path: choose a wallet, check source coverage and verify selected evidence without claiming a finished Case Report."
+        description="GRAM Scope turns fragmented blockchain activity into a guided path: choose a wallet, inspect pinned Findings, verify selected evidence and export a truth-bounded Case Report."
         action={<button className="button-primary" type="button" onClick={onOpenActivity}>{account ? "Inspect selected wallet" : "Choose a wallet"}<ArrowRight size={18} /></button>}
       />
 

@@ -1,8 +1,8 @@
-# GRAM Scope — v0.75.0 Promotion Checklist
+# GRAM Scope — v0.76.0 Promotion Checklist
 
-Current promotion gates for Wallet Case Report:
+Current promotion gates for Wallet Case Findings:
 
-- Product label is `v0.75.0 CASE REPORT`; backend API version stays
+- Product label is `v0.76.0 CASE FINDINGS`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260710_0022` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -60,7 +60,7 @@ Current promotion gates for Wallet Case Report:
 - Runtime readiness is factual: a disabled or dead local Evidence runner makes
   the action unavailable and publishes a machine-readable limitation instead
   of allowing a deterministic failing POST.
-- Summary, Activity, and Evidence routes survive direct navigation, refresh,
+- Summary, Activity, Findings, and Evidence routes survive direct navigation, refresh,
   back/forward, transient transport failures, and active-job polling. Keyboard
   focus, cancellation confirmation, narrow layouts, and both themes pass.
 - The report is pinned to one immutable CaseSync snapshot, content-addressed by
@@ -73,12 +73,20 @@ Current promotion gates for Wallet Case Report:
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
   provider-free whole-report revalidation. It never exposes run/source IDs or
   raw proof/provider data.
+- Findings are rebuilt from exactly one pinned Activity revision and its
+  revalidated Evidence catalog. Canonical asset identity is the sole asset
+  grouping key; symbol collisions remain separate. Every published rule is
+  versioned, deterministic, content-addressed, and either links public Activity
+  support or names a revision-level gap/conflict basis.
+- Findings never claim an opaque risk score, safe or illicit status, ownership,
+  actor identity, full history, cost basis, cross-asset comparability, or PnL.
+  An empty finding set retains the explicit not-safe limitation.
 - The native-TON artifact remains selected evidence only: it is not
   authoritative general Activity, does not establish complete history or cost
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.75.0 must not be promoted as a hosted Wallet Case release.
+  v0.76.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 
