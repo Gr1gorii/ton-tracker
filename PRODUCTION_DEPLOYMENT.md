@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.73.0
+release=v0.74.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -63,6 +63,38 @@ Alertmanager state is not supplied manually. The rollout creates a private
 durable sibling of the deployment state directory. For the example above it is
 `$HOME/.local/state/gram-scope-alertmanager`; it must remain owned by the same
 account with mode `0700` and be included in host backups.
+
+## Preserve the liteserver cache
+
+The v0.74 trust-0 verifier uses policy
+`ton_liteserver_checkpoint_strict_2026_08_v2` and its exact application-pinned
+checkpoint for each supported TON network. The policy and checkpoint are
+persisted with every new inclusion proof and covered by the proof and catalog
+digests. This is a canonical-at-capture statement: provider-free replay can
+revalidate the stored transaction/block commitment, but cannot independently
+re-establish the later canonical chain.
+
+Pre-strict `ton_liteserver_checkpoint_2026_08_v1` rows remain readable only as
+noncanonical legacy evidence. A policy-specific cache namespace and durable
+policy marker prevent blockstore entries produced by the older verifier from
+becoming a trusted starting point for strict-v2 synchronization.
+
+Production sets `TON_LITECLIENT_CACHE_DIRECTORY=/data/liteclient`. That path is
+on the writable persistent application data volume, survives container
+replacement, and is serialized by the verifier's per-network cache lock. The
+runtime can create the subdirectory beneath the mounted volume. Do not place it
+on the read-only image filesystem or an ephemeral `tmpfs`, and do not share one
+cache between unrelated installations. Treat the database's persisted verifier
+policy, checkpoint, and SHA-256 bindings as the evidence record; cached network
+configuration is not a substitute for those records.
+
+The shipped pre-authentication production profile keeps the Wallet Case
+Evidence runner disabled. Before an authenticated production profile enables
+it, confirm that `/data/liteclient` is writable and persistent under the backend
+runtime identity. The complete liteserver operation then runs in a child process
+behind one hard deadline. On expiry the parent requests termination and
+escalates to a forced kill after a bounded grace, which also bounds how long an
+accepted cooperative cancellation can wait at the inclusion stage.
 
 ## Configure external recovery storage
 
@@ -156,7 +188,8 @@ interface.
 The migration rehearsal runs the target backend image against an ephemeral copy
 of the heartbeat-selected verified backup. It applies the same fail-closed
 Alembic bootstrap used at application startup, validates the resulting model
-schema and SQLite integrity, confirms the observed source and target revisions,
+schema and SQLite integrity, confirms the observed source and target revisions
+(`20260710_0022` for v0.74.0),
 and then destroys the copy. The live database and retained backup stay
 read-only to this gate. An unknown future revision, schema drift, failed
 migration, integrity error, or inconsistent revision stops the rollout before

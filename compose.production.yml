@@ -68,6 +68,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-2g}
+    pids_limit: ${BACKEND_PIDS_LIMIT:-256}
     environment:
       DATA_MODE: real
       TON_NETWORK: ${TON_NETWORK:-mainnet}
@@ -77,8 +79,10 @@ services:
       WALLET_ACTIVITY_PROVIDER: tonapi
       WALLET_ACTIVITY_LIVE_ENABLED: "true"
       WALLET_CASE_JOB_RUNNER: disabled
+      WALLET_CASE_EVIDENCE_RUNNER: disabled
       TON_LITECLIENT_TRUST_LEVEL: "0"
       TON_LITECLIENT_TIMEOUT_SECONDS: ${TON_LITECLIENT_TIMEOUT_SECONDS:-20}
+      TON_LITECLIENT_CACHE_DIRECTORY: /data/liteclient
       TONCONNECT_EXPECTED_DOMAIN: ${TONCONNECT_EXPECTED_DOMAIN:?TONCONNECT_EXPECTED_DOMAIN is required}
       TONCONNECT_PROOF_TTL_SECONDS: ${TONCONNECT_PROOF_TTL_SECONDS:-900}
       BACKUP_HEALTH_FILE: /backups/.backup-health.json
