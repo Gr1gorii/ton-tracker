@@ -1,3 +1,49 @@
+# GRAM Scope — v0.75.0 CASE REPORT
+
+v0.75.0 adds the first Wallet Case Report over one immutable, pinned Activity
+snapshot. A synchronized case now always has a useful report revision: demo
+fixtures produce `observed`, live normalized observations produce `normalized`,
+and locally revalidated Evidence can raise the revision to
+`partially_verified`. `canonical` remains a distinct hard-gated assurance state
+and cannot be published while coverage, history, identity conflicts, Activity
+gaps, bounded Evidence history, transaction inclusion, or native-ledger
+requirements remain unmet.
+
+Each report is a strict `wallet_case_report_v1` document with a SHA-256 content
+hash and matching opaque `rpt_…` public ID. It binds the case and snapshot,
+subject identity, Activity aggregate and observed period, the returned
+revalidated Evidence window, coverage, gaps, limitations, unverified claims,
+and fixed truth boundaries. Rebuilding the same data revision produces the
+same bytes and hash; new Evidence produces a new content-addressed revision
+without mutating an exported prior document. The bounded facade deliberately
+does not expose compatibility run IDs, source row IDs, raw provider payloads,
+proof BOCs, worker state, or credentials.
+
+The local-only case API adds `GET /api/v1/cases/{case}/report` and an exact JSON
+export at `GET /api/v1/cases/{case}/report/export.json`. Both accept one
+optional snapshot UUID, pin the newest usable snapshot when omitted, use
+`Cache-Control: no-store`, enforce the existing owner scope, and fail closed on
+snapshot or Evidence conflicts. The export is the complete validated public
+envelope, not the legacy run-scoped report surface.
+
+Evidence now shows the report assurance, report and content hashes, Activity
+and Evidence counts, canonical gate status, and every remaining unverified
+claim. The report refreshes after terminal Evidence updates, survives direct
+snapshot URLs, and never renders a prior snapshot's report while a new scope is
+loading or failing. JSON export remains available for observed, normalized,
+and partially verified revisions instead of blocking all noncanonical output.
+
+No database migration is added in v0.75.0. The Alembic head remains
+`20260710_0022`; report revisions are deterministic read models over immutable
+CaseSync snapshots plus revalidated persisted Evidence. The server does not yet
+maintain a historical report-revision catalog, auto-select proof targets, prove
+complete wallet history, establish cost basis, or feed PnL. Those remain
+explicit limitations rather than inferred claims. Wallet Cases, Evidence, and
+Case Reports remain direct-loopback only until authenticated owner scopes are
+available.
+
+---
+
 # GRAM Scope — v0.74.0 CASE EVIDENCE
 
 v0.74.0 adds a durable Wallet Case evidence-verification workflow for one

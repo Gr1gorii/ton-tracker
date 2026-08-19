@@ -41,7 +41,7 @@ import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWor
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.74.0";
+const RELEASE_LABEL = "v0.75.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
