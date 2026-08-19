@@ -1,3 +1,40 @@
+# GRAM Scope — v0.77.0 REPORT HISTORY
+
+v0.77.0 adds durable, content-addressed Wallet Case Report revisions. A user
+can explicitly save the current report for one pinned usable snapshot, browse
+the case's saved revision history, reopen an exact revision, and export the
+stored validated JSON document. Repeating the same capture is idempotent: it
+returns the existing `rpt_…` revision instead of creating duplicate history.
+
+The new owner-scoped local API exposes a signed, snapshot-stable report catalog,
+an explicit capture endpoint, exact revision detail, and exact saved export.
+Catalog cursors bind the case, revision cutoff, and keyset position. They are
+opaque and tamper-evident, but intentionally live only for the current backend
+process. Public responses expose no sequential database IDs, source run IDs,
+provider payloads, proof BOCs, idempotency material, or cursor signing secret.
+
+Each stored revision preserves the complete validated `wallet_case_report_v1`
+envelope and revalidates its public ID, content hash, case, snapshot, assurance,
+and digest bindings on every read. A saved revision is immutable; the current
+report can still change when new Evidence is captured, and it is not silently
+added to history. History is therefore a record of explicit captures, not a
+claim that every intermediate report state was reconstructed or retained.
+
+The case shell now provides Summary, Activity, Findings, Evidence, and Reports.
+The Reports route pins snapshot and selected revision in strict URL state,
+survives refresh/back/forward navigation, appends non-overlapping cursor pages,
+and keeps keyboard focus on the opened revision or its returning history link.
+The view distinguishes the current reproducible report from saved history and
+keeps all incomplete-history, cost-basis, PnL, coverage, and canonical-gate
+limitations visible.
+
+Schema revision `20260710_0023` adds the durable revision catalog with exact
+case/snapshot ownership, content-hash uniqueness, stored-document integrity,
+and restart-safe forward-only migration checks. Wallet Cases remain
+direct-loopback only until authentication supplies an owner scope.
+
+---
+
 # GRAM Scope — v0.76.0 CASE FINDINGS
 
 v0.76.0 adds a deterministic Findings and Flows view over one pinned Wallet

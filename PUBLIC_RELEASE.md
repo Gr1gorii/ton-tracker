@@ -1,4 +1,4 @@
-# GRAM Scope - v0.76.0 Public Release
+# GRAM Scope - v0.77.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -22,10 +22,13 @@ Public release handoff for the current TON wallet intelligence workspace.
   its coverage and gaps, and the returned revalidated Evidence window. Useful
   observed, normalized, and partially verified revisions remain exportable;
   canonical assurance is separately hard-gated.
+- A durable report-revision catalog populated only by explicit user captures,
+  with idempotent content-addressed saves, signed keyset pagination, exact
+  revision detail, and exact stored JSON export.
 - A deterministic, content-addressed Wallet Case Findings facade with canonical
   asset flows, bounded counterparty/protocol groups, versioned explainable rules,
   public Activity support links, and explicit no-risk-score truth boundaries.
-- A shared Summary/Activity/Findings/Evidence case shell with refresh-safe filters,
+- A shared Summary/Activity/Findings/Evidence/Reports case shell with refresh-safe filters,
   selected-record details, verification progress, keyboard focus management,
   responsive cards, report assurance, canonical gates, and exact JSON export.
 - Compact case activity, portfolio snapshot, coverage, and limitation summaries
@@ -42,13 +45,14 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.76.0 CASE FINDINGS`.
+- Product release label: `v0.77.0 REPORT HISTORY`.
 - Backend API `VERSION` remains `0.2.1`.
-- Alembic head is `20260710_0022`: 0019 adds durable Case Evidence jobs, 0020
+- Alembic head is `20260710_0023`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
   persists the verifier policy plus exact per-network application checkpoint
   and binds them into proof and catalog digests. Revision 0022 activates the
   application-owned strict proof-link policy without relabeling older rows.
+  Revision 0023 adds owner-scoped immutable Case Report revision captures.
 - Current verifier policy `ton_liteserver_checkpoint_strict_2026_08_v2` pins these
   masterchain checkpoint tuples as
   `(workchain, shard, seqno, root hash, file hash)`:
@@ -79,7 +83,8 @@ Public release handoff for the current TON wallet intelligence workspace.
   matches are not fee allocation. Real PnL remains locked.
 - Case Report contract `wallet_case_report_v1` is a deterministic read model;
   its `rpt_…` ID is the SHA-256 of the exact public payload projection. It adds
-  no migration, so the Alembic head remains `20260710_0022`.
+  revision history is stored by migration `20260710_0023` only after an explicit
+  capture request.
 - Case Findings contract `wallet_case_findings_v1` is a deterministic read model;
   its `fset_…` ID binds the exact public payload projection. It adds no migration,
   never merges assets by symbol, and never publishes an opaque risk or safety
@@ -115,10 +120,13 @@ Public release handoff for the current TON wallet intelligence workspace.
   Empty findings are not a safe-wallet result; flow totals cannot be compared
   across canonical assets, and counterparty observations do not establish an
   actor, owner, beneficiary, or intent.
-- The service recomputes the content-addressed revision from its pinned snapshot
-  and persisted Evidence. Exported documents remain independently identifiable,
-  but the server does not yet keep a browsable historical report-revision
-  catalog or automatically select proof targets.
+- The current report is recomputed from its pinned snapshot and persisted
+  Evidence. Saved revisions are immutable explicit captures; the catalog does
+  not claim that every intermediate report state was retained or reconstructed.
+  Automatic proof-target selection remains out of scope.
+- Report-history cursors are signed and bound to a frozen case revision cutoff,
+  but their signing key is process-local. A cursor is not portable across a
+  backend restart; opening a fresh first page remains supported.
 - The local worker replays the whole bounded crawl after an in-flight crash;
   accepted provider pages are not yet committed as resumable checkpoints.
 - Case-sync cancellation is immediate while queued and cooperative around the
@@ -143,13 +151,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.76.0`, confirm:
+Before tagging `v0.77.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.76.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.77.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -164,6 +172,9 @@ Before tagging `v0.76.0`, confirm:
 - Case Report reproducibility, content-ID binding, snapshot/Evidence scope,
   assurance transitions, canonical negative gates, response redaction, export,
   refresh invalidation, and cross-snapshot race tests pass.
+- Report capture idempotency, immutable stored-document validation, signed
+  cursor tamper/cross-case rejection, cutoff-stable pagination, exact export,
+  URL restoration, load-more overlap rejection, and detail focus tests pass.
 - Case Findings reproducibility, content-ID binding, same-symbol asset
   separation, flow conservation, rule support, weakest-evidence labelling,
   strict URL state, response redaction, and Activity deep links pass.
