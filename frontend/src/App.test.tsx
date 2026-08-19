@@ -34,6 +34,7 @@ import {
   VERIFICATION_ID,
 } from "./test/walletCaseEvidenceFixtures";
 import { walletCaseReportFixture } from "./test/walletCaseReportFixtures";
+import { walletCaseFindingsFixture } from "./test/walletCaseFindingsFixtures";
 
 const WALLET = "EQC-demo-wallet";
 
@@ -292,6 +293,50 @@ describe("Wallet Case application flow", () => {
     await user.click(screen.getByRole("link", { name: /SummarySnapshot and coverage/ }));
     expect(await screen.findByRole("heading", { name: "Snapshot ready" })).toBeTruthy();
     expect(window.location.pathname).toBe(`/cases/${CASE_ID}/summary`);
+  });
+
+  it("deep-links pinned Findings and follows a supporting row back to Activity", async () => {
+    const liveSync = succeededSyncFixture({ data_mode: "real", provider: "tonapi_wallet_activity_live" });
+    const liveCase = walletCaseFixture({
+      latestAttempt: liveSync,
+      currentSnapshot: liveSync,
+      overrides: { data_environment: "live" },
+    });
+    window.history.replaceState({}, "", `/cases/${CASE_ID}/findings?snapshot=${SYNC_ID}`);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}` && method === "GET") return jsonResponse(liveCase);
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/findings` && method === "GET") {
+        expect(url.searchParams.getAll("snapshot")).toEqual([SYNC_ID]);
+        return jsonResponse(walletCaseFindingsFixture());
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/activity` && method === "GET") {
+        return jsonResponse(activityResponseFixture());
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/activity/${ACTIVITY_ID}` && method === "GET") {
+        return jsonResponse(activityDetailFixture());
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Explainable findings with supporting rows" })).toBeTruthy();
+    const findingsMain = screen.getByRole("main", { name: "Wallet Case findings" });
+    await waitFor(() => expect(document.activeElement).toBe(findingsMain));
+    expect(screen.getByRole("link", { name: /FindingsExplainable flows/ }).getAttribute("aria-current")).toBe("page");
+    await waitFor(() => expect(document.title).toBe("Wallet Case Findings · GRAM Scope"));
+
+    const support = screen.getAllByRole("link").find((link) => link.getAttribute("href")?.includes(ACTIVITY_ID));
+    expect(support).toBeTruthy();
+    await user.click(support!);
+    await waitFor(() => expect(window.location.pathname).toBe(`/cases/${CASE_ID}/activity`));
+    expect(new URLSearchParams(window.location.search).get("activity")).toBe(ACTIVITY_ID);
+    expect(await screen.findByRole("dialog", { name: "Activity detail" })).toBeTruthy();
   });
 
   it("keeps initial deep-linked Activity detail focus inside the modal after route focus runs", async () => {
