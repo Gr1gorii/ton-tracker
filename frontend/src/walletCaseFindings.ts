@@ -432,18 +432,22 @@ function parseFinding(value: unknown, index: number, environment: "demo" | "live
   if (new Set(supports.map((entry) => entry.activity_public_id)).size !== supports.length) fail(`finding ${index} support must be distinct`);
   const truncated = boolean(item.support_truncated, `finding ${index} support truncation`);
   const evidenceLevel = enumValue(item.evidence_level, LEVELS, `finding ${index} evidence level`);
+  const ruleId = enumValue(item.rule_id, RULES, `finding ${index} rule`);
   if (basis === "activity_rows") {
     if (supports.length === 0 || supports.length > affected || truncated !== (affected > supports.length)) fail(`finding ${index} Activity support is inconsistent`);
     const weakest = supports.reduce((current, support) => LEVEL_SCORE[support.evidence_level] < LEVEL_SCORE[current] ? support.evidence_level : current, supports[0].evidence_level);
-    if (weakest !== evidenceLevel) fail(`finding ${index} evidence level exceeds its weakest support`);
+    if (LEVEL_SCORE[evidenceLevel] > LEVEL_SCORE[weakest]) fail(`finding ${index} evidence level exceeds its weakest support`);
   } else if (supports.length !== 0 || truncated) fail(`finding ${index} diagnostic support is inconsistent`);
+  if (ruleId === "failed_transaction_observations_v1" && LEVEL_SCORE[evidenceLevel] > LEVEL_SCORE.normalized_provider_observation) {
+    fail(`finding ${index} provider outcome assurance is overstated`);
+  }
   if (
     (environment === "demo") !== (evidenceLevel === "fixture")
     || supports.some((support) => (environment === "demo") !== (support.evidence_level === "fixture"))
   ) fail(`finding ${index} evidence origin is inconsistent`);
   return {
     public_id: publicId,
-    rule_id: enumValue(item.rule_id, RULES, `finding ${index} rule`),
+    rule_id: ruleId,
     category: enumValue(item.category, CATEGORIES, `finding ${index} category`),
     importance: enumValue(item.importance, IMPORTANCE, `finding ${index} importance`),
     title: boundedText(item.title, `finding ${index} title`, 120),

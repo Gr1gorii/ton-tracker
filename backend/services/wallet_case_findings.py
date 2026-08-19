@@ -539,6 +539,7 @@ def _findings(
             by_id=by_id,
             evidence_levels=evidence_levels,
             fallback_level=base_level,
+            evidence_level_cap=base_level,
         ))
 
     unavailable_assets = sorted(flow_state["unavailable_asset_ids"])
@@ -657,6 +658,7 @@ def _finding(
     by_id: dict[str, dict[str, Any]],
     evidence_levels: dict[str, str],
     fallback_level: str,
+    evidence_level_cap: str | None = None,
 ) -> dict[str, Any]:
     ids = sorted(set(activity_ids))
     bounded = ids[:MAX_SUPPORTING_ACTIVITIES]
@@ -670,14 +672,24 @@ def _finding(
         for activity_id in bounded
         if activity_id in by_id and activity_id in evidence_levels
     ]
+    affected_levels = [
+        evidence_levels[activity_id]
+        for activity_id in ids
+        if activity_id in by_id and activity_id in evidence_levels
+    ]
     evidence_level = (
         min(
-            (support["evidence_level"] for support in supports),
+            affected_levels,
             key=lambda level: _EVIDENCE_SCORE[level],
         )
-        if supports
+        if affected_levels
         else fallback_level
     )
+    if (
+        evidence_level_cap is not None
+        and _EVIDENCE_SCORE[evidence_level] > _EVIDENCE_SCORE[evidence_level_cap]
+    ):
+        evidence_level = evidence_level_cap
     seed = {
         "contract": "wallet_case_finding_v1",
         "rule_id": rule_id,

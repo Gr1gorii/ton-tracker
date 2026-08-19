@@ -33,6 +33,12 @@ FindingEvidenceLevel = Literal[
     "locally_verified",
     "chain_inclusion_proven",
 ]
+_EVIDENCE_SCORE: dict[str, int] = {
+    "fixture": 0,
+    "normalized_provider_observation": 1,
+    "locally_verified": 2,
+    "chain_inclusion_proven": 3,
+}
 FindingRule = Literal[
     "activity_coverage_gaps_v1",
     "activity_identity_conflicts_v1",
@@ -274,8 +280,20 @@ class WalletCaseFinding(_StrictModel):
                 raise ValueError("activity finding support is incoherent")
             if self.support_truncated != (self.affected_count > len(ids)):
                 raise ValueError("finding support truncation is incoherent")
+            weakest = min(
+                self.supporting_activities,
+                key=lambda item: _EVIDENCE_SCORE[item.evidence_level],
+            ).evidence_level
+            if _EVIDENCE_SCORE[self.evidence_level] > _EVIDENCE_SCORE[weakest]:
+                raise ValueError("finding evidence exceeds its weakest public support")
         elif ids or self.support_truncated:
             raise ValueError("diagnostic finding cannot invent Activity support")
+        if (
+            self.rule_id == "failed_transaction_observations_v1"
+            and _EVIDENCE_SCORE[self.evidence_level]
+            > _EVIDENCE_SCORE["normalized_provider_observation"]
+        ):
+            raise ValueError("provider outcome findings cannot claim proof assurance")
         return self
 
 

@@ -25,7 +25,8 @@ from models import (
 from services.database_migrations import run_database_migrations
 from services.ton_event_action_identity import derive_ton_event_action_identity
 from services.ton_transaction_identity import derive_ton_transaction_identity
-from wallet_case_findings_schemas import WalletCaseFindingsResponse
+from services.wallet_case_findings import _finding, _findings
+from wallet_case_findings_schemas import WalletCaseFinding, WalletCaseFindingsResponse
 
 
 ACCOUNT = f"0:{'11' * 32}"
@@ -219,6 +220,110 @@ def test_findings_query_and_response_contract_fail_closed(findings_client):
     valid["findings"]["truth_boundaries"]["absence_of_findings_means_safe"] = True
     with pytest.raises(ValueError):
         WalletCaseFindingsResponse.model_validate(valid)
+
+
+def test_failed_outcome_claim_does_not_inherit_transaction_inclusion_assurance():
+    item = {
+        "public_id": "act_failed",
+        "kind": "transaction",
+        "outcome": "failed",
+        "occurred_at": _iso(START),
+    }
+    findings, _state = _findings(
+        (item,),
+        aggregate={"conflicted_identity_count": 0},
+        gaps=(),
+        evidence_levels={"act_failed": "chain_inclusion_proven"},
+        demo=False,
+        flow_state={
+            "unavailable_asset_ids": set(),
+            "unavailable_counterparty_ids": set(),
+            "counterparty_groups": [],
+            "protocol_groups": [],
+        },
+    )
+
+    failed = next(
+        row
+        for row in findings
+        if row["rule_id"] == "failed_transaction_observations_v1"
+    )
+    assert failed["evidence_level"] == "normalized_provider_observation"
+    assert failed["supporting_activities"][0]["evidence_level"] == (
+        "chain_inclusion_proven"
+    )
+
+
+def test_truncated_supports_include_omitted_rows_in_weakest_evidence_level():
+    activity_ids = [f"act_{index:02d}" for index in range(51)]
+    by_id = {
+        activity_id: {
+            "kind": "transaction",
+            "occurred_at": _iso(START),
+        }
+        for activity_id in activity_ids
+    }
+    evidence_levels = {
+        activity_id: "chain_inclusion_proven"
+        for activity_id in activity_ids[:50]
+    }
+    evidence_levels[activity_ids[50]] = "normalized_provider_observation"
+
+    finding = _finding(
+        rule_id="failed_transaction_observations_v1",
+        key="failed",
+        category="transaction_outcome",
+        importance="attention",
+        title="Failed transaction observations",
+        explanation="Observed provider outcomes.",
+        affected_count=len(activity_ids),
+        support_basis="activity_rows",
+        activity_ids=activity_ids,
+        by_id=by_id,
+        evidence_levels=evidence_levels,
+        fallback_level="normalized_provider_observation",
+    )
+
+    assert finding["support_truncated"] is True
+    assert len(finding["supporting_activities"]) == 50
+    assert all(
+        support["evidence_level"] == "chain_inclusion_proven"
+        for support in finding["supporting_activities"]
+    )
+    assert finding["evidence_level"] == "normalized_provider_observation"
+
+
+def test_public_finding_schema_rejects_assurance_overstatement():
+    support = [{
+        "activity_public_id": f"act_{'1' * 64}",
+        "kind": "transaction",
+        "occurred_at": _iso(START),
+        "evidence_level": "chain_inclusion_proven",
+    }]
+    base = {
+        "public_id": f"finding_{'2' * 64}",
+        "rule_id": "failed_transaction_observations_v1",
+        "category": "transaction_outcome",
+        "importance": "attention",
+        "title": "Failed transaction observations",
+        "explanation": "Observed provider outcomes.",
+        "affected_count": 1,
+        "support_basis": "activity_rows",
+        "supporting_activities": support,
+        "support_truncated": False,
+        "evidence_level": "chain_inclusion_proven",
+    }
+    with pytest.raises(ValueError, match="provider outcome"):
+        WalletCaseFinding.model_validate(base)
+
+    weaker_support = dict(base)
+    weaker_support["rule_id"] = "repeated_counterparty_observations_v1"
+    weaker_support["category"] = "flow_pattern"
+    weaker_support["supporting_activities"] = [
+        support[0] | {"evidence_level": "normalized_provider_observation"}
+    ]
+    with pytest.raises(ValueError, match="weakest public support"):
+        WalletCaseFinding.model_validate(weaker_support)
 
 
 def _case(session: Session, *, environment: str) -> WalletCase:

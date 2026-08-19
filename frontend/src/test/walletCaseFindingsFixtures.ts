@@ -128,7 +128,7 @@ export function walletCaseFindingsFixture(): WalletCaseFindingsResponse {
           evidence_level: "chain_inclusion_proven",
         }],
         support_truncated: false,
-        evidence_level: "chain_inclusion_proven",
+        evidence_level: "normalized_provider_observation",
       }, {
         public_id: `finding_${"2".repeat(64)}`,
         rule_id: "recognized_protocol_observations_v1",

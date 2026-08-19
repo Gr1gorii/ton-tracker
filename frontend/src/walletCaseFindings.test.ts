@@ -14,7 +14,8 @@ describe("Wallet Case Findings parser", () => {
   it("accepts the exact pinned Findings and Flows contract", () => {
     const parsed = parseWalletCaseFindingsResponse(payload());
     expect(parsed.findings?.flows.asset_flows[0].inflow_amount).toBe("12.5");
-    expect(parsed.findings?.findings[0].evidence_level).toBe("chain_inclusion_proven");
+    expect(parsed.findings?.findings[0].evidence_level).toBe("normalized_provider_observation");
+    expect(parsed.findings?.findings[0].supporting_activities[0].evidence_level).toBe("chain_inclusion_proven");
   });
 
   it("accepts the honest unsynchronized state", () => {
@@ -76,7 +77,14 @@ describe("Wallet Case Findings parser", () => {
       evidence_level: "normalized_provider_observation",
     });
     mixed.findings.findings[0].affected_count = 2;
+    mixed.findings.findings[0].evidence_level = "chain_inclusion_proven";
     expect(() => parseWalletCaseFindingsResponse(mixed)).toThrow(/weakest support/);
+  });
+
+  it("rejects proof assurance on a provider-only failed outcome claim", () => {
+    const overstated = payload();
+    overstated.findings.findings[0].evidence_level = "chain_inclusion_proven";
+    expect(() => parseWalletCaseFindingsResponse(overstated)).toThrow(/outcome assurance/);
   });
 
   it("accepts a live diagnostic finding whose support is a revision-level conflict", () => {
