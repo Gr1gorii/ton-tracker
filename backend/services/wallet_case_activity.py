@@ -149,6 +149,26 @@ class ResolvedCaseActivityRevision:
     verifiable_transactions: dict[str, ResolvedCaseActivityTransaction]
 
 
+@dataclass(frozen=True)
+class ResolvedCaseActivityDataset:
+    """One fully materialized, pinned Activity read revision.
+
+    Case-level derived read models use this internal bridge so they do not
+    paginate and rebuild the same bounded source revision once per page.  It
+    deliberately contains public Activity records only; source row and run
+    identifiers remain private to the Activity/Evidence services.
+    """
+
+    wallet_case: WalletCase
+    snapshot: CaseSync | None
+    snapshot_record: dict[str, Any] | None
+    aggregate: dict[str, Any]
+    observed_period: dict[str, Any] | None
+    gaps: tuple[dict[str, Any], ...]
+    limitations: tuple[dict[str, Any], ...]
+    items: tuple[dict[str, Any], ...]
+
+
 class WalletCaseActivityService:
     def __init__(
         self,
@@ -330,6 +350,90 @@ class WalletCaseActivityService:
             "source_observations": list(all_sources[:MAX_DETAIL_SOURCES]),
             "sources_truncated": len(all_sources) > MAX_DETAIL_SOURCES,
         }
+
+    def resolve_activity_dataset(
+        self,
+        case_public_id: str,
+        *,
+        snapshot_public_id: str | None,
+    ) -> ResolvedCaseActivityDataset:
+        """Materialize one unfiltered Activity revision exactly once.
+
+        This is an internal case-read-model boundary, not a public pagination
+        escape hatch.  The same source-sync and row-count caps used by the
+        Activity endpoint are enforced before any derived facade can inspect
+        the records.
+        """
+        query = normalize_activity_query(
+            WalletCaseActivityQuery(snapshot_public_id=snapshot_public_id)
+        )
+        wallet_case = self._required_case(case_public_id)
+        snapshot = self.repository.get_snapshot(
+            case_id=wallet_case.id,
+            public_id=query.snapshot_public_id,
+        )
+        if snapshot is None:
+            if query.snapshot_public_id is not None:
+                raise WalletCaseActivitySnapshotNotFound(
+                    "The requested Wallet Case snapshot is unavailable."
+                )
+            empty = _empty_response(wallet_case.public_id, query)
+            return ResolvedCaseActivityDataset(
+                wallet_case=wallet_case,
+                snapshot=None,
+                snapshot_record=None,
+                aggregate=empty["aggregate"],
+                observed_period=None,
+                gaps=tuple(empty["gaps"]),
+                limitations=tuple(empty["limitations"]),
+                items=(),
+            )
+
+        start_at, end_at = _effective_period(snapshot, query)
+        row_start_at, row_end_at = _row_period(snapshot, query, start_at, end_at)
+        source_syncs = self.repository.source_syncs(
+            snapshot=snapshot,
+            start_at=start_at,
+            end_at=end_at,
+            maximum=MAX_SOURCE_SYNCS,
+        )
+        if source_syncs is None:
+            raise WalletCaseActivityScopeTooLarge(
+                "The pinned activity revision includes too many synchronization sources."
+            )
+        sources = self.repository.load_sources(
+            syncs=source_syncs,
+            start_at=row_start_at,
+            end_at=row_end_at,
+            maximum_rows=MAX_SOURCE_ROWS,
+        )
+        if sources is None:
+            raise WalletCaseActivityScopeTooLarge(
+                "The pinned activity revision contains too many normalized rows."
+            )
+        snapshot_run = sources.runs.get(snapshot.ingestion_run_id)
+        expected_mode = "mock" if wallet_case.data_environment == "demo" else "real"
+        if snapshot_run is None or not _run_matches_case(
+            snapshot_run,
+            snapshot,
+            wallet_case,
+            expected_mode,
+        ):
+            raise WalletCaseActivitySnapshotConflict(
+                "The pinned snapshot failed its Wallet Case source-scope contract."
+            )
+        built = _build_activity(wallet_case, snapshot, sources)
+        items = tuple(built.items)
+        return ResolvedCaseActivityDataset(
+            wallet_case=wallet_case,
+            snapshot=snapshot,
+            snapshot_record=_snapshot_record(snapshot),
+            aggregate=_aggregate(items, built, query, snapshot.data_mode),
+            observed_period=_observed_period(items),
+            gaps=tuple(_gaps(snapshot, built, query, start_at, end_at)),
+            limitations=tuple(_limitations(snapshot, built, query)),
+            items=items,
+        )
 
     def resolve_verifiable_transaction(
         self,
