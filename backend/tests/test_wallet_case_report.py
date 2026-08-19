@@ -25,6 +25,10 @@ from services.database_migrations import run_database_migrations
 from services.ton_transaction_identity import derive_ton_transaction_identity
 from services.wallet_case_report import _assurance_level
 from wallet_case_report_schemas import WalletCaseReportResponse
+from wallet_case_report_revision_schemas import (
+    WalletCaseReportRevisionCatalog,
+    WalletCaseReportRevisionDetailResponse,
+)
 
 
 ACCOUNT = f"0:{'11' * 32}"
@@ -251,6 +255,18 @@ def test_report_revision_capture_replays_and_exports_exact_stored_report(report_
         "raw_json",
     ):
         assert forbidden not in serialized
+
+    detail_payload = detail.json()
+    detail_payload["revision"]["activity_count"] += 1
+    with pytest.raises(ValueError, match="incoherent"):
+        WalletCaseReportRevisionDetailResponse.model_validate(detail_payload)
+
+    catalog_payload = report_client.get(
+        f"/api/v1/cases/{case_id}/reports"
+    ).json()
+    catalog_payload["limitations"] = []
+    with pytest.raises(ValueError, match="capture scope"):
+        WalletCaseReportRevisionCatalog.model_validate(catalog_payload)
 
 
 def test_report_revision_cursor_freezes_catalog_while_new_capture_arrives(report_client):

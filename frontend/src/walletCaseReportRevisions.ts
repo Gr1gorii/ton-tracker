@@ -126,6 +126,11 @@ export function parseWalletCaseReportRevisionDetailResponse(value: unknown): Wal
     || report.report.assurance_level !== revision.assurance_level
     || report.report.activity_revision.digest_sha256 !== revision.activity_digest_sha256
     || report.report.evidence_revision.digest_sha256 !== revision.evidence_digest_sha256
+    || report.report.activity_revision.aggregate.total_items !== revision.activity_count
+    || report.report.evidence_revision.total_attempts !== revision.evidence_attempt_count
+    || report.report.canonical_gate.eligible !== revision.canonical_eligible
+    || report.report.limitations.length !== revision.limitation_count
+    || report.report.unverified_claims.length !== revision.unverified_claim_count
   ) fail("Stored Wallet Case report revision detail is inconsistent");
   return { case_public_id: caseId, revision, report };
 }

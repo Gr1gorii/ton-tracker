@@ -157,6 +157,41 @@ describe("Wallet Case application flow", () => {
     );
   });
 
+  it("gives an initially deep-linked saved report revision focus precedence", async () => {
+    const catalog = walletCaseReportRevisionCatalogFixture();
+    window.history.replaceState(
+      {},
+      "",
+      `/cases/${CASE_ID}/reports?snapshot=${SYNC_ID}&revision=${catalog.items[0].public_id}`,
+    );
+    const reportCase = walletCaseFixture({
+      latestAttempt: null,
+      currentSnapshot: null,
+      overrides: {
+        data_environment: "live",
+        canonical_wallet_key: `0:${"1".repeat(64)}`,
+      },
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}`) return jsonResponse(reportCase);
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/report`) return jsonResponse(walletCaseReportFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/reports` && method === "GET") return jsonResponse(catalog);
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/reports/${catalog.items[0].public_id}`) {
+        return jsonResponse(walletCaseReportRevisionDetailFixture());
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    const detailHeading = await screen.findByRole("heading", { name: "Exact stored public report" });
+    await waitFor(() => expect(document.activeElement).toBe(detailHeading));
+    expect(document.querySelector("[data-route-focus]")).not.toBe(document.activeElement);
+  });
+
   it("creates or opens a canonical case URL, syncs a bounded interval, and restores it after remount", async () => {
     const emptyCase = emptyWalletCaseFixture();
     const syncedCase = walletCaseFixture();

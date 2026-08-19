@@ -93,6 +93,10 @@ class WalletCaseReportRevisionCatalog(_StrictModel):
     def _catalog_is_scoped(self):
         if self.aggregate.returned_count != len(self.items):
             raise ValueError("report revision returned count changed")
+        if self.aggregate.returned_count > self.aggregate.total_revisions:
+            raise ValueError("report revision returned count exceeds its total")
+        if len(self.items) > self.page.limit:
+            raise ValueError("report revision page exceeds its requested limit")
         if (self.revision_cutoff_public_id is None) != (
             self.aggregate.total_revisions == 0
         ):
@@ -109,6 +113,13 @@ class WalletCaseReportRevisionCatalog(_StrictModel):
             raise ValueError("report revision catalog identity changed")
         if len({item.code for item in self.limitations}) != len(self.limitations):
             raise ValueError("report revision catalog limitations must be distinct")
+        limitation_codes = {item.code for item in self.limitations}
+        if "report_revisions_are_explicit_captures" not in limitation_codes:
+            raise ValueError("report revision catalog must disclose capture scope")
+        if self.page.has_more != (
+            "report_revision_cursor_local_process_scope" in limitation_codes
+        ):
+            raise ValueError("report revision cursor limitation is incoherent")
         return self
 
 
@@ -144,6 +155,15 @@ class WalletCaseReportRevisionDetailResponse(_StrictModel):
             != report.activity_revision.digest_sha256
             or self.revision.evidence_digest_sha256
             != report.evidence_revision.digest_sha256
+            or self.revision.activity_count
+            != report.activity_revision.aggregate.total_items
+            or self.revision.evidence_attempt_count
+            != report.evidence_revision.total_attempts
+            or self.revision.canonical_eligible
+            != report.canonical_gate.eligible
+            or self.revision.limitation_count != len(report.limitations)
+            or self.revision.unverified_claim_count
+            != len(report.unverified_claims)
         ):
             raise ValueError("stored report revision detail is incoherent")
         return self

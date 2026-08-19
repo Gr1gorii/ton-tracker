@@ -64,18 +64,25 @@ describe("Wallet Case report revision parser", () => {
     ["impossible date", (value: any) => { value.items[0].captured_at = "2026-02-30T00:00:00Z"; }],
     ["cursor mismatch", (value: any) => { value.page.has_more = true; }],
     ["missing capture limitation", (value: any) => { value.limitations = []; }],
+    ["unexpected cursor limitation", (value: any) => { value.limitations.push({ code: "report_revision_cursor_local_process_scope", message: "Local cursor." }); }],
+    ["returned total overflow", (value: any) => { value.aggregate.total_revisions = 0; }],
   ])("rejects %s", (_label, mutate) => {
     const value: any = structuredClone(catalog());
     mutate(value);
     expect(() => parseWalletCaseReportRevisionCatalog(value)).toThrow();
   });
 
-  it("rejects detail digest and snapshot drift", () => {
-    const digestDrift: any = { case_public_id: CASE_ID, revision: summary(), report: walletCaseReportFixture() };
-    digestDrift.revision.activity_digest_sha256 = "ef".repeat(32);
-    expect(() => parseWalletCaseReportRevisionDetailResponse(digestDrift)).toThrow(/inconsistent/);
-    const snapshotDrift: any = { case_public_id: CASE_ID, revision: summary(), report: walletCaseReportFixture() };
-    snapshotDrift.revision.snapshot_public_id = "550e8400-e29b-41d4-a716-446655440099";
-    expect(() => parseWalletCaseReportRevisionDetailResponse(snapshotDrift)).toThrow(/inconsistent/);
+  it.each([
+    ["Activity digest", (value: any) => { value.revision.activity_digest_sha256 = "ef".repeat(32); }],
+    ["snapshot", (value: any) => { value.revision.snapshot_public_id = "550e8400-e29b-41d4-a716-446655440099"; }],
+    ["Activity count", (value: any) => { value.revision.activity_count += 1; }],
+    ["Evidence attempt count", (value: any) => { value.revision.evidence_attempt_count += 1; }],
+    ["canonical gate", (value: any) => { value.revision.canonical_eligible = true; value.revision.assurance_level = "canonical"; }],
+    ["limitation count", (value: any) => { value.revision.limitation_count += 1; }],
+    ["unverified claim count", (value: any) => { value.revision.unverified_claim_count += 1; }],
+  ])("rejects detail %s drift", (_label, mutate) => {
+    const value: any = { case_public_id: CASE_ID, revision: summary(), report: walletCaseReportFixture() };
+    mutate(value);
+    expect(() => parseWalletCaseReportRevisionDetailResponse(value)).toThrow(/inconsistent/);
   });
 });
