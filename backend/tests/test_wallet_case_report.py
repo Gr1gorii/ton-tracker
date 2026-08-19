@@ -17,6 +17,7 @@ from models import (
     CaseSync,
     LOCAL_SINGLE_USER_SCOPE,
     WalletCase,
+    WalletCaseReportRevision,
     WalletIngestionRun,
     WalletTransaction,
 )
@@ -35,7 +36,7 @@ END = START + timedelta(days=1)
 def report_client(tmp_path):
     engine = create_database_engine(f"sqlite:///{tmp_path / 'report.sqlite3'}")
     migration = run_database_migrations(engine)
-    assert migration.revision_after == "20260710_0022"
+    assert migration.revision_after == "20260710_0023"
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override():
@@ -185,6 +186,206 @@ def test_report_query_and_response_model_fail_closed(report_client):
     valid["report"]["assurance_level"] = "canonical"
     with pytest.raises(ValueError):
         WalletCaseReportResponse.model_validate(valid)
+
+
+def test_report_revision_capture_replays_and_exports_exact_stored_report(report_client):
+    with app.state.case_report_test_sessions() as session:
+        wallet_case = _case(session, environment="demo")
+        run, sync = _run_and_sync(session, wallet_case)
+        session.add(_demo_transaction(run))
+        session.commit()
+        case_id = wallet_case.public_id
+        snapshot_id = sync.public_id
+
+    empty = report_client.get(f"/api/v1/cases/{case_id}/reports")
+    assert empty.status_code == 200, empty.text
+    assert empty.headers["cache-control"] == "no-store"
+    assert empty.json()["aggregate"] == {
+        "total_revisions": 0,
+        "returned_count": 0,
+    }
+    assert empty.json()["revision_cutoff_public_id"] is None
+
+    created = report_client.post(
+        f"/api/v1/cases/{case_id}/reports",
+        json={"snapshot_public_id": snapshot_id},
+    )
+    replay = report_client.post(
+        f"/api/v1/cases/{case_id}/reports",
+        json={"snapshot_public_id": snapshot_id},
+    )
+    assert created.status_code == 201, created.text
+    assert replay.status_code == 200, replay.text
+    assert created.headers["cache-control"] == "no-store"
+    assert created.json()["created"] is True
+    assert replay.json()["created"] is False
+    assert replay.json()["revision"] == created.json()["revision"]
+    revision = created.json()["revision"]
+    assert revision["public_id"] == f"rpt_{revision['content_hash_sha256']}"
+    assert revision["assurance_level"] == "observed"
+    assert revision["canonical_eligible"] is False
+
+    with app.state.case_report_test_sessions() as session:
+        assert session.query(WalletCaseReportRevision).count() == 1
+
+    detail = report_client.get(
+        f"/api/v1/cases/{case_id}/reports/{revision['public_id']}"
+    )
+    exported = report_client.get(
+        f"/api/v1/cases/{case_id}/reports/{revision['public_id']}/export.json"
+    )
+    assert detail.status_code == exported.status_code == 200
+    assert detail.headers["cache-control"] == "no-store"
+    assert exported.headers["cache-control"] == "no-store"
+    assert exported.headers["content-disposition"].endswith(
+        f'{revision["public_id"]}.json"'
+    )
+    assert detail.json()["revision"] == revision
+    assert exported.json() == detail.json()["report"]
+    serialized = detail.text
+    for forbidden in (
+        "run_id",
+        "ingestion_run_id",
+        "source_transaction_id",
+        "lease_token",
+        "raw_json",
+    ):
+        assert forbidden not in serialized
+
+
+def test_report_revision_cursor_freezes_catalog_while_new_capture_arrives(report_client):
+    with app.state.case_report_test_sessions() as session:
+        wallet_case = _case(session, environment="demo")
+        snapshots: list[str] = []
+        for index in range(3):
+            run, sync = _run_and_sync(session, wallet_case)
+            transaction = _demo_transaction(run)
+            transaction.tx_hash = f"demo-report-transaction-{index}"
+            transaction.logical_time = str(42 + index)
+            transaction.timestamp = START + timedelta(hours=index + 1)
+            session.add(transaction)
+            session.flush()
+            snapshots.append(sync.public_id)
+        session.commit()
+        case_id = wallet_case.public_id
+
+    captured = []
+    for snapshot_id in snapshots[:2]:
+        response = report_client.post(
+            f"/api/v1/cases/{case_id}/reports",
+            json={"snapshot_public_id": snapshot_id},
+        )
+        assert response.status_code == 201, response.text
+        captured.append(response.json()["revision"]["public_id"])
+
+    first_page = report_client.get(
+        f"/api/v1/cases/{case_id}/reports",
+        params={"limit": "1"},
+    )
+    assert first_page.status_code == 200, first_page.text
+    page = first_page.json()
+    assert page["items"][0]["public_id"] == captured[1]
+    assert page["revision_cutoff_public_id"] == captured[1]
+    assert page["page"]["has_more"] is True
+    cursor = page["page"]["next_cursor"]
+
+    third = report_client.post(
+        f"/api/v1/cases/{case_id}/reports",
+        json={"snapshot_public_id": snapshots[2]},
+    )
+    assert third.status_code == 201, third.text
+    third_id = third.json()["revision"]["public_id"]
+
+    second_page = report_client.get(
+        f"/api/v1/cases/{case_id}/reports",
+        params={"limit": "1", "cursor": cursor},
+    )
+    assert second_page.status_code == 200, second_page.text
+    assert second_page.json()["revision_cutoff_public_id"] == captured[1]
+    assert [item["public_id"] for item in second_page.json()["items"]] == [
+        captured[0]
+    ]
+    assert second_page.json()["page"] == {
+        "limit": 1,
+        "has_more": False,
+        "next_cursor": None,
+    }
+
+    fresh = report_client.get(
+        f"/api/v1/cases/{case_id}/reports",
+        params={"limit": "1"},
+    )
+    assert fresh.json()["items"][0]["public_id"] == third_id
+    assert fresh.json()["aggregate"]["total_revisions"] == 3
+
+
+def test_report_revision_boundaries_fail_closed(report_client):
+    with app.state.case_report_test_sessions() as session:
+        wallet_case = _case(session, environment="demo")
+        run, sync = _run_and_sync(session, wallet_case)
+        session.add(_demo_transaction(run))
+        other_case = _case(session, environment="live")
+        session.commit()
+        case_id = wallet_case.public_id
+        other_case_id = other_case.public_id
+        snapshot_id = sync.public_id
+
+    created = report_client.post(
+        f"/api/v1/cases/{case_id}/reports",
+        json={"snapshot_public_id": snapshot_id},
+    )
+    assert created.status_code == 201, created.text
+    report_id = created.json()["revision"]["public_id"]
+    page = report_client.get(
+        f"/api/v1/cases/{case_id}/reports",
+        params={"limit": "1"},
+    ).json()
+
+    duplicate = report_client.get(
+        f"/api/v1/cases/{case_id}/reports?limit=1&limit=1"
+    )
+    unknown = report_client.get(
+        f"/api/v1/cases/{case_id}/reports?run_id=1"
+    )
+    noncanonical = report_client.get(
+        f"/api/v1/cases/{case_id}/reports?limit=01"
+    )
+    extra_post = report_client.post(
+        f"/api/v1/cases/{case_id}/reports?cursor=nope",
+        json={"snapshot_public_id": snapshot_id},
+    )
+    assert {
+        duplicate.status_code,
+        unknown.status_code,
+        noncanonical.status_code,
+        extra_post.status_code,
+    } == {422}
+
+    invalid_cursor = page["page"]["next_cursor"] or "invalid.cursor"
+    tampered = f"{invalid_cursor[:-1]}{'0' if invalid_cursor[-1] != '0' else '1'}"
+    assert report_client.get(
+        f"/api/v1/cases/{case_id}/reports",
+        params={"cursor": tampered},
+    ).status_code == 422
+    assert report_client.get(
+        f"/api/v1/cases/{other_case_id}/reports/{report_id}"
+    ).status_code == 404
+
+    with app.state.case_report_test_sessions() as session:
+        row = session.query(WalletCaseReportRevision).filter_by(
+            public_id=report_id
+        ).one()
+        row.report_json = row.report_json.replace(
+            '"case_public_id":"',
+            '"case_public_id":"tampered-',
+            1,
+        )
+        session.commit()
+    conflict = report_client.get(
+        f"/api/v1/cases/{case_id}/reports/{report_id}"
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"]["code"] == "case_report_revision_conflict"
 
 
 def test_partially_verified_assurance_requires_a_local_artifact_prefix():
