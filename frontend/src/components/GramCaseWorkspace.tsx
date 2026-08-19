@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowClockwise, ChartDonut, ChartLineUp, Gauge, ShieldCheck, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, ChartDonut, ChartLineUp, FileText, Gauge, ShieldCheck, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 
 import { caseActivitySearch, DEFAULT_CASE_ACTIVITY_FILTERS } from "../caseActivityQuery";
 import { caseEvidenceSearch } from "../caseEvidenceQuery";
-import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseSummaryPath } from "../caseRouting";
+import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, caseSummaryPath } from "../caseRouting";
 import { getWalletCase } from "../walletCaseApi";
 import type { WalletCase } from "../walletCase";
 import GramCaseActivity from "./GramCaseActivity";
 import GramCaseEvidence from "./GramCaseEvidence";
 import GramCaseFindings from "./GramCaseFindings";
+import GramCaseReports from "./GramCaseReports";
 import GramCaseSummary from "./GramCaseSummary";
 
-export type WalletCaseView = "summary" | "activity" | "findings" | "evidence";
+export type WalletCaseView = "summary" | "activity" | "findings" | "evidence" | "reports";
 
 function shortAddress(value: string): string {
   if (value.length <= 24) return value;
@@ -157,6 +158,14 @@ export default function GramCaseWorkspace({
           <ShieldCheck size={18} weight={view === "evidence" ? "fill" : "regular"} />
           <span><strong>Evidence</strong><small>Transaction verification</small></span>
         </a>
+        <a
+          href={caseReportsPath(caseId)}
+          aria-current={view === "reports" ? "page" : undefined}
+          onClick={(event) => followCaseLink(event, "reports")}
+        >
+          <FileText size={18} weight={view === "reports" ? "fill" : "regular"} />
+          <span><strong>Reports</strong><small>Saved revisions</small></span>
+        </a>
       </nav>
 
       {view === "summary" ? (
@@ -182,7 +191,7 @@ export default function GramCaseWorkspace({
             }),
           )}
         />
-      ) : (
+      ) : view === "evidence" ? (
         <GramCaseEvidence
           walletCase={walletCase}
           onOpenActivity={(snapshotId, activityId) => onNavigate(
@@ -196,6 +205,8 @@ export default function GramCaseWorkspace({
                 }),
           )}
         />
+      ) : (
+        <GramCaseReports walletCase={walletCase} />
       )}
     </div>
   );

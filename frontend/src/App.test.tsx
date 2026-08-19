@@ -34,6 +34,10 @@ import {
   VERIFICATION_ID,
 } from "./test/walletCaseEvidenceFixtures";
 import { walletCaseReportFixture } from "./test/walletCaseReportFixtures";
+import {
+  walletCaseReportRevisionCatalogFixture,
+  walletCaseReportRevisionDetailFixture,
+} from "./test/walletCaseReportRevisionFixtures";
 import { walletCaseFindingsFixture } from "./test/walletCaseFindingsFixtures";
 
 const WALLET = "EQC-demo-wallet";
@@ -116,6 +120,43 @@ afterEach(() => {
 });
 
 describe("Wallet Case application flow", () => {
+  it("opens a deep-linked Case Reports catalog and restores an exact saved revision", async () => {
+    window.history.replaceState({}, "", `/cases/${CASE_ID}/reports?snapshot=${SYNC_ID}`);
+    const reportCase = walletCaseFixture({
+      latestAttempt: null,
+      currentSnapshot: null,
+      overrides: {
+        data_environment: "live",
+        canonical_wallet_key: `0:${"1".repeat(64)}`,
+      },
+    });
+    const catalog = walletCaseReportRevisionCatalogFixture();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}`) return jsonResponse(reportCase);
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/report`) return jsonResponse(walletCaseReportFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/reports` && method === "GET") return jsonResponse(catalog);
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/reports/${catalog.items[0].public_id}`) return jsonResponse(walletCaseReportRevisionDetailFixture());
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    expect(await screen.findByRole("heading", { name: "Saved report revisions" })).toBeTruthy();
+    expect(document.title).toBe("Wallet Case Reports · GRAM Scope");
+    const saved = await screen.findByRole("link", { name: /Activity rows/ });
+    await user.click(saved);
+    expect(await screen.findByRole("heading", { name: "Exact stored public report" })).toBeTruthy();
+    expect(window.location.search).toContain(`revision=${catalog.items[0].public_id}`);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/reports/${catalog.items[0].public_id}`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
   it("creates or opens a canonical case URL, syncs a bounded interval, and restores it after remount", async () => {
     const emptyCase = emptyWalletCaseFixture();
     const syncedCase = walletCaseFixture();

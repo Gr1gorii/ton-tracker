@@ -35,7 +35,7 @@ import {
 } from "./api";
 import { createWalletCase } from "./walletCaseApi";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
-import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
+import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWorkspace";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
@@ -131,8 +131,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.title = route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-findings" || route.kind === "case-evidence"
-      ? `Wallet Case ${route.kind === "case-summary" ? "Summary" : route.kind === "case-activity" ? "Activity" : route.kind === "case-findings" ? "Findings" : "Evidence"} · GRAM Scope`
+    document.title = route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-findings" || route.kind === "case-evidence" || route.kind === "case-reports"
+      ? `Wallet Case ${route.kind === "case-summary" ? "Summary" : route.kind === "case-activity" ? "Activity" : route.kind === "case-findings" ? "Findings" : route.kind === "case-evidence" ? "Evidence" : "Reports"} · GRAM Scope`
       : route.kind === "not-found"
         ? "Page not found · GRAM Scope"
         : entered
@@ -140,6 +140,7 @@ export default function App() {
           : "GRAM Scope · TON Wallet Evidence";
     const focusTimer = window.setTimeout(() => {
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
+      if (document.querySelector("[data-route-detail-focus]")) return;
       document.querySelector<HTMLElement>("[data-route-focus]")?.focus();
     }, 0);
     return () => window.clearTimeout(focusTimer);
@@ -218,13 +219,15 @@ export default function App() {
         ? caseActivityPath(caseId)
         : view === "findings"
           ? caseFindingsPath(caseId)
-          : caseEvidencePath(caseId);
-    const kind = view === "summary" ? "case-summary" : view === "activity" ? "case-activity" : view === "findings" ? "case-findings" : "case-evidence";
+          : view === "evidence"
+            ? caseEvidencePath(caseId)
+            : caseReportsPath(caseId);
+    const kind = view === "summary" ? "case-summary" : view === "activity" ? "case-activity" : view === "findings" ? "case-findings" : view === "evidence" ? "case-evidence" : "case-reports";
     setAppRoute({ kind, caseId }, `${path}${search}`);
   }
 
-  if (route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-findings" || route.kind === "case-evidence") {
-    const view: WalletCaseView = route.kind === "case-summary" ? "summary" : route.kind === "case-activity" ? "activity" : route.kind === "case-findings" ? "findings" : "evidence";
+  if (route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-findings" || route.kind === "case-evidence" || route.kind === "case-reports") {
+    const view: WalletCaseView = route.kind === "case-summary" ? "summary" : route.kind === "case-activity" ? "activity" : route.kind === "case-findings" ? "findings" : route.kind === "case-evidence" ? "evidence" : "reports";
     return (
       <div className="case-route-shell">
         <header className="case-route-header">
@@ -433,7 +436,7 @@ export default function App() {
 
 function sameAppRoute(left: AppRoute, right: AppRoute): boolean {
   if (left.kind !== right.kind) return false;
-  if (left.kind === "case-summary" || left.kind === "case-activity" || left.kind === "case-findings" || left.kind === "case-evidence") {
+  if (left.kind === "case-summary" || left.kind === "case-activity" || left.kind === "case-findings" || left.kind === "case-evidence" || left.kind === "case-reports") {
     return right.kind === left.kind && right.caseId === left.caseId;
   }
   return true;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseSummaryPath, parseAppRoute } from "./caseRouting";
+import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, caseSummaryPath, parseAppRoute } from "./caseRouting";
 
 const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
 
@@ -32,6 +32,13 @@ describe("case routing", () => {
     expect(parseAppRoute(`${path}/`)).toEqual({ kind: "case-findings", caseId: CASE_ID });
   });
 
+  it("round-trips a canonical case Reports route", () => {
+    const path = caseReportsPath(CASE_ID);
+    expect(path).toBe(`/cases/${CASE_ID}/reports`);
+    expect(parseAppRoute(path)).toEqual({ kind: "case-reports", caseId: CASE_ID });
+    expect(parseAppRoute(`${path}/`)).toEqual({ kind: "case-reports", caseId: CASE_ID });
+  });
+
   it.each([
     "/cases/1/summary",
     "/cases/550e8400-e29b-11d4-a716-446655440000/summary",
@@ -47,5 +54,6 @@ describe("case routing", () => {
     expect(() => caseActivityPath("1")).toThrow(/canonical UUIDv4/);
     expect(() => caseEvidencePath("1")).toThrow(/canonical UUIDv4/);
     expect(() => caseFindingsPath("1")).toThrow(/canonical UUIDv4/);
+    expect(() => caseReportsPath("1")).toThrow(/canonical UUIDv4/);
   });
 });
