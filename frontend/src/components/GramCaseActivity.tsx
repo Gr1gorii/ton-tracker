@@ -20,6 +20,8 @@ import {
   Clock,
   Funnel,
   Info,
+  LockKey,
+  ShieldCheck,
   SpinnerGap,
   Swap,
   WarningCircle,
@@ -44,6 +46,7 @@ import type {
   WalletCaseActivityItem,
   WalletCaseActivityKind,
 } from "../walletCaseActivity";
+import { walletCaseEvidenceEligibility } from "../walletCaseEvidence";
 
 function readUrlState(): { state: CaseActivityUrlState; error: string | null } {
   try {
@@ -121,7 +124,13 @@ function evidenceLabel(item: WalletCaseActivityItem): string {
     : "Normalized provider observation";
 }
 
-export default function GramCaseActivity({ walletCase }: { walletCase: WalletCase }) {
+export default function GramCaseActivity({
+  walletCase,
+  onVerifyEvidence,
+}: {
+  walletCase: WalletCase;
+  onVerifyEvidence: (snapshotId: string, activityId: string) => void;
+}) {
   const initial = useMemo(readUrlState, []);
   const [urlState, setUrlState] = useState(initial.state);
   const [queryError, setQueryError] = useState(initial.error);
@@ -343,7 +352,7 @@ export default function GramCaseActivity({ walletCase }: { walletCase: WalletCas
       )}
 
       {urlState.selectedActivityId && urlState.snapshot && (
-        <ActivityDetailDialog controller={controller} onClose={closeDetail} onApplyFilter={applyContextFilter} />
+        <ActivityDetailDialog controller={controller} onClose={closeDetail} onApplyFilter={applyContextFilter} onVerifyEvidence={onVerifyEvidence} />
       )}
     </div>
   );
@@ -365,10 +374,12 @@ function ActivityDetailDialog({
   controller,
   onClose,
   onApplyFilter,
+  onVerifyEvidence,
 }: {
   controller: ReturnType<typeof useWalletCaseActivity>;
   onClose: () => void;
   onApplyFilter: (filter: Pick<WalletCaseActivityFilters, "asset_id" | "protocol_id" | "counterparty">) => void;
+  onVerifyEvidence: (snapshotId: string, activityId: string) => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
@@ -427,7 +438,7 @@ function ActivityDetailDialog({
     <div className="case-detail-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section ref={dialogRef} className="case-activity-dialog" role="dialog" aria-modal="true" aria-labelledby="activity-detail-title">
         <header><div><span className="eyebrow">Sanitized provenance</span><h2 id="activity-detail-title">Activity detail</h2></div><button ref={closeRef} type="button" aria-label="Close Activity detail" onClick={onClose}><X size={20} /></button></header>
-        {controller.detailLoading ? <div className="case-detail-loading" role="status"><SpinnerGap className="spin" size={22} /> Loading detail…</div> : controller.detailError ? <div className="case-inline-error" role="alert"><WarningCircle size={18} /><span>{controller.detailError}</span><button type="button" onClick={controller.retryDetail}>Try again</button></div> : controller.detail ? <ActivityDetailContent detail={controller.detail} onApplyFilter={onApplyFilter} /> : null}
+        {controller.detailLoading ? <div className="case-detail-loading" role="status"><SpinnerGap className="spin" size={22} /> Loading detail…</div> : controller.detailError ? <div className="case-inline-error" role="alert"><WarningCircle size={18} /><span>{controller.detailError}</span><button type="button" onClick={controller.retryDetail}>Try again</button></div> : controller.detail ? <ActivityDetailContent detail={controller.detail} onApplyFilter={onApplyFilter} onVerifyEvidence={onVerifyEvidence} /> : null}
       </section>
     </div>,
     document.body,
@@ -437,14 +448,17 @@ function ActivityDetailDialog({
 function ActivityDetailContent({
   detail,
   onApplyFilter,
+  onVerifyEvidence,
 }: {
   detail: WalletCaseActivityDetailResponse;
   onApplyFilter: (filter: Pick<WalletCaseActivityFilters, "asset_id" | "protocol_id" | "counterparty">) => void;
+  onVerifyEvidence: (snapshotId: string, activityId: string) => void;
 }) {
   const item = detail.item;
   const filterableAssets = item.assets.filter((asset) => asset.asset_id !== null);
   const protocolId = item.protocol?.status === "recognized" ? item.protocol.id : null;
   const counterparty = item.counterparty?.canonical_address ?? null;
+  const eligibility = walletCaseEvidenceEligibility(item);
   return (
     <div className="case-detail-content">
       <div className="case-detail-lead">
@@ -452,6 +466,11 @@ function ActivityDetailContent({
         <div><strong>{itemAmount(item)}</strong><span>{formatDate(item.occurred_at)}</span></div>
         <span className={`case-evidence-chip is-${item.provenance.data_origin}`}>{evidenceLabel(item)}</span>
       </div>
+      <section className={`case-detail-verification ${eligibility.eligible ? "is-eligible" : "is-ineligible"}`} aria-labelledby="activity-verification-title">
+        <span>{eligibility.eligible ? <ShieldCheck size={21} /> : <LockKey size={21} />}</span>
+        <div><h3 id="activity-verification-title">{eligibility.eligible ? "Eligible for evidence verification" : "Evidence verification unavailable"}</h3><p>{eligibility.eligible ? `${eligibility.message} Availability is checked on the Evidence page.` : eligibility.message}</p></div>
+        {eligibility.eligible && <button type="button" className="button-primary" onClick={() => onVerifyEvidence(detail.snapshot_public_id, item.public_id)}>Check verification availability <ArrowRight size={17} /></button>}
+      </section>
       {(filterableAssets.length > 0 || protocolId || counterparty) && (
         <section className="case-detail-filter-actions" aria-label="Filter Activity from this row">
           <h3>Explore matching rows</h3>

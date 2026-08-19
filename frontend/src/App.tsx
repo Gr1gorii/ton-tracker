@@ -35,13 +35,13 @@ import {
 } from "./api";
 import { createWalletCase } from "./walletCaseApi";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
-import { caseActivityPath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
+import { caseActivityPath, caseEvidencePath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWorkspace";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.73.0";
+const RELEASE_LABEL = "v0.74.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
@@ -66,7 +66,7 @@ const sections: Array<{
   { id: "compare", label: "Compare", description: "Behavioral similarity", icon: ArrowsClockwise },
   { id: "proofs", label: "Proofs", description: "Cryptographic evidence", icon: ShieldCheck },
   { id: "assets", label: "Assets & DEX", description: "Jettons and protocols", icon: ChartDonut },
-  { id: "reports", label: "Reports", description: "Canonical exports", icon: FileText },
+  { id: "reports", label: "Reports", description: "Legacy run exports", icon: FileText },
   { id: "sources", label: "Data sources", description: "Providers and tools", icon: HardDrives },
 ];
 
@@ -131,8 +131,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.title = route.kind === "case-summary" || route.kind === "case-activity"
-      ? `Wallet Case ${route.kind === "case-summary" ? "Summary" : "Activity"} · GRAM Scope`
+    document.title = route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-evidence"
+      ? `Wallet Case ${route.kind === "case-summary" ? "Summary" : route.kind === "case-activity" ? "Activity" : "Evidence"} · GRAM Scope`
       : route.kind === "not-found"
         ? "Page not found · GRAM Scope"
         : entered
@@ -211,13 +211,18 @@ export default function App() {
     navigate("activity");
   }
 
-  function openCaseView(caseId: string, view: WalletCaseView) {
-    const path = view === "summary" ? caseSummaryPath(caseId) : caseActivityPath(caseId);
-    setAppRoute({ kind: view === "summary" ? "case-summary" : "case-activity", caseId }, path);
+  function openCaseView(caseId: string, view: WalletCaseView, search = "") {
+    const path = view === "summary"
+      ? caseSummaryPath(caseId)
+      : view === "activity"
+        ? caseActivityPath(caseId)
+        : caseEvidencePath(caseId);
+    const kind = view === "summary" ? "case-summary" : view === "activity" ? "case-activity" : "case-evidence";
+    setAppRoute({ kind, caseId }, `${path}${search}`);
   }
 
-  if (route.kind === "case-summary" || route.kind === "case-activity") {
-    const view: WalletCaseView = route.kind === "case-summary" ? "summary" : "activity";
+  if (route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-evidence") {
+    const view: WalletCaseView = route.kind === "case-summary" ? "summary" : route.kind === "case-activity" ? "activity" : "evidence";
     return (
       <div className="case-route-shell">
         <header className="case-route-header">
@@ -234,7 +239,7 @@ export default function App() {
             key={route.caseId}
             caseId={route.caseId}
             view={view}
-            onNavigate={(nextView) => openCaseView(route.caseId, nextView)}
+            onNavigate={(nextView, search) => openCaseView(route.caseId, nextView, search)}
           />
         </main>
       </div>
@@ -426,7 +431,7 @@ export default function App() {
 
 function sameAppRoute(left: AppRoute, right: AppRoute): boolean {
   if (left.kind !== right.kind) return false;
-  if (left.kind === "case-summary" || left.kind === "case-activity") {
+  if (left.kind === "case-summary" || left.kind === "case-activity" || left.kind === "case-evidence") {
     return right.kind === left.kind && right.caseId === left.caseId;
   }
   return true;
@@ -512,7 +517,7 @@ function Landing({
         <div className="landing-kicker"><Sparkle size={17} weight="fill" /> Evidence, without the noise</div>
         <h1 id="landing-title">See a clearer evidence trail behind every <em>TON</em> wallet.</h1>
         <p className="landing-lead">
-          Follow bounded activity, verify on-chain evidence and turn complex wallet observations into a clear, evidence-aware report.
+          Follow bounded activity and verify selected on-chain evidence while every trust level stays explicit.
         </p>
 
         <form className="landing-search" onSubmit={submit} noValidate>
@@ -539,7 +544,7 @@ function Landing({
 
         <div className="landing-value-grid">
           <LandingValue icon={<ShieldCheck size={24} weight="duotone" />} title="Proof-first" text="Block inclusion, account state and wallet ownership stay separate and explicit." />
-          <LandingValue icon={<Database size={24} weight="duotone" />} title="One canonical ledger" text="Reports, clustering and exports share the same evidence-aware source of truth." />
+          <LandingValue icon={<Database size={24} weight="duotone" />} title="Explicit trust levels" text="Observed Activity and cryptographically verified evidence stay separate until a reproducible Case Report is built." />
           <LandingValue icon={<Atom size={24} weight="duotone" />} title="Protocol-aware" text="Recognized DEX identities make swaps easier to understand without overclaiming." />
         </div>
       </main>
@@ -641,7 +646,7 @@ function Overview({
       <PageHeading
         eyebrow="Wallet overview"
         title={account ? `A clearer view of ${shortAddress(account)}` : "Start with one wallet"}
-        description={account ? "Your analysis is organized by activity, evidence, assets and canonical outputs." : "Add a TON wallet address above, then create an evidence-aware run."}
+        description={account ? "Your analysis is organized by activity, evidence, assets and clearly labelled legacy diagnostics." : "Add a TON wallet address above, then create an evidence-aware run."}
         action={<button className="button-primary" type="button" onClick={activeRun ? onOpenActivity : onRun}>{activeRun ? "Open activity" : "Start analysis"}<ArrowRight size={18} /></button>}
       />
 
@@ -679,14 +684,14 @@ function GeneralOverview({
     { icon: <ChartLineUp size={24} weight="duotone" />, tone: "blue", title: "Activity map", text: "Transfers, transactions, DEX swaps and balance snapshots stay organized by one selected wallet and time window." },
     { icon: <ShieldCheck size={24} weight="duotone" />, tone: "lilac", title: "Proof center", text: "Provider observations, block inclusion, account state and ownership verification are shown as separate evidence levels." },
     { icon: <Atom size={24} weight="duotone" />, tone: "aqua", title: "Asset & DEX context", text: "TON, jettons and recognized protocols are grouped so users can understand what moved and where." },
-    { icon: <FileText size={24} weight="duotone" />, tone: "coral", title: "Canonical outputs", text: "Ledger exports and reports use the same normalized source instead of rebuilding different answers for every screen." },
+    { icon: <FileText size={24} weight="duotone" />, tone: "coral", title: "Run-scoped diagnostics", text: "Existing exports remain tied to one legacy ingestion run and are not presented as a Wallet Case report." },
   ];
   return (
     <>
       <PageHeading
         eyebrow="Workspace overview"
         title="Everything you need to understand a TON wallet"
-        description="GRAM Scope turns fragmented blockchain activity into a guided path: choose a wallet, check source coverage, review evidence and export one canonical result."
+        description="GRAM Scope turns fragmented blockchain activity into a guided path: choose a wallet, check source coverage and verify selected evidence without claiming a finished Case Report."
         action={<button className="button-primary" type="button" onClick={onOpenActivity}>{account ? "Inspect selected wallet" : "Choose a wallet"}<ArrowRight size={18} /></button>}
       />
 
@@ -701,7 +706,7 @@ function GeneralOverview({
           <li><span>01</span><div><strong>Scope</strong><small>Wallet, period and data surfaces</small></div></li>
           <li><span>02</span><div><strong>Preview</strong><small>Provider coverage before persistence</small></div></li>
           <li><span>03</span><div><strong>Review</strong><small>Activity, identities and warnings</small></div></li>
-          <li><span>04</span><div><strong>Export</strong><small>Canonical ledger and report</small></div></li>
+          <li><span>04</span><div><strong>Verify</strong><small>Selected transaction evidence</small></div></li>
         </ol>
       </section>
 
@@ -725,7 +730,7 @@ function NextStepCard({ activeRun, account, onOpenActivity, onRun }: { activeRun
   return (
     <article className="next-step-card">
       <span className="next-step-icon">{activeRun ? <CheckCircle size={26} weight="fill" /> : <Sparkle size={26} weight="fill" />}</span>
-      <div><span className="eyebrow">Recommended next step</span><h2>{activeRun ? "Review proof coverage" : account ? "Create your first evidence run" : "Choose a wallet"}</h2><p>{activeRun ? `Run #${activeRun.run_id} is loaded. Inspect its canonical identity, trace evidence and warnings before exporting.` : account ? "Preview provider coverage, choose the surfaces you need and persist the result when it is ready." : "Paste a TON wallet address in the search field to organize the workspace around it."}</p></div>
+      <div><span className="eyebrow">Recommended next step</span><h2>{activeRun ? "Review proof coverage" : account ? "Create your first evidence run" : "Choose a wallet"}</h2><p>{activeRun ? `Run #${activeRun.run_id} is loaded. Inspect its canonical identity, trace evidence and warnings before using any legacy run export.` : account ? "Preview provider coverage, choose the surfaces you need and persist the result when it is ready." : "Paste a TON wallet address in the search field to organize the workspace around it."}</p></div>
       <button className="button-secondary" type="button" onClick={activeRun ? onOpenActivity : onRun} disabled={!account && !activeRun}>{activeRun ? "Inspect run" : "Open activity"}<ArrowRight size={17} /></button>
     </article>
   );
@@ -833,7 +838,7 @@ function ReportsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestion
         if (!cancelled) setAvailability(result);
       })
       .catch((error) => {
-        if (!cancelled) setAvailabilityError(error instanceof Error ? error.message : "Could not check canonical report readiness.");
+        if (!cancelled) setAvailabilityError(error instanceof Error ? error.message : "Could not check legacy run export readiness.");
       });
     return () => { cancelled = true; };
   }, [activeRun]);
@@ -841,16 +846,16 @@ function ReportsView({ activeRun, onOpenActivity }: { activeRun: WalletIngestion
   const exportsReady = availability?.available === true;
   return (
     <>
-      <PageHeading eyebrow="Canonical outputs" title="One ledger, every downstream answer" description="Reports and exports use the canonical ledger so the same normalized evidence flows into every downstream surface." action={!activeRun ? <button className="button-primary" type="button" onClick={onOpenActivity}>Select a run <ArrowRight size={18} /></button> : undefined} />
+      <PageHeading eyebrow="Advanced diagnostics" title="Legacy run-scoped exports" description="These compatibility exports are bound to one ingestion run. They are not the Wallet Case report and do not consume the v0.74 Evidence catalog." action={!activeRun ? <button className="button-primary" type="button" onClick={onOpenActivity}>Select a run <ArrowRight size={18} /></button> : undefined} />
       {activeRun && (
         <div className={exportsReady ? "report-readiness is-ready" : "report-readiness"} role="status">
           {availability === null && !availabilityError ? <SpinnerGap className="spin" size={18} /> : exportsReady ? <CheckCircle size={18} weight="fill" /> : <WarningCircle size={18} weight="fill" />}
-          <span>{availabilityError ?? availability?.message ?? "Checking canonical ledger readiness…"}</span>
+          <span>{availabilityError ?? (availability ? `Legacy run export status: ${availability.message}` : "Checking legacy run export readiness…")}</span>
         </div>
       )}
       <div className="report-grid">
-        <ReportCard icon={<Database size={24} />} title="Canonical ledger" text="Normalized source-labelled activity for downstream analysis." run={activeRun} jsonUrl={activeRun && exportsReady ? walletRunExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun && exportsReady ? walletRunExportCsvUrl(activeRun.run_id) : undefined} />
-        <ReportCard icon={<FileText size={24} />} title="Canonical report" text="Evidence-aware summary built from the same ledger contract." run={activeRun} jsonUrl={activeRun && exportsReady ? walletCanonicalReportExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun && exportsReady ? walletCanonicalReportCsvExportUrl(activeRun.run_id) : undefined} />
+        <ReportCard icon={<Database size={24} />} title="Run-scoped ledger export" text="Normalized, source-labelled rows from the selected legacy run only." run={activeRun} jsonUrl={activeRun && exportsReady ? walletRunExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun && exportsReady ? walletRunExportCsvUrl(activeRun.run_id) : undefined} />
+        <ReportCard icon={<FileText size={24} />} title="Legacy report export" text="Compatibility summary for the selected run; not a reproducible Wallet Case report." run={activeRun} jsonUrl={activeRun && exportsReady ? walletCanonicalReportExportUrl(activeRun.run_id) : undefined} csvUrl={activeRun && exportsReady ? walletCanonicalReportCsvExportUrl(activeRun.run_id) : undefined} />
       </div>
     </>
   );

@@ -29,7 +29,11 @@ import {
   validateWalletTransactionTraceBocVerificationResponse,
   type WalletTraceEligibleTransaction,
 } from "../walletTraceEvidence";
-import { validateWalletTransactionInclusionCatalog } from "../walletTransactionInclusion";
+import {
+  LEGACY_TRANSACTION_INCLUSION_POLICY,
+  LEGACY_CHECKPOINT_TRANSACTION_INCLUSION_POLICY,
+  validateWalletTransactionInclusionCatalog,
+} from "../walletTransactionInclusion";
 
 interface GramTransactionProofCardProps {
   runId: number;
@@ -117,9 +121,16 @@ export default function GramTransactionProofCard({
   const supported = dataMode === "real" && selected !== null;
   const busy = state === "loading" || workingStep !== null;
   const primaryProof = inclusion?.proofs[0] ?? null;
-  const trustLevel = inclusion
-    ? inclusion.proofs.reduce<0 | 1>((level, proof) => Math.max(level, proof.trust_level) as 0 | 1, 0)
-    : null;
+  const trustLevel = primaryProof?.trust_level ?? null;
+  const legacyPolicy =
+    inclusion?.verifier_policy_id === LEGACY_TRANSACTION_INCLUSION_POLICY;
+  const legacyCheckpointPolicy =
+    inclusion?.verifier_policy_id === LEGACY_CHECKPOINT_TRANSACTION_INCLUSION_POLICY;
+  const canonicalChainVerified = Boolean(
+    inclusion?.proofs.every(
+      (proof) => proof.canonical_block_chain_verified_at_capture,
+    ),
+  );
 
   async function hydrateEvidence(
     transaction: WalletTraceEligibleTransaction,
@@ -310,15 +321,38 @@ export default function GramTransactionProofCard({
                 <CheckCircle size={20} weight="fill" />
                 <div>
                   <strong>Every captured transaction BOC is included in a block.</strong>
-                  <span>{trustLevel === 0 ? "Checkpoint-anchored canonical chain verified at capture." : "Shard inclusion verified; a trust-level-0 checkpoint chain is not claimed."}</span>
+                  <span>
+                    {legacyPolicy
+                      ? "Legacy unpinned evidence was revalidated, but no canonical checkpoint chain is claimed."
+                      : legacyCheckpointPolicy
+                        ? "Legacy checkpoint evidence predates strict proof-link verification and is non-canonical."
+                      : canonicalChainVerified
+                        ? "Pinned-checkpoint canonical chain verified at capture. The checkpoint-to-head transcript was not persisted."
+                        : "Shard inclusion was verified under the pinned policy; a canonical checkpoint chain is not claimed at trust level 1."}
+                  </span>
                 </div>
-                <span>Trust {trustLevel}</span>
+                <span title={inclusion.verifier_policy_id}>
+                  {legacyPolicy
+                    ? "Legacy · non-canonical"
+                    : legacyCheckpointPolicy
+                      ? "Legacy checkpoint · non-canonical"
+                    : canonicalChainVerified
+                      ? "Canonical · trust 0"
+                      : `Inclusion · trust ${trustLevel}`}
+                </span>
               </div>
               <dl className="gram-proof-facts">
                 <div><dt>Proofs</dt><dd>{inclusion.proof_count}</dd></div>
                 <div><dt>Shard block</dt><dd>#{primaryProof.block.seqno}</dd></div>
                 <div><dt>Master anchor</dt><dd>#{primaryProof.masterchain_anchor.seqno}</dd></div>
-                <div><dt>Evidence</dt><dd title={inclusion.catalog_digest_sha256}>{shortHash(inclusion.catalog_digest_sha256)}</dd></div>
+                <div>
+                  <dt>Trust root</dt>
+                  <dd title={inclusion.trusted_checkpoint?.root_hash ?? inclusion.verifier_policy_id}>
+                    {inclusion.trusted_checkpoint
+                      ? `Checkpoint #${inclusion.trusted_checkpoint.seqno}`
+                      : "Not pinned"}
+                  </dd>
+                </div>
               </dl>
             </div>
           )}

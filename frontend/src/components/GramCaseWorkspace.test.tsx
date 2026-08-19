@@ -10,6 +10,7 @@ const apiMocks = vi.hoisted(() => ({ getWalletCase: vi.fn() }));
 vi.mock("../walletCaseApi", () => apiMocks);
 vi.mock("./GramCaseSummary", () => ({ default: () => <div>Summary surface</div> }));
 vi.mock("./GramCaseActivity", () => ({ default: () => <div>Activity surface</div> }));
+vi.mock("./GramCaseEvidence", () => ({ default: () => <div>Evidence surface</div> }));
 
 import GramCaseWorkspace from "./GramCaseWorkspace";
 
@@ -20,7 +21,7 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("GramCaseWorkspace", () => {
-  it("offers real Summary and Activity links with one current view and SPA plain-click navigation", async () => {
+  it("offers real Summary, Activity and Evidence links with one current view and SPA plain-click navigation", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
     const { rerender } = render(<GramCaseWorkspace caseId={CASE_ID} view="summary" onNavigate={onNavigate} />);
@@ -28,10 +29,13 @@ describe("GramCaseWorkspace", () => {
 
     const summary = screen.getByRole("link", { name: /SummarySnapshot and coverage/ });
     const activity = screen.getByRole("link", { name: /ActivityFiltered snapshot rows/ });
+    const evidence = screen.getByRole("link", { name: /EvidenceTransaction verification/ });
     expect(summary.getAttribute("href")).toBe(`/cases/${CASE_ID}/summary`);
     expect(activity.getAttribute("href")).toBe(`/cases/${CASE_ID}/activity`);
+    expect(evidence.getAttribute("href")).toBe(`/cases/${CASE_ID}/evidence`);
     expect(summary.getAttribute("aria-current")).toBe("page");
     expect(activity.getAttribute("aria-current")).toBeNull();
+    expect(evidence.getAttribute("aria-current")).toBeNull();
     await user.click(activity);
     expect(onNavigate).toHaveBeenCalledWith("activity");
 
@@ -39,6 +43,9 @@ describe("GramCaseWorkspace", () => {
     await waitFor(() => expect(screen.getByText("Activity surface")).toBeTruthy());
     expect(activity.getAttribute("aria-current")).toBe("page");
     expect(apiMocks.getWalletCase).toHaveBeenCalledTimes(1);
+
+    await user.click(evidence);
+    expect(onNavigate).toHaveBeenCalledWith("evidence");
   });
 
   it("shows a retryable shell error and never mounts a case surface without a bound case", async () => {

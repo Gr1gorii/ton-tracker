@@ -27,6 +27,12 @@ import {
   activityDetailFixture,
   activityResponseFixture,
 } from "./test/walletCaseActivityFixtures";
+import {
+  evidenceCatalogFixture,
+  liveEvidenceActivityDetailFixture,
+  partialEvidenceVerificationFixture,
+  VERIFICATION_ID,
+} from "./test/walletCaseEvidenceFixtures";
 
 const WALLET = "EQC-demo-wallet";
 
@@ -332,6 +338,54 @@ describe("Wallet Case application flow", () => {
     }
   });
 
+  it("deep-links strict Evidence state, resumes its durable partial result, and keeps route focus", async () => {
+    const liveSync = succeededSyncFixture({
+      data_mode: "real",
+      provider: "tonapi_wallet_activity_live",
+    });
+    const liveCase = walletCaseFixture({
+      latestAttempt: liveSync,
+      currentSnapshot: liveSync,
+      overrides: { data_environment: "live" },
+    });
+    const partial = partialEvidenceVerificationFixture();
+    const search = new URLSearchParams({
+      snapshot: SYNC_ID,
+      activity: ACTIVITY_ID,
+      verification: VERIFICATION_ID,
+    });
+    window.history.replaceState({}, "", `/cases/${CASE_ID}/evidence?${search}`);
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === `/api/v1/cases/${CASE_ID}` && method === "GET") return jsonResponse(liveCase);
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/evidence` && method === "GET") {
+        expect(url.searchParams.getAll("snapshot")).toEqual([SYNC_ID]);
+        return jsonResponse(evidenceCatalogFixture({ verifications: [partial] }));
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/activity/${ACTIVITY_ID}` && method === "GET") {
+        return jsonResponse(liveEvidenceActivityDetailFixture());
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}/evidence/verifications/${VERIFICATION_ID}` && method === "GET") {
+        return jsonResponse(partial);
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "Partial evidence preserved", level: 2 })).toBeTruthy();
+    const evidenceMain = screen.getByRole("main", { name: "Wallet Case evidence" });
+    await waitFor(() => expect(document.activeElement).toBe(evidenceMain));
+    expect(screen.getByRole("link", { name: /EvidenceTransaction verification/ }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("heading", { name: "Report not built yet" })).toBeTruthy();
+    expect(screen.queryByText(/canonical case ledger/i)).toBeNull();
+    await waitFor(() => expect(document.title).toBe("Wallet Case Evidence · GRAM Scope"));
+    expect(fetchMock.mock.calls.some(([input]) => requestUrl(input).pathname.includes("/runs/"))).toBe(false);
+  });
+
   it("keeps the pre-authentication case facade disabled on hosted access", async () => {
     const hostedStatus = {
       ...providersFixture(),
@@ -406,6 +460,34 @@ describe("Wallet Case application flow", () => {
     await user.type(input, WALLET);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("labels unfinished reports and exports as legacy run-scoped diagnostics", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      throw new Error(`Unexpected request: ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    await screen.findByText(/Demo runtime — cases use deterministic preview evidence/);
+    expect(screen.getByText("Explicit trust levels")).toBeTruthy();
+    expect(document.body.textContent).not.toContain("One canonical ledger");
+    expect(document.body.textContent).not.toContain("Reports, clustering and exports share");
+
+    await user.click(screen.getByRole("button", { name: "Open advanced diagnostics without an address" }));
+    const reports = screen.getAllByRole("button", { name: /ReportsLegacy run exports/ });
+    await user.click(reports[0]);
+
+    expect(await screen.findByRole("heading", { name: "Legacy run-scoped exports" })).toBeTruthy();
+    expect(screen.getByText(/not the Wallet Case report/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Run-scoped ledger export" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Legacy report export" })).toBeTruthy();
+    expect(document.body.textContent).not.toContain("One ledger, every downstream answer");
+    expect(document.body.textContent).not.toContain("Reports and exports use the canonical ledger");
   });
 
   it("announces SPA route changes with a title, focus target, and named mobile Home control", async () => {

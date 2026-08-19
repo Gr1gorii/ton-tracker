@@ -18,7 +18,7 @@ describe("getWalletCanonicalReportAvailability", () => {
 
     await expect(getWalletCanonicalReportAvailability(64)).resolves.toEqual({
       available: true,
-      message: "Canonical ledger and report are ready for export.",
+      message: "Legacy run-scoped ledger and compatibility report are ready for export.",
     });
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/wallets/ingest/64/canonical-report`,

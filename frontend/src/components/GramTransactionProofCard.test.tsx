@@ -159,15 +159,27 @@ function boc(): WalletTraceBocVerificationResponse {
 }
 
 function inclusion(): WalletTransactionInclusionCatalogResponse {
+  const checkpoint = {
+    workchain: -1 as const,
+    shard: "-9223372036854775808",
+    seqno: 46_894_135,
+    root_hash: "3048e69a12cf946ebc99b4cf9ca61c3ff4b3fcc88c4015763ac01204ecc1bf9f",
+    file_hash: "bbdac0b4543e9141449ceb37c3c63ba6e9cc4e2c904d77f56d17e44acf1d1bed",
+  };
   return {
-    contract_version: "ton_transaction_inclusion_v1",
+    contract_version: "ton_transaction_inclusion_v2",
+    verifier_policy_id: "ton_liteserver_checkpoint_strict_2026_08_v2",
+    trusted_checkpoint: checkpoint,
     boc_verification_id: "4",
     proof_count: 1,
     proof_digests: ["e".repeat(64)],
     proofs: [{
-      contract_version: "ton_transaction_inclusion_v1",
+      contract_version: "ton_transaction_inclusion_v2",
+      evidence_contract_version: "ton_transaction_inclusion_v2",
       network: "ton-mainnet",
       trust_level: 1,
+      verifier_policy_id: "ton_liteserver_checkpoint_strict_2026_08_v2",
+      trusted_checkpoint: checkpoint,
       account_address_canonical: ACCOUNT,
       logical_time: "46000000000001",
       transaction_hash: HASH,
@@ -191,6 +203,7 @@ function inclusion(): WalletTransactionInclusionCatalogResponse {
       verified_at: "2026-07-29T12:02:00.123456Z",
       block_merkle_proof_verified: true,
       canonical_block_chain_verified_at_capture: false,
+      checkpoint_to_observed_head_transcript_persisted: false,
       provider_free_revalidated: true,
       raw_bocs_returned: false,
     }],
@@ -228,8 +241,62 @@ describe("GramTransactionProofCard", () => {
     await user.click(await screen.findByRole("button", { name: "Prove block inclusion" }));
     expect(apiMocks.proveWalletTransactionInclusion).toHaveBeenCalledWith(25, HASH, expect.any(AbortSignal));
     expect(await screen.findByText("Every captured transaction BOC is included in a block.")).toBeTruthy();
-    expect(screen.getByText("Trust 1")).toBeTruthy();
+    expect(screen.getByText("Inclusion · trust 1")).toBeTruthy();
+    expect(screen.getByText("Checkpoint #46894135")).toBeTruthy();
+    expect(screen.getByText(/canonical checkpoint chain is not claimed at trust level 1/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Prove block inclusion" })).toBeNull();
+  });
+
+  it("labels legacy unpinned evidence as non-canonical even at trust level zero", async () => {
+    const legacy = inclusion();
+    legacy.verifier_policy_id = "legacy_unpinned_v1";
+    legacy.trusted_checkpoint = null;
+    legacy.proofs[0].evidence_contract_version = "ton_transaction_inclusion_v1";
+    legacy.proofs[0].trust_level = 0;
+    legacy.proofs[0].verifier_policy_id = "legacy_unpinned_v1";
+    legacy.proofs[0].trusted_checkpoint = null;
+    apiMocks.getPersistedWalletTransactionTraceEvidence.mockResolvedValue(capture());
+    apiMocks.getWalletTransactionTraceBocVerification.mockResolvedValue(boc());
+    apiMocks.getWalletTransactionInclusionProofs.mockResolvedValue(legacy);
+
+    render(<GramTransactionProofCard runId={25} dataMode="real" transactions={[transaction()]} />);
+
+    expect(await screen.findByText("Legacy · non-canonical")).toBeTruthy();
+    expect(screen.getByText("Not pinned")).toBeTruthy();
+    expect(screen.getByText(/Legacy unpinned evidence/)).toBeTruthy();
+    expect(screen.queryByText(/canonical chain verified at capture/)).toBeNull();
+  });
+
+  it("labels the pre-strict checkpoint policy as legacy and non-canonical", async () => {
+    const legacy = inclusion();
+    legacy.verifier_policy_id = "ton_liteserver_checkpoint_2026_08_v1";
+    legacy.proofs[0].trust_level = 0;
+    legacy.proofs[0].verifier_policy_id =
+      "ton_liteserver_checkpoint_2026_08_v1";
+    legacy.proofs[0].canonical_block_chain_verified_at_capture = false;
+    apiMocks.getPersistedWalletTransactionTraceEvidence.mockResolvedValue(capture());
+    apiMocks.getWalletTransactionTraceBocVerification.mockResolvedValue(boc());
+    apiMocks.getWalletTransactionInclusionProofs.mockResolvedValue(legacy);
+
+    render(<GramTransactionProofCard runId={25} dataMode="real" transactions={[transaction()]} />);
+
+    expect(await screen.findByText("Legacy checkpoint · non-canonical")).toBeTruthy();
+    expect(screen.getByText(/predates strict proof-link verification/i)).toBeTruthy();
+    expect(screen.queryByText(/canonical chain verified at capture/i)).toBeNull();
+  });
+
+  it("discloses the non-persisted checkpoint transcript for canonical trust-zero proof", async () => {
+    const canonical = inclusion();
+    canonical.proofs[0].trust_level = 0;
+    canonical.proofs[0].canonical_block_chain_verified_at_capture = true;
+    apiMocks.getPersistedWalletTransactionTraceEvidence.mockResolvedValue(capture());
+    apiMocks.getWalletTransactionTraceBocVerification.mockResolvedValue(boc());
+    apiMocks.getWalletTransactionInclusionProofs.mockResolvedValue(canonical);
+
+    render(<GramTransactionProofCard runId={25} dataMode="real" transactions={[transaction()]} />);
+
+    expect(await screen.findByText("Canonical · trust 0")).toBeTruthy();
+    expect(screen.getByText(/checkpoint-to-head transcript was not persisted/i)).toBeTruthy();
   });
 
   it("never contacts proof endpoints for mock data", () => {
