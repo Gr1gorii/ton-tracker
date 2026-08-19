@@ -39,12 +39,14 @@ from routers.stonfi import router as stonfi_router
 from routers.tonapi import router as tonapi_router
 from routers.wallet_activity import router as wallet_activity_router
 from routers.wallet_case_activity import router as wallet_case_activity_router
+from routers.wallet_case_evidence import router as wallet_case_evidence_router
 from routers.wallet_cases import jobs_router as wallet_case_jobs_router
 from routers.wallet_cases import router as wallet_cases_router
 from routers.wallet_ownership import router as wallet_ownership_router
 from services import export
 from services.analysis import analyze, get_providers_status
 from services.case_sync_jobs import CaseSyncWorker, LocalCaseSyncJobRunner
+from services.case_evidence_jobs import CaseEvidenceWorker, LocalCaseEvidenceJobRunner
 from services.wallet_case_access import wallet_case_access_available
 from services.monitoring import (
     observe_http_request,
@@ -61,6 +63,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Apply schema migrations before the API begins serving requests."""
     init_db()
     runner = None
+    evidence_runner = None
     settings = get_settings()
     if getattr(settings, "wallet_case_job_runner", "disabled") == "local":
         worker_sessions = sessionmaker(
@@ -76,12 +79,29 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         runner.start()
     else:
         _app.state.wallet_case_job_runner = None
+    if getattr(settings, "wallet_case_evidence_runner", "disabled") == "local":
+        evidence_sessions = sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            bind=database.engine,
+        )
+        evidence_runner = LocalCaseEvidenceJobRunner(
+            CaseEvidenceWorker(evidence_sessions),
+            poll_milliseconds=settings.wallet_case_evidence_poll_milliseconds,
+        )
+        _app.state.wallet_case_evidence_runner = evidence_runner
+        evidence_runner.start()
+    else:
+        _app.state.wallet_case_evidence_runner = None
     try:
         yield
     finally:
         if runner is not None:
             runner.stop()
+        if evidence_runner is not None:
+            evidence_runner.stop()
         _app.state.wallet_case_job_runner = None
+        _app.state.wallet_case_evidence_runner = None
 
 
 app = FastAPI(
@@ -135,6 +155,7 @@ app.include_router(tonapi_router)
 app.include_router(wallet_activity_router)
 app.include_router(wallet_cases_router)
 app.include_router(wallet_case_activity_router)
+app.include_router(wallet_case_evidence_router)
 app.include_router(wallet_case_jobs_router)
 app.include_router(wallet_ownership_router)
 

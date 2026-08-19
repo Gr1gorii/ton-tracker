@@ -216,35 +216,78 @@ def verify_wallet_transaction_trace_bocs(
 
     settings = settings or get_settings()
     _require_guarded_live_tonapi(settings, run)
+    expected_network = run.wallet_network
+    expected_capture_id = capture.id
+    expected_capture_digest = capture.evidence_digest_sha256
+    # Release the ORM transaction before TonAPI I/O. The trace and transaction
+    # are resolved and revalidated again after the candidate arrives.
+    session.rollback()
     result = TonapiAdapter(
         settings
     ).get_transaction_trace_boc_verification_candidate(
         transaction_hash,
-        network=run.wallet_network,
+        network=expected_network,
     )
     if not result.ok:
         detail = result.message or "TonAPI BOC verification request failed."
         raise WalletTraceEvidenceProviderFailure(
-            _sanitize_provider_message(detail, settings)
+            _sanitize_provider_message(detail, settings),
+            code=result.error or "provider_error",
         )
     candidate = result.data
     if not isinstance(candidate, dict):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI BOC verification response was not an object."
+            "TonAPI BOC verification response was not an object.",
+            code="provider_protocol_error",
         )
-    _require_candidate_matches_capture(candidate.get("trace"), capture, persisted)
     raw_rows = candidate.get("transaction_bocs")
     if not isinstance(raw_rows, list):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI BOC verification candidate omitted transaction BOCs."
+            "TonAPI BOC verification candidate omitted transaction BOCs.",
+            code="provider_protocol_error",
         )
+
+    run, transaction = resolve_wallet_transaction_trace_anchor(
+        run_id,
+        transaction_hash,
+        session,
+    )
+    _require_eligible_stored_identity(run, transaction, transaction_hash)
+    capture = _find_capture_for_transaction(run_id, transaction_hash, session)
+    if capture is None:
+        raise WalletTraceBocVerificationConflict(
+            "Persisted trace evidence disappeared during BOC acquisition."
+        )
+    persisted = _revalidate_capture(capture, run, transaction, session)
+    if (
+        run.wallet_network != expected_network
+        or capture.id != expected_capture_id
+        or capture.evidence_digest_sha256 != expected_capture_digest
+    ):
+        raise WalletTraceBocVerificationConflict(
+            "Persisted trace evidence changed during BOC acquisition."
+        )
+    existing = _find_verification(capture.id, session)
+    if existing is not None:
+        return (
+            _revalidate_verification(
+                existing,
+                capture,
+                persisted,
+                run,
+                transaction,
+            ),
+            False,
+        )
+    _require_candidate_matches_capture(candidate.get("trace"), capture, persisted)
 
     verified_at = datetime.now(timezone.utc)
     try:
         derived = _derive_boc_evidence(capture, raw_rows)
     except WalletTraceBocVerificationConflict as exc:
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI transaction BOCs failed local trace-bound verification."
+            "TonAPI transaction BOCs failed local trace-bound verification.",
+            code="provider_protocol_error",
         ) from exc
 
     verification = WalletTraceBocVerification(
@@ -360,7 +403,9 @@ def _find_verification(
             .options(
                 selectinload(WalletTraceBocVerification.transactions)
                 .selectinload(WalletTraceBocTransaction.node)
-                .selectinload(WalletTraceEvidenceNode.messages)
+                .selectinload(WalletTraceEvidenceNode.messages),
+                selectinload(WalletTraceBocVerification.transactions)
+                .selectinload(WalletTraceBocTransaction.inclusion_proofs),
             )
             .limit(2)
         ).unique()
@@ -519,7 +564,8 @@ def _require_candidate_matches_capture(
 ) -> None:
     if not isinstance(candidate, dict):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI BOC verification candidate omitted its trace graph."
+            "TonAPI BOC verification candidate omitted its trace graph.",
+            code="provider_protocol_error",
         )
     nodes = sorted(capture.nodes, key=lambda item: item.preorder_index)
     id_to_preorder = {node.id: node.preorder_index for node in nodes}

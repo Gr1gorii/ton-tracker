@@ -397,6 +397,240 @@ class CaseSync(Base):
     )
 
 
+class CaseEvidenceVerification(Base):
+    """Durable proof job bound to one pinned Case Activity transaction."""
+
+    __tablename__ = "wallet_case_evidence_verifications"
+    __table_args__ = (
+        CheckConstraint(
+            "policy = 'transaction_inclusion_v1'",
+            name="ck_wallet_case_evidence_policy",
+        ),
+        CheckConstraint(
+            "state IN ('queued', 'running', 'partial', 'succeeded', 'failed', 'cancelled')",
+            name="ck_wallet_case_evidence_state",
+        ),
+        CheckConstraint(
+            "stage IN ('queued', 'validating', 'capturing_trace', 'verifying_bocs', "
+            "'proving_inclusion', 'building_native_ledger', 'finalizing', "
+            "'retry_wait', 'terminal')",
+            name="ck_wallet_case_evidence_stage",
+        ),
+        CheckConstraint(
+            "highest_evidence_level IN ('normalized', 'locally_verified', "
+            "'chain_inclusion_proven')",
+            name="ck_wallet_case_evidence_level",
+        ),
+        CheckConstraint(
+            "progress_current >= 0 AND progress_current <= 4",
+            name="ck_wallet_case_evidence_progress",
+        ),
+        CheckConstraint(
+            "attempt_count >= 0 AND max_attempts >= 1 AND attempt_count <= max_attempts",
+            name="ck_wallet_case_evidence_attempts",
+        ),
+        CheckConstraint(
+            "(state != 'failed' OR progress_current = 0) AND "
+            "(state != 'partial' OR progress_current > 0) AND "
+            "(state != 'succeeded' OR progress_current = 4)",
+            name="ck_wallet_case_evidence_state_progress",
+        ),
+        CheckConstraint(
+            "(state = 'cancelled' AND cancel_requested_at IS NOT NULL) OR "
+            "(state = 'running') OR "
+            "(state IN ('queued', 'partial', 'succeeded', 'failed') AND "
+            "cancel_requested_at IS NULL)",
+            name="ck_wallet_case_evidence_cancel_state",
+        ),
+        CheckConstraint(
+            "(state = 'queued' AND stage IN ('queued', 'retry_wait') AND "
+            "next_attempt_at IS NOT NULL AND lease_token IS NULL AND "
+            "lease_expires_at IS NULL AND completed_at IS NULL) OR "
+            "(state = 'running' AND stage IN ('validating', 'capturing_trace', "
+            "'verifying_bocs', 'proving_inclusion', 'building_native_ledger', "
+            "'finalizing') AND "
+            "next_attempt_at IS NULL AND lease_token IS NOT NULL AND "
+            "lease_expires_at IS NOT NULL AND started_at IS NOT NULL AND "
+            "completed_at IS NULL) OR "
+            "(state IN ('partial', 'succeeded', 'failed', 'cancelled') AND "
+            "stage = 'terminal' AND next_attempt_at IS NULL AND "
+            "lease_token IS NULL AND lease_expires_at IS NULL AND "
+            "completed_at IS NOT NULL)",
+            name="ck_wallet_case_evidence_lifecycle",
+        ),
+        CheckConstraint(
+            "(progress_current = 0 AND trace_capture_id IS NULL AND "
+            "trace_digest_sha256 IS NULL AND trace_completed_at IS NULL AND "
+            "boc_verification_id IS NULL AND boc_digest_sha256 IS NULL AND "
+            "boc_completed_at IS NULL AND inclusion_catalog_digest_sha256 IS NULL AND "
+            "inclusion_completed_at IS NULL AND native_ledger_id IS NULL AND "
+            "native_ledger_digest_sha256 IS NULL AND native_ledger_completed_at IS NULL "
+            "AND highest_evidence_level = 'normalized') OR "
+            "(progress_current = 1 AND trace_capture_id IS NOT NULL AND "
+            "trace_digest_sha256 IS NOT NULL AND trace_completed_at IS NOT NULL AND "
+            "boc_verification_id IS NULL AND boc_digest_sha256 IS NULL AND "
+            "boc_completed_at IS NULL AND inclusion_catalog_digest_sha256 IS NULL AND "
+            "inclusion_completed_at IS NULL AND native_ledger_id IS NULL AND "
+            "native_ledger_digest_sha256 IS NULL AND native_ledger_completed_at IS NULL "
+            "AND highest_evidence_level = 'normalized') OR "
+            "(progress_current = 2 AND trace_capture_id IS NOT NULL AND "
+            "trace_digest_sha256 IS NOT NULL AND trace_completed_at IS NOT NULL AND "
+            "boc_verification_id IS NOT NULL AND boc_digest_sha256 IS NOT NULL AND "
+            "boc_completed_at IS NOT NULL AND inclusion_catalog_digest_sha256 IS NULL AND "
+            "inclusion_completed_at IS NULL AND native_ledger_id IS NULL AND "
+            "native_ledger_digest_sha256 IS NULL AND native_ledger_completed_at IS NULL "
+            "AND highest_evidence_level = 'locally_verified') OR "
+            "(progress_current = 3 AND trace_capture_id IS NOT NULL AND "
+            "trace_digest_sha256 IS NOT NULL AND trace_completed_at IS NOT NULL AND "
+            "boc_verification_id IS NOT NULL AND boc_digest_sha256 IS NOT NULL AND "
+            "boc_completed_at IS NOT NULL AND inclusion_catalog_digest_sha256 IS NOT NULL AND "
+            "inclusion_completed_at IS NOT NULL AND native_ledger_id IS NULL AND "
+            "native_ledger_digest_sha256 IS NULL AND native_ledger_completed_at IS NULL "
+            "AND highest_evidence_level = 'chain_inclusion_proven') OR "
+            "(progress_current = 4 AND trace_capture_id IS NOT NULL AND "
+            "trace_digest_sha256 IS NOT NULL AND trace_completed_at IS NOT NULL AND "
+            "boc_verification_id IS NOT NULL AND boc_digest_sha256 IS NOT NULL AND "
+            "boc_completed_at IS NOT NULL AND inclusion_catalog_digest_sha256 IS NOT NULL AND "
+            "inclusion_completed_at IS NOT NULL AND native_ledger_id IS NOT NULL AND "
+            "native_ledger_digest_sha256 IS NOT NULL AND native_ledger_completed_at IS NOT NULL "
+            "AND highest_evidence_level = 'chain_inclusion_proven')",
+            name="ck_wallet_case_evidence_artifact_prefix",
+        ),
+        Index("uq_wallet_case_evidence_public_id", "public_id", unique=True),
+        Index(
+            "uq_wallet_case_evidence_idempotency",
+            "case_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_case_evidence_active_selection",
+            "case_id",
+            "snapshot_sync_id",
+            "activity_public_id",
+            "policy",
+            unique=True,
+            sqlite_where=text("state IN ('queued', 'running')"),
+        ),
+        Index(
+            "ix_wallet_case_evidence_catalog",
+            "case_id",
+            "snapshot_sync_id",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_wallet_case_evidence_queue",
+            "state",
+            "next_attempt_at",
+            "created_at",
+            "id",
+        ),
+        Index(
+            "ix_wallet_case_evidence_source_transaction",
+            "source_transaction_id",
+            "state",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(String(36), nullable=False, default=_new_public_id)
+    case_id = Column(
+        Integer,
+        ForeignKey("wallet_cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_sync_id = Column(
+        Integer,
+        ForeignKey("wallet_case_syncs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_sync_id = Column(
+        Integer,
+        ForeignKey("wallet_case_syncs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_transaction_id = Column(
+        Integer,
+        ForeignKey("wallet_transactions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    activity_public_id = Column(String(68), nullable=False)
+    activity_semantic_fingerprint = Column(String(64), nullable=False)
+    policy = Column(
+        String(40),
+        nullable=False,
+        default="transaction_inclusion_v1",
+        server_default="transaction_inclusion_v1",
+    )
+    state = Column(String(16), nullable=False, default="queued", server_default="queued")
+    stage = Column(String(32), nullable=False, default="queued", server_default="queued")
+    progress_current = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    status_version = Column(Integer, nullable=False, default=1, server_default=text("1"))
+    highest_evidence_level = Column(
+        String(24), nullable=False, default="normalized", server_default="normalized"
+    )
+    provider = Column(String(64), nullable=False)
+    network = Column(String(16), nullable=False)
+    wallet_account_canonical = Column(String(76), nullable=False)
+    transaction_hash = Column(String(64), nullable=False)
+    transaction_logical_time = Column(String(20), nullable=False)
+    idempotency_key = Column(String(36), nullable=False)
+    request_fingerprint = Column(String(64), nullable=False)
+    attempt_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    max_attempts = Column(Integer, nullable=False, default=4, server_default=text("4"))
+    next_attempt_at = Column(DateTime, nullable=True)
+    cancel_requested_at = Column(DateTime, nullable=True)
+    lease_token = Column(String(64), nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    heartbeat_at = Column(DateTime, nullable=True)
+    checkpoint_json = Column(Text, nullable=False, default="{}", server_default="{}")
+    trace_capture_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_evidence_captures.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    trace_digest_sha256 = Column(String(64), nullable=True)
+    trace_completed_at = Column(DateTime, nullable=True)
+    boc_verification_id = Column(
+        Integer,
+        ForeignKey("wallet_trace_boc_verifications.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    boc_digest_sha256 = Column(String(64), nullable=True)
+    boc_completed_at = Column(DateTime, nullable=True)
+    inclusion_catalog_digest_sha256 = Column(String(64), nullable=True)
+    inclusion_completed_at = Column(DateTime, nullable=True)
+    native_ledger_id = Column(
+        Integer,
+        ForeignKey("wallet_native_activity_ledgers.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    native_ledger_digest_sha256 = Column(String(64), nullable=True)
+    native_ledger_completed_at = Column(DateTime, nullable=True)
+    result_digest_sha256 = Column(String(64), nullable=True)
+    error_code = Column(String(64), nullable=True)
+    error_detail_safe = Column(Text, nullable=True)
+    message_safe = Column(Text, nullable=False, default="", server_default="")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+    case = relationship("WalletCase")
+    snapshot_sync = relationship("CaseSync", foreign_keys=[snapshot_sync_id])
+    source_sync = relationship("CaseSync", foreign_keys=[source_sync_id])
+    source_transaction = relationship("WalletTransaction", foreign_keys=[source_transaction_id])
+    trace_capture = relationship("WalletTraceEvidenceCapture", foreign_keys=[trace_capture_id])
+    boc_verification = relationship("WalletTraceBocVerification", foreign_keys=[boc_verification_id])
+    native_ledger = relationship("WalletNativeActivityLedger", foreign_keys=[native_ledger_id])
+
+
 class WalletAcquisitionStream(Base):
     """Persisted acquisition contract and aggregate evidence for one stream."""
 
@@ -1036,11 +1270,14 @@ class WalletTraceBocTransaction(Base):
         "WalletTraceEvidenceNode",
         back_populates="boc_transactions",
     )
-    inclusion_proof = relationship(
+    inclusion_proofs = relationship(
         "WalletTransactionInclusionProof",
         back_populates="boc_transaction",
         cascade="all, delete-orphan",
-        uselist=False,
+        order_by=(
+            "WalletTransactionInclusionProof.trust_level, "
+            "WalletTransactionInclusionProof.verifier_policy_id"
+        ),
     )
 
 
@@ -1050,8 +1287,10 @@ class WalletTransactionInclusionProof(Base):
     __tablename__ = "wallet_transaction_inclusion_proofs"
     __table_args__ = (
         Index(
-            "uq_wallet_transaction_inclusion_boc_transaction",
+            "uq_wallet_transaction_inclusion_boc_transaction_trust_policy",
             "boc_transaction_id",
+            "trust_level",
+            "verifier_policy_id",
             unique=True,
         ),
         Index(
@@ -1086,10 +1325,21 @@ class WalletTransactionInclusionProof(Base):
     block_proof_boc_sha256 = Column(String(64), nullable=False)
     evidence_digest_sha256 = Column(String(64), nullable=False)
     verified_at = Column(DateTime, nullable=False)
+    verifier_policy_id = Column(
+        String(64),
+        nullable=False,
+        default="legacy_unpinned_v1",
+        server_default="legacy_unpinned_v1",
+    )
+    trusted_checkpoint_workchain = Column(Integer, nullable=True)
+    trusted_checkpoint_shard = Column(String(24), nullable=True)
+    trusted_checkpoint_seqno = Column(Integer, nullable=True)
+    trusted_checkpoint_root_hash = Column(String(64), nullable=True)
+    trusted_checkpoint_file_hash = Column(String(64), nullable=True)
 
     boc_transaction = relationship(
         "WalletTraceBocTransaction",
-        back_populates="inclusion_proof",
+        back_populates="inclusion_proofs",
     )
 
 

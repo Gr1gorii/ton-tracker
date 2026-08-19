@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from pytoniq_core import Cell
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import get_settings
@@ -88,14 +89,27 @@ def verify_wallet_jetton_contract_relationship(
         return _record_response(existing)
 
     settings = get_settings()
+    selection = {
+        "run_id": run_id,
+        "network": network,
+        "owner_account_canonical": run.wallet_address_canonical,
+        "jetton_wallet_account_canonical": wallet,
+        "jetton_master_account_canonical": master,
+        "balance_snapshot_id": snapshot.id,
+    }
+    # The child can run up to the hard supervisor deadline. Release the ORM
+    # transaction first, then re-resolve the exact run-scoped relation before
+    # any immutable artifact is written.
+    session.rollback()
     try:
         verified = live_verifier(
             network=network,
-            owner_account_canonical=run.wallet_address_canonical,
+            owner_account_canonical=selection["owner_account_canonical"],
             jetton_wallet_account_canonical=wallet,
             jetton_master_account_canonical=master,
             trust_level=settings.ton_liteclient_trust_level,
             timeout_seconds=settings.ton_liteclient_timeout_seconds,
+            cache_directory=settings.ton_liteclient_cache_directory,
         )
     except TonLiteclientJettonVerificationFailure as exc:
         raise WalletJettonContractVerificationFailure(str(exc)) from exc
@@ -105,10 +119,45 @@ def verify_wallet_jetton_contract_relationship(
         expected_wallet=wallet,
         expected_master=master,
     )
+    current_run = session.get(WalletIngestionRun, run_id)
+    if current_run is None:
+        session.rollback()
+        raise WalletJettonContractVerificationConflict(
+            "Jetton verification run changed during proof capture."
+        )
+    current_network = _validated_run_network(current_run)
+    current_snapshot = _exact_snapshot(
+        run_id, wallet, master, current_network, session
+    )
+    if selection != {
+        "run_id": run_id,
+        "network": current_network,
+        "owner_account_canonical": current_run.wallet_address_canonical,
+        "jetton_wallet_account_canonical": wallet,
+        "jetton_master_account_canonical": master,
+        "balance_snapshot_id": current_snapshot.id,
+    }:
+        session.rollback()
+        raise WalletJettonContractVerificationConflict(
+            "Jetton verification selection changed during proof capture."
+        )
+    existing = session.scalar(
+        select(WalletJettonContractVerification).where(
+            WalletJettonContractVerification.run_id == run_id,
+            WalletJettonContractVerification.jetton_wallet_account_canonical
+            == wallet,
+            WalletJettonContractVerification.jetton_master_account_canonical
+            == master,
+            WalletJettonContractVerification.contract_version
+            == JETTON_CONTRACT_VERIFICATION_VERSION,
+        )
+    )
+    if existing is not None:
+        return _record_response(existing)
     verified_at = datetime.now(timezone.utc)
     values = {
         "run_id": run_id,
-        "balance_snapshot_id": snapshot.id,
+        "balance_snapshot_id": current_snapshot.id,
         "contract_version": JETTON_CONTRACT_VERIFICATION_VERSION,
         "verifier_name": verified["verifier_name"],
         "verifier_version": verified["verifier_version"],
@@ -119,7 +168,7 @@ def verify_wallet_jetton_contract_relationship(
         "anchor_seqno": verified["anchor"]["seqno"],
         "anchor_root_hash": verified["anchor"]["root_hash"],
         "anchor_file_hash": verified["anchor"]["file_hash"],
-        "owner_account_canonical": run.wallet_address_canonical,
+        "owner_account_canonical": current_run.wallet_address_canonical,
         "jetton_wallet_account_canonical": wallet,
         "jetton_master_account_canonical": master,
         "asset_identity_key": f"{JETTON_ASSET_IDENTITY_VERSION}|{network}|{master}",
@@ -142,7 +191,26 @@ def verify_wallet_jetton_contract_relationship(
     )
     record = WalletJettonContractVerification(**values)
     session.add(record)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError:
+        session.rollback()
+        concurrent = session.scalar(
+            select(WalletJettonContractVerification).where(
+                WalletJettonContractVerification.run_id == run_id,
+                WalletJettonContractVerification.jetton_wallet_account_canonical
+                == wallet,
+                WalletJettonContractVerification.jetton_master_account_canonical
+                == master,
+                WalletJettonContractVerification.contract_version
+                == JETTON_CONTRACT_VERIFICATION_VERSION,
+            )
+        )
+        if concurrent is None:
+            raise WalletJettonContractVerificationFailure(
+                "Jetton verification storage conflict could not be resolved."
+            )
+        return _record_response(concurrent)
     for role, evidence in verified["account_inclusion_proofs"].items():
         proof_values = _account_proof_values(
             record,
@@ -247,7 +315,9 @@ def _record_response(record: WalletJettonContractVerification) -> dict[str, Any]
         "evidence_digest_sha256": digest,
         "verified_at": _iso(record.verified_at),
         "account_state_proof_verified": True,
-        "masterchain_checkpoint_chain_verified": record.trust_level == 0,
+        # v1 did not persist the application-owned verifier policy/checkpoint.
+        # Trust level alone can never establish durable checkpoint provenance.
+        "masterchain_checkpoint_chain_verified": False,
         "local_tvm_execution_applied": True,
         "wallet_owner_master_verified": True,
         "master_wallet_address_verified": True,
@@ -255,12 +325,11 @@ def _record_response(record: WalletJettonContractVerification) -> dict[str, Any]
         "jetton_asset_identity_applied": True,
         "raw_account_state_bocs_persisted": has_persisted_inclusion,
         "raw_account_state_bocs_returned": False,
-        "is_blockchain_inclusion_proof_verified": (
-            record.trust_level == 0 and has_persisted_inclusion
-        ),
+        "is_blockchain_inclusion_proof_verified": False,
         "eligible_for_cost_basis": False,
         "used_by_pnl": False,
         "is_ownership_proof": False,
+        "limitations": ["checkpoint_policy_not_persisted_v1"],
         "message": (
             (
                 "Stored Merkle proofs bind both full account-state BOCs to exact "
@@ -270,8 +339,9 @@ def _record_response(record: WalletJettonContractVerification) -> dict[str, Any]
             )
             + "Locally executed jetton getters agree on owner, master, wallet "
             "address, and wallet code. This establishes a network-scoped jetton "
-            "asset relationship, not wallet ownership, complete activity history, "
-            "cost basis, or PnL."
+            "asset relationship. The v1 artifact did not persist the application-owned "
+            "checkpoint policy, so it does not claim canonical chain inclusion, "
+            "wallet ownership, complete activity history, cost basis, or PnL."
         ),
     }
 
@@ -429,7 +499,7 @@ def _validate_live_result(
         and isinstance(anchor["shard"], str)
         and canonical_shard.fullmatch(anchor["shard"])
         and type(anchor["seqno"]) is int
-        and anchor["seqno"] > 0
+        and 0 < anchor["seqno"] <= 2**31 - 1
         and isinstance(anchor["root_hash"], str)
         and canonical_hash.fullmatch(anchor["root_hash"])
         and isinstance(anchor["file_hash"], str)
@@ -450,8 +520,7 @@ def _validate_live_result(
     if not (
         value["account_state_proof_verified"] is True
         and value["local_tvm_execution_applied"] is True
-        and value["masterchain_checkpoint_chain_verified"]
-        == (value["trust_level"] == 0)
+        and value["masterchain_checkpoint_chain_verified"] is False
     ):
         raise WalletJettonContractVerificationConflict(
             "Local jetton verifier proof flags are incoherent."
@@ -672,7 +741,7 @@ def _valid_account_inclusion_shape(value: Any, expected_address: str) -> bool:
         and shard["workchain"] in {-1, 0}
         and type(shard["shard"]) is int
         and type(shard["seqno"]) is int
-        and shard["seqno"] > 0
+        and 0 < shard["seqno"] <= 2**31 - 1
         and canonical_hash.fullmatch(shard["root_hash"] or "")
         and canonical_hash.fullmatch(shard["file_hash"] or "")
     ):

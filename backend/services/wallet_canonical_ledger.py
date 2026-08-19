@@ -19,6 +19,7 @@ from models import (
 )
 from services.wallet_native_activity_ledger import _revalidate_ledger
 from services.wallet_transaction_inclusion_proof import _proof_response
+from services.ton_liteclient_config import CURRENT_VERIFIER_POLICY_ID
 
 
 CANONICAL_LEDGER_CONTRACT_VERSION = "ton_canonical_activity_ledger_v1"
@@ -84,17 +85,28 @@ def get_wallet_canonical_ledger(
                 select(WalletTransactionInclusionProof)
                 .join(WalletTransactionInclusionProof.boc_transaction)
                 .join(WalletTraceBocTransaction.verification)
-                .where(WalletTraceBocVerification.capture_id == ledger.capture_id)
+                .where(
+                    WalletTraceBocVerification.capture_id == ledger.capture_id,
+                    WalletTransactionInclusionProof.trust_level == 0,
+                    WalletTransactionInclusionProof.verifier_policy_id
+                    == CURRENT_VERIFIER_POLICY_ID,
+                )
                 .options(
                     selectinload(
                         WalletTransactionInclusionProof.boc_transaction
+                    ).selectinload(
+                        WalletTraceBocTransaction.inclusion_proofs
                     )
                 )
                 .order_by(WalletTransactionInclusionProof.id)
             )
         )
         proof_by_hash = {
-            row.transaction_hash: _proof_response(row.boc_transaction)
+            row.transaction_hash: _proof_response(
+                row.boc_transaction,
+                trust_level=0,
+                policy_id=CURRENT_VERIFIER_POLICY_ID,
+            )
             for row in proof_rows
         }
         activity_hashes = {
@@ -103,7 +115,7 @@ def get_wallet_canonical_ledger(
         if not activity_hashes.issubset(proof_by_hash):
             raise WalletCanonicalLedgerConflict(
                 "Every canonical activity requires a provider-free transaction "
-                "block-inclusion proof."
+                "block-inclusion proof with canonical trust level 0."
             )
         sources.append(
             {

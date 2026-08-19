@@ -42,7 +42,7 @@ def client(tmp_path, monkeypatch):
     database_path = tmp_path / "wallet-cases.sqlite3"
     engine = create_database_engine(f"sqlite:///{database_path}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260710_0018"
+    assert report.revision_after == "20260710_0022"
     testing_session = sessionmaker(
         autocommit=False,
         autoflush=False,
@@ -862,6 +862,60 @@ def test_concurrent_same_key_enqueue_converges_on_one_persisted_job(client):
     assert _database_counts() == (1, 1, 0)
 
 
+def test_same_key_commit_before_active_lookup_converges_to_replay(
+    client,
+    monkeypatch,
+):
+    case_id = _create_case(client)["case"]["public_id"]
+    idempotency_key = str(uuid4())
+    payload = WalletCaseSyncRequest(
+        time_window="24h",
+        surfaces=["transactions"],
+    )
+    session_b = app.state.wallet_case_test_session()
+    service_b = WalletCaseService(session_b)
+    original_active_lookup = service_b.repository.get_active_sync
+    created_by_a: dict[str, str] = {}
+    interleaved = False
+
+    # Avoid shadowing the public UUID with the repository's internal case_id.
+    public_case_id = case_id
+
+    def active_after_commit(*, case_id: int):
+        nonlocal interleaved
+        if not interleaved:
+            interleaved = True
+            session_b.rollback()
+            with app.state.wallet_case_test_session() as session_a:
+                response_a, replayed_a = WalletCaseService(session_a).enqueue_sync(
+                    public_case_id,
+                    payload,
+                    idempotency_key,
+                )
+            assert replayed_a is False
+            created_by_a["public_id"] = response_a["public_id"]
+        return original_active_lookup(case_id=case_id)
+
+    monkeypatch.setattr(
+        service_b.repository,
+        "get_active_sync",
+        active_after_commit,
+    )
+    try:
+        response_b, replayed_b = service_b.enqueue_sync(
+            public_case_id,
+            payload,
+            idempotency_key,
+        )
+    finally:
+        session_b.close()
+
+    assert interleaved is True
+    assert replayed_b is True
+    assert response_b["public_id"] == created_by_a["public_id"]
+    assert _database_counts() == (1, 1, 0)
+
+
 def test_sync_enqueue_fails_without_a_live_consumer_and_stores_nothing(client):
     case_id = _create_case(client)["case"]["public_id"]
     app.state.wallet_case_job_runner = None
@@ -1203,6 +1257,13 @@ def test_retry_classifier_rejects_protocol_errors_and_accepts_http_signals():
     }
 
     assert _retry_signal(permanent) == (False, "provider_protocol_error")
+    for timeout_code in ("http_408", "http_425"):
+        assert _retry_signal(
+            {
+                "status": "partial",
+                "acquisition_streams": [{"error_code": timeout_code}],
+            }
+        ) == (True, timeout_code)
     assert _retry_signal(throttled) == (True, "http_429")
     assert _retry_signal(unavailable) == (True, "http_503")
 

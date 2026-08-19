@@ -122,10 +122,31 @@ class _Observation:
 class _BuiltActivity:
     items: tuple[dict[str, Any], ...]
     sources_by_public_id: dict[str, tuple[dict[str, Any], ...]]
+    observations_by_public_id: dict[str, tuple[_Observation, ...]]
     valid_sync_kinds: tuple[frozenset[str], ...]
     scope_mismatch_kinds: tuple[str, ...]
     invalid_provenance_kinds: tuple[str, ...]
     conflicted_groups: tuple[tuple[dict[str, Any], ...], ...]
+
+
+@dataclass(frozen=True)
+class ResolvedCaseActivityTransaction:
+    wallet_case: WalletCase
+    snapshot: CaseSync
+    source_sync: CaseSync
+    source_run: WalletIngestionRun
+    source_transaction: WalletTransaction
+    activity_public_id: str
+    semantic_fingerprint: str
+    item: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ResolvedCaseActivityRevision:
+    wallet_case: WalletCase
+    snapshot: CaseSync
+    activity_public_ids: frozenset[str]
+    verifiable_transactions: dict[str, ResolvedCaseActivityTransaction]
 
 
 class WalletCaseActivityService:
@@ -309,6 +330,135 @@ class WalletCaseActivityService:
             "source_observations": list(all_sources[:MAX_DETAIL_SOURCES]),
             "sources_truncated": len(all_sources) > MAX_DETAIL_SOURCES,
         }
+
+    def resolve_verifiable_transaction(
+        self,
+        case_public_id: str,
+        activity_public_id: str,
+        *,
+        snapshot_public_id: str,
+    ) -> ResolvedCaseActivityTransaction:
+        """Resolve the exact latest source row behind one pinned public item.
+
+        This internal bridge deliberately returns database identities only to
+        the evidence application service. Public Activity responses remain
+        free of compatibility run and sequential row identifiers.
+        """
+        revision = self.resolve_verifiable_transaction_revision(
+            case_public_id,
+            snapshot_public_id=snapshot_public_id,
+        )
+        if activity_public_id not in revision.activity_public_ids:
+            raise WalletCaseActivityItemNotFound(
+                "Activity is not available in the requested snapshot."
+            )
+        resolved = revision.verifiable_transactions.get(activity_public_id)
+        if resolved is None:
+            raise WalletCaseActivityInvalidQuery(
+                "Only a live provider-observed transaction with a revalidated "
+                "network-scoped identity can be verified."
+            )
+        return resolved
+
+    def resolve_verifiable_transaction_revision(
+        self,
+        case_public_id: str,
+        *,
+        snapshot_public_id: str,
+    ) -> ResolvedCaseActivityRevision:
+        """Build one canonical revision and index every eligible transaction."""
+        wallet_case = self._required_case(case_public_id)
+        snapshot = self.repository.get_snapshot(
+            case_id=wallet_case.id,
+            public_id=snapshot_public_id,
+        )
+        if snapshot is None:
+            raise WalletCaseActivitySnapshotNotFound(
+                "The requested Wallet Case snapshot is unavailable."
+            )
+        query = normalize_activity_query(
+            WalletCaseActivityQuery(snapshot_public_id=snapshot.public_id)
+        )
+        start_at, end_at = _effective_period(snapshot, query)
+        row_start_at, row_end_at = _row_period(snapshot, query, start_at, end_at)
+        syncs = self.repository.source_syncs(
+            snapshot=snapshot,
+            start_at=start_at,
+            end_at=end_at,
+            maximum=MAX_SOURCE_SYNCS,
+        )
+        if syncs is None:
+            raise WalletCaseActivityScopeTooLarge(
+                "The pinned activity revision includes too many synchronization sources."
+            )
+        sources = self.repository.load_sources(
+            syncs=syncs,
+            start_at=row_start_at,
+            end_at=row_end_at,
+            maximum_rows=MAX_SOURCE_ROWS,
+        )
+        if sources is None:
+            raise WalletCaseActivityScopeTooLarge(
+                "The pinned activity revision contains too many normalized rows."
+            )
+        snapshot_run = sources.runs.get(snapshot.ingestion_run_id)
+        expected_mode = "mock" if wallet_case.data_environment == "demo" else "real"
+        if snapshot_run is None or not _run_matches_case(
+            snapshot_run, snapshot, wallet_case, expected_mode
+        ):
+            raise WalletCaseActivitySnapshotConflict(
+                "The pinned snapshot failed its Wallet Case source-scope contract."
+            )
+        built = _build_activity(wallet_case, snapshot, sources)
+        sync_by_id = {value.id: value for value in syncs}
+        transaction_by_id = {value.id: value for value in sources.transactions}
+        resolved: dict[str, ResolvedCaseActivityTransaction] = {}
+        for item in built.items:
+            activity_public_id = item["public_id"]
+            observations = built.observations_by_public_id.get(activity_public_id, ())
+            if not observations:
+                continue
+            winner = observations[-1]
+            source_sync = sync_by_id.get(winner.sync_id)
+            source_run = (
+                sources.runs.get(source_sync.ingestion_run_id)
+                if source_sync is not None
+                else None
+            )
+            source_transaction = transaction_by_id.get(winner.row_id)
+            if (
+                item.get("kind") != "transaction"
+                or item.get("transaction", {}).get("linkage") != "self"
+                or item.get("provenance", {}).get("data_origin")
+                != "provider_observed"
+                or item.get("provenance", {}).get("identity_assurance")
+                != "network_scoped"
+                or source_sync is None
+                or source_run is None
+                or source_transaction is None
+                or winner.kind != "transaction"
+                or winner.identity_namespace != "transaction"
+                or winner.identity_key is None
+            ):
+                continue
+            resolved[activity_public_id] = ResolvedCaseActivityTransaction(
+                wallet_case=wallet_case,
+                snapshot=snapshot,
+                source_sync=source_sync,
+                source_run=source_run,
+                source_transaction=source_transaction,
+                activity_public_id=activity_public_id,
+                semantic_fingerprint=winner.semantic_fingerprint,
+                item=item,
+            )
+        return ResolvedCaseActivityRevision(
+            wallet_case=wallet_case,
+            snapshot=snapshot,
+            activity_public_ids=frozenset(
+                item["public_id"] for item in built.items
+            ),
+            verifiable_transactions=resolved,
+        )
 
     def _required_case(self, public_id: str) -> WalletCase:
         wallet_case = self.repository.get_case(
@@ -614,6 +764,7 @@ def _build_activity(
 
     items: list[dict[str, Any]] = []
     sources_by_public_id: dict[str, tuple[dict[str, Any], ...]] = {}
+    observations_by_public_id: dict[str, tuple[_Observation, ...]] = {}
     for occurrences in distinct:
         ordered = sorted(occurrences, key=lambda item: (item.sync_id, item.row_id))
         winner = ordered[-1]
@@ -641,10 +792,12 @@ def _build_activity(
             }
             for source in ordered
         )
+        observations_by_public_id[public_id] = tuple(ordered)
 
     return _BuiltActivity(
         items=tuple(items),
         sources_by_public_id=sources_by_public_id,
+        observations_by_public_id=observations_by_public_id,
         valid_sync_kinds=tuple(
             frozenset(_activity_kinds_for_surfaces(surfaces_by_run[run_id]))
             for run_id in valid_runs

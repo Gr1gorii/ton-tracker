@@ -395,7 +395,7 @@ def test_get_account_jettons_preview_http_error_returns_provider_error(
     )
 
     assert result.ok is False
-    assert result.error == ERROR_PROVIDER_ERROR
+    assert result.error == "http_429"
     assert "HTTP error: 429" in (result.message or "")
 
 

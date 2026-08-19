@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import json
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,6 +28,7 @@ from models import (
     WalletTraceEvidenceMessage,
     WalletTraceEvidenceNode,
     WalletTransaction,
+    WalletTransactionInclusionProof,
 )
 from schemas import (
     WalletPersistedTraceEvidenceResponse,
@@ -49,6 +51,11 @@ from services.wallet_trace_boc_verification import (
     WalletTraceBocVerificationConflict,
 )
 from services.ton_transaction_identity import derive_ton_transaction_identity
+from services.ton_liteclient_config import (
+    CURRENT_VERIFIER_POLICY_ID,
+    LEGACY_CHECKPOINT_POLICY_ID,
+    trusted_checkpoint_document,
+)
 
 
 ROOT_HASH = "11" * 32
@@ -1053,13 +1060,17 @@ def test_transaction_bocs_receive_provider_free_block_inclusion_proofs(
                         "root_hash": f"{index:064x}",
                         "file_hash": f"{index + 10:064x}",
                     },
-                    "masterchain_anchor": {
+                        "masterchain_anchor": {
                         "workchain": -1,
                         "shard": -9223372036854775808,
                         "seqno": 200,
                         "root_hash": "aa" * 32,
-                        "file_hash": "bb" * 32,
-                    },
+                            "file_hash": "bb" * 32,
+                        },
+                        "trusted_checkpoint": trusted_checkpoint_document(
+                            kwargs["network"]
+                        ),
+                        "verifier_policy_id": CURRENT_VERIFIER_POLICY_ID,
                     "transaction_boc_hex": bocs[request["transaction_hash"]],
                     "block_proof_boc_hex": "cc",
                     "trust_level": kwargs["trust_level"],
@@ -1085,10 +1096,67 @@ def test_transaction_bocs_receive_provider_free_block_inclusion_proofs(
     assert created.status_code == 201
     payload = created.json()
     WalletTransactionInclusionCatalogResponse.model_validate(payload)
+    mixed_trust = json.loads(json.dumps(payload))
+    mixed_trust["proofs"][1]["trust_level"] = 1
+    mixed_trust["proofs"][1][
+        "canonical_block_chain_verified_at_capture"
+    ] = False
+    with pytest.raises(ValueError, match="cannot mix verifier trust levels"):
+        WalletTransactionInclusionCatalogResponse.model_validate(mixed_trust)
     assert payload["proof_count"] == 2
     assert payload["all_transaction_bocs_included_in_blocks"] is True
+    assert payload["contract_version"] == "ton_transaction_inclusion_v2"
+    assert payload["verifier_policy_id"] == CURRENT_VERIFIER_POLICY_ID
+    assert payload["trusted_checkpoint"] == {
+        **trusted_checkpoint_document("ton-mainnet"),
+        "shard": str(
+            trusted_checkpoint_document("ton-mainnet")["shard"]
+        ),
+    }
+    assert all(
+        row["evidence_contract_version"] == "ton_transaction_inclusion_v2"
+        and row["canonical_block_chain_verified_at_capture"] is True
+        and row["checkpoint_to_observed_head_transcript_persisted"] is False
+        for row in payload["proofs"]
+    )
     assert "block_proof_boc_hex" not in json.dumps(payload)
     assert len(calls) == 1
+
+    forged = json.loads(json.dumps(payload))
+    forged["verifier_policy_id"] = "forged_policy"
+    forged["proofs"][0]["verifier_policy_id"] = "forged_policy"
+    with pytest.raises(ValueError, match="trust boundary|verifier policies"):
+        WalletTransactionInclusionCatalogResponse.model_validate(forged)
+
+    wrong_checkpoint = json.loads(json.dumps(payload))
+    wrong_checkpoint["trusted_checkpoint"]["root_hash"] = "ff" * 32
+    for row in wrong_checkpoint["proofs"]:
+        row["trusted_checkpoint"]["root_hash"] = "ff" * 32
+    with pytest.raises(ValueError, match="trust boundary"):
+        WalletTransactionInclusionCatalogResponse.model_validate(wrong_checkpoint)
+
+    invalid_public_values = (
+        ("account_address_canonical", "1:" + "11" * 32),
+        ("logical_time", "18446744073709551616"),
+        ("verified_at", "2026-07-29 12:00:00Z"),
+        ("verified_at", "2026-02-30T12:00:00Z"),
+        ("verified_at", "2026-07-29T12:00:00.1234567Z"),
+    )
+    for field, value in invalid_public_values:
+        corrupted = json.loads(json.dumps(payload))
+        corrupted["proofs"][0][field] = value
+        with pytest.raises(ValueError):
+            WalletTransactionInclusionCatalogResponse.model_validate(corrupted)
+    for field, value in (
+        ("shard", "-0"),
+        ("shard", "01"),
+        ("shard", "9223372036854775808"),
+        ("seqno", 2**31),
+    ):
+        corrupted = json.loads(json.dumps(payload))
+        corrupted["proofs"][0]["block"][field] = value
+        with pytest.raises(ValueError):
+            WalletTransactionInclusionCatalogResponse.model_validate(corrupted)
 
     repeated = client.post(url)
     assert repeated.status_code == 200
@@ -1096,6 +1164,246 @@ def test_transaction_bocs_receive_provider_free_block_inclusion_proofs(
     assert client.get(url).json() == payload
     assert len(calls) == 1
 
+
+def test_legacy_v1_inclusion_digest_revalidates_but_is_publicly_noncanonical(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, testing_session, run_id = persisted_trace_client
+    _capture_then_verify_bocs(client, run_id, monkeypatch)
+    assert client.post(_boc_url(run_id)).status_code == 201
+    monkeypatch.setattr(inclusion_service, "_verify_proof", lambda *_a, **_k: None)
+
+    def live(**kwargs):
+        bocs = {ROOT_HASH: "00", CHILD_HASH: "01"}
+        return [{
+            **request,
+            "block": {
+                "workchain": 0,
+                "shard": -9223372036854775808,
+                "seqno": 100 + index,
+                "root_hash": f"{index:064x}",
+                "file_hash": f"{index + 10:064x}",
+            },
+            "masterchain_anchor": {
+                "workchain": -1,
+                "shard": -9223372036854775808,
+                "seqno": 200,
+                "root_hash": "aa" * 32,
+                "file_hash": "bb" * 32,
+            },
+            "trusted_checkpoint": trusted_checkpoint_document(kwargs["network"]),
+            "verifier_policy_id": CURRENT_VERIFIER_POLICY_ID,
+            "transaction_boc_hex": bocs[request["transaction_hash"]],
+            "block_proof_boc_hex": "cc",
+            "trust_level": kwargs["trust_level"],
+        } for index, request in enumerate(kwargs["requests"], start=1)]
+
+    with testing_session() as session:
+        current = inclusion_service.create_wallet_transaction_inclusion_proofs(
+            run_id,
+            ROOT_HASH,
+            session,
+            live_verifier=live,
+        )
+        assert current["verifier_policy_id"] == CURRENT_VERIFIER_POLICY_ID
+        rows = list(session.scalars(select(WalletTransactionInclusionProof)))
+        for row in rows:
+            evidence = {
+                "account_address": row.account_address_canonical,
+                "logical_time": row.logical_time,
+                "transaction_hash": row.transaction_hash,
+                "block": inclusion_service._row_block(row, "block"),
+                "masterchain_anchor": inclusion_service._row_block(row, "anchor"),
+                "transaction_boc_hex": row.boc_transaction.transaction_boc_hex,
+                "block_proof_boc_hex": row.block_proof_boc_hex,
+                "trust_level": row.trust_level,
+            }
+            legacy = inclusion_service._legacy_proof_values(
+                row,
+                row.boc_transaction,
+                evidence,
+            )
+            row.evidence_digest_sha256 = legacy["evidence_digest_sha256"]
+            row.verifier_policy_id = "legacy_unpinned_v1"
+            row.trusted_checkpoint_workchain = None
+            row.trusted_checkpoint_shard = None
+            row.trusted_checkpoint_seqno = None
+            row.trusted_checkpoint_root_hash = None
+            row.trusted_checkpoint_file_hash = None
+        session.commit()
+
+    response = client.get(f"{_boc_url(run_id)}/block-inclusion")
+    assert response.status_code == 200
+    payload = response.json()
+    WalletTransactionInclusionCatalogResponse.model_validate(payload)
+    assert payload["contract_version"] == "ton_transaction_inclusion_v2"
+    assert payload["verifier_policy_id"] == "legacy_unpinned_v1"
+    assert payload["trusted_checkpoint"] is None
+    assert all(
+        row["evidence_contract_version"] == "ton_transaction_inclusion_v1"
+        and row["canonical_block_chain_verified_at_capture"] is False
+        and row["trusted_checkpoint"] is None
+        for row in payload["proofs"]
+    )
+
+
+def test_pre_strict_checkpoint_policy_is_noncanonical_and_upgrades_in_place(
+    persisted_trace_client,
+    monkeypatch,
+):
+    client, _engine, testing_session, run_id = persisted_trace_client
+    _capture_then_verify_bocs(client, run_id, monkeypatch)
+    assert client.post(_boc_url(run_id)).status_code == 201
+    monkeypatch.setattr(inclusion_service, "_verify_proof", lambda *_a, **_k: None)
+
+    def live(**kwargs):
+        bocs = {ROOT_HASH: "00", CHILD_HASH: "01"}
+        return [
+            {
+                **request,
+                "block": {
+                    "workchain": 0,
+                    "shard": -9223372036854775808,
+                    "seqno": 100 + index,
+                    "root_hash": f"{index:064x}",
+                    "file_hash": f"{index + 10:064x}",
+                },
+                "masterchain_anchor": {
+                    "workchain": -1,
+                    "shard": -9223372036854775808,
+                    "seqno": 200,
+                    "root_hash": "aa" * 32,
+                    "file_hash": "bb" * 32,
+                },
+                "trusted_checkpoint": trusted_checkpoint_document(kwargs["network"]),
+                "verifier_policy_id": CURRENT_VERIFIER_POLICY_ID,
+                "transaction_boc_hex": bocs[request["transaction_hash"]],
+                "block_proof_boc_hex": "cc",
+                "trust_level": kwargs["trust_level"],
+            }
+            for index, request in enumerate(kwargs["requests"], start=1)
+        ]
+
+    def endpoint_create(selected_run_id, selected_hash, session):
+        return inclusion_service.create_wallet_transaction_inclusion_proofs(
+            selected_run_id,
+            selected_hash,
+            session,
+            live_verifier=live,
+        )
+
+    monkeypatch.setattr(
+        wallet_activity_router,
+        "create_wallet_transaction_inclusion_proofs",
+        endpoint_create,
+    )
+    url = f"{_boc_url(run_id)}/block-inclusion"
+    assert client.post(url).status_code == 201
+
+    with testing_session() as session:
+        rows = list(session.scalars(select(WalletTransactionInclusionProof)))
+        assert len(rows) == 2
+        for row in rows:
+            request = {
+                "account_address": row.account_address_canonical,
+                "logical_time": row.logical_time,
+                "transaction_hash": row.transaction_hash,
+            }
+            evidence = {
+                **request,
+                "block": inclusion_service._row_block(row, "block"),
+                "masterchain_anchor": inclusion_service._row_block(row, "anchor"),
+                "trusted_checkpoint": trusted_checkpoint_document(row.network),
+                "verifier_policy_id": LEGACY_CHECKPOINT_POLICY_ID,
+                "transaction_boc_hex": row.boc_transaction.transaction_boc_hex,
+                "block_proof_boc_hex": row.block_proof_boc_hex,
+                "trust_level": row.trust_level,
+            }
+            values = inclusion_service._proof_values(
+                row.network,
+                row.trust_level,
+                LEGACY_CHECKPOINT_POLICY_ID,
+                request,
+                row.boc_transaction,
+                evidence,
+                row.verified_at,
+                allow_recognized_legacy_policy=True,
+            )
+            for field, value in values.items():
+                setattr(row, field, value)
+        session.commit()
+
+    legacy = client.get(url)
+    assert legacy.status_code == 200, legacy.text
+    legacy_payload = legacy.json()
+    WalletTransactionInclusionCatalogResponse.model_validate(legacy_payload)
+    assert legacy_payload["verifier_policy_id"] == LEGACY_CHECKPOINT_POLICY_ID
+    assert all(
+        row["evidence_contract_version"] == "ton_transaction_inclusion_v2"
+        and row["canonical_block_chain_verified_at_capture"] is False
+        for row in legacy_payload["proofs"]
+    )
+
+    upgraded = client.post(url)
+    assert upgraded.status_code == 201, upgraded.text
+    upgraded_payload = upgraded.json()
+    assert upgraded_payload["verifier_policy_id"] == CURRENT_VERIFIER_POLICY_ID
+    assert all(
+        row["canonical_block_chain_verified_at_capture"] is True
+        for row in upgraded_payload["proofs"]
+    )
+    assert client.get(url).json() == upgraded_payload
+    with testing_session() as session:
+        policies = list(session.scalars(
+            select(WalletTransactionInclusionProof.verifier_policy_id).order_by(
+                WalletTransactionInclusionProof.verifier_policy_id
+            )
+        ))
+    assert policies == sorted(
+        [LEGACY_CHECKPOINT_POLICY_ID] * 2
+        + [CURRENT_VERIFIER_POLICY_ID] * 2
+    )
+
+
+def test_current_policy_trust_one_outranks_legacy_unpinned_trust_zero():
+    transactions = [
+        SimpleNamespace(inclusion_proofs=[
+            SimpleNamespace(
+                trust_level=0,
+                verifier_policy_id="legacy_unpinned_v1",
+            ),
+            SimpleNamespace(
+                trust_level=1,
+                verifier_policy_id=CURRENT_VERIFIER_POLICY_ID,
+            ),
+        ])
+        for _ in range(2)
+    ]
+    assert inclusion_service._strongest_complete_identity(transactions) == (
+        1,
+        CURRENT_VERIFIER_POLICY_ID,
+    )
+
+
+def test_current_policy_trust_one_outranks_pre_strict_checkpoint_trust_zero():
+    transactions = [
+        SimpleNamespace(inclusion_proofs=[
+            SimpleNamespace(
+                trust_level=0,
+                verifier_policy_id=LEGACY_CHECKPOINT_POLICY_ID,
+            ),
+            SimpleNamespace(
+                trust_level=1,
+                verifier_policy_id=CURRENT_VERIFIER_POLICY_ID,
+            ),
+        ])
+        for _ in range(2)
+    ]
+    assert inclusion_service._strongest_complete_identity(transactions) == (
+        1,
+        CURRENT_VERIFIER_POLICY_ID,
+    )
 
 def test_boc_verification_readback_rejects_relational_tampering(
     persisted_trace_client,
@@ -1394,7 +1702,7 @@ def test_canonical_ledger_report_and_exports_require_block_proved_rows(
     persisted_trace_client,
     monkeypatch,
 ):
-    client, _engine, _testing_session, run_id = persisted_trace_client
+    client, _engine, testing_session, run_id = persisted_trace_client
     _capture_then_verify_bocs(client, run_id, monkeypatch)
     assert client.post(_boc_url(run_id)).status_code == 201
     source = {
@@ -1456,13 +1764,17 @@ def test_canonical_ledger_report_and_exports_require_block_proved_rows(
                     "root_hash": f"{index:064x}",
                     "file_hash": f"{index + 10:064x}",
                 },
-                "masterchain_anchor": {
+                    "masterchain_anchor": {
                     "workchain": -1,
                     "shard": -9223372036854775808,
                     "seqno": 200,
                     "root_hash": "aa" * 32,
-                    "file_hash": "bb" * 32,
-                },
+                        "file_hash": "bb" * 32,
+                    },
+                    "trusted_checkpoint": trusted_checkpoint_document(
+                        kwargs["network"]
+                    ),
+                    "verifier_policy_id": CURRENT_VERIFIER_POLICY_ID,
                 "transaction_boc_hex": bocs[request["transaction_hash"]],
                 "block_proof_boc_hex": "cc",
                 "trust_level": kwargs["trust_level"],
@@ -1483,7 +1795,36 @@ def test_canonical_ledger_report_and_exports_require_block_proved_rows(
         "create_wallet_transaction_inclusion_proofs",
         endpoint_create,
     )
-    assert client.post(f"{_boc_url(run_id)}/block-inclusion").status_code == 201
+    inclusion_url = f"{_boc_url(run_id)}/block-inclusion"
+    monkeypatch.setenv("TON_LITECLIENT_TRUST_LEVEL", "1")
+    trust_one = client.post(inclusion_url)
+    assert trust_one.status_code == 201
+    assert {row["trust_level"] for row in trust_one.json()["proofs"]} == {1}
+    still_not_canonical = client.get(
+        f"/api/wallets/ingest/{run_id}/canonical-ledger"
+    )
+    assert still_not_canonical.status_code == 409
+    assert "trust level 0" in still_not_canonical.json()["detail"]
+
+    monkeypatch.setenv("TON_LITECLIENT_TRUST_LEVEL", "0")
+    trust_zero = client.post(inclusion_url)
+    assert trust_zero.status_code == 201
+    trust_zero_payload = trust_zero.json()
+    assert {row["trust_level"] for row in trust_zero_payload["proofs"]} == {0}
+    assert client.post(inclusion_url).status_code == 200
+    strongest = client.get(inclusion_url)
+    assert strongest.status_code == 200
+    assert strongest.json() == trust_zero_payload
+    with testing_session() as session:
+        assert session.scalar(
+            select(func.count()).select_from(WalletTransactionInclusionProof)
+        ) == 4
+        assert list(
+            session.scalars(
+                select(WalletTransactionInclusionProof.trust_level)
+                .order_by(WalletTransactionInclusionProof.trust_level)
+            )
+        ) == [0, 0, 1, 1]
 
     ledger_url = f"/api/wallets/ingest/{run_id}/canonical-ledger"
     ledger_response = client.get(ledger_url)
@@ -1493,6 +1834,13 @@ def test_canonical_ledger_report_and_exports_require_block_proved_rows(
     assert ledger["canonical_activity_count"] == 1
     assert ledger["transaction_block_inclusion_required"] is True
     assert ledger["activities"][0]["direction"] == "outgoing"
+    trust_zero_digests = {
+        row["transaction_hash"]: row["evidence_digest_sha256"]
+        for row in trust_zero_payload["proofs"]
+    }
+    assert ledger["activities"][0][
+        "transaction_inclusion_proof_digest_sha256"
+    ] == trust_zero_digests[ROOT_HASH]
 
     report_url = f"/api/wallets/ingest/{run_id}/canonical-report"
     report_response = client.get(report_url)

@@ -30,6 +30,10 @@ class WalletTraceEvidenceIneligible(ValueError):
 class WalletTraceEvidenceProviderFailure(RuntimeError):
     """The provider response failed transport, protocol, or anchor checks."""
 
+    def __init__(self, message: str, *, code: str = "provider_error") -> None:
+        self.code = code[:64]
+        super().__init__(message)
+
 
 def get_wallet_transaction_trace_evidence(
     run_id: int,
@@ -53,12 +57,14 @@ def get_wallet_transaction_trace_evidence(
     if not result.ok:
         detail = result.message or "TonAPI trace evidence request failed."
         raise WalletTraceEvidenceProviderFailure(
-            _sanitize_provider_message(detail, settings)
+            _sanitize_provider_message(detail, settings),
+            code=result.error or "provider_error",
         )
     data = result.data
     if not isinstance(data, dict):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI trace evidence response was not an object."
+            "TonAPI trace evidence response was not an object.",
+            code="provider_protocol_error",
         )
     anchor = data.get("anchor")
     summary = data.get("summary")
@@ -69,7 +75,8 @@ def get_wallet_transaction_trace_evidence(
         or trace_state not in ("finalized", "pending")
     ):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI trace evidence response was incomplete."
+            "TonAPI trace evidence response was incomplete.",
+            code="provider_protocol_error",
         )
     if (
         anchor.get("transaction_hash")
@@ -80,7 +87,8 @@ def get_wallet_transaction_trace_evidence(
         != transaction.transaction_account_canonical
     ):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI trace anchor did not match the stored transaction identity."
+            "TonAPI trace anchor did not match the stored transaction identity.",
+            code="provider_protocol_error",
         )
 
     return {

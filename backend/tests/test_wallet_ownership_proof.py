@@ -8,6 +8,7 @@ from nacl.signing import SigningKey
 from pytoniq_core import Address, StateInit, begin_cell
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool
 
 from database import Base
 from schemas import (
@@ -138,3 +139,42 @@ def test_ownership_challenge_accepts_user_friendly_expected_wallet(monkeypatch):
     assert challenge["expected_wallet_account_canonical"] == address.to_str(
         is_user_friendly=False,
     )
+
+
+def test_ownership_releases_pool_connection_during_public_key_child(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("TONCONNECT_EXPECTED_DOMAIN", "tracker.example")
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'ownership.db'}",
+        poolclass=QueuePool,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.2,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    challenge = create_ownership_challenge(session)
+    request, public_key = _fixture(challenge)
+    observed = []
+
+    def resolver(**_kwargs):
+        observed.append(engine.pool.checkedout())
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
+        return public_key
+
+    try:
+        result = verify_ownership_proof(
+            challenge["challenge_id"],
+            request,
+            session,
+            public_key_resolver=resolver,
+        )
+        assert result["signature_verified"] is True
+        assert observed == [0]
+    finally:
+        session.close()
+        engine.dispose()

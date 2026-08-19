@@ -115,6 +115,7 @@ from services.wallet_transaction_inclusion_proof import (
     WalletTransactionInclusionProofNotFound,
     create_wallet_transaction_inclusion_proofs,
     get_wallet_transaction_inclusion_proofs,
+    get_wallet_transaction_inclusion_proofs_for_current_trust,
 )
 from services.wallet_canonical_ledger import (
     WalletCanonicalLedgerConflict,
@@ -1161,7 +1162,7 @@ def prove_wallet_transaction_boc_inclusion_route(
     response.headers.update(headers)
     canonical_run_id = _validated_trace_path(run_id, transaction_hash, headers)
     try:
-        existing = get_wallet_transaction_inclusion_proofs(
+        existing = get_wallet_transaction_inclusion_proofs_for_current_trust(
             canonical_run_id,
             transaction_hash,
             session,

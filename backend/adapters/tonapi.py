@@ -279,8 +279,14 @@ class TonapiAdapter:
                     "TonAPI JSON exceeded structural depth or node limits."
                 )
         except urllib.error.HTTPError as exc:
-            return self._provider_error(
-                f"TonAPI HTTP error: {exc.code} {exc.reason}."
+            status = int(exc.code)
+            return ProviderResult.failure(
+                f"http_{status}" if 400 <= status <= 599 else ERROR_PROVIDER_ERROR,
+                self._sanitize_diagnostic(
+                    f"TonAPI HTTP error: {status} {exc.reason}."
+                )
+                or "TonAPI HTTP error.",
+                source="real",
             )
         except (
             urllib.error.URLError,
