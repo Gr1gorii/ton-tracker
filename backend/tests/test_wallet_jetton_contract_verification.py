@@ -10,7 +10,7 @@ from pydantic import ValidationError
 from pytoniq_core import Address, begin_cell
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import QueuePool, StaticPool
 
 from database import Base, get_session
 from main import app
@@ -92,7 +92,7 @@ def _live_result(*, trust_level: int) -> dict:
         "master_data_hash": master_data.hash.hex(),
         "jetton_content_hash": "66" * 32,
         "account_state_proof_verified": True,
-        "masterchain_checkpoint_chain_verified": trust_level == 0,
+        "masterchain_checkpoint_chain_verified": False,
         "local_tvm_execution_applied": True,
         "account_inclusion_proofs": {
             "jetton_wallet": {
@@ -311,6 +311,71 @@ def test_verification_is_immutable_idempotent_and_provider_free_on_readback():
     assert catalog["verifications"] == [created]
 
 
+def test_jetton_verification_releases_pool_connection_during_child(tmp_path):
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'jetton.db'}",
+        poolclass=QueuePool,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=0.2,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    run = WalletIngestionRun(
+        wallet_address=OWNER,
+        time_window="all",
+        data_mode="real",
+        status="completed",
+        requested_surfaces_json='["balances"]',
+        provider_summary_json='{"tonapi":"live"}',
+        wallet_identity_status="network_scoped",
+        wallet_identity_version="ton_std_address_v1",
+        wallet_network="ton-mainnet",
+        wallet_address_canonical=OWNER,
+        wallet_workchain_id=0,
+        wallet_account_id_hex="11" * 32,
+        wallet_address_format="raw",
+    )
+    run.balance_snapshots.append(
+        WalletBalanceSnapshot(
+            asset="TEST",
+            balance=123456,
+            provider="tonapi",
+            source_status="live",
+            raw_json=json.dumps({
+                "surface": "jettons",
+                "wallet_contract_address": JETTON_WALLET,
+                "jetton_address": JETTON_MASTER,
+            }),
+        )
+    )
+    session.add(run)
+    session.commit()
+    run_id = run.id
+    observed = []
+
+    def verifier(**kwargs):
+        observed.append(engine.pool.checkedout())
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("SELECT 1").scalar_one() == 1
+        return _live_result(trust_level=kwargs["trust_level"])
+
+    try:
+        result = verify_wallet_jetton_contract_relationship(
+            run_id,
+            JETTON_WALLET,
+            JETTON_MASTER,
+            session,
+            live_verifier=verifier,
+        )
+        assert result["wallet_owner_master_verified"] is True
+        assert observed == [0]
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_verification_fails_closed_without_exact_live_snapshot_or_on_tamper():
     session, run_id = _session_with_run()
     with pytest.raises(WalletJettonContractVerificationNotFound):
@@ -352,15 +417,16 @@ def test_schema_rejects_overstated_proof_and_pnl_flags():
             trust_level=kwargs["trust_level"]
         ),
     )
-    payload["is_blockchain_inclusion_proof_verified"] = not (
-        payload["trust_level"] == 0
-    )
+    payload["is_blockchain_inclusion_proof_verified"] = True
     with pytest.raises(ValidationError):
         WalletJettonContractVerificationResponse.model_validate(payload)
 
-    payload["is_blockchain_inclusion_proof_verified"] = (
-        payload["trust_level"] == 0
-    )
+    payload["is_blockchain_inclusion_proof_verified"] = False
+    payload["masterchain_checkpoint_chain_verified"] = True
+    with pytest.raises(ValidationError):
+        WalletJettonContractVerificationResponse.model_validate(payload)
+
+    payload["masterchain_checkpoint_chain_verified"] = False
     payload["eligible_for_cost_basis"] = True
     with pytest.raises(ValidationError):
         WalletJettonContractVerificationResponse.model_validate(payload)

@@ -47,7 +47,7 @@ function preview(): WalletIngestionPreviewResponse {
     time_window: "24h",
     requested_surfaces: ALL_SURFACES,
     provider_coverage: [{
-      provider: "tonapi",
+      provider: "tonapi_wallet_activity_live",
       data_mode: "real",
       source_status: "live",
       warnings: [],

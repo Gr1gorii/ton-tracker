@@ -49,6 +49,8 @@ _RETRYABLE_CODES = {
     "provider_timeout",
     "provider_rate_limited",
     "provider_unavailable",
+    "http_408",
+    "http_425",
     "http_429",
     "http_500",
     "http_502",

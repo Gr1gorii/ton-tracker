@@ -77,6 +77,31 @@ def test_dockerfiles_copy_only_required_application_trees():
     assert "$proxy_add_x_forwarded_for" not in nginx
 
 
+def test_gateway_and_container_bound_every_liteclient_child():
+    from services.ton_liteclient_process import (
+        MAX_PROCESS_DEADLINE_SECONDS,
+        PROCESS_KILL_GRACE_SECONDS,
+        PROCESS_TERMINATE_GRACE_SECONDS,
+    )
+
+    nginx = (ROOT / "frontend/nginx.conf").read_text(encoding="utf-8")
+    timeout = re.search(r"proxy_read_timeout\s+([0-9]+)s;", nginx)
+    assert timeout is not None
+    gateway_seconds = int(timeout.group(1))
+    assert gateway_seconds > (
+        MAX_PROCESS_DEADLINE_SECONDS
+        + PROCESS_TERMINATE_GRACE_SECONDS
+        + PROCESS_KILL_GRACE_SECONDS
+        + 5
+    )
+
+    backend = yaml.safe_load(
+        (ROOT / "compose.production.yml").read_text(encoding="utf-8")
+    )["services"]["backend"]
+    assert backend["mem_limit"] == "${BACKEND_MEMORY_LIMIT:-2g}"
+    assert backend["pids_limit"] == "${BACKEND_PIDS_LIMIT:-256}"
+
+
 def test_backend_dependency_lock_is_complete_and_used_by_ci():
     lock = (ROOT / "backend/requirements.lock").read_text(encoding="utf-8")
     runtime_lock = (ROOT / "backend/requirements.runtime.lock").read_text(
@@ -209,7 +234,7 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
         "${{ github.workspace }}/.release-gate-deployment.json"
     )
     assert "python ops/create_release_manifest.py" in commands
-    assert "--tag v0.73.0" in commands
+    assert "--tag v0.75.0" in commands
     assert '--output "$DEPLOYMENT_MANIFEST_FILE"' in commands
     assert "python ops/inspect_deployment_state.py" in commands
     assert "DEPLOYMENT_STATE_DIRECTORY=$state" in commands
@@ -225,6 +250,12 @@ def test_release_gate_covers_tests_builds_preflight_and_compose():
     assert compose["services"]["backend"]["environment"][
         "WALLET_CASE_JOB_RUNNER"
     ] == "disabled"
+    assert compose["services"]["backend"]["environment"][
+        "WALLET_CASE_EVIDENCE_RUNNER"
+    ] == "disabled"
+    assert compose["services"]["backend"]["environment"][
+        "TON_LITECLIENT_TRUST_LEVEL"
+    ] == "0"
     assert preflight["environment"]["DEPLOYMENT_MANIFEST_FILE"] == (
         "/app/deployment-manifest.json"
     )

@@ -1,44 +1,86 @@
-# GRAM Scope — v0.73.0 Promotion Checklist
+# GRAM Scope — v0.75.0 Promotion Checklist
 
-Current promotion gates for canonical Wallet Case Activity:
+Current promotion gates for Wallet Case Report:
 
-- Product label is `v0.73.0 CASE ACTIVITY`; backend API version stays
+- Product label is `v0.75.0 CASE REPORT`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic must reach the current migration head with model parity from fresh,
-  legacy, current-0017, and every accepted interrupted-DDL/index path.
-- Create/open is canonical and idempotent across friendly/raw address forms;
-  mainnet/testnet and demo/live identities never merge.
-- Case sync is persisted before provider I/O. Claiming is lease-fenced, retry
-  is bounded, one case has at most one active sync, and idempotency-key replay
-  cannot create duplicate jobs.
-- Final sync state and its compatibility ingestion run commit atomically.
-  Public case/job payloads contain no sequential run identifier.
-- Latest attempt, active sync, and latest usable snapshot are separate
-  provenance objects; queued/failed work cannot masquerade as snapshot data.
-- Activity is pinned to one usable snapshot. Cursor state binds the case,
-  snapshot, filters, sort, and keyset position; later syncs cannot alter the
-  remaining pages of an existing traversal.
-- Cross-sync deduplication requires fully revalidated transaction or shared
-  provider event-action identities. Unavailable identities remain separate,
-  while semantic conflicts fail closed as explicit gaps.
-- Native TON has a network-scoped identity. Jetton identity requires the
-  canonical network and master-contract address; symbols never merge assets.
-- Activity responses expose bounded aggregates, observed period, coverage,
-  gaps, and sanitized provenance without raw payloads, internal row/run IDs,
-  worker fields, or chain-proof claims.
-- Summary labels the case's latest usable snapshot while Activity labels its
-  explicit pinned revision. Their latest-run versus cross-sync aggregate
-  distinction remains visible until the next unification slice.
-- Restart recovery, heartbeat, cancel-before/after-provider, retry exhaustion,
-  and stale-writer fencing tests pass. No page-level resume claim is made.
-- Provider configuration makes no health claim. Live cases are advertised only
-  when the guarded TonAPI sync path is actually available; mock fallback is
-  rejected before persistence.
-- The pre-authentication facade is direct-loopback only. Hosted access remains
-  disabled until authentication supplies an owner scope; v0.73.0 must not be
-  promoted as a hosted Wallet Case release.
-- Backend, frontend, migration rehearsal, production contract, credential, and
-  prohibited-brand checks pass before tagging.
+- Alembic reaches revision `20260710_0022` with exact model parity from fresh,
+  legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
+  path. Missing or changed columns, checks, foreign keys, delete actions, and
+  indexes fail closed; downgrade remains unsupported. Revision 0020 versions
+  proofs by trust level. Revision 0021 persists the verifier policy and exact
+  application-pinned network checkpoint and covers both in the proof/catalog
+  digests. Revision 0022 separates the strict proof-chain policy from prior
+  checkpoint rows. The accepted policy is
+  `ton_liteserver_checkpoint_strict_2026_08_v2`.
+  Existing trust-level-0 rows remain preserved as `legacy_unpinned_v1`,
+  noncanonical evidence and are never selected by the current policy. Existing
+  `ton_liteserver_checkpoint_2026_08_v1` rows also remain noncanonical legacy
+  checkpoint evidence.
+- Evidence is bound to one owner-scoped case, usable pinned snapshot, exact
+  source synchronization, and a revalidated provider-observed transaction.
+  Demo fixtures, transfers, swaps, unknown linkage, and mismatched source scope
+  never enter the proof job.
+- POST persists a queued job before proof I/O. UUID idempotency replay returns
+  the same job, a reused key with another fingerprint fails closed, and one
+  case/snapshot/Activity/policy selection has at most one active verification.
+- Claiming is lease-fenced and heartbeat-protected. Restart recovery resumes
+  from the last revalidated immutable artifact; bounded retry distinguishes
+  transient provider failures from permanent protocol/scope conflicts.
+- Cancellation is immediate while queued and cooperatively polled while proof
+  work is running. Inclusion cancellation becomes observable after at most the
+  current whole-operation subprocess deadline plus its bounded terminate/kill
+  grace. Stale workers cannot publish progress or terminal state after losing
+  their lease.
+- TonAPI and liteserver calls hold no application database connection. The
+  complete liteserver operation, including config acquisition, startup, proof
+  work, and shutdown, runs in a child process behind one hard deadline; timeout
+  first terminates and then force-kills it after a bounded grace. Source
+  coordinates and every returned candidate are reloaded and revalidated before
+  immutable persistence or Case-job progress is committed.
+- Trace capture remains normalized evidence and local BOC verification raises
+  the level only to locally verified. `chain-inclusion-proven` additionally
+  requires every block proof to have been captured at trust level 0 from the
+  exact current application-pinned checkpoint for its TON network. The persisted
+  policy/checkpoint binding must reproduce the proof and catalog digests.
+  Canonicality is asserted at capture under that policy, not recreated by an
+  offline BOC replay. Trust level 1 and legacy unpinned trust-0 evidence cannot
+  satisfy current-policy promotion; without a complete current set the job stops
+  as a disclosed noncanonical partial. A partial job exposes only artifacts
+  that still bind to the pinned selection and includes an explicit limitation.
+- Production configuration supplies
+  `TON_LITECLIENT_CACHE_DIRECTORY=/data/liteclient` on the writable persistent
+  data volume. Cache creation and reuse are lock-serialized; inability to
+  create/write the directory or an unsafe path fails the applicable gate.
+- Public catalog/job responses contain only non-sequential case identifiers,
+  sanitized provenance, factual progress, safe messages, and evidence digests.
+  Raw BOCs/provider payloads, compatibility run IDs, database IDs, lease data,
+  idempotency keys, worker lifecycle checkpoint state, SQL diagnostics, and
+  credentials are absent.
+- Runtime readiness is factual: a disabled or dead local Evidence runner makes
+  the action unavailable and publishes a machine-readable limitation instead
+  of allowing a deterministic failing POST.
+- Summary, Activity, and Evidence routes survive direct navigation, refresh,
+  back/forward, transient transport failures, and active-job polling. Keyboard
+  focus, cancellation confirmation, narrow layouts, and both themes pass.
+- The report is pinned to one immutable CaseSync snapshot, content-addressed by
+  its exact public payload projection, and rebuilt deterministically from
+  Activity plus revalidated persisted Evidence. Observed, normalized, and
+  partially verified revisions remain useful and exportable. Canonical requires
+  every published hard gate; one failed proof does not destroy the report.
+- Report output always includes assurance, coverage, gaps, limitations,
+  unverified claims, Activity/Evidence revision digests, and fixed false
+  boundaries for complete history, cost basis, PnL, raw payload inclusion, and
+  provider-free whole-report revalidation. It never exposes run/source IDs or
+  raw proof/provider data.
+- The native-TON artifact remains selected evidence only: it is not
+  authoritative general Activity, does not establish complete history or cost
+  basis, and is not used by PnL. The report does not inflate that artifact.
+- The pre-authentication facade and Evidence runner are direct-loopback only.
+  Hosted access remains disabled until authentication supplies an owner scope;
+  v0.75.0 must not be promoted as a hosted Wallet Case release.
+- Backend, frontend, migration rehearsal, production contract, browser, live
+  provider, credential, and prohibited-brand checks pass before tagging.
 
 ---
 

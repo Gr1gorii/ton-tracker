@@ -108,8 +108,8 @@ export default function GramAccountStateProofCard({
         <span className="gram-proof-flow-icon tone-coral"><Database size={25} weight="duotone" /></span>
         <div>
           <small>Account state</small>
-          <h2>Jetton wallet identity at a proven block</h2>
-          <p>Verify the account-state proof, execute getters locally and bind wallet, master, owner and code into one evidence record.</p>
+          <h2>Jetton wallet identity from verified account state</h2>
+          <p>Check stored account-state material, execute getters locally and bind wallet, master, owner and code without overstating canonical-chain trust.</p>
         </div>
         <span className={verification ? "gram-proof-status is-verified" : "gram-proof-status"}>
           {loading ? <SpinnerGap className="spin" size={15} /> : verification ? <CheckCircle size={15} weight="fill" /> : <Database size={15} />}
@@ -162,24 +162,29 @@ export default function GramAccountStateProofCard({
 }
 
 function AccountProofResult({ verification }: { verification: WalletJettonContractVerificationResponse }) {
+  const hasPersistedMerkleProofs = verification.account_state_inclusion_proofs.length === 2;
   return (
     <div className="gram-proof-result">
       <div className="gram-proof-result-banner">
         <CheckCircle size={20} weight="fill" />
         <div>
           <strong>Account state and jetton relationship verified.</strong>
-          <span>{verification.trust_level === 0 ? "Masterchain checkpoint chain verified at capture." : "Account-state proof verified; a trust-level-0 checkpoint chain is not claimed."}</span>
+          <span>
+            {hasPersistedMerkleProofs
+              ? "Two persisted account Merkle proofs were revalidated. Legacy v1 did not persist the checkpoint policy, so canonical chain inclusion is not claimed."
+              : "This legacy record predates persisted account Merkle proofs and did not persist the checkpoint policy; canonical chain inclusion is not claimed."}
+          </span>
         </div>
-        <span>Trust {verification.trust_level}</span>
+        <span title={`Recorded liteserver trust level ${verification.trust_level}`}>Legacy · non-canonical</span>
       </div>
       <div className="account-proof-checks">
-        <span><Check weight="bold" />Account proof</span>
+        <span>{hasPersistedMerkleProofs ? <Check weight="bold" /> : <WarningCircle weight="fill" />}{hasPersistedMerkleProofs ? "2 account proofs" : "Legacy proof gap"}</span>
         <span><Check weight="bold" />Local TVM</span>
         <span><Check weight="bold" />Owner + master</span>
         <span><Check weight="bold" />Wallet code</span>
       </div>
       <dl className="gram-proof-facts">
-        <div><dt>Anchor</dt><dd>#{verification.anchor.seqno}</dd></div>
+        <div><dt>Observed anchor</dt><dd>#{verification.anchor.seqno}</dd></div>
         <div><dt>Balance units</dt><dd>{verification.wallet_balance_base_units}</dd></div>
         <div><dt>Total supply</dt><dd>{verification.total_supply_base_units}</dd></div>
         <div><dt>Evidence</dt><dd title={verification.evidence_digest_sha256}>{shortAddress(verification.evidence_digest_sha256)}</dd></div>

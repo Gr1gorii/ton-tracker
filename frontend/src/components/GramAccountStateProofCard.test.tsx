@@ -9,6 +9,10 @@ import type {
   WalletJettonContractVerificationCatalogResponse,
   WalletJettonContractVerificationResponse,
 } from "../types";
+import {
+  validateWalletJettonContractVerification,
+  validateWalletJettonContractVerificationCatalog,
+} from "../walletJettonContractVerification";
 
 const apiMocks = vi.hoisted(() => ({
   getWalletJettonContractVerifications: vi.fn(),
@@ -24,6 +28,7 @@ const WALLET = `0:${"2".repeat(64)}`;
 const MASTER = `0:${"3".repeat(64)}`;
 
 function verification(): WalletJettonContractVerificationResponse {
+  const verifiedAt = "2026-07-29T12:00:00Z";
   return {
     contract_version: "ton_jetton_contract_verification_v1",
     verification_id: "7",
@@ -58,8 +63,54 @@ function verification(): WalletJettonContractVerificationResponse {
       master_code_boc_hex: "d".repeat(64),
       master_data_boc_hex: "e".repeat(64),
     },
+    account_state_inclusion_proofs: [
+      {
+        contract_version: "ton_account_state_inclusion_v1",
+        account_role: "jetton_master",
+        account_address_canonical: MASTER,
+        shard_block: {
+          workchain: 0,
+          shard: "-9223372036854775808",
+          seqno: 120,
+          root_hash: "1".repeat(64),
+          file_hash: "2".repeat(64),
+        },
+        boc_sha256: {
+          state_boc_hex: "3".repeat(64),
+          account_proof_boc_hex: "4".repeat(64),
+          shard_proof_boc_hex: "5".repeat(64),
+        },
+        evidence_digest_sha256: "6".repeat(64),
+        verified_at: verifiedAt,
+        provider_requests_performed: false,
+        provider_free_revalidated: true,
+        raw_bocs_returned: false,
+      },
+      {
+        contract_version: "ton_account_state_inclusion_v1",
+        account_role: "jetton_wallet",
+        account_address_canonical: WALLET,
+        shard_block: {
+          workchain: 0,
+          shard: "-9223372036854775808",
+          seqno: 121,
+          root_hash: "7".repeat(64),
+          file_hash: "8".repeat(64),
+        },
+        boc_sha256: {
+          state_boc_hex: "9".repeat(64),
+          account_proof_boc_hex: "a".repeat(64),
+          shard_proof_boc_hex: "b".repeat(64),
+        },
+        evidence_digest_sha256: "c".repeat(64),
+        verified_at: verifiedAt,
+        provider_requests_performed: false,
+        provider_free_revalidated: true,
+        raw_bocs_returned: false,
+      },
+    ],
     evidence_digest_sha256: "f".repeat(64),
-    verified_at: "2026-07-29T12:00:00Z",
+    verified_at: verifiedAt,
     account_state_proof_verified: true,
     masterchain_checkpoint_chain_verified: false,
     local_tvm_execution_applied: true,
@@ -73,6 +124,7 @@ function verification(): WalletJettonContractVerificationResponse {
     eligible_for_cost_basis: false,
     used_by_pnl: false,
     is_ownership_proof: false,
+    limitations: ["checkpoint_policy_not_persisted_v1"],
     message: "Verified account state.",
   };
 }
@@ -128,7 +180,90 @@ describe("GramAccountStateProofCard", () => {
     await waitFor(() => expect(apiMocks.verifyWalletJettonContractRelationship).toHaveBeenCalledWith(25, WALLET, MASTER));
     expect(await screen.findByText("Account state and jetton relationship verified.")).toBeTruthy();
     expect(screen.getByText("Local TVM")).toBeTruthy();
-    expect(screen.getByText("Trust 1")).toBeTruthy();
+    expect(screen.getByText("Legacy · non-canonical")).toBeTruthy();
+    expect(screen.getByText("2 account proofs")).toBeTruthy();
+    expect(screen.getByText(/did not persist the checkpoint policy/)).toBeTruthy();
+  });
+
+  it("never presents a legacy trust-zero record as canonical", async () => {
+    const trustZero = verification();
+    trustZero.trust_level = 0;
+    apiMocks.getWalletJettonContractVerifications
+      .mockReset()
+      .mockResolvedValue(catalog([trustZero]));
+    render(<GramAccountStateProofCard runId={25} dataMode="real" network="ton-mainnet" balances={[balance()]} />);
+
+    expect(await screen.findByText("Legacy · non-canonical")).toBeTruthy();
+    expect(screen.getByTitle("Recorded liteserver trust level 0")).toBeTruthy();
+    expect(screen.getByText(/canonical chain inclusion is not claimed/)).toBeTruthy();
+    expect(screen.queryByText(/checkpoint chain verified/i)).toBeNull();
+  });
+
+  it("shows the explicit proof gap for an older record without persisted Merkle rows", async () => {
+    const legacy = verification();
+    legacy.account_state_inclusion_proofs = [];
+    legacy.raw_account_state_bocs_persisted = false;
+    apiMocks.getWalletJettonContractVerifications
+      .mockReset()
+      .mockResolvedValue(catalog([legacy]));
+    render(<GramAccountStateProofCard runId={25} dataMode="real" network="ton-mainnet" balances={[balance()]} />);
+
+    expect(await screen.findByText("Legacy proof gap")).toBeTruthy();
+    expect(screen.getByText(/predates persisted account Merkle proofs/)).toBeTruthy();
+  });
+
+  it("fails closed for partial, reordered, cross-address or time-detached account proofs", () => {
+    const mutations: Array<(value: any) => void> = [
+      (value) => { value.account_state_inclusion_proofs.pop(); },
+      (value) => { value.account_state_inclusion_proofs.reverse(); },
+      (value) => { value.account_state_inclusion_proofs[0].account_address_canonical = WALLET; },
+      (value) => { value.account_state_inclusion_proofs[0].verified_at = "2026-07-29T12:00:01Z"; },
+      (value) => { value.account_state_inclusion_proofs[0].boc_sha256.state_boc_hex = "bad"; },
+      (value) => { value.account_state_inclusion_proofs[0].state_boc_hex = "00"; },
+    ];
+    mutations.forEach((mutate) => {
+      const value: any = structuredClone(verification());
+      mutate(value);
+      expect(() => validateWalletJettonContractVerification(value, 25, "ton-mainnet")).toThrow(
+        /Jetton contract proof response is incoherent/,
+      );
+    });
+  });
+
+  it("requires the legacy checkpoint limitation and false canonical flags at trust zero", () => {
+    const missingLimitation: any = structuredClone(verification());
+    missingLimitation.limitations = [];
+    expect(() => validateWalletJettonContractVerification(missingLimitation, 25, "ton-mainnet")).toThrow();
+
+    const overstated: any = structuredClone(verification());
+    overstated.trust_level = 0;
+    overstated.masterchain_checkpoint_chain_verified = true;
+    overstated.is_blockchain_inclusion_proof_verified = true;
+    expect(() => validateWalletJettonContractVerification(overstated, 25, "ton-mainnet")).toThrow();
+  });
+
+  it("enforces the exact signed 32-bit seqno ceiling for every block record", () => {
+    const topAnchor: any = structuredClone(verification());
+    topAnchor.anchor.seqno = 2_147_483_648;
+    expect(() => validateWalletJettonContractVerification(topAnchor, 25, "ton-mainnet")).toThrow();
+
+    const nestedShardBlock: any = structuredClone(verification());
+    nestedShardBlock.account_state_inclusion_proofs[0].shard_block.seqno = 2_147_483_648;
+    expect(() => validateWalletJettonContractVerification(nestedShardBlock, 25, "ton-mainnet")).toThrow();
+  });
+
+  it("rejects unexpected public or nested fields in the v1 response", () => {
+    const response: any = structuredClone(verification());
+    response.verifier_policy_id = "not_persisted";
+    expect(() => validateWalletJettonContractVerification(response, 25, "ton-mainnet")).toThrow();
+
+    const nested: any = structuredClone(verification());
+    nested.account_state_inclusion_proofs[0].boc_sha256.state_boc_hex_raw = "00";
+    expect(() => validateWalletJettonContractVerification(nested, 25, "ton-mainnet")).toThrow();
+
+    const responseCatalog: any = catalog([verification()]);
+    responseCatalog.internal_rows = [7];
+    expect(() => validateWalletJettonContractVerificationCatalog(responseCatalog, 25, "ton-mainnet")).toThrow();
   });
 
   it("does not load evidence for a mock run", () => {

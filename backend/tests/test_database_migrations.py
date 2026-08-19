@@ -51,7 +51,11 @@ WALLET_CASES_REVISION = "20260710_0015"
 WALLET_CASE_COMPACT_RESULTS_REVISION = "20260710_0016"
 CASE_SYNC_JOBS_REVISION = "20260710_0017"
 CASE_ACTIVITY_INDEXES_REVISION = "20260710_0018"
-CURRENT_REVISION = CASE_ACTIVITY_INDEXES_REVISION
+CASE_EVIDENCE_VERIFICATIONS_REVISION = "20260710_0019"
+TRANSACTION_INCLUSION_TRUST_REVISION = "20260710_0020"
+TRANSACTION_INCLUSION_CHECKPOINT_REVISION = "20260710_0021"
+STRICT_TRANSACTION_INCLUSION_POLICY_REVISION = "20260710_0022"
+CURRENT_REVISION = STRICT_TRANSACTION_INCLUSION_POLICY_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -65,6 +69,7 @@ JETTON_CONTRACT_VERIFICATIONS_TABLE = (
 )
 WALLET_CASES_TABLE = "wallet_cases"
 WALLET_CASE_SYNCS_TABLE = "wallet_case_syncs"
+CASE_EVIDENCE_VERIFICATIONS_TABLE = "wallet_case_evidence_verifications"
 CASE_SYNC_JOB_PARTIAL_COLUMNS = (
     "status_version INTEGER DEFAULT 1 NOT NULL",
     "idempotency_key VARCHAR(36)",
@@ -1437,6 +1442,10 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -1487,6 +1496,10 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1539,6 +1552,10 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1683,6 +1700,10 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1835,6 +1856,10 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -1991,6 +2016,10 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2428,6 +2457,10 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2525,6 +2558,10 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2729,6 +2766,10 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -2986,6 +3027,10 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_trace_boc_verification_schema(engine)
@@ -3012,6 +3057,10 @@ def test_upgrade_from_0007_reaches_current_model_parity(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert {
         "wallet_native_activity_ledgers",
@@ -3039,6 +3088,10 @@ def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert inspect(engine).get_table_names().count(
         JETTON_CONTRACT_VERIFICATIONS_TABLE
@@ -3069,6 +3122,10 @@ def test_wallet_ownership_challenge_upgrade_from_0009_reaches_model_parity(tmp_p
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -3104,6 +3161,10 @@ def test_account_state_inclusion_upgrade_from_0010_reaches_model_parity(tmp_path
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert "wallet_account_state_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3125,6 +3186,10 @@ def test_transaction_inclusion_upgrade_from_0011_reaches_model_parity(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert "wallet_transaction_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3145,6 +3210,10 @@ def test_dex_protocol_identity_upgrade_from_0012_reaches_model_parity(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     columns = {
         column["name"]
@@ -3168,6 +3237,10 @@ def test_ownership_network_scope_upgrade_from_0013_reaches_model_parity(tmp_path
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -3220,6 +3293,10 @@ def test_wallet_cases_upgrade_from_0014_preserves_runs_without_backfill(tmp_path
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     assert _wallet_case_counts(engine) == (0, 0)
@@ -3402,6 +3479,10 @@ def test_wallet_case_compact_results_upgrade_from_0015_preserves_rows(tmp_path):
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     with engine.connect() as connection:
         row = connection.exec_driver_sql(
@@ -3561,6 +3642,10 @@ def test_case_sync_jobs_upgrade_normalizes_legacy_active_rows_and_enforces_slots
     assert report.applied_revisions == (
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     with engine.connect() as connection:
         legacy = connection.exec_driver_sql(
@@ -3634,6 +3719,7 @@ def test_case_sync_jobs_repairs_each_exact_partial_column_prefix(
 
     _upgrade_to_revision(engine, CASE_ACTIVITY_INDEXES_REVISION)
 
+    _upgrade_to_revision(engine, CURRENT_REVISION)
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
     engine.dispose()
@@ -3667,6 +3753,7 @@ def test_case_sync_jobs_repairs_each_exact_partial_index_prefix(
 
     _upgrade_to_revision(engine, CASE_ACTIVITY_INDEXES_REVISION)
 
+    _upgrade_to_revision(engine, CURRENT_REVISION)
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
     engine.dispose()
@@ -3761,6 +3848,7 @@ def test_case_activity_indexes_resume_each_exact_partial_prefix(
 
     _upgrade_to_revision(engine, CASE_ACTIVITY_INDEXES_REVISION)
 
+    _upgrade_to_revision(engine, CURRENT_REVISION)
     _assert_schema_matches_models(engine)
     inspector = inspect(engine)
     for table, name, columns in CASE_ACTIVITY_INDEX_DEFINITIONS:
@@ -3833,6 +3921,886 @@ def test_case_activity_indexes_require_source_tables_and_are_forward_only(
             "SELECT version_num FROM alembic_version"
         ).scalar_one() == CASE_ACTIVITY_INDEXES_REVISION
     forward_only.dispose()
+
+
+CASE_EVIDENCE_INDEX_DEFINITIONS = (
+    (
+        "uq_wallet_case_evidence_public_id",
+        ("public_id",),
+        True,
+    ),
+    (
+        "uq_wallet_case_evidence_idempotency",
+        ("case_id", "idempotency_key"),
+        True,
+    ),
+    (
+        "uq_wallet_case_evidence_active_selection",
+        ("case_id", "snapshot_sync_id", "activity_public_id", "policy"),
+        True,
+    ),
+    (
+        "ix_wallet_case_evidence_catalog",
+        ("case_id", "snapshot_sync_id", "created_at", "id"),
+        False,
+    ),
+    (
+        "ix_wallet_case_evidence_queue",
+        ("state", "next_attempt_at", "created_at", "id"),
+        False,
+    ),
+    (
+        "ix_wallet_case_evidence_source_transaction",
+        ("source_transaction_id", "state"),
+        False,
+    ),
+)
+
+
+def _stamp_revision(connection, revision: str) -> None:
+    statement = "UPDATE alembic_version SET version_num=?"
+    if hasattr(connection, "exec_driver_sql"):
+        connection.exec_driver_sql(statement, (revision,))
+    else:
+        connection.execute(statement, (revision,))
+
+
+def _insert_raw_case_evidence(
+    connection: sqlite3.Connection,
+    **overrides: Any,
+) -> None:
+    now = "2026-08-11 12:00:00.000000"
+    values: dict[str, Any] = {
+        "public_id": "11111111-1111-4111-8111-111111111111",
+        "case_id": 991,
+        "snapshot_sync_id": 992,
+        "source_sync_id": 992,
+        "source_transaction_id": 993,
+        "activity_public_id": "tx:" + "ab" * 32,
+        "activity_semantic_fingerprint": "cd" * 32,
+        "provider": "tonapi",
+        "network": "ton-mainnet",
+        "wallet_account_canonical": RAW_ADDRESS,
+        "transaction_hash": TRANSACTION_HASH,
+        "transaction_logical_time": TRANSACTION_LT,
+        "idempotency_key": "22222222-2222-4222-8222-222222222222",
+        "request_fingerprint": "ef" * 32,
+        "next_attempt_at": now,
+        "created_at": now,
+        "updated_at": now,
+    }
+    values.update(overrides)
+    columns = ", ".join(values)
+    placeholders = ", ".join("?" for _ in values)
+    connection.execute(
+        f"INSERT INTO {CASE_EVIDENCE_VERIFICATIONS_TABLE} "
+        f"({columns}) VALUES ({placeholders})",
+        tuple(values.values()),
+    )
+
+
+@pytest.mark.parametrize("index_prefix_count", range(7))
+def test_case_evidence_migration_resumes_each_exact_partial_index_prefix(
+    tmp_path,
+    index_prefix_count,
+):
+    engine = _engine(
+        tmp_path / f"partial-case-evidence-indexes-{index_prefix_count}.db"
+    )
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    with engine.begin() as connection:
+        for name, _columns, _unique in CASE_EVIDENCE_INDEX_DEFINITIONS[
+            index_prefix_count:
+        ]:
+            connection.exec_driver_sql(f'DROP INDEX "{name}"')
+        _stamp_revision(connection, CASE_ACTIVITY_INDEXES_REVISION)
+
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+
+    reflected = {
+        str(item["name"]): item
+        for item in inspect(engine).get_indexes(CASE_EVIDENCE_VERIFICATIONS_TABLE)
+    }
+    assert set(reflected) == {
+        definition[0] for definition in CASE_EVIDENCE_INDEX_DEFINITIONS
+    }
+    for name, columns, unique in CASE_EVIDENCE_INDEX_DEFINITIONS:
+        assert tuple(reflected[name]["column_names"]) == columns
+        assert bool(reflected[name]["unique"]) is unique
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_EVIDENCE_VERIFICATIONS_REVISION
+    engine.dispose()
+
+
+def test_case_evidence_migration_rejects_wrong_partial_index(tmp_path):
+    engine = _engine(tmp_path / "wrong-case-evidence-index.db")
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("DROP INDEX uq_wallet_case_evidence_idempotency")
+        connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX uq_wallet_case_evidence_idempotency "
+            "ON wallet_case_evidence_verifications (idempotency_key, case_id)"
+        )
+        _stamp_revision(connection, CASE_ACTIVITY_INDEXES_REVISION)
+
+    with pytest.raises(RuntimeError, match="does not match revision 0019"):
+        _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_ACTIVITY_INDEXES_REVISION
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    (
+        (
+            "FOREIGN KEY(source_transaction_id) REFERENCES wallet_transactions (id) ON DELETE RESTRICT",
+            "FOREIGN KEY(source_transaction_id) REFERENCES wallet_transfers (id) ON DELETE RESTRICT",
+            "foreign keys do not match revision 0019",
+        ),
+        (
+            "FOREIGN KEY(trace_capture_id) REFERENCES wallet_trace_evidence_captures (id) ON DELETE RESTRICT",
+            "FOREIGN KEY(trace_capture_id) REFERENCES wallet_trace_evidence_captures (id) ON DELETE CASCADE",
+            "foreign keys do not match revision 0019",
+        ),
+        (
+            "FOREIGN KEY(native_ledger_id) REFERENCES wallet_native_activity_ledgers (id) ON DELETE RESTRICT",
+            "CHECK (native_ledger_id IS NULL OR native_ledger_id >= 0)",
+            "foreign keys do not match revision 0019",
+        ),
+        (
+            "CONSTRAINT ck_wallet_case_evidence_state CHECK",
+            "CONSTRAINT ck_wallet_case_evidence_state_missing CHECK",
+            "checks do not match revision 0019",
+        ),
+        (
+            "progress_current >= 0 AND progress_current <= 4",
+            "progress_current >= 0 AND progress_current <= 5",
+            "checks do not match revision 0019",
+        ),
+        (
+            "stage IN ('queued', 'retry_wait')",
+            "stage IN ('queued', 'retry_wait', 'validating')",
+            "checks do not match revision 0019",
+        ),
+        (
+            "progress_current = 4 AND trace_capture_id IS NOT NULL",
+            "progress_current >= 4 AND trace_capture_id IS NOT NULL",
+            "checks do not match revision 0019",
+        ),
+    ),
+)
+def test_case_evidence_migration_rejects_fk_and_named_check_drift(
+    tmp_path,
+    old,
+    new,
+    message,
+):
+    engine = _engine(tmp_path / f"case-evidence-drift-{abs(hash(old))}.db")
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    _rewrite_table_sql(
+        engine,
+        CASE_EVIDENCE_VERIFICATIONS_TABLE,
+        old,
+        new,
+    )
+    with engine.begin() as connection:
+        _stamp_revision(connection, CASE_ACTIVITY_INDEXES_REVISION)
+
+    with pytest.raises(RuntimeError, match=message):
+        _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_ACTIVITY_INDEXES_REVISION
+    engine.dispose()
+
+
+def test_case_evidence_migration_never_adopts_pre_revision_rows(tmp_path):
+    path = tmp_path / "pre-revision-case-evidence-data.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        _insert_raw_case_evidence(connection)
+        _stamp_revision(connection, CASE_ACTIVITY_INDEXES_REVISION)
+
+    engine = _engine(path)
+    with pytest.raises(RuntimeError, match="cannot be adopted by revision 0019"):
+        _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_ACTIVITY_INDEXES_REVISION
+        assert connection.exec_driver_sql(
+            "SELECT COUNT(*) FROM wallet_case_evidence_verifications"
+        ).scalar_one() == 1
+    engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"state": "queued", "stage": "validating"},
+        {
+            "state": "running",
+            "stage": "queued",
+            "next_attempt_at": None,
+            "lease_token": "lease",
+            "lease_expires_at": "2026-08-11 12:05:00.000000",
+            "started_at": "2026-08-11 12:00:00.000000",
+        },
+        {
+            "state": "running",
+            "stage": "validating",
+            "next_attempt_at": None,
+            "started_at": "2026-08-11 12:00:00.000000",
+        },
+        {
+            "state": "failed",
+            "stage": "validating",
+            "next_attempt_at": None,
+            "completed_at": "2026-08-11 12:00:00.000000",
+        },
+        {"cancel_requested_at": "2026-08-11 12:00:00.000000"},
+        {
+            "state": "cancelled",
+            "stage": "terminal",
+            "next_attempt_at": None,
+            "completed_at": "2026-08-11 12:00:00.000000",
+        },
+        {
+            "progress_current": 2,
+            "highest_evidence_level": "locally_verified",
+            "boc_verification_id": 997,
+            "boc_digest_sha256": "aa" * 32,
+            "boc_completed_at": "2026-08-11 12:00:00.000000",
+        },
+    ),
+)
+def test_case_evidence_database_checks_reject_invalid_lifecycle_and_prefix(
+    tmp_path,
+    overrides,
+):
+    path = tmp_path / f"invalid-case-evidence-{abs(hash(repr(overrides)))}.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    engine.dispose()
+
+    with sqlite3.connect(path) as connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_raw_case_evidence(connection, **overrides)
+
+
+def test_case_evidence_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "case-evidence-forward-only.db")
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="downgrade would discard"):
+            command.downgrade(
+                migration_config(connection),
+                CASE_ACTIVITY_INDEXES_REVISION,
+            )
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_EVIDENCE_VERIFICATIONS_REVISION
+    engine.dispose()
+
+
+def _insert_raw_transaction_inclusion_proof(
+    connection: sqlite3.Connection,
+    *,
+    trust_level: int,
+    boc_transaction_id: int = 995,
+    digest: str = "ab" * 32,
+) -> None:
+    connection.execute(
+        "INSERT INTO wallet_transaction_inclusion_proofs ("
+        "boc_transaction_id, network, trust_level, account_address_canonical, "
+        "logical_time, transaction_hash, block_workchain, block_shard, "
+        "block_seqno, block_root_hash, block_file_hash, anchor_workchain, "
+        "anchor_shard, anchor_seqno, anchor_root_hash, anchor_file_hash, "
+        "block_proof_boc_hex, transaction_boc_sha256, "
+        "block_proof_boc_sha256, evidence_digest_sha256, verified_at"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            boc_transaction_id,
+            "ton-mainnet",
+            trust_level,
+            RAW_ADDRESS,
+            TRANSACTION_LT,
+            TRANSACTION_HASH,
+            0,
+            "-9223372036854775808",
+            100,
+            "01" * 32,
+            "02" * 32,
+            -1,
+            "-9223372036854775808",
+            200,
+            "03" * 32,
+            "04" * 32,
+            "00",
+            "05" * 32,
+            "06" * 32,
+            digest,
+            "2026-08-11 12:00:00.000000",
+        ),
+    )
+
+
+@pytest.mark.parametrize("resume_state", ("old_only", "both", "new_only"))
+def test_transaction_inclusion_trust_migration_resumes_every_exact_index_state(
+    tmp_path,
+    resume_state,
+):
+    engine = _engine(tmp_path / f"transaction-trust-resume-{resume_state}.db")
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    with engine.begin() as connection:
+        if resume_state in {"both", "new_only"}:
+            connection.exec_driver_sql(
+                "CREATE UNIQUE INDEX "
+                "uq_wallet_transaction_inclusion_boc_transaction_trust "
+                "ON wallet_transaction_inclusion_proofs "
+                "(boc_transaction_id, trust_level)"
+            )
+        if resume_state == "new_only":
+            connection.exec_driver_sql(
+                "DROP INDEX uq_wallet_transaction_inclusion_boc_transaction"
+            )
+
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_TRUST_REVISION)
+
+    indexes = {
+        item["name"]: item
+        for item in inspect(engine).get_indexes(
+            "wallet_transaction_inclusion_proofs"
+        )
+    }
+    assert set(indexes) == {
+        "ix_wallet_transaction_inclusion_digest",
+        "uq_wallet_transaction_inclusion_boc_transaction_trust",
+    }
+    assert tuple(
+        indexes["uq_wallet_transaction_inclusion_boc_transaction_trust"][
+            "column_names"
+        ]
+    ) == ("boc_transaction_id", "trust_level")
+    assert bool(
+        indexes["uq_wallet_transaction_inclusion_boc_transaction_trust"][
+            "unique"
+        ]
+    ) is True
+    engine.dispose()
+
+
+def test_transaction_inclusion_trust_migration_preserves_old_proof_and_versions_it(
+    tmp_path,
+):
+    path = tmp_path / "transaction-trust-preserve.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        _insert_raw_transaction_inclusion_proof(connection, trust_level=1)
+
+    engine = _engine(path)
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_TRUST_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT trust_level, evidence_digest_sha256 "
+            "FROM wallet_transaction_inclusion_proofs"
+        ).fetchall() == [(1, "ab" * 32)]
+        _insert_raw_transaction_inclusion_proof(
+            connection,
+            trust_level=0,
+            digest="cd" * 32,
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_raw_transaction_inclusion_proof(
+                connection,
+                trust_level=1,
+                digest="ef" * 32,
+            )
+        assert connection.execute(
+            "SELECT trust_level FROM wallet_transaction_inclusion_proofs "
+            "ORDER BY trust_level"
+        ).fetchall() == [(0,), (1,)]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("wrong_new", "missing_both", "unsupported_trust"),
+)
+def test_transaction_inclusion_trust_migration_rejects_unresumable_schema(
+    tmp_path,
+    mutation,
+):
+    path = tmp_path / f"transaction-trust-reject-{mutation}.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, CASE_EVIDENCE_VERIFICATIONS_REVISION)
+    if mutation == "wrong_new":
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "CREATE UNIQUE INDEX "
+                "uq_wallet_transaction_inclusion_boc_transaction_trust "
+                "ON wallet_transaction_inclusion_proofs "
+                "(trust_level, boc_transaction_id)"
+            )
+    elif mutation == "missing_both":
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "DROP INDEX uq_wallet_transaction_inclusion_boc_transaction"
+            )
+    else:
+        engine.dispose()
+        with sqlite3.connect(path) as connection:
+            _insert_raw_transaction_inclusion_proof(
+                connection,
+                trust_level=2,
+            )
+        engine = _engine(path)
+
+    with pytest.raises(RuntimeError, match="revision 0020|unsupported"):
+        _upgrade_to_revision(engine, TRANSACTION_INCLUSION_TRUST_REVISION)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_EVIDENCE_VERIFICATIONS_REVISION
+    engine.dispose()
+
+
+def test_transaction_inclusion_trust_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "transaction-trust-forward-only.db")
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_TRUST_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="intentionally unsupported"):
+            command.downgrade(
+                migration_config(connection),
+                CASE_EVIDENCE_VERIFICATIONS_REVISION,
+            )
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == TRANSACTION_INCLUSION_TRUST_REVISION
+    # Model parity is defined at the current head. Preserve the exact 0020
+    # forward-only assertion above, then apply the additive 0021 columns
+    # before comparing the reflected schema with current metadata.
+    _upgrade_to_revision(engine, CURRENT_REVISION)
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+CHECKPOINT_POLICY = "ton_liteserver_checkpoint_2026_08_v1"
+STRICT_CHECKPOINT_POLICY = "ton_liteserver_checkpoint_strict_2026_08_v2"
+LEGACY_CHECKPOINT_POLICY = "legacy_unpinned_v1"
+MAINNET_CHECKPOINT = (
+    -1,
+    "-9223372036854775808",
+    46894135,
+    "3048e69a12cf946ebc99b4cf9ca61c3ff4b3fcc88c4015763ac01204ecc1bf9f",
+    "bbdac0b4543e9141449ceb37c3c63ba6e9cc4e2c904d77f56d17e44acf1d1bed",
+)
+
+
+def _checkpoint_column_sql() -> tuple[str, ...]:
+    return (
+        "verifier_policy_id VARCHAR(64) DEFAULT 'legacy_unpinned_v1' NOT NULL",
+        "trusted_checkpoint_workchain INTEGER",
+        "trusted_checkpoint_shard VARCHAR(24)",
+        "trusted_checkpoint_seqno INTEGER",
+        "trusted_checkpoint_root_hash VARCHAR(64)",
+        "trusted_checkpoint_file_hash VARCHAR(64)",
+    )
+
+
+def _insert_raw_current_checkpoint_proof(
+    connection: sqlite3.Connection,
+    *,
+    policy: str = CHECKPOINT_POLICY,
+    network: str = "ton-mainnet",
+    checkpoint: tuple[Any, ...] = MAINNET_CHECKPOINT,
+    digest: str = "cd" * 32,
+) -> None:
+    connection.execute(
+        "INSERT INTO wallet_transaction_inclusion_proofs ("
+        "boc_transaction_id, network, trust_level, account_address_canonical, "
+        "logical_time, transaction_hash, block_workchain, block_shard, "
+        "block_seqno, block_root_hash, block_file_hash, anchor_workchain, "
+        "anchor_shard, anchor_seqno, anchor_root_hash, anchor_file_hash, "
+        "block_proof_boc_hex, transaction_boc_sha256, "
+        "block_proof_boc_sha256, evidence_digest_sha256, verified_at, "
+        "verifier_policy_id, trusted_checkpoint_workchain, "
+        "trusted_checkpoint_shard, trusted_checkpoint_seqno, "
+        "trusted_checkpoint_root_hash, trusted_checkpoint_file_hash"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            995,
+            network,
+            0,
+            RAW_ADDRESS,
+            TRANSACTION_LT,
+            TRANSACTION_HASH,
+            0,
+            "-9223372036854775808",
+            100,
+            "01" * 32,
+            "02" * 32,
+            -1,
+            "-9223372036854775808",
+            200,
+            "03" * 32,
+            "04" * 32,
+            "00",
+            "05" * 32,
+            "06" * 32,
+            digest,
+            "2026-08-11 12:00:00.000000",
+            policy,
+            *checkpoint,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("prefix", "index_state", "one_trigger"),
+    (
+        (0, "old", False),
+        (3, "old", False),
+        (6, "old", False),
+        (6, "both", False),
+        (6, "new", False),
+        (6, "new", True),
+    ),
+)
+def test_transaction_checkpoint_migration_resumes_exact_prefix_states(
+    tmp_path,
+    prefix,
+    index_state,
+    one_trigger,
+):
+    engine = _engine(
+        tmp_path / f"checkpoint-resume-{prefix}-{index_state}-{one_trigger}.db"
+    )
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_TRUST_REVISION)
+    with engine.begin() as connection:
+        for ddl in _checkpoint_column_sql()[:prefix]:
+            connection.exec_driver_sql(
+                f"ALTER TABLE wallet_transaction_inclusion_proofs ADD COLUMN {ddl}"
+            )
+        if index_state in {"both", "new"}:
+            connection.exec_driver_sql(
+                "CREATE UNIQUE INDEX "
+                "uq_wallet_transaction_inclusion_boc_transaction_trust_policy "
+                "ON wallet_transaction_inclusion_proofs "
+                "(boc_transaction_id, trust_level, verifier_policy_id)"
+            )
+        if index_state == "new":
+            connection.exec_driver_sql(
+                "DROP INDEX uq_wallet_transaction_inclusion_boc_transaction_trust"
+            )
+        if one_trigger:
+            from importlib import import_module
+
+            migration = import_module(
+                "migrations.versions.20260710_0021_transaction_inclusion_pinned_checkpoints"
+            )
+            connection.exec_driver_sql(
+                migration._trigger_sql(migration._INSERT_TRIGGER, "INSERT")
+            )
+
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_CHECKPOINT_REVISION)
+    inspector = inspect(engine)
+    columns = {row["name"] for row in inspector.get_columns(
+        "wallet_transaction_inclusion_proofs"
+    )}
+    assert {value.split()[0] for value in _checkpoint_column_sql()}.issubset(columns)
+    indexes = {
+        row["name"]: tuple(row.get("column_names") or ())
+        for row in inspector.get_indexes("wallet_transaction_inclusion_proofs")
+    }
+    assert indexes["uq_wallet_transaction_inclusion_boc_transaction_trust_policy"] == (
+        "boc_transaction_id",
+        "trust_level",
+        "verifier_policy_id",
+    )
+    with engine.connect() as connection:
+        assert {
+            row[0]
+            for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type='trigger' AND "
+                "tbl_name='wallet_transaction_inclusion_proofs'"
+            )
+        } == {
+            "ck_wallet_transaction_inclusion_checkpoint_insert",
+            "ck_wallet_transaction_inclusion_checkpoint_update",
+        }
+    engine.dispose()
+
+
+def test_transaction_checkpoint_migration_preserves_legacy_and_allows_pinned_upgrade(
+    tmp_path,
+):
+    path = tmp_path / "checkpoint-preserve.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_TRUST_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        _insert_raw_transaction_inclusion_proof(connection, trust_level=0)
+
+    engine = _engine(path)
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_CHECKPOINT_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT verifier_policy_id, trusted_checkpoint_root_hash FROM "
+            "wallet_transaction_inclusion_proofs"
+        ).fetchall() == [(LEGACY_CHECKPOINT_POLICY, None)]
+        _insert_raw_current_checkpoint_proof(connection)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_raw_current_checkpoint_proof(connection, digest="ef" * 32)
+        assert connection.execute(
+            "SELECT verifier_policy_id FROM wallet_transaction_inclusion_proofs "
+            "ORDER BY verifier_policy_id"
+        ).fetchall() == [
+            (LEGACY_CHECKPOINT_POLICY,),
+            (CHECKPOINT_POLICY,),
+        ]
+
+
+@pytest.mark.parametrize(
+    ("policy", "network", "checkpoint"),
+    (
+        ("forged_policy", "ton-mainnet", MAINNET_CHECKPOINT),
+        (
+            CHECKPOINT_POLICY,
+            "ton-mainnet",
+            (-1, "-9223372036854775808", 46894135, "ff" * 32, "aa" * 32),
+        ),
+        (CHECKPOINT_POLICY, "ton-testnet", MAINNET_CHECKPOINT),
+        (CHECKPOINT_POLICY, "ton-mainnet", (None, None, None, None, None)),
+        (
+            LEGACY_CHECKPOINT_POLICY,
+            "ton-mainnet",
+            MAINNET_CHECKPOINT,
+        ),
+    ),
+)
+def test_transaction_checkpoint_triggers_reject_impossible_provenance(
+    tmp_path,
+    policy,
+    network,
+    checkpoint,
+):
+    path = tmp_path / f"checkpoint-trigger-{abs(hash((policy, network, checkpoint)))}.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_CHECKPOINT_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_raw_current_checkpoint_proof(
+                connection,
+                policy=policy,
+                network=network,
+                checkpoint=checkpoint,
+            )
+
+
+@pytest.mark.parametrize("mutation", ("drop", "rewrite"))
+def test_current_schema_rejects_checkpoint_trigger_drift(tmp_path, mutation):
+    engine = _engine(tmp_path / f"checkpoint-trigger-drift-{mutation}.db")
+    assert run_database_migrations(engine).revision_after == CURRENT_REVISION
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DROP TRIGGER ck_wallet_transaction_inclusion_checkpoint_insert"
+        )
+        if mutation == "rewrite":
+            connection.exec_driver_sql(
+                "CREATE TRIGGER ck_wallet_transaction_inclusion_checkpoint_insert "
+                "BEFORE INSERT ON wallet_transaction_inclusion_proofs "
+                "BEGIN SELECT 1; END"
+            )
+    with pytest.raises(MigrationBootstrapError, match="checkpoint triggers differ"):
+        run_database_migrations(engine)
+    engine.dispose()
+
+
+def test_transaction_checkpoint_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "checkpoint-forward-only.db")
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_CHECKPOINT_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="intentionally unsupported"):
+            command.downgrade(
+                migration_config(connection),
+                TRANSACTION_INCLUSION_TRUST_REVISION,
+            )
+    engine.dispose()
+
+
+def test_strict_proof_policy_migration_preserves_v1_and_allows_v2_coexistence(
+    tmp_path,
+):
+    path = tmp_path / "strict-proof-policy-preserve.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_CHECKPOINT_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        _insert_raw_current_checkpoint_proof(
+            connection,
+            policy=CHECKPOINT_POLICY,
+            digest="ab" * 32,
+        )
+
+    engine = _engine(path)
+    _upgrade_to_revision(engine, STRICT_TRANSACTION_INCLUSION_POLICY_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        assert connection.execute(
+            "SELECT verifier_policy_id, trusted_checkpoint_root_hash FROM "
+            "wallet_transaction_inclusion_proofs"
+        ).fetchall() == [(CHECKPOINT_POLICY, MAINNET_CHECKPOINT[3])]
+        _insert_raw_current_checkpoint_proof(
+            connection,
+            policy=STRICT_CHECKPOINT_POLICY,
+            digest="cd" * 32,
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_raw_current_checkpoint_proof(
+                connection,
+                policy=STRICT_CHECKPOINT_POLICY,
+                digest="ef" * 32,
+            )
+        assert connection.execute(
+            "SELECT verifier_policy_id FROM wallet_transaction_inclusion_proofs "
+            "ORDER BY verifier_policy_id"
+        ).fetchall() == [
+            (CHECKPOINT_POLICY,),
+            (STRICT_CHECKPOINT_POLICY,),
+        ]
+
+
+@pytest.mark.parametrize(
+    ("policy", "network", "checkpoint"),
+    (
+        ("forged_policy", "ton-mainnet", MAINNET_CHECKPOINT),
+        (
+            STRICT_CHECKPOINT_POLICY,
+            "ton-mainnet",
+            (-1, "-9223372036854775808", 46894135, "ff" * 32, "aa" * 32),
+        ),
+        (STRICT_CHECKPOINT_POLICY, "ton-testnet", MAINNET_CHECKPOINT),
+        (
+            STRICT_CHECKPOINT_POLICY,
+            "ton-mainnet",
+            (None, None, None, None, None),
+        ),
+        (
+            CHECKPOINT_POLICY,
+            "ton-mainnet",
+            (-1, "-9223372036854775808", 46894135, "ff" * 32, "aa" * 32),
+        ),
+    ),
+)
+def test_strict_proof_policy_triggers_reject_impossible_provenance(
+    tmp_path,
+    policy,
+    network,
+    checkpoint,
+):
+    path = tmp_path / f"strict-policy-trigger-{abs(hash(repr((policy, network, checkpoint))))}.db"
+    engine = _engine(path)
+    _upgrade_to_revision(engine, STRICT_TRANSACTION_INCLUSION_POLICY_REVISION)
+    engine.dispose()
+    with sqlite3.connect(path) as connection:
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_raw_current_checkpoint_proof(
+                connection,
+                policy=policy,
+                network=network,
+                checkpoint=checkpoint,
+            )
+
+
+@pytest.mark.parametrize(
+    ("insert_trigger", "update_trigger"),
+    (
+        ("old", "old"),
+        ("new", "old"),
+        ("old", "new"),
+        (None, "old"),
+        ("new", None),
+        (None, None),
+    ),
+)
+def test_strict_proof_policy_migration_resumes_trigger_transition(
+    tmp_path,
+    insert_trigger,
+    update_trigger,
+):
+    engine = _engine(
+        tmp_path / f"strict-policy-resume-{insert_trigger}-{update_trigger}.db"
+    )
+    _upgrade_to_revision(engine, TRANSACTION_INCLUSION_CHECKPOINT_REVISION)
+    old = importlib.import_module(
+        "migrations.versions.20260710_0021_transaction_inclusion_pinned_checkpoints"
+    )
+    new = importlib.import_module(
+        "migrations.versions.20260710_0022_strict_liteserver_proof_policy"
+    )
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DROP TRIGGER ck_wallet_transaction_inclusion_checkpoint_insert"
+        )
+        connection.exec_driver_sql(
+            "DROP TRIGGER ck_wallet_transaction_inclusion_checkpoint_update"
+        )
+        for name, event, state in (
+            (new._INSERT_TRIGGER, "INSERT", insert_trigger),
+            (new._UPDATE_TRIGGER, "UPDATE", update_trigger),
+        ):
+            if state is not None:
+                source = old if state == "old" else new
+                connection.exec_driver_sql(source._trigger_sql(name, event))
+
+    _upgrade_to_revision(engine, STRICT_TRANSACTION_INCLUSION_POLICY_REVISION)
+    with engine.connect() as connection:
+        rows = connection.exec_driver_sql(
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND "
+            "tbl_name='wallet_transaction_inclusion_proofs'"
+        ).fetchall()
+    assert {
+        name: new._normalize_sql(sql) for name, sql in rows
+    } == {
+        new._INSERT_TRIGGER: new._normalize_sql(
+            new._trigger_sql(new._INSERT_TRIGGER, "INSERT")
+        ),
+        new._UPDATE_TRIGGER: new._normalize_sql(
+            new._trigger_sql(new._UPDATE_TRIGGER, "UPDATE")
+        ),
+    }
+    engine.dispose()
+
+
+def test_strict_proof_policy_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "strict-proof-policy-forward-only.db")
+    _upgrade_to_revision(engine, STRICT_TRANSACTION_INCLUSION_POLICY_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="intentionally unsupported"):
+            command.downgrade(
+                migration_config(connection),
+                TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+            )
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == STRICT_TRANSACTION_INCLUSION_POLICY_REVISION
+    engine.dispose()
 
 
 def test_wallet_case_constraints_enforce_scope_bounds_progress_and_cascade(
@@ -4439,6 +5407,10 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         WALLET_CASE_COMPACT_RESULTS_REVISION,
         CASE_SYNC_JOBS_REVISION,
         CASE_ACTIVITY_INDEXES_REVISION,
+        CASE_EVIDENCE_VERIFICATIONS_REVISION,
+        TRANSACTION_INCLUSION_TRUST_REVISION,
+        TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
+        STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

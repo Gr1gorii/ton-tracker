@@ -672,7 +672,7 @@ export async function getWalletCanonicalReportAvailability(
   if (res.ok) {
     return {
       available: true,
-      message: "Canonical ledger and report are ready for export.",
+      message: "Legacy run-scoped ledger and compatibility report are ready for export.",
     };
   }
 

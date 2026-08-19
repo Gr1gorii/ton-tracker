@@ -228,7 +228,25 @@ class WalletCaseService:
 
         active = self.repository.get_active_sync(case_id=wallet_case.id)
         if active is not None:
-            raise WalletCaseSyncAlreadyActive(active.public_id)
+            active_public_id = active.public_id
+            # A same-key caller can commit between the first idempotency read
+            # and the active-selection read. Refresh the transaction snapshot
+            # and let idempotent replay take precedence over active conflict.
+            self.session.rollback()
+            replay = self.repository.get_by_idempotency_key(
+                case_id=wallet_case.id,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                if replay.request_fingerprint != fingerprint:
+                    raise WalletCaseIdempotencyConflict(
+                        "Idempotency-Key was already used for another sync scope."
+                    )
+                return self._sync_response(
+                    replay,
+                    case_public_id=wallet_case.public_id,
+                ), True
+            raise WalletCaseSyncAlreadyActive(active_public_id)
 
         queued_at = _as_utc(now or _utc_now())
         ingestion_settings = self._settings_for_case(

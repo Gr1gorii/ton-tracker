@@ -312,6 +312,47 @@ def _assert_current_schema(connection: Connection) -> None:
                 f"actual={sorted(actual_checks, key=repr)}"
             )
 
+    if connection.dialect.name == "sqlite" and (
+        "wallet_transaction_inclusion_proofs" in actual_tables
+    ):
+        from importlib import import_module
+
+        _checkpoint_migration = import_module(
+            "migrations.versions.20260710_0022_strict_liteserver_proof_policy"
+        )
+
+        trigger_rows = connection.execute(text(
+            "SELECT name, sql FROM sqlite_master WHERE type = 'trigger' "
+            "AND tbl_name = 'wallet_transaction_inclusion_proofs'"
+        )).all()
+        actual_triggers = {
+            str(name): _checkpoint_migration._normalize_sql(sql)
+            for name, sql in trigger_rows
+        }
+        expected_triggers = {
+            _checkpoint_migration._INSERT_TRIGGER: (
+                _checkpoint_migration._normalize_sql(
+                    _checkpoint_migration._trigger_sql(
+                        _checkpoint_migration._INSERT_TRIGGER,
+                        "INSERT",
+                    )
+                )
+            ),
+            _checkpoint_migration._UPDATE_TRIGGER: (
+                _checkpoint_migration._normalize_sql(
+                    _checkpoint_migration._trigger_sql(
+                        _checkpoint_migration._UPDATE_TRIGGER,
+                        "UPDATE",
+                    )
+                )
+            ),
+        }
+        if actual_triggers != expected_triggers:
+            errors.append(
+                "wallet_transaction_inclusion_proofs: current checkpoint "
+                "triggers differ"
+            )
+
     if errors:
         details = "; ".join(errors[:20])
         raise MigrationBootstrapError(

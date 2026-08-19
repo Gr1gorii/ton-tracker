@@ -771,10 +771,20 @@ export interface WalletTransactionInclusionBlockRecord {
   file_hash: string;
 }
 
+export type WalletTransactionInclusionVerifierPolicy =
+  | "legacy_unpinned_v1"
+  | "ton_liteserver_checkpoint_2026_08_v1"
+  | "ton_liteserver_checkpoint_strict_2026_08_v2";
+
 export interface WalletTransactionInclusionProofRecord {
-  contract_version: "ton_transaction_inclusion_v1";
+  contract_version: "ton_transaction_inclusion_v2";
+  evidence_contract_version:
+    | "ton_transaction_inclusion_v1"
+    | "ton_transaction_inclusion_v2";
   network: "ton-mainnet" | "ton-testnet";
   trust_level: 0 | 1;
+  verifier_policy_id: WalletTransactionInclusionVerifierPolicy;
+  trusted_checkpoint: WalletTransactionInclusionBlockRecord | null;
   account_address_canonical: string;
   logical_time: string;
   transaction_hash: string;
@@ -786,12 +796,15 @@ export interface WalletTransactionInclusionProofRecord {
   verified_at: string;
   block_merkle_proof_verified: true;
   canonical_block_chain_verified_at_capture: boolean;
+  checkpoint_to_observed_head_transcript_persisted: false;
   provider_free_revalidated: true;
   raw_bocs_returned: false;
 }
 
 export interface WalletTransactionInclusionCatalogResponse {
-  contract_version: "ton_transaction_inclusion_v1";
+  contract_version: "ton_transaction_inclusion_v2";
+  verifier_policy_id: WalletTransactionInclusionVerifierPolicy;
+  trusted_checkpoint: WalletTransactionInclusionBlockRecord | null;
   boc_verification_id: string;
   proof_count: number;
   proof_digests: string[];
@@ -936,6 +949,23 @@ export interface WalletJettonContractVerificationAnchorRecord {
   file_hash: string;
 }
 
+export interface WalletAccountStateInclusionProofRecord {
+  contract_version: "ton_account_state_inclusion_v1";
+  account_role: "jetton_master" | "jetton_wallet";
+  account_address_canonical: string;
+  shard_block: WalletJettonContractVerificationAnchorRecord;
+  boc_sha256: {
+    state_boc_hex: string;
+    account_proof_boc_hex: string;
+    shard_proof_boc_hex: string;
+  };
+  evidence_digest_sha256: string;
+  verified_at: string;
+  provider_requests_performed: false;
+  provider_free_revalidated: true;
+  raw_bocs_returned: false;
+}
+
 export interface WalletJettonContractVerificationResponse {
   contract_version: "ton_jetton_contract_verification_v1";
   verification_id: string;
@@ -958,22 +988,29 @@ export interface WalletJettonContractVerificationResponse {
   master_code_hash: string;
   master_data_hash: string;
   jetton_content_hash: string;
-  account_state_boc_hashes: Record<string, string>;
+  account_state_boc_hashes: {
+    wallet_code_boc_hex: string;
+    wallet_data_boc_hex: string;
+    master_code_boc_hex: string;
+    master_data_boc_hex: string;
+  };
+  account_state_inclusion_proofs: WalletAccountStateInclusionProofRecord[];
   evidence_digest_sha256: string;
   verified_at: string;
   account_state_proof_verified: true;
-  masterchain_checkpoint_chain_verified: boolean;
+  masterchain_checkpoint_chain_verified: false;
   local_tvm_execution_applied: true;
   wallet_owner_master_verified: true;
   master_wallet_address_verified: true;
   wallet_code_consistency_verified: true;
   jetton_asset_identity_applied: true;
-  raw_account_state_bocs_persisted: true;
+  raw_account_state_bocs_persisted: boolean;
   raw_account_state_bocs_returned: false;
-  is_blockchain_inclusion_proof_verified: boolean;
+  is_blockchain_inclusion_proof_verified: false;
   eligible_for_cost_basis: false;
   used_by_pnl: false;
   is_ownership_proof: false;
+  limitations: ["checkpoint_policy_not_persisted_v1"];
   message: string;
 }
 

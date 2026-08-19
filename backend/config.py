@@ -74,8 +74,9 @@ class Settings:
     wallet_activity_live_event_limit: int = 100
     wallet_activity_live_event_max_pages: int = 10
     ton_network: str = "mainnet"
-    ton_liteclient_trust_level: int = 1
+    ton_liteclient_trust_level: int = 0
     ton_liteclient_timeout_seconds: int = 20
+    ton_liteclient_cache_directory: str = "~/.cache/gram-scope/liteclient"
     tonconnect_expected_domain: str = "127.0.0.1:5173"
     tonconnect_proof_ttl_seconds: int = 900
     backup_health_file: str = ""
@@ -89,6 +90,13 @@ class Settings:
     wallet_case_job_max_attempts: int = 4
     wallet_case_job_retry_base_seconds: int = 2
     wallet_case_job_retry_cap_seconds: int = 60
+    wallet_case_evidence_runner: str = "local"
+    wallet_case_evidence_poll_milliseconds: int = 500
+    wallet_case_evidence_lease_seconds: int = 60
+    wallet_case_evidence_heartbeat_seconds: int = 10
+    wallet_case_evidence_max_attempts: int = 4
+    wallet_case_evidence_retry_base_seconds: int = 2
+    wallet_case_evidence_retry_cap_seconds: int = 60
 
     @property
     def is_mock(self) -> bool:
@@ -148,6 +156,11 @@ def get_settings() -> Settings:
     wallet_case_job_runner = _env("WALLET_CASE_JOB_RUNNER", "local").lower()
     if wallet_case_job_runner not in {"local", "disabled"}:
         wallet_case_job_runner = "disabled"
+    wallet_case_evidence_runner = _env(
+        "WALLET_CASE_EVIDENCE_RUNNER", "local"
+    ).lower()
+    if wallet_case_evidence_runner not in {"local", "disabled"}:
+        wallet_case_evidence_runner = "disabled"
 
     return Settings(
         data_mode=mode,
@@ -198,10 +211,13 @@ def get_settings() -> Settings:
         ),
         ton_network=ton_network,
         ton_liteclient_trust_level=_env_int(
-            "TON_LITECLIENT_TRUST_LEVEL", 1, 0, 1
+            "TON_LITECLIENT_TRUST_LEVEL", 0, 0, 1
         ),
         ton_liteclient_timeout_seconds=_env_int(
             "TON_LITECLIENT_TIMEOUT_SECONDS", 20, 5, 60
+        ),
+        ton_liteclient_cache_directory=_env(
+            "TON_LITECLIENT_CACHE_DIRECTORY", "~/.cache/gram-scope/liteclient"
         ),
         tonconnect_expected_domain=_env(
             "TONCONNECT_EXPECTED_DOMAIN", "127.0.0.1:5173"
@@ -235,6 +251,25 @@ def get_settings() -> Settings:
         ),
         wallet_case_job_retry_cap_seconds=_env_int(
             "WALLET_CASE_JOB_RETRY_CAP_SECONDS", 60, 2, 900
+        ),
+        wallet_case_evidence_runner=wallet_case_evidence_runner,
+        wallet_case_evidence_poll_milliseconds=_env_int(
+            "WALLET_CASE_EVIDENCE_POLL_MILLISECONDS", 500, 100, 15000
+        ),
+        wallet_case_evidence_lease_seconds=_env_int(
+            "WALLET_CASE_EVIDENCE_LEASE_SECONDS", 60, 30, 3600
+        ),
+        wallet_case_evidence_heartbeat_seconds=_env_int(
+            "WALLET_CASE_EVIDENCE_HEARTBEAT_SECONDS", 10, 2, 300
+        ),
+        wallet_case_evidence_max_attempts=_env_int(
+            "WALLET_CASE_EVIDENCE_MAX_ATTEMPTS", 4, 1, 10
+        ),
+        wallet_case_evidence_retry_base_seconds=_env_int(
+            "WALLET_CASE_EVIDENCE_RETRY_BASE_SECONDS", 2, 1, 300
+        ),
+        wallet_case_evidence_retry_cap_seconds=_env_int(
+            "WALLET_CASE_EVIDENCE_RETRY_CAP_SECONDS", 60, 2, 900
         ),
     )
 

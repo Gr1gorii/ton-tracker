@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowClockwise, ChartLineUp, Gauge, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, ChartLineUp, Gauge, ShieldCheck, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 
-import { caseActivityPath, caseSummaryPath } from "../caseRouting";
+import { caseActivitySearch, DEFAULT_CASE_ACTIVITY_FILTERS } from "../caseActivityQuery";
+import { caseEvidenceSearch } from "../caseEvidenceQuery";
+import { caseActivityPath, caseEvidencePath, caseSummaryPath } from "../caseRouting";
 import { getWalletCase } from "../walletCaseApi";
 import type { WalletCase } from "../walletCase";
 import GramCaseActivity from "./GramCaseActivity";
+import GramCaseEvidence from "./GramCaseEvidence";
 import GramCaseSummary from "./GramCaseSummary";
 
-export type WalletCaseView = "summary" | "activity";
+export type WalletCaseView = "summary" | "activity" | "evidence";
 
 function shortAddress(value: string): string {
   if (value.length <= 24) return value;
@@ -21,7 +24,7 @@ export default function GramCaseWorkspace({
 }: {
   caseId: string;
   view: WalletCaseView;
-  onNavigate: (view: WalletCaseView) => void;
+  onNavigate: (view: WalletCaseView, search?: string) => void;
 }) {
   const [walletCase, setWalletCase] = useState<WalletCase | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,6 +140,14 @@ export default function GramCaseWorkspace({
           <ChartLineUp size={18} weight={view === "activity" ? "fill" : "regular"} />
           <span><strong>Activity</strong><small>Filtered snapshot rows</small></span>
         </a>
+        <a
+          href={caseEvidencePath(caseId)}
+          aria-current={view === "evidence" ? "page" : undefined}
+          onClick={(event) => followCaseLink(event, "evidence")}
+        >
+          <ShieldCheck size={18} weight={view === "evidence" ? "fill" : "regular"} />
+          <span><strong>Evidence</strong><small>Transaction verification</small></span>
+        </a>
       </nav>
 
       {view === "summary" ? (
@@ -145,8 +156,25 @@ export default function GramCaseWorkspace({
           refreshError={refreshError}
           onRefresh={load}
         />
+      ) : view === "activity" ? (
+        <GramCaseActivity
+          walletCase={walletCase}
+          onVerifyEvidence={(snapshotId, activityId) => onNavigate("evidence", caseEvidenceSearch({ snapshot: snapshotId, activity: activityId, verification: null }))}
+        />
       ) : (
-        <GramCaseActivity walletCase={walletCase} />
+        <GramCaseEvidence
+          walletCase={walletCase}
+          onOpenActivity={(snapshotId, activityId) => onNavigate(
+            "activity",
+            snapshotId === null
+              ? ""
+              : caseActivitySearch({
+                  snapshot: snapshotId,
+                  filters: DEFAULT_CASE_ACTIVITY_FILTERS,
+                  selectedActivityId: activityId,
+                }),
+          )}
+        />
       )}
     </div>
   );

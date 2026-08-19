@@ -1,3 +1,125 @@
+# GRAM Scope — v0.75.0 CASE REPORT
+
+v0.75.0 adds the first Wallet Case Report over one immutable, pinned Activity
+snapshot. A synchronized case now always has a useful report revision: demo
+fixtures produce `observed`, live normalized observations produce `normalized`,
+and locally revalidated Evidence can raise the revision to
+`partially_verified`. `canonical` remains a distinct hard-gated assurance state
+and cannot be published while coverage, history, identity conflicts, Activity
+gaps, bounded Evidence history, transaction inclusion, or native-ledger
+requirements remain unmet.
+
+Each report is a strict `wallet_case_report_v1` document with a SHA-256 content
+hash and matching opaque `rpt_…` public ID. It binds the case and snapshot,
+subject identity, Activity aggregate and observed period, the returned
+revalidated Evidence window, coverage, gaps, limitations, unverified claims,
+and fixed truth boundaries. Rebuilding the same data revision produces the
+same bytes and hash; new Evidence produces a new content-addressed revision
+without mutating an exported prior document. The bounded facade deliberately
+does not expose compatibility run IDs, source row IDs, raw provider payloads,
+proof BOCs, worker state, or credentials.
+
+The local-only case API adds `GET /api/v1/cases/{case}/report` and an exact JSON
+export at `GET /api/v1/cases/{case}/report/export.json`. Both accept one
+optional snapshot UUID, pin the newest usable snapshot when omitted, use
+`Cache-Control: no-store`, enforce the existing owner scope, and fail closed on
+snapshot or Evidence conflicts. The export is the complete validated public
+envelope, not the legacy run-scoped report surface.
+
+Evidence now shows the report assurance, report and content hashes, Activity
+and Evidence counts, canonical gate status, and every remaining unverified
+claim. The report refreshes after terminal Evidence updates, survives direct
+snapshot URLs, and never renders a prior snapshot's report while a new scope is
+loading or failing. JSON export remains available for observed, normalized,
+and partially verified revisions instead of blocking all noncanonical output.
+
+No database migration is added in v0.75.0. The Alembic head remains
+`20260710_0022`; report revisions are deterministic read models over immutable
+CaseSync snapshots plus revalidated persisted Evidence. The server does not yet
+maintain a historical report-revision catalog, auto-select proof targets, prove
+complete wallet history, establish cost basis, or feed PnL. Those remain
+explicit limitations rather than inferred claims. Wallet Cases, Evidence, and
+Case Reports remain direct-loopback only until authenticated owner scopes are
+available.
+
+---
+
+# GRAM Scope — v0.74.0 CASE EVIDENCE
+
+v0.74.0 adds a durable Wallet Case evidence-verification workflow for one
+transaction selected from a pinned Activity snapshot. Eligible live,
+provider-observed transactions can enter one explicit pipeline that captures a
+finalized trace and verifies persisted transaction BOCs locally. It promotes
+block inclusion and the selected native-TON evidence artifact only when every
+inclusion proof was captured at liteserver trust level 0 from the exact
+application-pinned checkpoint for that TON network under verifier policy
+`ton_liteserver_checkpoint_strict_2026_08_v2`. The policy and checkpoint are persisted
+with each proof and covered by its evidence and catalog digests.
+`chain_inclusion_proven` therefore means canonical under that policy at capture
+time; it does not claim that a later offline BOC replay re-establishes the live
+canonical chain. Demo fixtures, transfers, swaps, unavailable identities, and
+transactions without a self-linked canonical hash remain explicitly
+ineligible.
+
+Pre-strict `ton_liteserver_checkpoint_2026_08_v1` rows are preserved only as
+noncanonical legacy checkpoint evidence. Revision `20260710_0022` activates the
+strict policy and prevents older blockstore state from becoming its trust root.
+
+Verification is stored as an owner-scoped job before proof work starts. A UUID
+idempotency key and semantic request fingerprint prevent duplicate work; one
+selection has at most one active verification. Fenced leases, heartbeats,
+bounded retry, restart recovery, stage checkpoints, and cooperative
+cancellation preserve completed immutable artifacts without changing the
+usable Case synchronization that supplied the transaction. Provider and
+liteserver calls run without holding an application database connection. The
+whole liteserver operation runs in a child process behind one hard deadline;
+expiry requests termination and escalates to a forced kill after a bounded
+grace period. Running cancellation remains cooperative, but an active
+liteserver child cannot make it unbounded: the same deadline and bounded stop
+path limit that wait. Every persisted artifact is revalidated before progress
+or a terminal result is published.
+
+Schema revision `20260710_0019` adds the durable Evidence job and its exact
+scope, lifecycle, lease, retry, artifact-prefix, and ownership constraints.
+Revision `20260710_0020` preserves existing inclusion proofs while versioning
+their identity by `(BOC transaction, trust level)`. Revision
+`20260710_0021` adds immutable verifier-policy and exact network-checkpoint
+provenance to transaction-inclusion proofs and their digests. Revision
+`20260710_0022` is the Alembic head and separates strict proof-link verification
+from pre-strict checkpoint rows. Existing trust-level-0 rows are preserved under
+`legacy_unpinned_v1`, but are noncanonical and cannot be promoted or selected
+by the current policy. A prior legacy or trust-level-1 proof can coexist with a
+current policy proof; only a complete set bound to the current pinned
+checkpoint is canonical at capture.
+
+The public case facade adds a snapshot-pinned Evidence catalog plus enqueue,
+poll, and cancel endpoints. Responses expose non-sequential case, snapshot,
+Activity, synchronization, and verification identifiers; sanitized transaction
+provenance; factual stage progress; safe retry/error state; SHA-256 evidence
+digests; and explicit normalized, locally verified, or chain-inclusion-proven
+levels. `chain_inclusion_proven` therefore never means only “a liteserver named
+this block.” Responses do not expose compatibility run IDs, database row IDs,
+raw BOCs, provider payloads, lease tokens, idempotency keys, worker lifecycle
+checkpoint state, or credentials.
+
+The case shell now has Summary, Activity, and Evidence views. An eligible
+Activity transaction links to a refresh-safe Evidence URL where the user can
+review eligibility, start or resume the durable job, follow all four stages,
+cancel at a safe boundary, inspect preserved partial evidence, and reopen
+snapshot history. Demo and unavailable-runtime states remain disabled with a
+machine-readable explanation. Direct URLs, refresh, back/forward navigation,
+keyboard focus, narrow layouts, and both themes are covered by the new flow.
+
+The native TON artifact is deliberately labelled as selected evidence only. It
+is not the authoritative general Activity ledger, does not establish complete
+wallet history, is not eligible for cost basis, and is not consumed by PnL.
+v0.74.0 also keeps the Case report unavailable: a reproducible versioned report
+over pinned observed and verified evidence is the next Roadmap 1 slice. Wallet
+Cases and their proof worker remain direct-loopback only until authenticated
+owner scopes replace the local single-user boundary.
+
+---
+
 # GRAM Scope — v0.73.0 CASE ACTIVITY
 
 v0.73.0 adds the first canonical Wallet Case Activity facade and replaces the

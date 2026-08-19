@@ -96,20 +96,30 @@ def capture_persisted_wallet_transaction_trace_evidence(
 
     settings = settings or get_settings()
     _require_guarded_live_tonapi(settings, run)
+    expected_network = run.wallet_network
+    expected_transaction_hash = transaction.transaction_hash_canonical
+    expected_logical_time = transaction.transaction_logical_time_canonical
+    expected_account = transaction.transaction_account_canonical
+    # Provider I/O must not monopolize the SQLite pool. The candidate is
+    # fetched without an open ORM transaction, then every source coordinate is
+    # resolved and revalidated again before persistence.
+    session.rollback()
     adapter = TonapiAdapter(settings)
     result = adapter.get_transaction_trace_persisted_evidence(
         transaction_hash,
-        network=run.wallet_network,
+        network=expected_network,
     )
     if not result.ok:
         detail = result.message or "TonAPI persisted trace evidence request failed."
         raise WalletTraceEvidenceProviderFailure(
-            _sanitize_provider_message(detail, settings)
+            _sanitize_provider_message(detail, settings),
+            code=result.error or "provider_error",
         )
     normalized = result.data
     if not isinstance(normalized, dict):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI persisted trace evidence response was not an object."
+            "TonAPI persisted trace evidence response was not an object.",
+            code="provider_protocol_error",
         )
     if normalized.get("trace_state") != "finalized":
         raise WalletPersistedTraceEvidenceConflict(
@@ -119,15 +129,35 @@ def capture_persisted_wallet_transaction_trace_evidence(
     if (
         not isinstance(anchor, dict)
         or anchor.get("transaction_hash")
-        != transaction.transaction_hash_canonical
+        != expected_transaction_hash
         or anchor.get("logical_time")
-        != transaction.transaction_logical_time_canonical
+        != expected_logical_time
         or anchor.get("account_canonical")
-        != transaction.transaction_account_canonical
+        != expected_account
     ):
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI persisted trace anchor did not match the stored transaction identity."
+            "TonAPI persisted trace anchor did not match the stored transaction identity.",
+            code="provider_protocol_error",
         )
+
+    run, transaction = resolve_wallet_transaction_trace_anchor(
+        run_id,
+        transaction_hash,
+        session,
+    )
+    _require_eligible_stored_identity(run, transaction, transaction_hash)
+    if (
+        run.wallet_network != expected_network
+        or transaction.transaction_hash_canonical != expected_transaction_hash
+        or transaction.transaction_logical_time_canonical != expected_logical_time
+        or transaction.transaction_account_canonical != expected_account
+    ):
+        raise WalletPersistedTraceEvidenceConflict(
+            "Stored transaction scope changed during trace acquisition."
+        )
+    existing = _find_capture_for_transaction(run_id, transaction_hash, session)
+    if existing is not None:
+        return _revalidate_capture(existing, run, transaction, session), False
 
     capture_slot = _available_capture_slot(session, run_id)
     if capture_slot is None:
@@ -186,7 +216,8 @@ def capture_persisted_wallet_transaction_trace_evidence(
         )
     except (KeyError, TypeError, ValueError, OverflowError) as exc:
         raise WalletTraceEvidenceProviderFailure(
-            "TonAPI persisted trace evidence candidate was incoherent."
+            "TonAPI persisted trace evidence candidate was incoherent.",
+            code="provider_protocol_error",
         ) from exc
 
     try:
@@ -199,7 +230,8 @@ def capture_persisted_wallet_transaction_trace_evidence(
                 or node_data.get("preorder_index") != expected_index
             ):
                 raise WalletTraceEvidenceProviderFailure(
-                    "TonAPI persisted trace node order was incoherent."
+                    "TonAPI persisted trace node order was incoherent.",
+                    code="provider_protocol_error",
                 )
             parent_index = node_data.get("parent_preorder_index")
             if parent_index is not None and (
@@ -208,7 +240,8 @@ def capture_persisted_wallet_transaction_trace_evidence(
                 or not 0 <= parent_index < expected_index
             ):
                 raise WalletTraceEvidenceProviderFailure(
-                    "TonAPI persisted trace parent order was incoherent."
+                    "TonAPI persisted trace parent order was incoherent.",
+                    code="provider_protocol_error",
                 )
             parent_id = (
                 None

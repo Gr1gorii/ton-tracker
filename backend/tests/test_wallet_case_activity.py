@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlalchemy.orm import Session, sessionmaker
 
+from adapters.wallet_activity import TONAPI_LIVE_WALLET_ACTIVITY_PROVIDER
 from database import create_database_engine, get_session
 from main import app
 from models import (
@@ -39,7 +40,7 @@ TESTNET_COUNTERPARTY = "kQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPgpP"
 def activity_client(tmp_path):
     engine = create_database_engine(f"sqlite:///{tmp_path / 'activity.sqlite3'}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260710_0018"
+    assert report.revision_after == "20260710_0022"
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override():
@@ -97,7 +98,11 @@ def _run_and_sync(
     surfaces = surfaces or ["transactions"]
     is_demo = wallet_case.data_environment == "demo"
     data_mode = "mock" if is_demo else "real"
-    provider = "mock_wallet_activity" if is_demo else "tonapi"
+    provider = (
+        "mock_wallet_activity"
+        if is_demo
+        else TONAPI_LIVE_WALLET_ACTIVITY_PROVIDER
+    )
     run = WalletIngestionRun(
         wallet_address=wallet_case.canonical_wallet_key,
         time_window="custom",

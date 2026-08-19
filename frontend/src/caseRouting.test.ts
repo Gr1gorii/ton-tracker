@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caseActivityPath, caseSummaryPath, parseAppRoute } from "./caseRouting";
+import { caseActivityPath, caseEvidencePath, caseSummaryPath, parseAppRoute } from "./caseRouting";
 
 const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
 
@@ -18,6 +18,13 @@ describe("case routing", () => {
     expect(parseAppRoute(`${path}/`)).toEqual({ kind: "case-activity", caseId: CASE_ID });
   });
 
+  it("round-trips a canonical case Evidence route", () => {
+    const path = caseEvidencePath(CASE_ID);
+    expect(path).toBe(`/cases/${CASE_ID}/evidence`);
+    expect(parseAppRoute(path)).toEqual({ kind: "case-evidence", caseId: CASE_ID });
+    expect(parseAppRoute(`${path}/`)).toEqual({ kind: "case-evidence", caseId: CASE_ID });
+  });
+
   it.each([
     "/cases/1/summary",
     "/cases/550e8400-e29b-11d4-a716-446655440000/summary",
@@ -31,5 +38,6 @@ describe("case routing", () => {
   it("rejects a non-canonical id when building a path", () => {
     expect(() => caseSummaryPath("1")).toThrow(/canonical UUIDv4/);
     expect(() => caseActivityPath("1")).toThrow(/canonical UUIDv4/);
+    expect(() => caseEvidencePath("1")).toThrow(/canonical UUIDv4/);
   });
 });

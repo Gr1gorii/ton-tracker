@@ -15,6 +15,14 @@ from typing import Annotated, Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from services.ton_liteclient_config import (
+    CURRENT_VERIFIER_POLICY_ID,
+    LEGACY_CHECKPOINT_POLICY_ID,
+    LEGACY_UNPINNED_POLICY_ID,
+    is_current_trusted_checkpoint,
+    is_recognized_trusted_checkpoint,
+)
+
 WalletIngestionSurface = Literal[
     "transfers",
     "transactions",
@@ -651,19 +659,37 @@ class WalletTransactionInclusionBlockRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     workchain: Annotated[int, Field(strict=True, ge=-1, le=0)]
-    shard: str = Field(pattern=r"^-?[0-9]{1,20}$")
-    seqno: Annotated[int, Field(strict=True, ge=1)]
+    shard: str = Field(pattern=r"^(?:0|-?[1-9][0-9]{0,18})$")
+    seqno: Annotated[int, Field(strict=True, ge=1, le=2**31 - 1)]
     root_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("shard")
+    @classmethod
+    def _shard_must_fit_signed_int64(cls, value: str) -> str:
+        parsed = int(value, 10)
+        if not -(2**63) <= parsed <= 2**63 - 1:
+            raise ValueError("transaction inclusion shard exceeds signed int64")
+        return value
 
 
 class WalletTransactionInclusionProofRecord(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contract_version: Literal["ton_transaction_inclusion_v1"]
+    contract_version: Literal["ton_transaction_inclusion_v2"]
+    evidence_contract_version: Literal[
+        "ton_transaction_inclusion_v1",
+        "ton_transaction_inclusion_v2",
+    ]
     network: str = Field(pattern=r"^ton-(?:mainnet|testnet)$")
     trust_level: Annotated[int, Field(strict=True, ge=0, le=1)]
-    account_address_canonical: str = Field(min_length=66, max_length=76)
+    verifier_policy_id: str = Field(pattern=r"^[a-z0-9_]{1,64}$")
+    trusted_checkpoint: WalletTransactionInclusionBlockRecord | None
+    account_address_canonical: str = Field(
+        pattern=r"^(?:0|-1):[0-9a-f]{64}$",
+        min_length=66,
+        max_length=67,
+    )
     logical_time: str = Field(pattern=r"^[1-9][0-9]{0,19}$")
     transaction_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     block: WalletTransactionInclusionBlockRecord
@@ -674,22 +700,92 @@ class WalletTransactionInclusionProofRecord(BaseModel):
     verified_at: str
     block_merkle_proof_verified: Literal[True]
     canonical_block_chain_verified_at_capture: bool
+    checkpoint_to_observed_head_transcript_persisted: Literal[False]
     provider_free_revalidated: Literal[True]
     raw_bocs_returned: Literal[False] = False
 
+    @field_validator("logical_time")
+    @classmethod
+    def _logical_time_must_fit_uint64(cls, value: str) -> str:
+        if int(value, 10) > 2**64 - 1:
+            raise ValueError("transaction inclusion logical time exceeds uint64")
+        return value
+
+    @field_validator("verified_at")
+    @classmethod
+    def _verified_at_must_be_strict_utc_rfc3339(cls, value: str) -> str:
+        if (
+            len(value) > 40
+            or re.fullmatch(
+                r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:"
+                r"[0-9]{2}(?:\.[0-9]{1,6})?(?:Z|\+00:00)",
+                value,
+            )
+            is None
+        ):
+            raise ValueError("transaction inclusion timestamp must be UTC RFC3339")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                "transaction inclusion timestamp must be UTC RFC3339"
+            ) from exc
+        if parsed.utcoffset() is None or parsed.utcoffset().total_seconds() != 0:
+            raise ValueError("transaction inclusion timestamp must be UTC RFC3339")
+        return value
+
     @model_validator(mode="after")
     def _transaction_inclusion_trust_must_be_coherent(self):
-        if self.canonical_block_chain_verified_at_capture != (
-            self.trust_level == 0
+        legacy_unpinned = self.verifier_policy_id == LEGACY_UNPINNED_POLICY_ID
+        legacy_checkpoint = (
+            self.verifier_policy_id == LEGACY_CHECKPOINT_POLICY_ID
+        )
+        if legacy_unpinned and (
+            self.evidence_contract_version != "ton_transaction_inclusion_v1"
+            or self.trusted_checkpoint is not None
+            or self.canonical_block_chain_verified_at_capture
         ):
-            raise ValueError("transaction inclusion trust boundary changed")
+            raise ValueError("legacy transaction inclusion trust is not canonical")
+        if not legacy_unpinned:
+            checkpoint = (
+                self.trusted_checkpoint.model_dump()
+                if self.trusted_checkpoint is not None
+                else None
+            )
+            if checkpoint is not None:
+                checkpoint["shard"] = int(checkpoint["shard"])
+            if self.evidence_contract_version != "ton_transaction_inclusion_v2":
+                raise ValueError("transaction inclusion trust boundary changed")
+            if legacy_checkpoint:
+                if (
+                    not is_recognized_trusted_checkpoint(
+                        self.network,
+                        self.verifier_policy_id,
+                        checkpoint,
+                    )
+                    or self.canonical_block_chain_verified_at_capture
+                ):
+                    raise ValueError("legacy checkpoint proof is not canonical")
+            elif (
+                self.verifier_policy_id != CURRENT_VERIFIER_POLICY_ID
+                or not is_current_trusted_checkpoint(
+                    self.network,
+                    self.verifier_policy_id,
+                    checkpoint,
+                )
+                or self.canonical_block_chain_verified_at_capture
+                != (self.trust_level == 0)
+            ):
+                raise ValueError("transaction inclusion trust boundary changed")
         return self
 
 
 class WalletTransactionInclusionCatalogResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    contract_version: Literal["ton_transaction_inclusion_v1"]
+    contract_version: Literal["ton_transaction_inclusion_v2"]
+    verifier_policy_id: str = Field(pattern=r"^[a-z0-9_]{1,64}$")
+    trusted_checkpoint: WalletTransactionInclusionBlockRecord | None
     boc_verification_id: str = Field(pattern=r"^[1-9][0-9]*$", max_length=19)
     proof_count: Annotated[int, Field(strict=True, ge=1, le=256)]
     proof_digests: list[str] = Field(min_length=1, max_length=256)
@@ -709,6 +805,18 @@ class WalletTransactionInclusionCatalogResponse(BaseModel):
             row.evidence_digest_sha256 for row in self.proofs
         ]:
             raise ValueError("transaction inclusion catalog changed")
+        if len({row.trust_level for row in self.proofs}) != 1:
+            raise ValueError(
+                "transaction inclusion catalog cannot mix verifier trust levels"
+            )
+        if any(
+            row.verifier_policy_id != self.verifier_policy_id
+            or row.trusted_checkpoint != self.trusted_checkpoint
+            for row in self.proofs
+        ):
+            raise ValueError(
+                "transaction inclusion catalog cannot mix verifier policies"
+            )
         return self
 
 
@@ -951,7 +1059,7 @@ class WalletJettonContractVerificationAnchorRecord(BaseModel):
 
     workchain: Annotated[int, Field(strict=True, ge=-1, le=0)]
     shard: str = Field(pattern=r"^-?[0-9]{1,20}$")
-    seqno: Annotated[int, Field(strict=True, ge=1)]
+    seqno: Annotated[int, Field(strict=True, ge=1, le=2**31 - 1)]
     root_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     file_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
 
@@ -1016,7 +1124,7 @@ class WalletJettonContractVerificationResponse(BaseModel):
     evidence_digest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     verified_at: str
     account_state_proof_verified: Literal[True]
-    masterchain_checkpoint_chain_verified: bool
+    masterchain_checkpoint_chain_verified: Literal[False] = False
     local_tvm_execution_applied: Literal[True]
     wallet_owner_master_verified: Literal[True]
     master_wallet_address_verified: Literal[True]
@@ -1024,10 +1132,14 @@ class WalletJettonContractVerificationResponse(BaseModel):
     jetton_asset_identity_applied: Literal[True]
     raw_account_state_bocs_persisted: bool
     raw_account_state_bocs_returned: Literal[False] = False
-    is_blockchain_inclusion_proof_verified: bool
+    is_blockchain_inclusion_proof_verified: Literal[False] = False
     eligible_for_cost_basis: Literal[False] = False
     used_by_pnl: Literal[False] = False
     is_ownership_proof: Literal[False] = False
+    limitations: list[Literal["checkpoint_policy_not_persisted_v1"]] = Field(
+        min_length=1,
+        max_length=1,
+    )
     message: str = Field(min_length=1, max_length=600)
 
     @model_validator(mode="after")
@@ -1041,24 +1153,27 @@ class WalletJettonContractVerificationResponse(BaseModel):
         if self.jetton_wallet_account_canonical == self.jetton_master_account_canonical:
             raise ValueError("jetton wallet and master addresses must differ")
         has_inclusion_proofs = len(self.account_state_inclusion_proofs) == 2
-        checkpoint_verified = self.trust_level == 0
         if (
-            self.masterchain_checkpoint_chain_verified != checkpoint_verified
-            or self.is_blockchain_inclusion_proof_verified
-            != (checkpoint_verified and has_inclusion_proofs)
-            or self.raw_account_state_bocs_persisted != has_inclusion_proofs
+            self.raw_account_state_bocs_persisted != has_inclusion_proofs
         ):
             raise ValueError("jetton proof trust boundary changed")
+        if self.limitations != ["checkpoint_policy_not_persisted_v1"]:
+            raise ValueError("jetton checkpoint limitation changed")
         if has_inclusion_proofs:
-            roles = {row.account_role for row in self.account_state_inclusion_proofs}
+            roles = [
+                row.account_role for row in self.account_state_inclusion_proofs
+            ]
             addresses = {
                 row.account_role: row.account_address_canonical
                 for row in self.account_state_inclusion_proofs
             }
-            if roles != {"jetton_master", "jetton_wallet"} or addresses != {
+            if roles != ["jetton_master", "jetton_wallet"] or addresses != {
                 "jetton_master": self.jetton_master_account_canonical,
                 "jetton_wallet": self.jetton_wallet_account_canonical,
-            }:
+            } or any(
+                row.verified_at != self.verified_at
+                for row in self.account_state_inclusion_proofs
+            ):
                 raise ValueError("jetton account inclusion roles changed")
         elif self.account_state_inclusion_proofs:
             raise ValueError("partial account inclusion proofs are forbidden")

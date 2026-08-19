@@ -37,12 +37,22 @@ async def capture_account_inclusion_proof(
                 "The account has no state at the selected block anchor."
             )
         shard_block = BlockIdExt.from_dict(result["shardblk"])
+        state_boc = bytes(result["state"])
+        account_proof_boc = bytes(result["proof"])
+        shard_proof_boc = bytes(result["shard_proof"])
+        if any(
+            len(value) > 4 * 1024 * 1024
+            for value in (state_boc, account_proof_boc, shard_proof_boc)
+        ):
+            raise TonAccountInclusionProofFailure(
+                "TON account-state inclusion evidence exceeds the safe size limit."
+            )
         evidence = {
             "account_address": account_address,
             "shard_block": _block_document(shard_block),
-            "state_boc_hex": bytes(result["state"]).hex(),
-            "account_proof_boc_hex": bytes(result["proof"]).hex(),
-            "shard_proof_boc_hex": bytes(result["shard_proof"]).hex(),
+            "state_boc_hex": state_boc.hex(),
+            "account_proof_boc_hex": account_proof_boc.hex(),
+            "shard_proof_boc_hex": shard_proof_boc.hex(),
         }
         verified = verify_account_inclusion_proof(
             evidence,

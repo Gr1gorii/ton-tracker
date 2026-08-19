@@ -12,6 +12,7 @@ import {
   activityResponseFixture,
 } from "../test/walletCaseActivityFixtures";
 import { CASE_ID, SYNC_ID, walletCaseFixture } from "../test/walletCaseFixtures";
+import { liveEvidenceActivityDetailFixture } from "../test/walletCaseEvidenceFixtures";
 
 const apiMocks = vi.hoisted(() => ({
   getWalletCaseActivity: vi.fn(),
@@ -39,7 +40,7 @@ describe("GramCaseActivity", () => {
   it("fails an invalid Activity URL closed without fetching or rewriting it", async () => {
     const invalidPath = `/cases/${CASE_ID}/activity?asset_id=TON`;
     window.history.replaceState({}, "", invalidPath);
-    render(<GramCaseActivity walletCase={walletCaseFixture()} />);
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
 
     expect((await screen.findByRole("alert")).textContent).toContain("Activity asset filter must use a server asset id");
     expect(apiMocks.getWalletCaseActivity).not.toHaveBeenCalled();
@@ -49,7 +50,7 @@ describe("GramCaseActivity", () => {
 
   it("pins the latest usable snapshot in URL and React query state before refresh", async () => {
     const user = userEvent.setup();
-    render(<GramCaseActivity walletCase={walletCaseFixture()} />);
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
 
     expect(await screen.findByRole("heading", { name: "1 Activity rows" })).toBeTruthy();
     await waitFor(() => expect(new URLSearchParams(window.location.search).get("snapshot")).toBe(SYNC_ID));
@@ -66,7 +67,7 @@ describe("GramCaseActivity", () => {
 
   it("restores server-only asset filters in the URL and request without accepting a symbol", async () => {
     const user = userEvent.setup();
-    render(<GramCaseActivity walletCase={walletCaseFixture()} />);
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
     await screen.findByRole("heading", { name: "1 Activity rows" });
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
@@ -129,7 +130,7 @@ describe("GramCaseActivity", () => {
       item,
     });
     const user = userEvent.setup();
-    render(<GramCaseActivity walletCase={walletCaseFixture()} />);
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
 
     expect(await screen.findByText("12 reported as TON · identity unavailable")).toBeTruthy();
     expect(screen.queryByText("12 TON")).toBeNull();
@@ -146,7 +147,7 @@ describe("GramCaseActivity", () => {
 
   it("canonicalizes checkbox filters after uncheck and recheck before the immediate request", async () => {
     const user = userEvent.setup();
-    render(<GramCaseActivity walletCase={walletCaseFixture()} />);
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
     await screen.findByRole("heading", { name: "1 Activity rows" });
     await user.click(screen.getByRole("button", { name: "Filters" }));
 
@@ -184,7 +185,7 @@ describe("GramCaseActivity", () => {
 
   it("contains keyboard focus in detail and returns it to the row after browser Back", async () => {
     const user = userEvent.setup();
-    render(<GramCaseActivity walletCase={walletCaseFixture()} />);
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
     const row = await screen.findByRole("link", { name: "Open Transaction Activity detail" });
     row.focus();
     await user.click(row);
@@ -210,7 +211,7 @@ describe("GramCaseActivity", () => {
   it("closes a refreshed detail deep link in place and focuses the Activity heading", async () => {
     window.history.replaceState({}, "", `/cases/${CASE_ID}/activity?snapshot=${SYNC_ID}&sort=newest&activity=${ACTIVITY_ID}`);
     const user = userEvent.setup();
-    render(<GramCaseActivity walletCase={walletCaseFixture()} />);
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
 
     await screen.findByRole("dialog", { name: "Activity detail" });
     await user.click(screen.getByRole("button", { name: "Close Activity detail" }));
@@ -220,5 +221,41 @@ describe("GramCaseActivity", () => {
     await waitFor(() => expect(document.activeElement).toBe(heading));
     expect(new URLSearchParams(window.location.search).has("activity")).toBe(false);
     expect(new URLSearchParams(window.location.search).get("snapshot")).toBe(SYNC_ID);
+  });
+
+  it("navigates an eligible live transaction to Evidence without running proof work in the dialog", async () => {
+    const liveDetail = liveEvidenceActivityDetailFixture();
+    apiMocks.getWalletCaseActivity.mockResolvedValue(activityResponseFixture({
+      snapshot: {
+        ...activityResponseFixture().snapshot!,
+        data_mode: "real",
+        provider: "tonapi_wallet_activity_live",
+      },
+      items: [liveDetail.item],
+    }));
+    apiMocks.getWalletCaseActivityDetail.mockResolvedValue(liveDetail);
+    const onVerifyEvidence = vi.fn();
+    const user = userEvent.setup();
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={onVerifyEvidence} />);
+
+    await user.click(await screen.findByRole("link", { name: "Open Transaction Activity detail" }));
+    const action = await screen.findByRole("button", { name: "Check verification availability" });
+    expect(screen.getByRole("heading", { name: "Eligible for evidence verification" })).toBeTruthy();
+    expect(screen.getByText(/Availability is checked on the Evidence page/)).toBeTruthy();
+    await user.click(action);
+
+    expect(onVerifyEvidence).toHaveBeenCalledWith(SYNC_ID, ACTIVITY_ID);
+    expect(apiMocks.getWalletCaseActivityDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps demo detail explicitly ineligible and exposes no Verify link", async () => {
+    const user = userEvent.setup();
+    render(<GramCaseActivity walletCase={walletCaseFixture()} onVerifyEvidence={vi.fn()} />);
+
+    await user.click(await screen.findByRole("link", { name: "Open Transaction Activity detail" }));
+
+    expect(await screen.findByRole("heading", { name: "Evidence verification unavailable" })).toBeTruthy();
+    expect(screen.getByText(/Demo fixtures cannot be promoted/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Check verification availability" })).toBeNull();
   });
 });

@@ -1,4 +1,4 @@
-# GRAM Scope - v0.73.0 Public Release
+# GRAM Scope - v0.75.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -13,8 +13,18 @@ Public release handoff for the current TON wallet intelligence workspace.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
   revalidation, overlap deduplication, stable cursor pagination, server-side
   filters, bounded aggregates, coverage gaps, and sanitized provenance.
-- A shared Summary/Activity case shell with refresh-safe filters, sorting,
-  selected-record details, keyboard focus management, and responsive cards.
+- A durable, idempotent selected-transaction Evidence pipeline with trace
+  capture, local BOC verification, TON block-inclusion proof captured at
+  liteserver trust level 0 from the exact application-pinned checkpoint for its
+  network, native-TON semantics, fenced leases, bounded retry, restart recovery,
+  and cooperative cancellation.
+- A content-addressed Wallet Case Report bound to one pinned Activity snapshot,
+  its coverage and gaps, and the returned revalidated Evidence window. Useful
+  observed, normalized, and partially verified revisions remain exportable;
+  canonical assurance is separately hard-gated.
+- A shared Summary/Activity/Evidence case shell with refresh-safe filters,
+  selected-record details, verification progress, keyboard focus management,
+  responsive cards, report assurance, canonical gates, and exact JSON export.
 - Compact case activity, portfolio snapshot, coverage, and limitation summaries
   that keep internal compatibility run IDs out of the primary workflow.
 - Responsive TON wallet evidence workspace with guarded real TonAPI ingestion.
@@ -29,8 +39,30 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.73.0 CASE ACTIVITY`.
+- Product release label: `v0.75.0 CASE REPORT`.
 - Backend API `VERSION` remains `0.2.1`.
+- Alembic head is `20260710_0022`: 0019 adds durable Case Evidence jobs, 0020
+  versions immutable transaction-inclusion proofs by trust level, and 0021
+  persists the verifier policy plus exact per-network application checkpoint
+  and binds them into proof and catalog digests. Revision 0022 activates the
+  application-owned strict proof-link policy without relabeling older rows.
+- Current verifier policy `ton_liteserver_checkpoint_strict_2026_08_v2` pins these
+  masterchain checkpoint tuples as
+  `(workchain, shard, seqno, root hash, file hash)`:
+
+  - `ton-mainnet`: workchain `-1`, shard `-9223372036854775808`, seqno
+    `46894135`, root
+    `3048e69a12cf946ebc99b4cf9ca61c3ff4b3fcc88c4015763ac01204ecc1bf9f`,
+    file
+    `bbdac0b4543e9141449ceb37c3c63ba6e9cc4e2c904d77f56d17e44acf1d1bed`.
+  - `ton-testnet`: workchain `-1`, shard `-9223372036854775808`, seqno
+    `58834988`, root
+    `8c711614c06a513e026dd1456f2f01a3b5b412f5a99ff1b050e23e9b103231d9`,
+    file
+    `898c25a4599a33bea0b442e80ec3877461eaac824b497ebbbc670f7d077925d7`.
+
+  Every current-policy proof persists its network-scoped tuple. Rows migrated
+  as `legacy_unpinned_v1` have no checkpoint tuple and remain noncanonical.
 - `DATA_MODE=mock` remains the default.
 - Guarded live wallet ingestion requires explicit real/TonAPI/live settings.
 - Demo syncs are deterministic fixtures; live syncs reject mock fallback
@@ -42,6 +74,9 @@ Public release handoff for the current TON wallet intelligence workspace.
   message-body contents.
 - Provider snapshot matches are not local jetton-master proofs. Exact fee
   matches are not fee allocation. Real PnL remains locked.
+- Case Report contract `wallet_case_report_v1` is a deterministic read model;
+  its `rpt_…` ID is the SHA-256 of the exact public payload projection. It adds
+  no migration, so the Alembic head remains `20260710_0022`.
 
 ## Known Limitations
 
@@ -55,10 +90,37 @@ Public release handoff for the current TON wallet intelligence workspace.
   Summary aggregation is deferred.
 - Native proof ledgers remain a separate manually initiated evidence subset and
   are not presented as the complete or authoritative general timeline.
+- Evidence verification is available only for an explicitly selected live,
+  provider-observed, network-scoped transaction. Demo fixtures and derived
+  transfer/swap actions remain ineligible.
+- The Evidence runtime requires liteserver trust level 0 under the current
+  application-owned checkpoint policy. `chain_inclusion_proven` is canonical at
+  capture under that exact persisted policy and checkpoint; local replay still
+  validates the stored transaction/block commitment but does not independently
+  re-establish later chain canonicality.
+- Existing trust-level-0 proofs without the current verifier-policy and exact
+  checkpoint binding remain immutable legacy evidence. They are noncanonical
+  and cannot be selected, promoted, or combined with current-policy proofs.
+- The selected native-TON artifact and the Case Report do not establish
+  complete wallet history, cost basis, or PnL eligibility. Noncanonical report
+  assurance and every unmet hard gate remain visible.
+- The service recomputes the content-addressed revision from its pinned snapshot
+  and persisted Evidence. Exported documents remain independently identifiable,
+  but the server does not yet keep a browsable historical report-revision
+  catalog or automatically select proof targets.
 - The local worker replays the whole bounded crawl after an in-flight crash;
   accepted provider pages are not yet committed as resumable checkpoints.
-- Cancellation is immediate while queued and cooperative around the current
-  monolithic bounded provider crawl while running.
+- Case-sync cancellation is immediate while queued and cooperative around the
+  current monolithic bounded provider crawl while running. Evidence cancellation
+  is cooperatively polled while running; during inclusion, its wait cannot exceed
+  the whole-operation child-process deadline plus the bounded terminate/kill
+  grace.
+- The liteserver child process covers config acquisition, startup, proof work,
+  and shutdown under one hard deadline. Deadline expiry terminates the child and
+  escalates to a forced kill instead of leaving an unbounded worker behind.
+- A production Evidence worker requires
+  `TON_LITECLIENT_CACHE_DIRECTORY=/data/liteclient` on a writable, persistent,
+  lock-serialized volume; ephemeral or read-only cache paths are unsupported.
 - Legacy ingestion runs are not automatically backfilled into cases when their
   canonical identity or exact acquisition bounds cannot be proven.
 - Hosted Wallet Cases are a release blocker, not an accepted anonymous mode.
@@ -70,13 +132,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.73.0`, confirm:
+Before tagging `v0.75.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.73.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.75.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -84,6 +146,16 @@ Before tagging `v0.73.0`, confirm:
 - Activity overlap deduplication, unavailable-identity separation, semantic
   conflict gaps, token-symbol collision, snapshot-stable cursors, filters,
   direct URL restoration, and sanitized-detail tests pass.
+- Evidence eligibility, enqueue/idempotency, stage persistence, lease fencing,
+  retry/cancel/restart, partial-result preservation, snapshot provenance,
+  response redaction, direct URL restoration, and runner-availability tests
+  pass.
+- Case Report reproducibility, content-ID binding, snapshot/Evidence scope,
+  assurance transitions, canonical negative gates, response redaction, export,
+  refresh invalidation, and cross-snapshot race tests pass.
+- Migration 0021, current-policy selection, legacy trust-0 rejection,
+  checkpoint/digest binding, whole-operation timeout, terminate/kill cleanup,
+  cancellation bound, and locked persistent-cache tests pass.
 - Real stored-run multi-asset readiness is provider-free, digest-stable, and
   fail-closed for unavailable/malformed evidence.
 - Credential and prohibited-brand scans are clean.

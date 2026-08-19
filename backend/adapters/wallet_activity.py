@@ -66,6 +66,7 @@ WALLET_ACTIVITY_PROVIDER_CHOICES = {
     WALLET_ACTIVITY_PROVIDER_STONFI,
     WALLET_ACTIVITY_PROVIDER_BITQUERY,
 }
+TONAPI_LIVE_WALLET_ACTIVITY_PROVIDER = "tonapi_wallet_activity_live"
 
 MOCK_ACTIVITY_WARNINGS = [
     "Mock-normalized wallet activity ingestion uses deterministic fixtures only.",
@@ -690,7 +691,7 @@ class TonapiWalletActivityLiveAdapter:
     cost basis and ownership proof remain unavailable.
     """
 
-    provider_name = "tonapi_wallet_activity_live"
+    provider_name = TONAPI_LIVE_WALLET_ACTIVITY_PROVIDER
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
