@@ -40,6 +40,7 @@ from routers.tonapi import router as tonapi_router
 from routers.wallet_activity import router as wallet_activity_router
 from routers.wallet_case_activity import router as wallet_case_activity_router
 from routers.wallet_case_evidence import router as wallet_case_evidence_router
+from routers.wallet_case_findings import router as wallet_case_findings_router
 from routers.wallet_case_report import router as wallet_case_report_router
 from routers.wallet_cases import jobs_router as wallet_case_jobs_router
 from routers.wallet_cases import router as wallet_cases_router
@@ -157,6 +158,7 @@ app.include_router(wallet_activity_router)
 app.include_router(wallet_cases_router)
 app.include_router(wallet_case_activity_router)
 app.include_router(wallet_case_evidence_router)
+app.include_router(wallet_case_findings_router)
 app.include_router(wallet_case_report_router)
 app.include_router(wallet_case_jobs_router)
 app.include_router(wallet_ownership_router)

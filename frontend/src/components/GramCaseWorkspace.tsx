@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowClockwise, ChartLineUp, Gauge, ShieldCheck, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, ChartDonut, ChartLineUp, Gauge, ShieldCheck, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
 
 import { caseActivitySearch, DEFAULT_CASE_ACTIVITY_FILTERS } from "../caseActivityQuery";
 import { caseEvidenceSearch } from "../caseEvidenceQuery";
-import { caseActivityPath, caseEvidencePath, caseSummaryPath } from "../caseRouting";
+import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseSummaryPath } from "../caseRouting";
 import { getWalletCase } from "../walletCaseApi";
 import type { WalletCase } from "../walletCase";
 import GramCaseActivity from "./GramCaseActivity";
 import GramCaseEvidence from "./GramCaseEvidence";
+import GramCaseFindings from "./GramCaseFindings";
 import GramCaseSummary from "./GramCaseSummary";
 
-export type WalletCaseView = "summary" | "activity" | "evidence";
+export type WalletCaseView = "summary" | "activity" | "findings" | "evidence";
 
 function shortAddress(value: string): string {
   if (value.length <= 24) return value;
@@ -141,6 +142,14 @@ export default function GramCaseWorkspace({
           <span><strong>Activity</strong><small>Filtered snapshot rows</small></span>
         </a>
         <a
+          href={caseFindingsPath(caseId)}
+          aria-current={view === "findings" ? "page" : undefined}
+          onClick={(event) => followCaseLink(event, "findings")}
+        >
+          <ChartDonut size={18} weight={view === "findings" ? "fill" : "regular"} />
+          <span><strong>Findings</strong><small>Explainable flows</small></span>
+        </a>
+        <a
           href={caseEvidencePath(caseId)}
           aria-current={view === "evidence" ? "page" : undefined}
           onClick={(event) => followCaseLink(event, "evidence")}
@@ -160,6 +169,18 @@ export default function GramCaseWorkspace({
         <GramCaseActivity
           walletCase={walletCase}
           onVerifyEvidence={(snapshotId, activityId) => onNavigate("evidence", caseEvidenceSearch({ snapshot: snapshotId, activity: activityId, verification: null }))}
+        />
+      ) : view === "findings" ? (
+        <GramCaseFindings
+          walletCase={walletCase}
+          onOpenActivity={(snapshotId, activityId) => onNavigate(
+            "activity",
+            caseActivitySearch({
+              snapshot: snapshotId,
+              filters: DEFAULT_CASE_ACTIVITY_FILTERS,
+              selectedActivityId: activityId,
+            }),
+          )}
         />
       ) : (
         <GramCaseEvidence

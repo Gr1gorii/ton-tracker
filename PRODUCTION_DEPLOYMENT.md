@@ -11,7 +11,7 @@ Start from an empty private directory and replace the example tag with the
 release being deployed:
 
 ```sh
-release=v0.75.0
+release=v0.76.0
 assets=$(mktemp -d)
 chmod 700 "$assets"
 state="$HOME/.local/state/gram-scope"
@@ -66,7 +66,7 @@ account with mode `0700` and be included in host backups.
 
 ## Preserve the liteserver cache
 
-The v0.75 trust-0 verifier uses policy
+The v0.76 trust-0 verifier uses policy
 `ton_liteserver_checkpoint_strict_2026_08_v2` and its exact application-pinned
 checkpoint for each supported TON network. The policy and checkpoint are
 persisted with every new inclusion proof and covered by the proof and catalog
@@ -189,7 +189,7 @@ The migration rehearsal runs the target backend image against an ephemeral copy
 of the heartbeat-selected verified backup. It applies the same fail-closed
 Alembic bootstrap used at application startup, validates the resulting model
 schema and SQLite integrity, confirms the observed source and target revisions
-(`20260710_0022` for v0.75.0),
+(`20260710_0022` for v0.76.0),
 and then destroys the copy. The live database and retained backup stay
 read-only to this gate. An unknown future revision, schema drift, failed
 migration, integrity error, or inconsistent revision stops the rollout before

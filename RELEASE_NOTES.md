@@ -1,3 +1,42 @@
+# GRAM Scope — v0.76.0 CASE FINDINGS
+
+v0.76.0 adds a deterministic Findings and Flows view over one pinned Wallet
+Case Activity revision. It groups observed asset movement only by canonical
+network-scoped asset identity, keeps same-symbol jettons separate, and publishes
+bounded counterparty and recognized-protocol groups without treating display
+labels as identity.
+
+Each `wallet_case_findings_v1` document is content-addressed by an exact
+SHA-256 public projection and binds the case, snapshot, subject, Activity
+aggregate, observed period, Evidence revision, flow groups, findings, gaps,
+limitations, and fixed truth boundaries. Rebuilding the same revision produces
+the same `fset_…` identifier. The endpoint is read-only, uses the existing
+local owner scope, pins the newest usable snapshot when one is not supplied,
+and exposes no compatibility run IDs, source-row IDs, raw provider payloads,
+proof BOCs, or credentials.
+
+Published findings use named versioned rules rather than an opaque risk score.
+Every row-supported finding links back to its public Activity records and is
+labelled by the weakest revalidated support level. Coverage and identity
+conflicts remain revision-level diagnostics. An empty finding set explicitly
+does not mean a wallet is safe, and the document does not establish ownership,
+illicit status, complete history, cost basis, cross-asset comparability, or PnL.
+
+The case shell now provides Summary, Activity, Findings, and Evidence routes.
+The Findings URL survives refresh and back/forward navigation, pins its
+snapshot in history, rejects malformed or duplicated query state before a
+request, fails case/environment drift closed, and opens supporting Activity
+details through real links with keyboard-safe route focus. Desktop flow cards
+collapse to a bounded mobile layout without hiding interpretation limits.
+
+The local API adds `GET /api/v1/cases/{case}/findings`. No database migration is
+added in v0.76.0; the Alembic head remains `20260710_0022`. Findings are a
+bounded read model and do not replace the content-addressed Case Report or
+silently promote Evidence. Wallet Cases remain direct-loopback only until an
+authenticated owner scope is implemented.
+
+---
+
 # GRAM Scope — v0.75.0 CASE REPORT
 
 v0.75.0 adds the first Wallet Case Report over one immutable, pinned Activity
