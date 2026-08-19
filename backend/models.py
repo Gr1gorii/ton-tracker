@@ -631,6 +631,89 @@ class CaseEvidenceVerification(Base):
     native_ledger = relationship("WalletNativeActivityLedger", foreign_keys=[native_ledger_id])
 
 
+class WalletCaseReportRevision(Base):
+    """Immutable, content-addressed capture of one public Case Report revision."""
+
+    __tablename__ = "wallet_case_report_revisions"
+    __table_args__ = (
+        CheckConstraint(
+            "contract_version = 'wallet_case_report_v1'",
+            name="ck_wallet_case_report_revisions_contract",
+        ),
+        CheckConstraint(
+            "assurance_level IN ('observed', 'normalized', "
+            "'partially_verified', 'canonical')",
+            name="ck_wallet_case_report_revisions_assurance",
+        ),
+        CheckConstraint(
+            "length(content_hash_sha256) = 64 AND "
+            "public_id = 'rpt_' || content_hash_sha256",
+            name="ck_wallet_case_report_revisions_identity",
+        ),
+        CheckConstraint(
+            "length(activity_digest_sha256) = 64 AND "
+            "length(evidence_digest_sha256) = 64",
+            name="ck_wallet_case_report_revisions_digests",
+        ),
+        CheckConstraint(
+            "length(report_json) > 2",
+            name="ck_wallet_case_report_revisions_payload",
+        ),
+        Index(
+            "uq_wallet_case_report_revisions_public_id",
+            "public_id",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_case_report_revisions_case_hash",
+            "case_id",
+            "content_hash_sha256",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_case_report_revisions_catalog",
+            "case_id",
+            "id",
+        ),
+        Index(
+            "ix_wallet_case_report_revisions_snapshot",
+            "case_id",
+            "snapshot_sync_id",
+            "id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(String(68), nullable=False)
+    case_id = Column(
+        Integer,
+        ForeignKey("wallet_cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    snapshot_sync_id = Column(
+        Integer,
+        ForeignKey("wallet_case_syncs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    contract_version = Column(
+        String(32),
+        nullable=False,
+        default="wallet_case_report_v1",
+        server_default="wallet_case_report_v1",
+    )
+    content_hash_sha256 = Column(String(64), nullable=False)
+    assurance_level = Column(String(24), nullable=False)
+    activity_digest_sha256 = Column(String(64), nullable=False)
+    evidence_digest_sha256 = Column(String(64), nullable=False)
+    report_json = Column(Text, nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    case = relationship("WalletCase")
+    snapshot_sync = relationship("CaseSync")
+
+
 class WalletAcquisitionStream(Base):
     """Persisted acquisition contract and aggregate evidence for one stream."""
 

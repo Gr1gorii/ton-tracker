@@ -4,6 +4,7 @@ export type AppRoute =
   | { kind: "case-activity"; caseId: string }
   | { kind: "case-findings"; caseId: string }
   | { kind: "case-evidence"; caseId: string }
+  | { kind: "case-reports"; caseId: string }
   | { kind: "not-found" };
 
 const CASE_PUBLIC_ID =
@@ -12,7 +13,7 @@ const CASE_PUBLIC_ID =
 export function parseAppRoute(pathname: string): AppRoute {
   if (pathname === "/" || pathname === "") return { kind: "home" };
 
-  const match = /^\/cases\/([^/]+)\/(summary|activity|findings|evidence)\/?$/.exec(pathname);
+  const match = /^\/cases\/([^/]+)\/(summary|activity|findings|evidence|reports)\/?$/.exec(pathname);
   if (!match) return { kind: "not-found" };
 
   let caseId: string;
@@ -28,7 +29,9 @@ export function parseAppRoute(pathname: string): AppRoute {
       ? "case-activity"
       : match[2] === "findings"
         ? "case-findings"
-        : "case-evidence";
+        : match[2] === "evidence"
+          ? "case-evidence"
+          : "case-reports";
   return { kind, caseId };
 }
 
@@ -58,4 +61,11 @@ export function caseFindingsPath(caseId: string): string {
     throw new Error("Wallet Case id must be a canonical UUIDv4");
   }
   return `/cases/${encodeURIComponent(caseId)}/findings`;
+}
+
+export function caseReportsPath(caseId: string): string {
+  if (!CASE_PUBLIC_ID.test(caseId)) {
+    throw new Error("Wallet Case id must be a canonical UUIDv4");
+  }
+  return `/cases/${encodeURIComponent(caseId)}/reports`;
 }

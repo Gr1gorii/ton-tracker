@@ -1,10 +1,10 @@
-# GRAM Scope — v0.76.0 Promotion Checklist
+# GRAM Scope — v0.77.0 Promotion Checklist
 
-Current promotion gates for Wallet Case Findings:
+Current promotion gates for Wallet Case Report History:
 
-- Product label is `v0.76.0 CASE FINDINGS`; backend API version stays
+- Product label is `v0.77.0 REPORT HISTORY`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic reaches revision `20260710_0022` with exact model parity from fresh,
+- Alembic reaches revision `20260710_0023` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
   path. Missing or changed columns, checks, foreign keys, delete actions, and
   indexes fail closed; downgrade remains unsupported. Revision 0020 versions
@@ -17,6 +17,9 @@ Current promotion gates for Wallet Case Findings:
   noncanonical evidence and are never selected by the current policy. Existing
   `ton_liteserver_checkpoint_2026_08_v1` rows also remain noncanonical legacy
   checkpoint evidence.
+- Revision 0023 adds the immutable Wallet Case Report revision table. Fresh,
+  0022 upgrade, exact empty interrupted-DDL resume, same-name drift, row
+  adoption, and forward-only behavior must all pass fail-closed tests.
 - Evidence is bound to one owner-scoped case, usable pinned snapshot, exact
   source synchronization, and a revalidated provider-observed transaction.
   Demo fixtures, transfers, swaps, unknown linkage, and mismatched source scope
@@ -60,7 +63,7 @@ Current promotion gates for Wallet Case Findings:
 - Runtime readiness is factual: a disabled or dead local Evidence runner makes
   the action unavailable and publishes a machine-readable limitation instead
   of allowing a deterministic failing POST.
-- Summary, Activity, Findings, and Evidence routes survive direct navigation, refresh,
+- Summary, Activity, Findings, Evidence, and Reports routes survive direct navigation, refresh,
   back/forward, transient transport failures, and active-job polling. Keyboard
   focus, cancellation confirmation, narrow layouts, and both themes pass.
 - The report is pinned to one immutable CaseSync snapshot, content-addressed by
@@ -68,6 +71,11 @@ Current promotion gates for Wallet Case Findings:
   Activity plus revalidated persisted Evidence. Observed, normalized, and
   partially verified revisions remain useful and exportable. Canonical requires
   every published hard gate; one failed proof does not destroy the report.
+- Report history is populated only through an explicit capture. The same exact
+  content replays idempotently, saved documents are revalidated on every read,
+  and catalog pagination freezes a revision cutoff with a case-bound signed
+  cursor. Process-local cursor lifetime and the absence of automatic capture of
+  intermediate Evidence states remain disclosed limitations.
 - Report output always includes assurance, coverage, gaps, limitations,
   unverified claims, Activity/Evidence revision digests, and fixed false
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
@@ -86,7 +94,7 @@ Current promotion gates for Wallet Case Findings:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.76.0 must not be promoted as a hosted Wallet Case release.
+  v0.77.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

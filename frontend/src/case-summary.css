@@ -79,9 +79,9 @@
 .case-refreshing { display: inline-flex; align-items: center; gap: 8px; color: var(--text-soft); font-size: 0.8125rem; font-weight: 700; }
 .case-view-nav {
   display: grid;
-  width: fit-content;
+  width: 100%;
   padding: 5px;
-  grid-template-columns: repeat(3, minmax(170px, 1fr));
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
   gap: 4px;
   border: 1px solid var(--border);
   border-radius: 17px;
@@ -493,6 +493,55 @@
 .case-findings-boundary li strong { color: var(--text-soft); font-size: 0.7rem; text-transform: capitalize; }
 .case-findings-boundary li span { color: var(--text-muted); font-size: 0.75rem; line-height: 1.5; }
 
+.case-reports-page { display: grid; gap: 18px; }
+.case-report-current,
+.case-report-history,
+.case-report-detail { overflow: hidden; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.case-report-current > header,
+.case-report-history > header,
+.case-report-detail > header { display: flex; min-height: 74px; padding: 17px 21px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); color: var(--accent); }
+.case-report-current > header > div,
+.case-report-history > header > div,
+.case-report-detail > header > div { flex: 1; }
+.case-report-current h2,
+.case-report-history h2,
+.case-report-detail h2 { margin: 3px 0 0; color: var(--text); font-size: 1rem; }
+.case-report-detail h2:focus { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 4px; }
+.case-report-history > header > strong { color: var(--text-muted); font-size: 0.75rem; }
+.case-report-current-body,
+.case-report-detail-body { display: grid; padding: 20px; gap: 17px; }
+.case-report-facts { display: grid; overflow: hidden; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; border: 1px solid var(--border); border-radius: 14px; background: var(--border); }
+.case-report-facts > div { display: grid; min-width: 0; min-height: 68px; padding: 12px 14px; align-content: center; gap: 4px; background: var(--surface-solid); }
+.case-report-facts small { color: var(--text-muted); font-size: 0.65rem; font-weight: 740; letter-spacing: 0.04em; text-transform: uppercase; }
+.case-report-facts strong { overflow: hidden; color: var(--text); font-size: 0.8125rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-report-current-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.case-report-current-actions > * { min-height: 44px; }
+.case-report-boundary-copy { margin: 0; color: var(--text-muted); font-size: 0.76rem; line-height: 1.55; }
+.case-reports-loading,
+.case-reports-empty { display: flex; min-height: 150px; padding: 24px; align-items: center; justify-content: center; gap: 10px; color: var(--accent); text-align: center; }
+.case-reports-empty { flex-direction: column; gap: 7px; }
+.case-reports-empty.is-error { color: var(--danger); }
+.case-reports-empty strong { color: var(--text); }
+.case-reports-empty p { max-width: 570px; margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.55; }
+.case-report-history ul { margin: 0; padding: 0; list-style: none; }
+.case-report-history li + li { border-top: 1px solid var(--border); }
+.case-report-history li > a { display: grid; min-height: 72px; padding: 12px 18px; align-items: center; grid-template-columns: auto minmax(0, 1fr) minmax(120px, auto); gap: 12px; color: var(--text); text-decoration: none; }
+.case-report-history li > a:hover,
+.case-report-history li > a[aria-current="page"] { background: var(--surface-accent); }
+.case-report-history li > a:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.case-report-history li > a > span:nth-child(2) { display: grid; min-width: 0; gap: 4px; }
+.case-report-history li strong { font-size: 0.8125rem; }
+.case-report-history li small { color: var(--text-muted); font-size: 0.72rem; }
+.case-report-history li code { overflow: hidden; color: var(--text-muted); font-size: 0.7rem; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.case-report-assurance { display: inline-flex; min-height: 27px; padding: 4px 9px; align-items: center; border: 1px solid var(--border); border-radius: 999px; color: var(--accent); background: var(--surface-solid); font-size: 0.67rem; font-weight: 740; white-space: nowrap; }
+.case-report-assurance.is-observed { color: var(--warning); }
+.case-report-assurance.is-canonical { color: var(--positive); }
+.case-report-history > p { margin: 0; padding: 12px 18px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.72rem; line-height: 1.5; }
+.case-report-load-more { margin: 14px 18px; }
+.case-report-detail-close { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--surface-solid); cursor: pointer; }
+.case-report-detail-body > .case-definition-list code { display: block; max-width: min(620px, 65vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.case-report-detail-body > a { width: fit-content; }
+
 @media (max-width: 960px) {
   .case-heading { grid-template-columns: 1fr; align-items: start; }
   .case-sync-panel-heading { align-items: stretch; flex-direction: column; }
@@ -507,6 +556,7 @@
   .case-findings-trust { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .case-findings-columns,
   .case-finding-list { grid-template-columns: 1fr; }
+  .case-report-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .case-activity-results li > a { grid-template-columns: auto minmax(0, 1fr) auto; }
   .case-activity-results li > a > span:not(.case-activity-kind, .case-activity-row-main, .case-evidence-chip) { display: none; }
   .case-evidence-chip { justify-self: start; grid-column: 2; }
@@ -532,7 +582,7 @@
   .case-cancel-confirm p { margin: 0 0 5px; }
   .case-cancel-confirm .button-secondary,
   .case-cancel-confirm .button-danger { width: 100%; }
-  .case-view-nav { width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .case-view-nav { width: 100%; overflow-x: auto; grid-template-columns: repeat(5, minmax(105px, 1fr)); }
   .case-view-nav a { min-height: 48px; padding: 7px 9px; }
   .case-view-nav small { display: none; }
   .case-activity-toolbar { align-items: stretch; flex-direction: column; }
@@ -570,6 +620,12 @@
   .case-finding-support a { grid-template-columns: minmax(0, 1fr) auto; }
   .case-finding-support a > svg { display: none; }
   .case-findings-boundary li { grid-template-columns: 1fr; gap: 4px; }
+  .case-report-facts { grid-template-columns: 1fr; }
+  .case-report-current-actions { display: grid; grid-template-columns: 1fr; }
+  .case-report-current-actions > * { width: 100%; }
+  .case-report-history li > a { grid-template-columns: auto minmax(0, 1fr); }
+  .case-report-history li code { display: none; }
+  .case-report-detail-body > .case-definition-list code { max-width: 78vw; }
   .case-evidence-selection-actions { display: grid; grid-template-columns: 1fr; }
   .case-evidence-selection-actions button { width: 100%; }
   .case-evidence-steps li { grid-template-columns: auto minmax(0, 1fr); }

@@ -104,8 +104,8 @@ describe("GramCaseEvidence", () => {
     expect(await screen.findByText("Unavailable")).toBeTruthy();
     expect(screen.getAllByText("The local evidence runner is unavailable.").length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "Verify transaction evidence" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "Normalized report" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Export JSON" }).getAttribute("href")).toContain(`/report/export.json?snapshot=${SYNC_ID}`);
+    expect(await screen.findByRole("heading", { name: "Normalized report" })).toBeTruthy();
+    expect((await screen.findByRole("link", { name: "Export JSON" })).getAttribute("href")).toContain(`/report/export.json?snapshot=${SYNC_ID}`);
     expect(evidenceApiMocks.createWalletCaseEvidenceVerification).not.toHaveBeenCalled();
   });
 
