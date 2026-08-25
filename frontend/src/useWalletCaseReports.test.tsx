@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CASE_ID, SYNC_ID } from "./test/walletCaseFixtures";
@@ -122,6 +122,33 @@ describe("useWalletCaseReports", () => {
       revision.public_id,
       expect.any(AbortSignal),
     );
+  });
+
+  it("does not expose a saved comparison after snapshot-only navigation", async () => {
+    const revision = walletCaseReportRevisionSummaryFixture();
+    const nextSnapshot = "550e8400-e29b-41d4-a716-446655440099";
+    const stable = vi.fn();
+    const renders: Array<{ snapshot: string; comparison: string | null }> = [];
+
+    function Harness({ snapshot }: { snapshot: string }) {
+      const controller = useWalletCaseReports({
+        caseId: CASE_ID,
+        urlState: { snapshot, revision: revision.public_id, baseline: revision.public_id },
+        enabled: true,
+        onSnapshotPinned: stable,
+        onRevisionCaptured: stable,
+      });
+      renders.push({ snapshot, comparison: controller.comparison?.public_id ?? null });
+      return null;
+    }
+
+    const view = render(<Harness snapshot={SYNC_ID} />);
+    await waitFor(() => expect(renders.some((item) => item.comparison !== null)).toBe(true));
+    renders.length = 0;
+
+    view.rerender(<Harness snapshot={nextSnapshot} />);
+
+    expect(renders[0]).toEqual({ snapshot: nextSnapshot, comparison: null });
   });
 
   it("rejects overlapping catalog pagination without appending duplicates", async () => {

@@ -62,7 +62,7 @@ export function useWalletCaseReports({
   const [comparisonVersion, setComparisonVersion] = useState(0);
   const comparisonController = useRef<AbortController | null>(null);
   const comparisonGeneration = useRef(0);
-  const comparisonScopeKey = `${caseId}|${urlState.baseline ?? "none"}|${urlState.revision ?? "none"}`;
+  const comparisonScopeKey = `${caseId}|${urlState.snapshot ?? "none"}|${urlState.baseline ?? "none"}|${urlState.revision ?? "none"}`;
 
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
