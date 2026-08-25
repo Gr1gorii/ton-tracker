@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
   ArrowClockwise,
+  ArrowsLeftRight,
   ClockCounterClockwise,
   Database,
   DownloadSimple,
@@ -25,7 +26,11 @@ import {
   walletCaseReportExportUrl,
   walletCaseReportRevisionExportUrl,
 } from "../walletCaseReportApi";
-import type { WalletCaseReportRevisionSummary } from "../walletCaseReportRevisions";
+import type {
+  WalletCaseReportRevisionComparison,
+  WalletCaseReportRevisionIntegerDelta,
+  WalletCaseReportRevisionSummary,
+} from "../walletCaseReportRevisions";
 import { useWalletCaseReports } from "../useWalletCaseReports";
 
 export default function GramCaseReports({ walletCase }: { walletCase: WalletCase }) {
@@ -34,7 +39,9 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
   const [queryError, setQueryError] = useState(initial.error);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+  const comparisonHeadingRef = useRef<HTMLHeadingElement>(null);
   const focusedRevision = useRef<string | null>(null);
+  const focusedComparison = useRef<string | null>(null);
 
   const commitUrlState = useCallback((next: CaseReportsUrlState, replace = false) => {
     window.history[replace ? "replaceState" : "pushState"]({}, "", `${caseReportsPath(walletCase.public_id)}${caseReportsSearch(next)}`);
@@ -49,14 +56,14 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
     onSnapshotPinned: useCallback((snapshotId: string) => {
       setUrlState((current) => {
         if (current.snapshot !== null) return current;
-        const next = { snapshot: snapshotId, revision: null };
+        const next = { snapshot: snapshotId, revision: null, baseline: null };
         window.history.replaceState({}, "", `${caseReportsPath(walletCase.public_id)}${caseReportsSearch(next)}`);
         return next;
       });
     }, [walletCase.public_id]),
     onRevisionCaptured: useCallback((revision: WalletCaseReportRevisionSummary) => {
-      commitUrlState({ snapshot: revision.snapshot_public_id, revision: revision.public_id });
-    }, [commitUrlState]),
+      commitUrlState({ snapshot: revision.snapshot_public_id, revision: revision.public_id, baseline: urlState.baseline });
+    }, [commitUrlState, urlState.baseline]),
   });
 
   useEffect(() => {
@@ -80,6 +87,17 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
     focusedRevision.current = revision;
     detailHeadingRef.current?.focus();
   }, [controller.detail]);
+
+  useEffect(() => {
+    const comparison = controller.comparison?.public_id ?? null;
+    if (comparison === null) {
+      focusedComparison.current = null;
+      return;
+    }
+    if (focusedComparison.current === comparison) return;
+    focusedComparison.current = comparison;
+    comparisonHeadingRef.current?.focus();
+  }, [controller.comparison]);
 
   if (queryError) {
     return (
@@ -109,7 +127,7 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
   function selectRevision(event: MouseEvent<HTMLAnchorElement>, revision: WalletCaseReportRevisionSummary) {
     if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
     event.preventDefault();
-    commitUrlState({ snapshot: revision.snapshot_public_id, revision: revision.public_id });
+    commitUrlState({ snapshot: revision.snapshot_public_id, revision: revision.public_id, baseline: urlState.baseline });
   }
 
   return (
@@ -170,12 +188,12 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
             <ul>
               {controller.catalog.items.map((revision) => {
                 const selected = urlState.revision === revision.public_id;
-                const href = `${caseReportsPath(walletCase.public_id)}${caseReportsSearch({ snapshot: revision.snapshot_public_id, revision: revision.public_id })}`;
+                const href = `${caseReportsPath(walletCase.public_id)}${caseReportsSearch({ snapshot: revision.snapshot_public_id, revision: revision.public_id, baseline: urlState.baseline })}`;
                 return (
                   <li key={revision.public_id}>
                     <a data-report-revision-id={revision.public_id} href={href} aria-current={selected ? "page" : undefined} onClick={(event) => selectRevision(event, revision)}>
                       <span className={`case-report-assurance is-${revision.assurance_level}`}>{assuranceLabel(revision.assurance_level)}</span>
-                      <span><strong>{formatDate(revision.captured_at)}</strong><small>{revision.activity_count} Activity rows · {revision.evidence_attempt_count} Evidence attempts</small></span>
+                      <span><strong>{formatDate(revision.captured_at)}</strong><small>{revision.activity_count} Activity rows · {revision.evidence_attempt_count} Evidence attempts{urlState.baseline === revision.public_id ? " · Comparison baseline" : ""}</small></span>
                       <code title={revision.public_id}>{short(revision.public_id)}</code>
                     </a>
                   </li>
@@ -199,7 +217,7 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
             <div><span className="eyebrow">Saved revision detail</span><h2 ref={detailHeadingRef} data-route-detail-focus tabIndex={-1} id="case-report-detail-title">Exact stored public report</h2></div>
             <button type="button" className="case-report-detail-close" aria-label="Close saved revision" onClick={() => {
               const selected = urlState.revision;
-              commitUrlState({ snapshot: urlState.snapshot, revision: null });
+              commitUrlState({ snapshot: urlState.snapshot, revision: null, baseline: null });
               window.setTimeout(() => (document.querySelector<HTMLElement>(`[data-report-revision-id="${selected}"]`) ?? headingRef.current)?.focus(), 0);
             }}><X size={18} /></button>
           </header>
@@ -217,10 +235,38 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
                 <div><dt>Activity digest</dt><dd><code title={detailReport.activity_revision.digest_sha256}>{detailReport.activity_revision.digest_sha256}</code></dd></div>
                 <div><dt>Evidence digest</dt><dd><code title={detailReport.evidence_revision.digest_sha256}>{detailReport.evidence_revision.digest_sha256}</code></dd></div>
               </dl>
-              <a className="button-secondary" href={walletCaseReportRevisionExportUrl(walletCase.public_id, detailReport.public_id)} download>
-                <DownloadSimple size={17} /> Export saved JSON
-              </a>
+              <div className="case-report-current-actions">
+                <button
+                  type="button"
+                  className="button-primary"
+                  disabled={urlState.baseline === detailReport.public_id}
+                  onClick={() => commitUrlState({ ...urlState, baseline: detailReport.public_id })}
+                >
+                  <ArrowsLeftRight size={17} /> {urlState.baseline === detailReport.public_id ? "Comparison baseline" : "Compare from this revision"}
+                </button>
+                <a className="button-secondary" href={walletCaseReportRevisionExportUrl(walletCase.public_id, detailReport.public_id)} download>
+                  <DownloadSimple size={17} /> Export saved JSON
+                </a>
+              </div>
             </div>
+          )}
+        </section>
+      )}
+
+      {urlState.baseline !== null && urlState.revision !== null && (
+        <section className="case-report-comparison" aria-labelledby="case-report-comparison-title">
+          <header>
+            <ArrowsLeftRight size={23} />
+            <div><span className="eyebrow">Directional saved diff</span><h2 ref={comparisonHeadingRef} tabIndex={-1} id="case-report-comparison-title">Saved report comparison</h2></div>
+            <button type="button" className="case-report-detail-close" aria-label="Clear report comparison" onClick={() => commitUrlState({ ...urlState, baseline: null })}><X size={18} /></button>
+          </header>
+          {controller.comparisonError && <InlineError message={controller.comparisonError} onRetry={controller.reloadComparison} />}
+          {controller.comparisonLoading && !controller.comparison ? (
+            <div className="case-reports-loading" role="status"><SpinnerGap className="spin" size={22} /><span>Revalidating and comparing both stored revisions…</span></div>
+          ) : controller.comparison ? (
+            <ReportComparison comparison={controller.comparison} />
+          ) : (
+            <div className="case-reports-empty is-error"><WarningCircle size={27} /><strong>Comparison unavailable</strong><p>The two stored report revisions could not be validated together.</p></div>
           )}
         </section>
       )}
@@ -230,6 +276,77 @@ export default function GramCaseReports({ walletCase }: { walletCase: WalletCase
         <div><h2 id="case-reports-boundary-title">History boundary</h2><p>The catalog contains explicit captures only. It does not reconstruct intermediate Evidence states or convert provider observations into canonical facts.</p></div>
       </section>
     </div>
+  );
+}
+
+function ReportComparison({ comparison }: { comparison: WalletCaseReportRevisionComparison }) {
+  return (
+    <div className="case-report-comparison-body">
+      <div className="case-report-comparison-scope">
+        <div><small>Baseline</small><strong>{formatDate(comparison.baseline.captured_at)}</strong><code title={comparison.baseline.public_id}>{short(comparison.baseline.public_id)}</code></div>
+        <ArrowsLeftRight size={19} aria-hidden="true" />
+        <div><small>Target</small><strong>{formatDate(comparison.target.captured_at)}</strong><code title={comparison.target.public_id}>{short(comparison.target.public_id)}</code></div>
+      </div>
+      <p className={`case-report-comparison-result ${comparison.content_changed ? "is-changed" : "is-unchanged"}`}>
+        <strong>{comparison.content_changed ? "Stored report content changed" : "No stored content change"}</strong>
+        <span>{comparison.same_snapshot ? "Both captures use the same pinned snapshot." : "The captures use different bounded snapshots."}</span>
+      </p>
+      <div className="case-report-comparison-columns">
+        <ComparisonGroup title="Activity">
+          <DeltaFact label="Rows" value={comparison.activity.total_items} />
+          <DeltaFact label="Transactions" value={comparison.activity.transactions} />
+          <DeltaFact label="Transfers" value={comparison.activity.transfers} />
+          <DeltaFact label="Swaps" value={comparison.activity.swaps} />
+          <DeltaFact label="Failed" value={comparison.activity.failed_transactions} />
+          <DeltaFact label="Source syncs" value={comparison.activity.source_sync_count} />
+        </ComparisonGroup>
+        <ComparisonGroup title="Evidence">
+          <DeltaFact label="Attempts" value={comparison.evidence.total_attempts} />
+          <DeltaFact label="Revalidated" value={comparison.evidence.returned_revalidated} />
+          <DeltaFact label="Selected" value={comparison.evidence.selected_activity_count} />
+          <DeltaFact label="Locally verified" value={comparison.evidence.locally_verified_activity_count} />
+          <DeltaFact label="Chain proven" value={comparison.evidence.chain_inclusion_proven_activity_count} />
+          <DeltaFact label="Native ledgers" value={comparison.evidence.native_ledger_activity_count} />
+        </ComparisonGroup>
+      </div>
+      <dl className="case-definition-list case-report-comparison-facts">
+        <div><dt>Assurance</dt><dd>{assuranceLabel(comparison.assurance.baseline)} → {assuranceLabel(comparison.assurance.target)}</dd></div>
+        <div><dt>Canonical eligibility</dt><dd>{yesNo(comparison.canonical_gate.eligible.baseline)} → {yesNo(comparison.canonical_gate.eligible.target)}</dd></div>
+        <div><dt>Activity digest</dt><dd>{comparison.activity.digest_changed ? "Changed" : "Unchanged"}</dd></div>
+        <div><dt>Evidence digest</dt><dd>{comparison.evidence.digest_changed ? "Changed" : "Unchanged"}</dd></div>
+        <div><dt>Coverage</dt><dd>{comparison.coverage_changed ? "Changed" : "Unchanged"}</dd></div>
+        <div><dt>Observed period</dt><dd>{comparison.activity.observed_period_changed ? "Changed" : "Unchanged"}</dd></div>
+      </dl>
+      <div className="case-report-code-changes">
+        <CodeChanges title="Canonical gates" added={comparison.canonical_gate.newly_unmet} removed={comparison.canonical_gate.resolved} modified={[]} />
+        <CodeChanges title="Gaps" {...comparison.gaps} />
+        <CodeChanges title="Limitations" {...comparison.limitations} />
+        <CodeChanges title="Unverified claims" {...comparison.unverified_claims} />
+      </div>
+      <p className="case-report-boundary-copy">{comparison.comparison_limitations.map((item) => item.message).join(" ")}</p>
+    </div>
+  );
+}
+
+function ComparisonGroup({ title, children }: { title: string; children: ReactNode }) {
+  return <section><h3>{title}</h3><div className="case-report-delta-grid">{children}</div></section>;
+}
+
+function DeltaFact({ label, value }: { label: string; value: WalletCaseReportRevisionIntegerDelta }) {
+  return <div><small>{label}</small><strong>{value.baseline} → {value.target}</strong><span className={value.delta > 0 ? "is-positive" : value.delta < 0 ? "is-negative" : undefined}>{formatDelta(value.delta)}</span></div>;
+}
+
+function CodeChanges({ title, added, removed, modified }: { title: string; added: string[]; removed: string[]; modified: string[]; unchanged_count?: number }) {
+  const changed = added.length + removed.length + modified.length;
+  return (
+    <section>
+      <h3>{title}</h3>
+      {changed === 0 ? <p>No code-level changes</p> : <ul>
+        {removed.map((code) => <li className="is-resolved" key={`removed-${code}`}><span>Resolved</span><code>{code}</code></li>)}
+        {added.map((code) => <li className="is-added" key={`added-${code}`}><span>Added</span><code>{code}</code></li>)}
+        {modified.map((code) => <li className="is-modified" key={`modified-${code}`}><span>Modified</span><code>{code}</code></li>)}
+      </ul>}
+    </section>
   );
 }
 
@@ -262,4 +379,12 @@ function short(value: string): string {
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatDelta(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
+}
+
+function yesNo(value: boolean): string {
+  return value ? "Eligible" : "Not eligible";
 }

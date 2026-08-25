@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { CASE_ID, SYNC_ID } from "./test/walletCaseFixtures";
 import { walletCaseReportFixture } from "./test/walletCaseReportFixtures";
+import { walletCaseReportRevisionComparisonFixture } from "./test/walletCaseReportRevisionFixtures";
 import {
   parseWalletCaseReportRevisionCaptureResponse,
   parseWalletCaseReportRevisionCatalog,
+  parseWalletCaseReportRevisionComparison,
   parseWalletCaseReportRevisionDetailResponse,
 } from "./walletCaseReportRevisions";
 
@@ -84,5 +86,25 @@ describe("Wallet Case report revision parser", () => {
     const value: any = { case_public_id: CASE_ID, revision: summary(), report: walletCaseReportFixture() };
     mutate(value);
     expect(() => parseWalletCaseReportRevisionDetailResponse(value)).toThrow(/inconsistent/);
+  });
+
+  it("accepts a strict comparison of the same stored revision", () => {
+    const value = walletCaseReportRevisionComparisonFixture();
+    expect(parseWalletCaseReportRevisionComparison(value)).toEqual(value);
+  });
+
+  it.each([
+    ["extra field", (value: any) => { value.run_id = 1; }],
+    ["case scope", (value: any) => { value.target.case_public_id = "550e8400-e29b-41d4-a716-446655440099"; }],
+    ["content state", (value: any) => { value.content_changed = true; }],
+    ["Activity delta", (value: any) => { value.activity.total_items.delta = 1; }],
+    ["Evidence summary", (value: any) => { value.evidence.total_attempts.target += 1; value.evidence.total_attempts.delta += 1; }],
+    ["gate overlap", (value: any) => { value.canonical_gate.newly_unmet = ["activity_required"]; value.canonical_gate.resolved = ["activity_required"]; }],
+    ["limitation order", (value: any) => { value.comparison_limitations.reverse(); }],
+    ["truth boundary", (value: any) => { value.truth_boundaries_changed = true; }],
+  ])("rejects comparison %s drift", (_label, mutate) => {
+    const value: any = structuredClone(walletCaseReportRevisionComparisonFixture());
+    mutate(value);
+    expect(() => parseWalletCaseReportRevisionComparison(value)).toThrow();
   });
 });

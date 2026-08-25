@@ -8,9 +8,11 @@ import {
   isWalletCaseReportPublicId,
   parseWalletCaseReportRevisionCaptureResponse,
   parseWalletCaseReportRevisionCatalog,
+  parseWalletCaseReportRevisionComparison,
   parseWalletCaseReportRevisionDetailResponse,
   type WalletCaseReportRevisionCaptureResponse,
   type WalletCaseReportRevisionCatalog,
+  type WalletCaseReportRevisionComparison,
   type WalletCaseReportRevisionDetailResponse,
 } from "./walletCaseReportRevisions";
 
@@ -113,6 +115,29 @@ export async function getWalletCaseReportRevision(
   if (parsed.case_public_id !== caseId || parsed.revision.public_id !== reportId) {
     throw new Error("Stored Wallet Case report revision does not match the requested resource");
   }
+  return parsed;
+}
+
+export async function compareWalletCaseReportRevisions(
+  caseId: string,
+  baselineReportId: string,
+  targetReportId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseReportRevisionComparison> {
+  assertUuid(caseId, "Wallet Case ID");
+  assertReportId(baselineReportId);
+  assertReportId(targetReportId);
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/reports/${encodeURIComponent(baselineReportId)}/compare/${encodeURIComponent(targetReportId)}`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) throw await reportResponseError(response);
+  const parsed = parseWalletCaseReportRevisionComparison(await response.json());
+  if (
+    parsed.case_public_id !== caseId
+    || parsed.baseline.public_id !== baselineReportId
+    || parsed.target.public_id !== targetReportId
+  ) throw new Error("Wallet Case report comparison does not match the requested revisions");
   return parsed;
 }
 

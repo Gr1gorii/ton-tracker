@@ -4,12 +4,14 @@ import type { CaseReportsUrlState } from "./caseReportsQuery";
 import type { WalletCaseReportResponse } from "./walletCaseReport";
 import {
   captureWalletCaseReportRevision,
+  compareWalletCaseReportRevisions,
   getWalletCaseReport,
   getWalletCaseReportRevision,
   listWalletCaseReportRevisions,
 } from "./walletCaseReportApi";
 import type {
   WalletCaseReportRevisionCatalog,
+  WalletCaseReportRevisionComparison,
   WalletCaseReportRevisionDetailResponse,
   WalletCaseReportRevisionSummary,
 } from "./walletCaseReportRevisions";
@@ -52,6 +54,15 @@ export function useWalletCaseReports({
   const detailController = useRef<AbortController | null>(null);
   const detailGeneration = useRef(0);
   const detailScopeKey = `${caseId}|${urlState.snapshot ?? "none"}|${urlState.revision ?? "none"}`;
+
+  const [comparison, setComparison] = useState<WalletCaseReportRevisionComparison | null>(null);
+  const [comparisonScope, setComparisonScope] = useState<string | null>(null);
+  const [comparisonLoading, setComparisonLoading] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [comparisonVersion, setComparisonVersion] = useState(0);
+  const comparisonController = useRef<AbortController | null>(null);
+  const comparisonGeneration = useRef(0);
+  const comparisonScopeKey = `${caseId}|${urlState.baseline ?? "none"}|${urlState.revision ?? "none"}`;
 
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
@@ -147,6 +158,36 @@ export function useWalletCaseReports({
   }, [caseId, detailScopeKey, detailVersion, enabled, urlState.revision, urlState.snapshot]);
 
   useEffect(() => {
+    comparisonController.current?.abort();
+    const requestGeneration = ++comparisonGeneration.current;
+    setComparison(null);
+    setComparisonScope(null);
+    setComparisonError(null);
+    if (!enabled || urlState.baseline === null || urlState.revision === null || urlState.snapshot === null) {
+      setComparisonLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    comparisonController.current = controller;
+    setComparisonLoading(true);
+    void compareWalletCaseReportRevisions(caseId, urlState.baseline, urlState.revision, controller.signal)
+      .then((response) => {
+        if (controller.signal.aborted || requestGeneration !== comparisonGeneration.current) return;
+        if (response.target.snapshot_public_id !== urlState.snapshot) throw new Error("Compared report target does not match the pinned URL snapshot.");
+        setComparison(response);
+        setComparisonScope(comparisonScopeKey);
+      })
+      .catch((caught) => {
+        if (!controller.signal.aborted && requestGeneration === comparisonGeneration.current) setComparisonError(message(caught, "Saved report revisions could not be compared."));
+      })
+      .finally(() => {
+        if (comparisonController.current === controller) comparisonController.current = null;
+        if (!controller.signal.aborted && requestGeneration === comparisonGeneration.current) setComparisonLoading(false);
+      });
+    return () => controller.abort();
+  }, [caseId, comparisonScopeKey, comparisonVersion, enabled, urlState.baseline, urlState.revision, urlState.snapshot]);
+
+  useEffect(() => {
     captureController.current?.abort();
     captureController.current = null;
     setCapturing(false);
@@ -157,9 +198,11 @@ export function useWalletCaseReports({
     currentGeneration.current += 1;
     catalogGeneration.current += 1;
     detailGeneration.current += 1;
+    comparisonGeneration.current += 1;
     currentController.current?.abort();
     catalogController.current?.abort();
     detailController.current?.abort();
+    comparisonController.current?.abort();
     captureController.current?.abort();
   }, []);
 
@@ -226,11 +269,16 @@ export function useWalletCaseReports({
     detailLoading,
     detailError,
     reloadDetail: () => setDetailVersion((value) => value + 1),
+    comparison: comparisonScope === comparisonScopeKey ? comparison : null,
+    comparisonLoading,
+    comparisonError,
+    reloadComparison: () => setComparisonVersion((value) => value + 1),
     capture,
     capturing,
     captureError,
   }), [
     capture, captureError, capturing, caseId, catalog, catalogError, catalogLoading, catalogScope,
+    comparison, comparisonError, comparisonLoading, comparisonScope, comparisonScopeKey,
     current, currentError, currentLoading, currentScope, currentScopeKey, detail, detailError,
     detailLoading, detailScope, detailScopeKey, loadMore,
   ]);

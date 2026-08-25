@@ -496,17 +496,22 @@
 .case-reports-page { display: grid; gap: 18px; }
 .case-report-current,
 .case-report-history,
-.case-report-detail { overflow: hidden; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
+.case-report-detail,
+.case-report-comparison { overflow: hidden; border: 1px solid var(--border); border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-soft); }
 .case-report-current > header,
 .case-report-history > header,
-.case-report-detail > header { display: flex; min-height: 74px; padding: 17px 21px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); color: var(--accent); }
+.case-report-detail > header,
+.case-report-comparison > header { display: flex; min-height: 74px; padding: 17px 21px; align-items: center; gap: 12px; border-bottom: 1px solid var(--border); color: var(--accent); }
 .case-report-current > header > div,
 .case-report-history > header > div,
-.case-report-detail > header > div { flex: 1; }
+.case-report-detail > header > div,
+.case-report-comparison > header > div { flex: 1; }
 .case-report-current h2,
 .case-report-history h2,
-.case-report-detail h2 { margin: 3px 0 0; color: var(--text); font-size: 1rem; }
-.case-report-detail h2:focus { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 4px; }
+.case-report-detail h2,
+.case-report-comparison h2 { margin: 3px 0 0; color: var(--text); font-size: 1rem; }
+.case-report-detail h2:focus,
+.case-report-comparison h2:focus { outline: 2px solid var(--accent); outline-offset: 5px; border-radius: 4px; }
 .case-report-history > header > strong { color: var(--text-muted); font-size: 0.75rem; }
 .case-report-current-body,
 .case-report-detail-body { display: grid; padding: 20px; gap: 17px; }
@@ -541,6 +546,42 @@
 .case-report-detail-close { display: grid; width: 42px; height: 42px; padding: 0; place-items: center; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--surface-solid); cursor: pointer; }
 .case-report-detail-body > .case-definition-list code { display: block; max-width: min(620px, 65vw); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .case-report-detail-body > a { width: fit-content; }
+.case-report-comparison-body { display: grid; padding: 20px; gap: 18px; }
+.case-report-comparison-scope { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 14px; }
+.case-report-comparison-scope > div { display: grid; min-width: 0; padding: 14px; gap: 4px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-solid); }
+.case-report-comparison-scope > svg { color: var(--text-muted); }
+.case-report-comparison-scope small { color: var(--text-muted); font-size: 0.65rem; font-weight: 760; letter-spacing: 0.05em; text-transform: uppercase; }
+.case-report-comparison-scope strong { color: var(--text); font-size: 0.78rem; }
+.case-report-comparison-scope code { overflow: hidden; color: var(--text-muted); font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-report-comparison-result { display: flex; margin: 0; padding: 13px 15px; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 13px; background: var(--surface-solid); }
+.case-report-comparison-result.is-changed { border-color: color-mix(in srgb, var(--warning) 30%, var(--border)); }
+.case-report-comparison-result.is-unchanged { border-color: color-mix(in srgb, var(--positive) 30%, var(--border)); }
+.case-report-comparison-result strong { color: var(--text); font-size: 0.8rem; }
+.case-report-comparison-result span { color: var(--text-muted); font-size: 0.73rem; text-align: right; }
+.case-report-comparison-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.case-report-comparison-columns > section { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; }
+.case-report-comparison-columns h3,
+.case-report-code-changes h3 { margin: 0; padding: 11px 13px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 0.75rem; }
+.case-report-delta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.case-report-delta-grid > div { display: grid; min-width: 0; padding: 11px 13px; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; border-bottom: 1px solid var(--border); }
+.case-report-delta-grid > div:nth-last-child(-n + 2) { border-bottom: 0; }
+.case-report-delta-grid > div:nth-child(odd) { border-right: 1px solid var(--border); }
+.case-report-delta-grid small { grid-column: 1 / -1; color: var(--text-muted); font-size: 0.63rem; text-transform: uppercase; }
+.case-report-delta-grid strong { overflow: hidden; color: var(--text); font-size: 0.74rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-report-delta-grid span { color: var(--text-muted); font-size: 0.72rem; font-weight: 760; }
+.case-report-delta-grid span.is-positive { color: var(--positive); }
+.case-report-delta-grid span.is-negative { color: var(--danger); }
+.case-report-comparison-facts { margin: 0; }
+.case-report-code-changes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.case-report-code-changes > section { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; }
+.case-report-code-changes p { margin: 0; padding: 14px; color: var(--text-muted); font-size: 0.72rem; }
+.case-report-code-changes ul { display: grid; margin: 0; padding: 10px; gap: 7px; list-style: none; }
+.case-report-code-changes li { display: grid; min-width: 0; grid-template-columns: 62px minmax(0, 1fr); gap: 8px; align-items: center; }
+.case-report-code-changes li span { color: var(--text-muted); font-size: 0.62rem; font-weight: 760; text-transform: uppercase; }
+.case-report-code-changes li.is-resolved span { color: var(--positive); }
+.case-report-code-changes li.is-added span { color: var(--warning); }
+.case-report-code-changes li.is-modified span { color: var(--accent); }
+.case-report-code-changes li code { overflow: hidden; color: var(--text); font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 960px) {
   .case-heading { grid-template-columns: 1fr; align-items: start; }
@@ -557,6 +598,7 @@
   .case-findings-columns,
   .case-finding-list { grid-template-columns: 1fr; }
   .case-report-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .case-report-comparison-columns { grid-template-columns: 1fr; }
   .case-activity-results li > a { grid-template-columns: auto minmax(0, 1fr) auto; }
   .case-activity-results li > a > span:not(.case-activity-kind, .case-activity-row-main, .case-evidence-chip) { display: none; }
   .case-evidence-chip { justify-self: start; grid-column: 2; }
@@ -626,6 +668,11 @@
   .case-report-history li > a { grid-template-columns: auto minmax(0, 1fr); }
   .case-report-history li code { display: none; }
   .case-report-detail-body > .case-definition-list code { max-width: 78vw; }
+  .case-report-comparison-scope { grid-template-columns: 1fr; }
+  .case-report-comparison-scope > svg { justify-self: center; transform: rotate(90deg); }
+  .case-report-comparison-result { align-items: flex-start; flex-direction: column; }
+  .case-report-comparison-result span { text-align: left; }
+  .case-report-code-changes { grid-template-columns: 1fr; }
   .case-evidence-selection-actions { display: grid; grid-template-columns: 1fr; }
   .case-evidence-selection-actions button { width: 100%; }
   .case-evidence-steps li { grid-template-columns: auto minmax(0, 1fr); }
