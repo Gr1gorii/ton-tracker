@@ -157,6 +157,11 @@ def test_recovery_heartbeat_metrics_are_bounded_and_fail_closed(tmp_path):
 
 
 def test_readiness_and_metrics_endpoints(monkeypatch):
+    # This probe test owns one StaticPool connection; background job runners
+    # would share that connection across threads and make readiness timing-
+    # dependent instead of testing the endpoint contract in isolation.
+    monkeypatch.setenv("WALLET_CASE_JOB_RUNNER", "disabled")
+    monkeypatch.setenv("WALLET_CASE_EVIDENCE_RUNNER", "disabled")
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
