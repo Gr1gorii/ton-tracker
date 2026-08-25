@@ -27,6 +27,7 @@ from services.wallet_case_report import _assurance_level
 from wallet_case_report_schemas import WalletCaseReportResponse
 from wallet_case_report_revision_schemas import (
     WalletCaseReportRevisionCatalog,
+    WalletCaseReportRevisionComparison,
     WalletCaseReportRevisionDetailResponse,
 )
 
@@ -333,6 +334,123 @@ def test_report_revision_cursor_freezes_catalog_while_new_capture_arrives(report
     )
     assert fresh.json()["items"][0]["public_id"] == third_id
     assert fresh.json()["aggregate"]["total_revisions"] == 3
+
+
+def test_report_revision_comparison_is_directional_content_addressed_and_bounded(
+    report_client,
+):
+    with app.state.case_report_test_sessions() as session:
+        wallet_case = _case(session, environment="demo")
+        snapshots: list[str] = []
+        for index in range(2):
+            run, sync = _run_and_sync(session, wallet_case)
+            transaction = _demo_transaction(run)
+            transaction.tx_hash = f"demo-report-comparison-{index}"
+            transaction.logical_time = str(42 + index)
+            transaction.timestamp = START + timedelta(hours=index + 1)
+            session.add(transaction)
+            snapshots.append(sync.public_id)
+        session.commit()
+        case_id = wallet_case.public_id
+
+    revisions = [
+        report_client.post(
+            f"/api/v1/cases/{case_id}/reports",
+            json={"snapshot_public_id": snapshot},
+        ).json()["revision"]
+        for snapshot in snapshots
+    ]
+    baseline_id = revisions[0]["public_id"]
+    target_id = revisions[1]["public_id"]
+    response = report_client.get(
+        f"/api/v1/cases/{case_id}/reports/{baseline_id}/compare/{target_id}"
+    )
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    comparison = response.json()
+    assert comparison["contract_version"] == (
+        "wallet_case_report_revision_comparison_v1"
+    )
+    assert comparison["public_id"].startswith("rcmp_")
+    assert comparison["baseline"] == revisions[0]
+    assert comparison["target"] == revisions[1]
+    assert comparison["same_snapshot"] is False
+    assert comparison["content_changed"] is True
+    assert comparison["assurance"] == {
+        "baseline": "observed",
+        "target": "observed",
+        "changed": False,
+    }
+    assert comparison["activity"]["total_items"] == {
+        "baseline": 1,
+        "target": 2,
+        "delta": 1,
+    }
+    assert comparison["activity"]["source_sync_count"]["delta"] == 1
+    assert comparison["evidence"]["total_attempts"]["delta"] == 0
+    assert comparison["truth_boundaries_changed"] is False
+    assert [
+        item["code"] for item in comparison["comparison_limitations"]
+    ] == [
+        "comparison_uses_explicit_captures",
+        "comparison_does_not_establish_causality",
+        "comparison_spans_pinned_snapshots",
+    ]
+    assert WalletCaseReportRevisionComparison.model_validate(
+        comparison
+    ).model_dump(mode="json") == comparison
+    for forbidden in (
+        "run_id",
+        "ingestion_run_id",
+        "source_transaction_id",
+        "lease_token",
+        "raw_json",
+    ):
+        assert forbidden not in response.text
+
+    reverse = report_client.get(
+        f"/api/v1/cases/{case_id}/reports/{target_id}/compare/{baseline_id}"
+    ).json()
+    assert reverse["public_id"] != comparison["public_id"]
+    assert reverse["activity"]["total_items"]["delta"] == -1
+
+    unchanged = report_client.get(
+        f"/api/v1/cases/{case_id}/reports/{baseline_id}/compare/{baseline_id}"
+    ).json()
+    assert unchanged["same_snapshot"] is True
+    assert unchanged["content_changed"] is False
+    assert unchanged["activity"]["total_items"]["delta"] == 0
+    assert len(unchanged["comparison_limitations"]) == 2
+
+    tampered = dict(comparison)
+    tampered["content_changed"] = False
+    with pytest.raises(ValueError, match="content state"):
+        WalletCaseReportRevisionComparison.model_validate(tampered)
+
+
+def test_report_revision_comparison_rejects_query_and_cross_case_scope(report_client):
+    with app.state.case_report_test_sessions() as session:
+        wallet_case = _case(session, environment="demo")
+        run, sync = _run_and_sync(session, wallet_case)
+        session.add(_demo_transaction(run))
+        other_case = _case(session, environment="live")
+        session.commit()
+        case_id = wallet_case.public_id
+        other_case_id = other_case.public_id
+        snapshot_id = sync.public_id
+
+    report_id = report_client.post(
+        f"/api/v1/cases/{case_id}/reports",
+        json={"snapshot_public_id": snapshot_id},
+    ).json()["revision"]["public_id"]
+    assert report_client.get(
+        f"/api/v1/cases/{case_id}/reports/{report_id}/compare/{report_id}?snapshot={snapshot_id}"
+    ).status_code == 422
+    cross_case = report_client.get(
+        f"/api/v1/cases/{other_case_id}/reports/{report_id}/compare/{report_id}"
+    )
+    assert cross_case.status_code == 404
+    assert cross_case.json()["detail"]["code"] == "case_report_revision_not_found"
 
 
 def test_report_revision_boundaries_fail_closed(report_client):
