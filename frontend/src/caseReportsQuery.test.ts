@@ -7,14 +7,14 @@ import { caseReportsSearch, EMPTY_CASE_REPORTS_URL_STATE, readCaseReportsUrlStat
 describe("Case Reports URL state", () => {
   it("round-trips canonical snapshot and report revision in stable order", () => {
     const revision = walletCaseReportFixture().report!.public_id;
-    const search = caseReportsSearch({ snapshot: SYNC_ID, revision });
-    expect(search).toBe(`?snapshot=${SYNC_ID}&revision=${revision}`);
-    expect(readCaseReportsUrlState(search)).toEqual({ state: { snapshot: SYNC_ID, revision }, error: null });
+    const search = caseReportsSearch({ snapshot: SYNC_ID, revision, baseline: revision });
+    expect(search).toBe(`?snapshot=${SYNC_ID}&revision=${revision}&baseline=${revision}`);
+    expect(readCaseReportsUrlState(search)).toEqual({ state: { snapshot: SYNC_ID, revision, baseline: revision }, error: null });
   });
 
   it("accepts empty and snapshot-only state", () => {
     expect(readCaseReportsUrlState("")).toEqual({ state: EMPTY_CASE_REPORTS_URL_STATE, error: null });
-    expect(readCaseReportsUrlState(`?snapshot=${SYNC_ID}`).state).toEqual({ snapshot: SYNC_ID, revision: null });
+    expect(readCaseReportsUrlState(`?snapshot=${SYNC_ID}`).state).toEqual({ snapshot: SYNC_ID, revision: null, baseline: null });
   });
 
   it.each([
@@ -23,12 +23,15 @@ describe("Case Reports URL state", () => {
     `?revision=rpt_${"ab".repeat(32)}`,
     `?snapshot=bad`,
     `?snapshot=${SYNC_ID}&revision=rpt_bad`,
+    `?baseline=rpt_${"ab".repeat(32)}`,
+    `?snapshot=${SYNC_ID}&revision=rpt_${"ab".repeat(32)}&baseline=rpt_bad`,
   ])("fails closed for %s", (search) => {
     expect(readCaseReportsUrlState(search).error).not.toBeNull();
   });
 
   it("rejects invalid state when serializing", () => {
-    expect(() => caseReportsSearch({ snapshot: null, revision: `rpt_${"ab".repeat(32)}` })).toThrow(/requires/);
-    expect(() => caseReportsSearch({ snapshot: "bad", revision: null })).toThrow(/UUIDv4/);
+    expect(() => caseReportsSearch({ snapshot: null, revision: `rpt_${"ab".repeat(32)}`, baseline: null })).toThrow(/requires/);
+    expect(() => caseReportsSearch({ snapshot: "bad", revision: null, baseline: null })).toThrow(/UUIDv4/);
+    expect(() => caseReportsSearch({ snapshot: SYNC_ID, revision: null, baseline: `rpt_${"ab".repeat(32)}` })).toThrow(/selected revision/);
   });
 });

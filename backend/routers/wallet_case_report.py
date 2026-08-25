@@ -31,6 +31,7 @@ from wallet_case_report_revision_schemas import (
     WalletCaseReportRevisionCaptureRequest,
     WalletCaseReportRevisionCaptureResponse,
     WalletCaseReportRevisionCatalog,
+    WalletCaseReportRevisionComparison,
     WalletCaseReportRevisionDetailResponse,
 )
 from wallet_case_report_schemas import WalletCaseReportResponse
@@ -161,6 +162,40 @@ def read_case_report_revision(
         lambda service: service.detail(
             public_id,
             report_public_id=report_public_id,
+        ),
+    )
+
+
+@router.get(
+    "/{public_id}/reports/{baseline_public_id}/compare/{target_public_id}",
+    response_model=WalletCaseReportRevisionComparison,
+)
+def compare_case_report_revisions(
+    request: Request,
+    response: Response,
+    public_id: str = Path(..., pattern=_UUID_PATTERN, max_length=36),
+    baseline_public_id: str = Path(
+        ...,
+        pattern=_REPORT_ID_PATTERN,
+        min_length=68,
+        max_length=68,
+    ),
+    target_public_id: str = Path(
+        ...,
+        pattern=_REPORT_ID_PATTERN,
+        min_length=68,
+        max_length=68,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    _no_query(request)
+    response.headers["Cache-Control"] = "no-store"
+    return _revision_call(
+        session,
+        lambda service: service.compare(
+            public_id,
+            baseline_public_id=baseline_public_id,
+            target_public_id=target_public_id,
         ),
     )
 

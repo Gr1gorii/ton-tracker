@@ -8,6 +8,7 @@ import { CASE_ID, SYNC_ID, walletCaseFixture } from "../test/walletCaseFixtures"
 import { walletCaseReportFixture } from "../test/walletCaseReportFixtures";
 import {
   walletCaseReportRevisionCatalogFixture,
+  walletCaseReportRevisionComparisonFixture,
   walletCaseReportRevisionDetailFixture,
 } from "../test/walletCaseReportRevisionFixtures";
 
@@ -20,6 +21,7 @@ const capture = vi.fn();
 const reloadCurrent = vi.fn();
 const reloadCatalog = vi.fn();
 const reloadDetail = vi.fn();
+const reloadComparison = vi.fn();
 const loadMore = vi.fn();
 
 function reportWalletCase() {
@@ -31,7 +33,7 @@ function reportWalletCase() {
   });
 }
 
-function controller(selected: string | null) {
+function controller(selected: string | null, baseline: string | null = null) {
   return {
     current: walletCaseReportFixture(),
     currentLoading: false,
@@ -46,6 +48,10 @@ function controller(selected: string | null) {
     detailLoading: false,
     detailError: null,
     reloadDetail,
+    comparison: baseline && selected ? walletCaseReportRevisionComparisonFixture() : null,
+    comparisonLoading: false,
+    comparisonError: null,
+    reloadComparison,
     capture,
     capturing: false,
     captureError: null,
@@ -55,7 +61,7 @@ function controller(selected: string | null) {
 beforeEach(() => {
   vi.clearAllMocks();
   window.history.replaceState({}, "", `/cases/${CASE_ID}/reports?snapshot=${SYNC_ID}`);
-  hook.useWalletCaseReports.mockImplementation(({ urlState }: any) => controller(urlState.revision));
+  hook.useWalletCaseReports.mockImplementation(({ urlState }: any) => controller(urlState.revision, urlState.baseline));
 });
 afterEach(() => {
   cleanup();
@@ -95,6 +101,21 @@ describe("GramCaseReports", () => {
     await user.click(screen.getByRole("button", { name: /Reset Reports view/ }));
     expect(window.location.pathname).toBe(`/cases/${CASE_ID}/reports`);
     expect(window.location.search).toBe("");
+  });
+
+  it("pins a comparison baseline in URL state and renders the bounded directional diff", async () => {
+    const user = userEvent.setup();
+    render(<GramCaseReports walletCase={reportWalletCase()} />);
+    const revision = walletCaseReportRevisionCatalogFixture().items[0];
+    await user.click(screen.getByRole("link", { name: /Activity rows/ }));
+    await user.click(await screen.findByRole("button", { name: "Compare from this revision" }));
+    await waitFor(() => expect(window.location.search).toBe(`?snapshot=${SYNC_ID}&revision=${revision.public_id}&baseline=${revision.public_id}`));
+    const comparisonHeading = await screen.findByRole("heading", { name: "Saved report comparison" });
+    await waitFor(() => expect(document.activeElement).toBe(comparisonHeading));
+    expect(screen.getByText("No stored content change")).toBeTruthy();
+    expect(screen.getByText(/do not prove why a value changed/i)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Clear report comparison" }));
+    expect(window.location.search).toBe(`?snapshot=${SYNC_ID}&revision=${revision.public_id}`);
   });
 
   it("renders honest empty states without inventing saved history", () => {

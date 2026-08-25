@@ -27,7 +27,11 @@ from services.wallet_case_report import (
     WalletCaseReportService,
     WalletCaseReportSnapshotNotFound,
 )
-from wallet_case_report_revision_schemas import report_revision_catalog_public_id
+from wallet_case_report_revision_schemas import (
+    WalletCaseReportRevisionComparison,
+    report_revision_catalog_public_id,
+    report_revision_comparison_public_id,
+)
 from wallet_case_report_schemas import WalletCaseReportResponse
 
 
@@ -299,6 +303,147 @@ class WalletCaseReportRevisionService:
             "report": report,
         }
 
+    def compare(
+        self,
+        case_public_id: str,
+        *,
+        baseline_public_id: str,
+        target_public_id: str,
+    ) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        requested_ids = {baseline_public_id, target_public_id}
+        rows = {
+            row.public_id: row
+            for row in self.session.scalars(
+                select(WalletCaseReportRevision)
+                .where(
+                    WalletCaseReportRevision.case_id == wallet_case.id,
+                    WalletCaseReportRevision.public_id.in_(requested_ids),
+                )
+                .options(joinedload(WalletCaseReportRevision.snapshot_sync))
+            )
+        }
+        if set(rows) != requested_ids:
+            raise WalletCaseReportRevisionNotFound(
+                "One or both stored report revisions were not found."
+            )
+        baseline_summary, baseline_document = self._stored(
+            rows[baseline_public_id],
+            wallet_case=wallet_case,
+        )
+        if baseline_public_id == target_public_id:
+            target_summary, target_document = baseline_summary, baseline_document
+        else:
+            target_summary, target_document = self._stored(
+                rows[target_public_id],
+                wallet_case=wallet_case,
+            )
+        baseline = WalletCaseReportResponse.model_validate(baseline_document).report
+        target = WalletCaseReportResponse.model_validate(target_document).report
+        if baseline is None or target is None or baseline.subject != target.subject:
+            raise WalletCaseReportRevisionConflict(
+                "Stored report revisions do not share one public subject identity."
+            )
+
+        same_snapshot = baseline.snapshot_public_id == target.snapshot_public_id
+        comparison_limitations = [
+            {
+                "code": "comparison_uses_explicit_captures",
+                "message": "This comparison covers two explicitly captured revisions, not every intermediate report state.",
+            },
+            {
+                "code": "comparison_does_not_establish_causality",
+                "message": "Directional deltas describe stored public documents and do not prove why a value changed.",
+            },
+        ]
+        if not same_snapshot:
+            comparison_limitations.append({
+                "code": "comparison_spans_pinned_snapshots",
+                "message": "The revisions use different pinned snapshots, so Activity and Evidence deltas may reflect different bounded observation scopes.",
+            })
+
+        baseline_activity = baseline.activity_revision.aggregate.model_dump()
+        target_activity = target.activity_revision.aggregate.model_dump()
+        baseline_evidence = baseline.evidence_revision.model_dump()
+        target_evidence = target.evidence_revision.model_dump()
+        payload: dict[str, Any] = {
+            "contract_version": "wallet_case_report_revision_comparison_v1",
+            "public_id": "rcmp_" + ("0" * 64),
+            "case_public_id": wallet_case.public_id,
+            "baseline": baseline_summary,
+            "target": target_summary,
+            "same_snapshot": same_snapshot,
+            "content_changed": baseline.public_id != target.public_id,
+            "assurance": {
+                "baseline": baseline.assurance_level,
+                "target": target.assurance_level,
+                "changed": baseline.assurance_level != target.assurance_level,
+            },
+            "activity": {
+                "digest_changed": baseline.activity_revision.digest_sha256
+                != target.activity_revision.digest_sha256,
+                "observed_period_changed": baseline.activity_revision.observed_period
+                != target.activity_revision.observed_period,
+                **{
+                    key: _integer_delta(baseline_activity[key], target_activity[key])
+                    for key in baseline_activity
+                },
+            },
+            "evidence": {
+                "digest_changed": baseline.evidence_revision.digest_sha256
+                != target.evidence_revision.digest_sha256,
+                **{
+                    key: _integer_delta(baseline_evidence[key], target_evidence[key])
+                    for key in (
+                        "total_attempts",
+                        "returned_revalidated",
+                        "selected_activity_count",
+                        "locally_verified_activity_count",
+                        "chain_inclusion_proven_activity_count",
+                        "native_ledger_activity_count",
+                    )
+                },
+                "history_truncated": _boolean_transition(
+                    baseline.evidence_revision.history_truncated,
+                    target.evidence_revision.history_truncated,
+                ),
+            },
+            "coverage_changed": baseline.coverage != target.coverage,
+            "canonical_gate": {
+                "eligible": _boolean_transition(
+                    baseline.canonical_gate.eligible,
+                    target.canonical_gate.eligible,
+                ),
+                "newly_unmet": sorted(
+                    set(target.canonical_gate.unmet)
+                    - set(baseline.canonical_gate.unmet)
+                ),
+                "resolved": sorted(
+                    set(baseline.canonical_gate.unmet)
+                    - set(target.canonical_gate.unmet)
+                ),
+                "unchanged_count": len(
+                    set(baseline.canonical_gate.unmet)
+                    & set(target.canonical_gate.unmet)
+                ),
+            },
+            "gaps": _code_changes(baseline.gaps, target.gaps),
+            "limitations": _code_changes(
+                baseline.limitations,
+                target.limitations,
+            ),
+            "unverified_claims": _code_changes(
+                baseline.unverified_claims,
+                target.unverified_claims,
+            ),
+            "truth_boundaries_changed": False,
+            "comparison_limitations": comparison_limitations,
+        }
+        payload["public_id"] = report_revision_comparison_public_id(payload)
+        return WalletCaseReportRevisionComparison.model_validate(payload).model_dump(
+            mode="json"
+        )
+
     def _required_case(self, case_public_id: str) -> WalletCase:
         row = self.session.scalar(
             select(WalletCase).where(
@@ -366,6 +511,50 @@ def _explicit_capture_limitation() -> dict[str, str]:
     return {
         "code": "report_revisions_are_explicit_captures",
         "message": "Only explicitly captured report revisions are retained; intermediate Evidence states are not reconstructed.",
+    }
+
+
+def _integer_delta(baseline: int, target: int) -> dict[str, int]:
+    return {
+        "baseline": baseline,
+        "target": target,
+        "delta": target - baseline,
+    }
+
+
+def _boolean_transition(baseline: bool, target: bool) -> dict[str, bool]:
+    return {
+        "baseline": baseline,
+        "target": target,
+        "changed": baseline != target,
+    }
+
+
+def _code_changes(baseline: list[Any], target: list[Any]) -> dict[str, Any]:
+    def group(items: list[Any]) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {}
+        for item in items:
+            encoded = _canonical_json(item.model_dump(mode="json")).decode("utf-8")
+            grouped.setdefault(item.code, []).append(encoded)
+        return {key: sorted(values) for key, values in grouped.items()}
+
+    baseline_by_code = group(baseline)
+    target_by_code = group(target)
+    baseline_codes = set(baseline_by_code)
+    target_codes = set(target_by_code)
+    shared = baseline_codes & target_codes
+    return {
+        "added": sorted(target_codes - baseline_codes),
+        "removed": sorted(baseline_codes - target_codes),
+        "modified": sorted(
+            code
+            for code in shared
+            if baseline_by_code[code] != target_by_code[code]
+        ),
+        "unchanged_count": sum(
+            baseline_by_code[code] == target_by_code[code]
+            for code in shared
+        ),
     }
 
 

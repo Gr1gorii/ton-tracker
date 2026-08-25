@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_BASE } from "./apiBase";
 import { CASE_ID, SYNC_ID } from "./test/walletCaseFixtures";
 import { walletCaseReportFixture } from "./test/walletCaseReportFixtures";
+import { walletCaseReportRevisionComparisonFixture } from "./test/walletCaseReportRevisionFixtures";
 import {
   captureWalletCaseReportRevision,
+  compareWalletCaseReportRevisions,
   getWalletCaseReport,
   getWalletCaseReportRevision,
   listWalletCaseReportRevisions,
@@ -84,13 +86,15 @@ describe("Wallet Case report API", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(catalog))
       .mockResolvedValueOnce(jsonResponse({ case_public_id: CASE_ID, created: true, revision }, 201))
-      .mockResolvedValueOnce(jsonResponse({ case_public_id: CASE_ID, revision, report: walletCaseReportFixture() }));
+      .mockResolvedValueOnce(jsonResponse({ case_public_id: CASE_ID, revision, report: walletCaseReportFixture() }))
+      .mockResolvedValueOnce(jsonResponse(walletCaseReportRevisionComparisonFixture()));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
 
     await expect(listWalletCaseReportRevisions(CASE_ID, 10, null, controller.signal)).resolves.toEqual(catalog);
     await expect(captureWalletCaseReportRevision(CASE_ID, SYNC_ID, controller.signal)).resolves.toEqual({ case_public_id: CASE_ID, created: true, revision });
     await expect(getWalletCaseReportRevision(CASE_ID, revision.public_id, controller.signal)).resolves.toEqual({ case_public_id: CASE_ID, revision, report: walletCaseReportFixture() });
+    await expect(compareWalletCaseReportRevisions(CASE_ID, revision.public_id, revision.public_id, controller.signal)).resolves.toEqual(walletCaseReportRevisionComparisonFixture());
     expect(fetchMock.mock.calls[0]).toEqual([
       `${API_BASE}/api/v1/cases/${CASE_ID}/reports?limit=10`,
       { cache: "no-store", signal: controller.signal },
@@ -107,6 +111,10 @@ describe("Wallet Case report API", () => {
     expect(walletCaseReportRevisionExportUrl(CASE_ID, revision.public_id)).toBe(
       `${API_BASE}/api/v1/cases/${CASE_ID}/reports/${revision.public_id}/export.json`,
     );
+    expect(fetchMock.mock.calls[3]).toEqual([
+      `${API_BASE}/api/v1/cases/${CASE_ID}/reports/${revision.public_id}/compare/${revision.public_id}`,
+      { cache: "no-store", signal: controller.signal },
+    ]);
   });
 
   it("rejects invalid revision requests before fetch and status/body drift", async () => {
@@ -115,6 +123,7 @@ describe("Wallet Case report API", () => {
     await expect(listWalletCaseReportRevisions(CASE_ID, 0)).rejects.toThrow(/limit/);
     await expect(listWalletCaseReportRevisions(CASE_ID, 10, " cursor ")).rejects.toThrow(/cursor/);
     await expect(getWalletCaseReportRevision(CASE_ID, "rpt_bad")).rejects.toThrow(/revision ID/);
+    await expect(compareWalletCaseReportRevisions(CASE_ID, "rpt_bad", `rpt_${"ab".repeat(32)}`)).rejects.toThrow(/revision ID/);
     expect(fetchMock).not.toHaveBeenCalled();
 
     const report = walletCaseReportFixture().report!;

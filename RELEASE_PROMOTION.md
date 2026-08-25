@@ -1,8 +1,8 @@
-# GRAM Scope — v0.77.0 Promotion Checklist
+# GRAM Scope — v0.78.0 Promotion Checklist
 
-Current promotion gates for Wallet Case Report History:
+Current promotion gates for Wallet Case Report Compare:
 
-- Product label is `v0.77.0 REPORT HISTORY`; backend API version stays
+- Product label is `v0.78.0 REPORT COMPARE`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260710_0023` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -76,6 +76,11 @@ Current promotion gates for Wallet Case Report History:
   and catalog pagination freezes a revision cutoff with a case-bound signed
   cursor. Process-local cursor lifetime and the absence of automatic capture of
   intermediate Evidence states remain disclosed limitations.
+- Report comparison revalidates both immutable stored documents and requires
+  one owner-scoped case and public subject identity. Its `rcmp_…` document binds
+  ordered baseline and target summaries, exact directional deltas, comparison
+  limitations, and the distinction between same- and cross-snapshot scope.
+  It never interprets a delta as causality or reconstructs uncaptured states.
 - Report output always includes assurance, coverage, gaps, limitations,
   unverified claims, Activity/Evidence revision digests, and fixed false
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
@@ -94,7 +99,7 @@ Current promotion gates for Wallet Case Report History:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.77.0 must not be promoted as a hosted Wallet Case release.
+  v0.78.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 
