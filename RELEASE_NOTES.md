@@ -1,3 +1,41 @@
+# GRAM Scope — v0.78.0 REPORT COMPARE
+
+v0.78.0 adds a deterministic comparison view for two immutable Wallet Case
+Report revisions. A user can designate any saved revision as the baseline,
+select another saved revision as the target, and inspect directional changes
+without exporting documents or treating capture order as causality.
+
+The owner-scoped local API adds
+`GET /api/v1/cases/{case}/reports/{baseline}/compare/{target}`. Both stored
+documents are revalidated against their content addresses, persisted metadata,
+case, snapshot, and public subject identity before comparison. The strict
+`wallet_case_report_revision_comparison_v1` response is itself content-addressed
+as `rcmp_…` and exposes only public revision summaries and bounded deltas. It
+does not expose database/run/source IDs, provider payloads, proof BOCs, worker
+state, or credentials.
+
+Comparison covers assurance, Activity and Evidence digests and counts, observed
+period and coverage change flags, canonical eligibility and gate changes, plus
+added, resolved, or modified gap, limitation, and unverified-claim codes. The
+direction is exactly baseline to target. Comparing across different snapshots
+is explicitly labelled because those counts can represent different bounded
+observation scopes; no delta is presented as proof of why a value changed.
+
+The Reports route now persists `baseline` alongside the pinned target snapshot
+and revision in strict URL state. It survives refresh and back/forward
+navigation, rejects malformed or partial comparison state before requesting,
+aborts stale comparisons, and moves keyboard focus to the newly validated diff.
+Responsive comparison cards retain the explicit-capture, incomplete-history,
+cost-basis, PnL, and non-causality boundaries.
+
+No database migration is added in v0.78.0; Alembic remains at
+`20260710_0023`. Comparisons are read models over two explicit immutable
+captures and do not reconstruct missing intermediate states or automatically
+select Evidence targets. Wallet Cases remain direct-loopback only until
+authentication supplies an owner scope.
+
+---
+
 # GRAM Scope — v0.77.0 REPORT HISTORY
 
 v0.77.0 adds durable, content-addressed Wallet Case Report revisions. A user

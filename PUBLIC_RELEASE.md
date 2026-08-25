@@ -1,4 +1,4 @@
-# GRAM Scope - v0.77.0 Public Release
+# GRAM Scope - v0.78.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -25,6 +25,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 - A durable report-revision catalog populated only by explicit user captures,
   with idempotent content-addressed saves, signed keyset pagination, exact
   revision detail, and exact stored JSON export.
+- A deterministic report-revision comparison contract that revalidates two
+  immutable captures and publishes directional Activity, Evidence, assurance,
+  canonical-gate, gap, limitation, and unverified-claim deltas without claiming
+  causality.
 - A deterministic, content-addressed Wallet Case Findings facade with canonical
   asset flows, bounded counterparty/protocol groups, versioned explainable rules,
   public Activity support links, and explicit no-risk-score truth boundaries.
@@ -45,7 +49,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.77.0 REPORT HISTORY`.
+- Product release label: `v0.78.0 REPORT COMPARE`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260710_0023`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -85,6 +89,9 @@ Public release handoff for the current TON wallet intelligence workspace.
   its `rpt_…` ID is the SHA-256 of the exact public payload projection. It adds
   revision history is stored by migration `20260710_0023` only after an explicit
   capture request.
+- Report comparison contract `wallet_case_report_revision_comparison_v1` is a
+  content-addressed read model over two revalidated explicit captures. Baseline
+  and target order is caller-selected; a delta does not establish causality.
 - Case Findings contract `wallet_case_findings_v1` is a deterministic read model;
   its `fset_…` ID binds the exact public payload projection. It adds no migration,
   never merges assets by symbol, and never publishes an opaque risk or safety
@@ -124,6 +131,9 @@ Public release handoff for the current TON wallet intelligence workspace.
   Evidence. Saved revisions are immutable explicit captures; the catalog does
   not claim that every intermediate report state was retained or reconstructed.
   Automatic proof-target selection remains out of scope.
+- Saved comparison can span different pinned snapshots. Such deltas describe
+  two bounded public documents and are not asserted to represent one continuous
+  observation scope, every intermediate state, or the cause of a change.
 - Report-history cursors are signed and bound to a frozen case revision cutoff,
   but their signing key is process-local. A cursor is not portable across a
   backend restart; opening a fresh first page remains supported.
@@ -151,13 +161,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.77.0`, confirm:
+Before tagging `v0.78.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.77.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.78.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -175,6 +185,9 @@ Before tagging `v0.77.0`, confirm:
 - Report capture idempotency, immutable stored-document validation, signed
   cursor tamper/cross-case rejection, cutoff-stable pagination, exact export,
   URL restoration, load-more overlap rejection, and detail focus tests pass.
+- Report comparison direction, content identity, same/cross-snapshot scope,
+  response redaction, strict URL restoration, stale-request rejection, and
+  comparison focus tests pass.
 - Case Findings reproducibility, content-ID binding, same-symbol asset
   separation, flow conservation, rule support, weakest-evidence labelling,
   strict URL state, response redaction, and Activity deep links pass.
