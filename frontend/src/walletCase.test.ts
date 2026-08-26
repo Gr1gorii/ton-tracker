@@ -19,6 +19,35 @@ import {
 } from "./test/walletCaseFixtures";
 
 describe("wallet case contracts", () => {
+  it("accepts a bounded unique Wallet Case catalog", () => {
+    const first = walletCaseFixture();
+    const second = emptyWalletCaseFixture({
+      public_id: "550e8400-e29b-41d4-a716-446655440099",
+      canonical_wallet_key: `0:${"b".repeat(64)}`,
+    });
+    expect(parseWalletCaseListResponse({
+      cases: [first, second],
+      limit: 2,
+      truncated: true,
+    }).cases).toHaveLength(2);
+  });
+
+  it("rejects unbounded, duplicate, and contradictory Wallet Case catalogs", () => {
+    const walletCase = walletCaseFixture();
+    expect(() => parseWalletCaseListResponse({
+      cases: [walletCase], limit: 0, truncated: false,
+    })).toThrow(/limit/);
+    expect(() => parseWalletCaseListResponse({
+      cases: [walletCase], limit: 51, truncated: false,
+    })).toThrow(/bounded limit/);
+    expect(() => parseWalletCaseListResponse({
+      cases: [walletCase, walletCase], limit: 2, truncated: false,
+    })).toThrow(/duplicate/);
+    expect(() => parseWalletCaseListResponse({
+      cases: [walletCase], limit: 2, truncated: true,
+    })).toThrow(/does not fill/);
+  });
+
   it("accepts a terminal snapshot with explicit published-result provenance", () => {
     const parsed = parseWalletCase(walletCaseFixture());
     expect(parsed.current_snapshot?.result?.summary.activity_counts.transactions).toBe(3);

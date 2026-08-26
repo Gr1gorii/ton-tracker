@@ -1,5 +1,6 @@
 export type AppRoute =
   | { kind: "home" }
+  | { kind: "case-list" }
   | { kind: "case-summary"; caseId: string }
   | { kind: "case-activity"; caseId: string }
   | { kind: "case-findings"; caseId: string }
@@ -12,6 +13,9 @@ const CASE_PUBLIC_ID =
 
 export function parseAppRoute(pathname: string): AppRoute {
   if (pathname === "/" || pathname === "") return { kind: "home" };
+  if (pathname === "/cases" || pathname === "/cases/") {
+    return { kind: "case-list" };
+  }
 
   const match = /^\/cases\/([^/]+)\/(summary|activity|findings|evidence|reports)\/?$/.exec(pathname);
   if (!match) return { kind: "not-found" };
@@ -33,6 +37,10 @@ export function parseAppRoute(pathname: string): AppRoute {
           ? "case-evidence"
           : "case-reports";
   return { kind, caseId };
+}
+
+export function caseListPath(): string {
+  return "/cases";
 }
 
 export function caseSummaryPath(caseId: string): string {

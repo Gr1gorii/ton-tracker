@@ -1,4 +1,4 @@
-# GRAM Scope - v0.80.0 Public Release
+# GRAM Scope - v0.81.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -6,6 +6,8 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 - Durable Wallet Cases keyed by canonical TON identity, network, and demo/live
   environment.
+- A refresh-safe local Wallet Case library with bounded newest-updated cards,
+  explicit catalog states, strict page binding, and direct Case restoration.
 - Versioned Wallet Case label and note editing with bounded canonical values,
   atomic stale-write rejection, and immutable identity checks in the client.
 - Permanent owner-scoped Wallet Case deletion with active-job conflict fencing,
@@ -54,7 +56,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.80.0 CASE DETAILS`.
+- Product release label: `v0.81.0 CASE LIBRARY`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260710_0025`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -92,6 +94,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Case metadata updates require the exact current `metadata_version`; a stale
   write returns a structured conflict and never silently overwrites another
   editor. Label and note changes do not mutate canonical Case identity.
+- The Case catalog is owner-scoped, newest-updated, and limited to 50 rows per
+  request. The UI starts at 12, binds the returned limit to the request, and
+  discloses truncation instead of implying that every local Case was returned.
 - Multi-asset readiness performs no provider request and never returns BOC or
   message-body contents.
 - Provider snapshot matches are not local jetton-master proofs. Exact fee
@@ -172,13 +177,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.80.0`, confirm:
+Before tagging `v0.81.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.80.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.81.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -206,6 +211,9 @@ Before tagging `v0.80.0`, confirm:
 - Case metadata update tests cover bounded canonical values, identity
   immutability, atomic version increments, stale-write conflict detail,
   deleted-case absence, draft preservation, and stale shell-load rejection.
+- Case Library tests cover strict `/cases` routing, exact request/response page
+  binding, duplicate and truncation rejection, loading/empty/error/retry
+  states, bounded expansion, abort on unmount, direct restoration, and focus.
 - Case Findings reproducibility, content-ID binding, same-symbol asset
   separation, flow conservation, rule support, weakest-evidence labelling,
   strict URL state, response redaction, and Activity deep links pass.

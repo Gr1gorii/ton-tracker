@@ -11,6 +11,7 @@ import {
   Database,
   DownloadSimple,
   FileText,
+  FolderOpen,
   Gauge,
   HardDrives,
   House,
@@ -35,15 +36,16 @@ import {
 } from "./api";
 import { createWalletCase } from "./walletCaseApi";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
-import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
+import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseListPath, caseReportsPath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWorkspace";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.79.0";
+const RELEASE_LABEL = "v0.81.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
+const GramCaseLibrary = lazy(() => import("./components/GramCaseLibrary"));
 const GramTransactionProofCard = lazy(() => import("./components/GramTransactionProofCard"));
 const GramAccountStateProofCard = lazy(() => import("./components/GramAccountStateProofCard"));
 const GramInsightsView = lazy(() => import("./components/GramInsightsView"));
@@ -131,7 +133,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.title = route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-findings" || route.kind === "case-evidence" || route.kind === "case-reports"
+    document.title = route.kind === "case-list"
+      ? "Wallet Case Library · GRAM Scope"
+      : route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-findings" || route.kind === "case-evidence" || route.kind === "case-reports"
       ? `Wallet Case ${route.kind === "case-summary" ? "Summary" : route.kind === "case-activity" ? "Activity" : route.kind === "case-findings" ? "Findings" : route.kind === "case-evidence" ? "Evidence" : "Reports"} · GRAM Scope`
       : route.kind === "not-found"
         ? "Page not found · GRAM Scope"
@@ -203,6 +207,16 @@ export default function App() {
     setAppRoute({ kind: "home" }, "/");
   }
 
+  function goCaseLibrary() {
+    setEntered(false);
+    setAppRoute({ kind: "case-list" }, caseListPath());
+  }
+
+  function openCaseSummary(caseId: string) {
+    const path = caseSummaryPath(caseId);
+    setAppRoute({ kind: "case-summary", caseId }, path);
+  }
+
   function navigate(section: SectionId) {
     setActiveSection(section);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -226,6 +240,27 @@ export default function App() {
     setAppRoute({ kind, caseId }, `${path}${search}`);
   }
 
+  if (route.kind === "case-list") {
+    return (
+      <div className="case-route-shell">
+        <header className="case-route-header">
+          <Brand compact />
+          <div className="case-route-header-actions">
+            <button className="case-route-home" type="button" aria-label="Return to home" onClick={goHome}>
+              <House size={17} /><span>Home</span>
+            </button>
+            <ThemeToggle theme={theme} onChange={setTheme} />
+          </div>
+        </header>
+        <main className="case-route-main" data-route-focus tabIndex={-1} aria-label="Wallet Case library">
+          <Suspense fallback={<section className="case-state-panel" role="status"><SpinnerGap className="spin" size={22} /> Loading Case library…</section>}>
+            <GramCaseLibrary onOpenCase={openCaseSummary} onCreateCase={goHome} />
+          </Suspense>
+        </main>
+      </div>
+    );
+  }
+
   if (route.kind === "case-summary" || route.kind === "case-activity" || route.kind === "case-findings" || route.kind === "case-evidence" || route.kind === "case-reports") {
     const view: WalletCaseView = route.kind === "case-summary" ? "summary" : route.kind === "case-activity" ? "activity" : route.kind === "case-findings" ? "findings" : route.kind === "case-evidence" ? "evidence" : "reports";
     return (
@@ -233,6 +268,9 @@ export default function App() {
         <header className="case-route-header">
           <Brand compact />
           <div className="case-route-header-actions">
+            <button className="case-route-home" type="button" aria-label="Open Case library" onClick={goCaseLibrary}>
+              <FolderOpen size={17} /><span>Cases</span>
+            </button>
             <button className="case-route-home" type="button" aria-label="Return to home" onClick={goHome}>
               <House size={17} /><span>Home</span>
             </button>
@@ -245,7 +283,7 @@ export default function App() {
             caseId={route.caseId}
             view={view}
             onNavigate={(nextView, search) => openCaseView(route.caseId, nextView, search)}
-            onDeleted={goHome}
+            onDeleted={goCaseLibrary}
           />
         </main>
       </div>
@@ -276,6 +314,7 @@ export default function App() {
         providersError={providersError}
         onRetryProviders={() => void loadProviders()}
         onOpenCase={openWalletCase}
+        onOpenCases={goCaseLibrary}
         onOpenAdvanced={() => enterWorkspace("")}
         atmosphere={atmosphere}
       />
@@ -450,6 +489,7 @@ function Landing({
   providersError,
   onRetryProviders,
   onOpenCase,
+  onOpenCases,
   onOpenAdvanced,
   atmosphere: background,
 }: {
@@ -459,6 +499,7 @@ function Landing({
   providersError: string | null;
   onRetryProviders: () => void;
   onOpenCase: (address: string) => Promise<void>;
+  onOpenCases: () => void;
   onOpenAdvanced: () => void;
   atmosphere: string;
 }) {
@@ -544,9 +585,19 @@ function Landing({
           </button>
         </form>
         {error && <p className="landing-error" id="landing-address-error" role="alert" aria-atomic="true">{error}</p>}
-        <button className="browse-link" type="button" onClick={onOpenAdvanced}>
-          Open advanced diagnostics without an address
-        </button>
+        <div className="landing-secondary-actions">
+          <button
+            className="browse-link"
+            type="button"
+            disabled={!providers?.wallet_cases_available}
+            onClick={onOpenCases}
+          >
+            <FolderOpen size={15} /> Open Case library
+          </button>
+          <button className="browse-link" type="button" onClick={onOpenAdvanced}>
+            Open advanced diagnostics without an address
+          </button>
+        </div>
 
         <div className="landing-value-grid">
           <LandingValue icon={<ShieldCheck size={24} weight="duotone" />} title="Proof-first" text="Block inclusion, account state and wallet ownership stay separate and explicit." />

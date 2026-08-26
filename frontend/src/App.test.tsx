@@ -120,6 +120,57 @@ afterEach(() => {
 });
 
 describe("Wallet Case application flow", () => {
+  it("restores the Case library route and opens a selected Case", async () => {
+    window.history.replaceState({}, "", "/cases");
+    const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === "/api/v1/cases" && method === "GET") {
+        expect(url.searchParams.getAll("limit")).toEqual(["12"]);
+        return jsonResponse({ cases: [walletCase], limit: 12, truncated: false });
+      }
+      if (url.pathname === `/api/v1/cases/${CASE_ID}` && method === "GET") {
+        return jsonResponse(walletCase);
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const libraryMain = await screen.findByRole("main", { name: "Wallet Case library" });
+    await waitFor(() => expect(document.title).toBe("Wallet Case Library · GRAM Scope"));
+    await waitFor(() => expect(document.activeElement).toBe(libraryMain));
+    await user.click(await screen.findByRole("button", { name: "Open Case Treasury" }));
+    expect(await screen.findByRole("heading", { name: "Treasury" })).toBeTruthy();
+    expect(window.location.pathname).toBe(`/cases/${CASE_ID}/summary`);
+    expect(screen.getByRole("button", { name: "Open Case library" })).toBeTruthy();
+  });
+
+  it("navigates from the landing page to the local Case library", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
+      if (url.pathname === "/api/v1/cases" && method === "GET") {
+        return jsonResponse({ cases: [], limit: 12, truncated: false });
+      }
+      throw new Error(`Unexpected request: ${method} ${url.pathname}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await screen.findByText(/Demo runtime — cases use deterministic preview evidence/);
+    await user.click(screen.getByRole("button", { name: "Open Case library" }));
+
+    expect(await screen.findByRole("heading", { name: "No Wallet Cases yet" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/cases");
+  });
+
   it("opens a deep-linked Case Reports catalog and restores an exact saved revision", async () => {
     window.history.replaceState({}, "", `/cases/${CASE_ID}/reports?snapshot=${SYNC_ID}`);
     const reportCase = walletCaseFixture({

@@ -6,6 +6,7 @@ import App from "./App";
 import "./gram-design.css";
 import "./gram-workspace.css";
 import "./case-summary.css";
+import "./case-library.css";
 
 const tonConnectManifestUrl =
   (import.meta.env.VITE_TONCONNECT_MANIFEST_URL as string | undefined) ??

@@ -103,6 +103,9 @@ export async function listWalletCases(
   limit = 20,
   signal?: AbortSignal,
 ): Promise<WalletCaseListResponse> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+    throw new Error("Wallet Case list limit must be from 1 through 50");
+  }
   const params = new URLSearchParams({ limit: String(limit) });
   const response = await fetch(`${API_BASE}/api/v1/cases?${params}`, {
     cache: "no-store",
@@ -111,7 +114,11 @@ export async function listWalletCases(
   if (!response.ok) {
     throw await walletCaseResponseError(response, "Wallet Case list failed");
   }
-  return parseWalletCaseListResponse(await response.json());
+  const catalog = parseWalletCaseListResponse(await response.json());
+  if (catalog.limit !== limit) {
+    throw new Error("Wallet Case list response does not match the requested limit");
+  }
+  return catalog;
 }
 
 export async function getWalletCase(

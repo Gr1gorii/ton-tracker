@@ -1,3 +1,31 @@
+# GRAM Scope — v0.81.0 CASE LIBRARY
+
+v0.81.0 completes the missing return path into durable Wallet Cases. The new
+refresh-safe `/cases` route reads the existing owner-scoped local catalog and
+lets a user reopen a Case without pasting its TON address again. The landing
+page and every Case route link to the library, and permanent deletion returns
+to the remaining catalog instead of an unrelated workspace.
+
+Each Case card keeps canonical identity and display metadata separate while
+showing the network, demo/live environment, optional note, latest sync or
+snapshot state, bounded Activity count, and update time. Loading, empty,
+storage-error, retry, and narrow-screen states are explicit. The initial page
+is limited to 12 Cases and can expand to the API maximum of 50; a larger local
+catalog remains honestly disclosed as truncated.
+
+The frontend treats the catalog as a strict contract. Requested page sizes
+must be safe integers from 1 through 50, the response must echo that exact
+limit, cases must be unique and fit the page, and a truncated page must be
+full. Superseded loads are aborted and cannot publish stale state. The library
+is a separate lazy chunk so the primary landing path does not eagerly load its
+catalog UI.
+
+No database migration is added in v0.81.0; Alembic remains at
+`20260710_0025`. The catalog retains the existing direct-loopback and local
+owner-scope boundary. It is not exposed as an anonymous hosted case index.
+
+---
+
 # GRAM Scope — v0.80.0 CASE DETAILS
 
 v0.80.0 makes the human context on a Wallet Case editable without weakening
