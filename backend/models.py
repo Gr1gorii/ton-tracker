@@ -141,6 +141,7 @@ class WalletCaseCatalogEvent(Base):
         nullable=False,
     )
     recorded_at = Column(DateTime, nullable=False)
+    visible = Column(Boolean, nullable=False)
 
     case = relationship("WalletCase", back_populates="catalog_events")
 

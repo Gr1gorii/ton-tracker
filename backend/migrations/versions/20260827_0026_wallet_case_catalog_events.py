@@ -33,6 +33,7 @@ def _columns() -> tuple[sa.Column, ...]:
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),
         sa.Column("case_id", sa.Integer(), nullable=False),
         sa.Column("recorded_at", sa.DateTime(), nullable=False),
+        sa.Column("visible", sa.Boolean(), nullable=False),
     )
 
 
@@ -128,8 +129,11 @@ def _ensure_index() -> None:
 def _seed_existing_cases() -> None:
     op.execute(
         sa.text(
-            'INSERT INTO "wallet_case_catalog_events" (case_id, recorded_at) '
-            'SELECT id, updated_at FROM "wallet_cases"'
+            'INSERT INTO "wallet_case_catalog_events" '
+            '(case_id, recorded_at, visible) '
+            'SELECT id, updated_at, '
+            'CASE WHEN archived_at IS NULL THEN TRUE ELSE FALSE END '
+            'FROM "wallet_cases"'
         )
     )
 

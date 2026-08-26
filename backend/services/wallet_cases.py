@@ -691,6 +691,7 @@ class WalletCaseService:
             WalletCaseCatalogEvent(
                 case=wallet_case,
                 recorded_at=_as_utc(recorded_at),
+                visible=True,
             )
         )
 

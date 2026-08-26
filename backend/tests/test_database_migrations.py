@@ -5300,6 +5300,15 @@ def test_wallet_case_catalog_migration_seeds_frozen_positions(tmp_path):
         case_id = connection.execute(
             wallet_cases.insert().values(**_wallet_case_values())
         ).inserted_primary_key[0]
+        archived_case_id = connection.execute(
+            wallet_cases.insert().values(
+                **_wallet_case_values(
+                    canonical_wallet_key=f"0:{'11' * 32}",
+                    display_address=f"0:{'11' * 32}",
+                    archived_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+                )
+            )
+        ).inserted_primary_key[0]
 
     report = run_database_migrations(engine)
 
@@ -5310,7 +5319,7 @@ def test_wallet_case_catalog_migration_seeds_frozen_positions(tmp_path):
     assert [
         column["name"]
         for column in inspector.get_columns("wallet_case_catalog_events")
-    ] == ["id", "case_id", "recorded_at"]
+    ] == ["id", "case_id", "recorded_at", "visible"]
     assert {
         item["name"]: (tuple(item["column_names"]), bool(item["unique"]))
         for item in inspector.get_indexes("wallet_case_catalog_events")
@@ -5326,11 +5335,13 @@ def test_wallet_case_catalog_migration_seeds_frozen_positions(tmp_path):
     assert tuple(foreign_key["referred_columns"]) == ("id",)
     assert foreign_key["options"]["ondelete"] == "CASCADE"
     with engine.connect() as connection:
-        event = connection.exec_driver_sql(
-            "SELECT case_id, recorded_at FROM wallet_case_catalog_events"
-        ).one()
-    assert event.case_id == case_id
-    assert str(event.recorded_at).startswith("2026-")
+        events = connection.exec_driver_sql(
+            "SELECT case_id, recorded_at, visible "
+            "FROM wallet_case_catalog_events ORDER BY case_id"
+        ).all()
+    assert [event.case_id for event in events] == [case_id, archived_case_id]
+    assert all(str(event.recorded_at).startswith("2026-") for event in events)
+    assert [event.visible for event in events] == [1, 0]
     _assert_schema_matches_models(engine)
     engine.dispose()
 
@@ -5362,6 +5373,7 @@ def test_wallet_case_catalog_migration_never_adopts_existing_rows(tmp_path):
             models.WalletCaseCatalogEvent.__table__.insert().values(
                 case_id=case_id,
                 recorded_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+                visible=True,
             )
         )
 

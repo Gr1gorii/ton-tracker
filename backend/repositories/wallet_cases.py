@@ -81,9 +81,14 @@ class WalletCaseRepository:
                 frozen_positions,
                 frozen_positions.c.case_id == WalletCase.id,
             )
+            .join(
+                WalletCaseCatalogEvent,
+                WalletCaseCatalogEvent.id == frozen_positions.c.position,
+            )
             .where(
                 WalletCase.owner_scope_id == owner_scope_id,
                 WalletCase.archived_at.is_(None),
+                WalletCaseCatalogEvent.visible.is_(True),
             )
             .order_by(frozen_positions.c.position.desc())
             .limit(limit + 1)

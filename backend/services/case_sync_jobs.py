@@ -950,7 +950,11 @@ class CaseSyncWorker:
             else:
                 wallet_case.updated_at = now
                 session.add(
-                    WalletCaseCatalogEvent(case=wallet_case, recorded_at=now)
+                    WalletCaseCatalogEvent(
+                        case=wallet_case,
+                        recorded_at=now,
+                        visible=True,
+                    )
                 )
                 session.commit()
                 published = True

@@ -316,6 +316,51 @@ def test_case_catalog_cursor_freezes_order_and_excludes_later_cases(client):
     ]
 
 
+def test_case_catalog_cursor_excludes_cases_reopened_after_cutoff(client):
+    active = [
+        _create_case(client, address=f"0:{account_id:064x}")["case"]
+        for account_id in range(1, 4)
+    ]
+    archived = _create_case(client, address=f"0:{4:064x}")["case"]
+    archived_at = datetime.now(timezone.utc)
+    with app.state.wallet_case_test_session() as session:
+        wallet_case = session.scalar(
+            select(WalletCase).where(
+                WalletCase.public_id == archived["public_id"]
+            )
+        )
+        assert wallet_case is not None
+        wallet_case.archived_at = archived_at
+        session.add(
+            WalletCaseCatalogEvent(
+                case=wallet_case,
+                recorded_at=archived_at,
+                visible=False,
+            )
+        )
+        session.commit()
+
+    first = client.get("/api/v1/cases?limit=1").json()
+    assert first["truncated"] is True
+    assert first["next_cursor"] is not None
+    reopened = _create_case(client, address=f"0:{4:064x}")
+    assert reopened["created"] is False
+
+    frozen_ids = [first["cases"][0]["public_id"]]
+    cursor = first["next_cursor"]
+    while cursor is not None:
+        page = client.get(
+            "/api/v1/cases",
+            params={"limit": 1, "cursor": cursor},
+        ).json()
+        frozen_ids.extend(item["public_id"] for item in page["cases"])
+        cursor = page["next_cursor"]
+
+    assert frozen_ids == [item["public_id"] for item in reversed(active)]
+    fresh = client.get("/api/v1/cases?limit=1").json()
+    assert fresh["cases"][0]["public_id"] == archived["public_id"]
+
+
 def test_case_catalog_rejects_untrusted_or_cross_scope_cursors(client):
     for account_id in range(1, 4):
         _create_case(client, address=f"0:{account_id:064x}")
