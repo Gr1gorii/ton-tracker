@@ -117,6 +117,7 @@ export interface WalletCase {
   display_address: string;
   label: string | null;
   note: string | null;
+  metadata_version: number;
   created_at: string;
   updated_at: string;
   latest_sync: WalletCaseSync | null;
@@ -138,6 +139,12 @@ export interface WalletCaseCreateRequest {
 export interface WalletCaseUpsertResponse {
   created: boolean;
   case: WalletCase;
+}
+
+export interface WalletCaseMetadataUpdateRequest {
+  expected_metadata_version: number;
+  label?: string | null;
+  note?: string | null;
 }
 
 export interface WalletCaseListResponse {
@@ -232,6 +239,18 @@ function nullableTimestamp(value: unknown, label: string): string | null {
 function nullableString(value: unknown, label: string): string | null {
   if (value === null) return null;
   return string(value, label);
+}
+
+function boundedNullableString(
+  value: unknown,
+  label: string,
+  maximumLength: number,
+): string | null {
+  const parsed = nullableString(value, label);
+  if (parsed !== null && parsed.length > maximumLength) {
+    throw new Error(`${label} is too long`);
+  }
+  return parsed;
 }
 
 function stringArray(value: unknown, label: string): string[] {
@@ -638,8 +657,12 @@ export function parseWalletCase(value: unknown): WalletCase {
     canonical_wallet_key: string(item.canonical_wallet_key, "canonical wallet key"),
     identity_version: string(item.identity_version, "wallet identity version"),
     display_address: string(item.display_address, "wallet display address"),
-    label: nullableString(item.label, "wallet case label"),
-    note: nullableString(item.note, "wallet case note"),
+    label: boundedNullableString(item.label, "wallet case label", 120),
+    note: boundedNullableString(item.note, "wallet case note", 4_000),
+    metadata_version: positiveInteger(
+      item.metadata_version,
+      "wallet case metadata version",
+    ),
     created_at: string(item.created_at, "wallet case created time"),
     updated_at: string(item.updated_at, "wallet case updated time"),
     latest_sync: latestSync,

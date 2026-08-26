@@ -197,6 +197,7 @@ export function walletCaseFixture({
     display_address: "EQC-demo-wallet",
     label: null,
     note: null,
+    metadata_version: 1,
     created_at: "2026-08-09T12:00:00Z",
     updated_at: "2026-08-09T12:01:00Z",
     latest_sync: latestAttempt,

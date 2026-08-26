@@ -13,6 +13,7 @@ import {
   getWalletCaseActivityDetail,
   getWalletCaseSync,
   listWalletCases,
+  updateWalletCaseMetadata,
 } from "./walletCaseApi";
 import {
   activeSyncFixture,
@@ -124,6 +125,79 @@ describe("Wallet Case API", () => {
       case_public_id: OTHER_CASE_ID,
     }));
     await expect(deleteWalletCase(CASE_ID)).rejects.toThrow(/does not match/);
+  });
+
+  it("updates Case metadata only from a versioned scope-bound response", async () => {
+    const current = walletCaseFixture({
+      overrides: { label: "Treasury", note: "Old note", metadata_version: 3 },
+    });
+    const updated = walletCaseFixture({
+      overrides: {
+        label: "Investigation",
+        note: null,
+        metadata_version: 4,
+        updated_at: "2026-08-26T18:30:00Z",
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(updated));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    const request = {
+      expected_metadata_version: 3,
+      label: "Investigation",
+      note: null,
+    };
+
+    await expect(updateWalletCaseMetadata(current, request, controller.signal))
+      .resolves.toEqual(updated);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}`,
+      {
+        method: "PATCH",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+        signal: controller.signal,
+      },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...updated,
+      metadata_version: 5,
+    }));
+    await expect(updateWalletCaseMetadata(current, request)).rejects.toThrow(
+      /does not match/,
+    );
+  });
+
+  it("rejects invalid metadata updates before fetch and preserves stale version detail", async () => {
+    const current = walletCaseFixture({ overrides: { metadata_version: 2 } });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      detail: {
+        code: "case_metadata_changed",
+        message_safe: "Wallet Case metadata changed.",
+        retryable: true,
+        current_metadata_version: 3,
+      },
+    }, 409));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(updateWalletCaseMetadata(current, {
+      expected_metadata_version: 1,
+      label: "Stale",
+    })).rejects.toThrow(/version is invalid/);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const conflict = await updateWalletCaseMetadata(current, {
+      expected_metadata_version: 2,
+      label: "Current draft",
+    }).catch((error: unknown) => error);
+    expect(conflict).toMatchObject({
+      status: 409,
+      code: "case_metadata_changed",
+      retryable: true,
+      currentMetadataVersion: 3,
+    });
   });
 
   it("starts a durable sync only from 202 with one explicit UUIDv4 idempotency key", async () => {

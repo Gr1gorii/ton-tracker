@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CASE_ID, walletCaseFixture } from "../test/walletCaseFixtures";
 
-const apiMocks = vi.hoisted(() => ({ getWalletCase: vi.fn() }));
+const apiMocks = vi.hoisted(() => ({
+  getWalletCase: vi.fn(),
+  updateWalletCaseMetadata: vi.fn(),
+  WalletCaseApiError: class extends Error { code: string | null = null; },
+}));
 vi.mock("../walletCaseApi", () => apiMocks);
 vi.mock("./GramCaseSummary", () => ({ default: () => <div>Summary surface</div> }));
 vi.mock("./GramCaseActivity", () => ({ default: () => <div>Activity surface</div> }));
@@ -81,5 +85,56 @@ describe("GramCaseWorkspace", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Case scope rejected");
     expect(screen.queryByText("Activity surface")).toBeNull();
+  });
+
+  it("publishes edited Case details without a stale shell reload overwriting them", async () => {
+    const current = walletCaseFixture({
+      overrides: {
+        label: "Treasury",
+        note: "Initial note",
+        metadata_version: 2,
+      },
+    });
+    const updated = walletCaseFixture({
+      overrides: {
+        label: "Investigation",
+        note: "Evidence requested.",
+        metadata_version: 3,
+        updated_at: "2026-08-26T18:30:00Z",
+      },
+    });
+    apiMocks.getWalletCase.mockResolvedValueOnce(current);
+    apiMocks.updateWalletCaseMetadata.mockResolvedValueOnce(updated);
+    const user = userEvent.setup();
+    render(
+      <GramCaseWorkspace
+        caseId={CASE_ID}
+        view="summary"
+        onNavigate={vi.fn()}
+        onDeleted={vi.fn()}
+      />,
+    );
+    await screen.findByText("Treasury");
+
+    await user.click(screen.getByRole("button", { name: "Edit case" }));
+    await user.clear(screen.getByLabelText("Label"));
+    await user.type(screen.getByLabelText("Label"), "Investigation");
+    await user.clear(screen.getByLabelText("Note"));
+    await user.type(screen.getByLabelText("Note"), "Evidence requested.");
+    await user.click(screen.getByRole("button", { name: "Save details" }));
+
+    await screen.findByRole("heading", { name: "Investigation" });
+    expect(screen.getByText("Evidence requested.")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Edit Wallet Case" })).toBeNull();
+    expect(apiMocks.getWalletCase).toHaveBeenCalledTimes(1);
+    expect(apiMocks.updateWalletCaseMetadata).toHaveBeenCalledWith(
+      current,
+      {
+        expected_metadata_version: 2,
+        label: "Investigation",
+        note: "Evidence requested.",
+      },
+      expect.any(AbortSignal),
+    );
   });
 });
