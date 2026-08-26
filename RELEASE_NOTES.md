@@ -1,3 +1,35 @@
+# GRAM Scope — v0.80.0 CASE DETAILS
+
+v0.80.0 makes the human context on a Wallet Case editable without weakening
+its canonical identity. The owner-scoped local API adds
+`PATCH /api/v1/cases/{case_public_id}` for bounded labels and notes. Empty
+values are normalized to `null`; the route cannot change the case wallet,
+network, data environment, creation time, sync history, Evidence, Findings, or
+Report revisions.
+
+Metadata writes use explicit optimistic concurrency. Every Case carries a
+positive `metadata_version`, and a write succeeds only when its
+`expected_metadata_version` is current. A successful update increments the
+version atomically. A stale editor receives a structured `409` with the safe
+current version, while a deleted or foreign case remains indistinguishable as
+`404`. This prevents two browser tabs from silently overwriting each other's
+notes.
+
+The shared Case shell now displays a bounded multiline note and opens an
+accessible details editor from every Case view. The editor canonicalizes
+whitespace, publishes only a response bound to the unchanged Case identity and
+the next version, preserves the user's draft after a conflict, blocks dismissal
+during a save, aborts obsolete requests, and prevents a stale shell reload from
+overwriting the accepted update.
+
+Revision `20260710_0025` appends the non-null `metadata_version` column with a
+default of `1`. Fresh install, 0024 upgrade, exact interrupted-DDL resume,
+schema drift, invalid existing rows, model parity, and forward-only downgrade
+behavior are covered by migration tests. Wallet Cases remain direct-loopback
+only until authentication supplies a hosted owner scope.
+
+---
+
 # GRAM Scope — v0.79.0 CASE LIFECYCLE
 
 v0.79.0 completes the first permanent data-lifecycle action for Wallet Cases.
