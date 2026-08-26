@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowClockwise, ChartDonut, ChartLineUp, FileText, Gauge, ShieldCheck, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, ChartDonut, ChartLineUp, FileText, Gauge, ShieldCheck, SpinnerGap, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { caseActivitySearch, DEFAULT_CASE_ACTIVITY_FILTERS } from "../caseActivityQuery";
 import { caseEvidenceSearch } from "../caseEvidenceQuery";
 import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, caseSummaryPath } from "../caseRouting";
 import { getWalletCase } from "../walletCaseApi";
 import type { WalletCase } from "../walletCase";
+import CaseDeleteDialog from "./CaseDeleteDialog";
 import GramCaseActivity from "./GramCaseActivity";
 import GramCaseEvidence from "./GramCaseEvidence";
 import GramCaseFindings from "./GramCaseFindings";
@@ -23,16 +24,19 @@ export default function GramCaseWorkspace({
   caseId,
   view,
   onNavigate,
+  onDeleted,
 }: {
   caseId: string;
   view: WalletCaseView;
   onNavigate: (view: WalletCaseView, search?: string) => void;
+  onDeleted: () => void;
 }) {
   const [walletCase, setWalletCase] = useState<WalletCase | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const generation = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -122,7 +126,16 @@ export default function GramCaseWorkspace({
           <p>One persistent case for this canonical TON address. Every view remains bounded by a pinned snapshot and its recorded evidence source.</p>
           <code title={walletCase.canonical_wallet_key}>{walletCase.canonical_wallet_key}</code>
         </div>
-        {refreshing && <span className="case-refreshing" role="status"><SpinnerGap className="spin" size={17} /> Publishing the new snapshot…</span>}
+        <div className="case-heading-actions">
+          {refreshing && <span className="case-refreshing" role="status"><SpinnerGap className="spin" size={17} /> Publishing the new snapshot…</span>}
+          <button
+            type="button"
+            className="case-delete-trigger"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash size={17} /> Delete case
+          </button>
+        </div>
       </header>
 
       <nav className="case-view-nav" aria-label="Wallet Case views">
@@ -208,6 +221,14 @@ export default function GramCaseWorkspace({
       ) : (
         <GramCaseReports walletCase={walletCase} />
       )}
+
+      <CaseDeleteDialog
+        caseId={walletCase.public_id}
+        caseName={walletCase.label ?? shortAddress(walletCase.display_address)}
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={onDeleted}
+      />
     </div>
   );
 }

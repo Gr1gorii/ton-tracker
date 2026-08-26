@@ -245,6 +245,7 @@ export default function App() {
             caseId={route.caseId}
             view={view}
             onNavigate={(nextView, search) => openCaseView(route.caseId, nextView, search)}
+            onDeleted={goHome}
           />
         </main>
       </div>

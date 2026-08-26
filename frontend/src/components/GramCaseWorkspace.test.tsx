@@ -26,8 +26,13 @@ describe("GramCaseWorkspace", () => {
   it("offers real Summary, Activity, Findings, Evidence and Reports links with one current view and SPA plain-click navigation", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
-    const { rerender } = render(<GramCaseWorkspace caseId={CASE_ID} view="summary" onNavigate={onNavigate} />);
+    const { rerender } = render(<GramCaseWorkspace caseId={CASE_ID} view="summary" onNavigate={onNavigate} onDeleted={vi.fn()} />);
     await screen.findByText("Summary surface");
+
+    await user.click(screen.getByRole("button", { name: "Delete case" }));
+    expect(screen.getByRole("dialog", { name: "Delete Wallet Case?" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Close deletion confirmation" }));
+    expect(screen.queryByRole("dialog", { name: "Delete Wallet Case?" })).toBeNull();
 
     const summary = screen.getByRole("link", { name: /SummarySnapshot and coverage/ });
     const activity = screen.getByRole("link", { name: /ActivityFiltered snapshot rows/ });
@@ -47,7 +52,7 @@ describe("GramCaseWorkspace", () => {
     await user.click(activity);
     expect(onNavigate).toHaveBeenCalledWith("activity");
 
-    rerender(<GramCaseWorkspace caseId={CASE_ID} view="activity" onNavigate={onNavigate} />);
+    rerender(<GramCaseWorkspace caseId={CASE_ID} view="activity" onNavigate={onNavigate} onDeleted={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("Activity surface")).toBeTruthy());
     expect(activity.getAttribute("aria-current")).toBe("page");
     expect(apiMocks.getWalletCase).toHaveBeenCalledTimes(1);
@@ -55,7 +60,7 @@ describe("GramCaseWorkspace", () => {
     await user.click(findings);
     expect(onNavigate).toHaveBeenCalledWith("findings");
 
-    rerender(<GramCaseWorkspace caseId={CASE_ID} view="findings" onNavigate={onNavigate} />);
+    rerender(<GramCaseWorkspace caseId={CASE_ID} view="findings" onNavigate={onNavigate} onDeleted={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("Findings surface")).toBeTruthy());
     expect(findings.getAttribute("aria-current")).toBe("page");
 
@@ -65,14 +70,14 @@ describe("GramCaseWorkspace", () => {
     await user.click(reports);
     expect(onNavigate).toHaveBeenCalledWith("reports");
 
-    rerender(<GramCaseWorkspace caseId={CASE_ID} view="reports" onNavigate={onNavigate} />);
+    rerender(<GramCaseWorkspace caseId={CASE_ID} view="reports" onNavigate={onNavigate} onDeleted={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("Reports surface")).toBeTruthy());
     expect(reports.getAttribute("aria-current")).toBe("page");
   });
 
   it("shows a retryable shell error and never mounts a case surface without a bound case", async () => {
     apiMocks.getWalletCase.mockRejectedValueOnce(new Error("Case scope rejected"));
-    render(<GramCaseWorkspace caseId={CASE_ID} view="activity" onNavigate={vi.fn()} />);
+    render(<GramCaseWorkspace caseId={CASE_ID} view="activity" onNavigate={vi.fn()} onDeleted={vi.fn()} />);
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Case scope rejected");
     expect(screen.queryByText("Activity surface")).toBeNull();

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   parseWalletCase,
+  parseWalletCaseDeletionResponse,
   parseWalletCaseListResponse,
   parseWalletCaseSync,
   parseWalletCaseUpsertResponse,
@@ -180,5 +181,29 @@ describe("wallet case contracts", () => {
       parseWalletCaseListResponse({ cases: [walletCaseFixture()], limit: 20, truncated: false }).cases,
     ).toHaveLength(1);
     expect(parseWalletCase(walletCaseFixture()).public_id).toBe(CASE_ID);
+  });
+
+  it("validates a bounded deletion receipt and rejects identity/count drift", () => {
+    const receipt = {
+      deleted: true,
+      case_public_id: CASE_ID,
+      audit_event_public_id: "550e8400-e29b-41d4-a716-446655440099",
+      deleted_at: "2026-08-26T12:00:00Z",
+      removed: {
+        syncs: 2,
+        ingestion_runs: 2,
+        evidence_verifications: 1,
+        report_revisions: 3,
+      },
+    };
+    expect(parseWalletCaseDeletionResponse(receipt)).toEqual(receipt);
+    expect(() => parseWalletCaseDeletionResponse({
+      ...receipt,
+      audit_event_public_id: "not-a-uuid",
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseDeletionResponse({
+      ...receipt,
+      removed: { ...receipt.removed, syncs: -1 },
+    })).toThrow(/sync count/);
   });
 });
