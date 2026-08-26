@@ -237,6 +237,7 @@ class WalletCaseService:
         """Delete one owner-scoped case and its uniquely owned persisted data."""
         wallet_case = self._required_case(public_id)
         self._raise_if_delete_conflicts(wallet_case.id)
+        self._acquire_delete_write_fence(wallet_case)
 
         ingestion_runs = list(
             self.session.scalars(
@@ -275,18 +276,7 @@ class WalletCaseService:
             .execution_options(synchronize_session=False)
         )
         if case_delete.rowcount != 1:
-            self.session.rollback()
-            current = self.repository.get_by_public_id(
-                owner_scope_id=self.owner_scope_id,
-                public_id=public_id,
-            )
-            if current is None:
-                raise WalletCaseNotFound("Wallet Case not found")
-            self._raise_if_delete_conflicts(current.id)
-            raise WalletCaseDeletionConflict(
-                active_sync_public_id=None,
-                active_evidence_public_id=None,
-            )
+            self._raise_delete_changed(public_id)
 
         audit_event = WalletCaseLifecycleEvent(
             owner_scope_id=self.owner_scope_id,
@@ -559,6 +549,41 @@ class WalletCaseService:
                     else None
                 ),
             )
+
+    def _acquire_delete_write_fence(self, wallet_case: WalletCase) -> None:
+        """Serialize the cleanup inventory against new SQLite writers."""
+        fenced = self.session.execute(
+            update(WalletCase)
+            .where(
+                WalletCase.id == wallet_case.id,
+                WalletCase.owner_scope_id == self.owner_scope_id,
+                ~exists().where(
+                    CaseSync.case_id == wallet_case.id,
+                    CaseSync.state.in_(("queued", "running")),
+                ),
+                ~exists().where(
+                    CaseEvidenceVerification.case_id == wallet_case.id,
+                    CaseEvidenceVerification.state.in_(("queued", "running")),
+                ),
+            )
+            .values(updated_at=WalletCase.updated_at)
+            .execution_options(synchronize_session=False)
+        )
+        if fenced.rowcount != 1:
+            self._raise_delete_changed(wallet_case.public_id)
+
+    def _raise_delete_changed(self, public_id: str) -> None:
+        self.session.rollback()
+        current = self.repository.get_by_public_id(
+            owner_scope_id=self.owner_scope_id,
+            public_id=public_id,
+        )
+        if current is None:
+            raise WalletCaseNotFound("Wallet Case not found")
+        self._raise_if_delete_conflicts(current.id)
+        raise WalletCaseRuntimeConflict(
+            "Wallet Case changed while deletion was being prepared."
+        )
 
     def _row_count(self, model, predicate) -> int:
         return int(

@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.wallet_activity import (
@@ -432,6 +432,62 @@ def test_case_delete_rejects_active_evidence_verification(client):
         verification_public_id
     )
     assert _database_counts() == (1, 1, 1)
+
+
+def test_case_delete_write_fence_blocks_late_sync_before_cleanup_inventory(
+    client,
+    monkeypatch,
+):
+    case_id = _create_case(client)["case"]["public_id"]
+    session_factory = app.state.wallet_case_test_session
+    writer_errors: list[Exception] = []
+
+    with session_factory() as delete_session:
+        service = WalletCaseService(delete_session)
+        original_row_count = service._row_count
+        interleaved = False
+
+        def try_late_enqueue(model, predicate):
+            nonlocal interleaved
+            if not interleaved:
+                interleaved = True
+
+                def enqueue() -> None:
+                    with session_factory() as writer_session:
+                        writer_session.connection().exec_driver_sql(
+                            "PRAGMA busy_timeout=100"
+                        )
+                        try:
+                            WalletCaseService(writer_session).enqueue_sync(
+                                case_id,
+                                WalletCaseSyncRequest(
+                                    time_window="24h",
+                                    surfaces=["transactions"],
+                                ),
+                                str(uuid4()),
+                            )
+                        except Exception as exc:  # captured for the parent test
+                            writer_errors.append(exc)
+
+                writer = Thread(target=enqueue)
+                writer.start()
+                writer.join(timeout=2)
+                assert not writer.is_alive()
+            return original_row_count(model, predicate)
+
+        monkeypatch.setattr(service, "_row_count", try_late_enqueue)
+        receipt = service.delete_case(case_id)
+
+    assert receipt["deleted"] is True
+    assert receipt["removed"] == {
+        "syncs": 0,
+        "ingestion_runs": 0,
+        "evidence_verifications": 0,
+        "report_revisions": 0,
+    }
+    assert len(writer_errors) == 1
+    assert isinstance(writer_errors[0], OperationalError)
+    assert _database_counts() == (0, 0, 0)
 
 
 def test_wallet_case_facade_is_blocked_outside_direct_loopback(client):
