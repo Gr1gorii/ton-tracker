@@ -103,6 +103,9 @@ export async function listWalletCases(
   limit = 20,
   signal?: AbortSignal,
 ): Promise<WalletCaseListResponse> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
+    throw new Error("Wallet Case list limit must be from 1 through 50");
+  }
   const params = new URLSearchParams({ limit: String(limit) });
   const response = await fetch(`${API_BASE}/api/v1/cases?${params}`, {
     cache: "no-store",

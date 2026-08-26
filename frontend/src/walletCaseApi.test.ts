@@ -95,7 +95,22 @@ describe("Wallet Case API", () => {
         signal: controller.signal,
       },
     ]);
+    expect(fetchMock.mock.calls[1]).toEqual([
+      `${API_BASE}/api/v1/cases?limit=7`,
+      { cache: "no-store", signal: controller.signal },
+    ]);
   });
+
+  it.each([0, 51, 1.5, Number.NaN])(
+    "rejects an unsafe Wallet Case catalog limit before fetching: %s",
+    async (limit) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(listWalletCases(limit)).rejects.toThrow(/from 1 through 50/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("deletes a case only from a strictly bound lifecycle receipt", async () => {
     const receipt = {

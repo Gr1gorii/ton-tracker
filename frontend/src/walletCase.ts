@@ -685,15 +685,24 @@ export function parseWalletCaseUpsertResponse(value: unknown): WalletCaseUpsertR
 export function parseWalletCaseListResponse(value: unknown): WalletCaseListResponse {
   const response = record(value, "wallet case list response");
   if (!Array.isArray(response.cases)) throw new Error("wallet case list is invalid");
+  const cases = response.cases.map(parseWalletCase);
+  const limit = positiveInteger(response.limit, "wallet case list limit");
+  if (limit > 50 || cases.length > limit) {
+    throw new Error("wallet case list exceeds its bounded limit");
+  }
+  if (new Set(cases.map((walletCase) => walletCase.public_id)).size !== cases.length) {
+    throw new Error("wallet case list contains duplicate cases");
+  }
+  if (typeof response.truncated !== "boolean") {
+    throw new Error("wallet case list truncated flag is invalid");
+  }
+  if (response.truncated && cases.length !== limit) {
+    throw new Error("truncated wallet case list does not fill its bounded page");
+  }
   return {
-    cases: response.cases.map(parseWalletCase),
-    limit: nonNegativeInteger(response.limit, "wallet case list limit"),
-    truncated:
-      typeof response.truncated === "boolean"
-        ? response.truncated
-        : (() => {
-            throw new Error("wallet case list truncated flag is invalid");
-          })(),
+    cases,
+    limit,
+    truncated: response.truncated,
   };
 }
 

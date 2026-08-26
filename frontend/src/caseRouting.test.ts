@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, caseSummaryPath, parseAppRoute } from "./caseRouting";
+import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseListPath, caseReportsPath, caseSummaryPath, parseAppRoute } from "./caseRouting";
 
 const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
 
 describe("case routing", () => {
+  it("round-trips the Wallet Case library route", () => {
+    expect(caseListPath()).toBe("/cases");
+    expect(parseAppRoute("/cases")).toEqual({ kind: "case-list" });
+    expect(parseAppRoute("/cases/")).toEqual({ kind: "case-list" });
+  });
+
   it("round-trips a canonical case summary route", () => {
     const path = caseSummaryPath(CASE_ID);
     expect(path).toBe(`/cases/${CASE_ID}/summary`);
