@@ -114,7 +114,11 @@ export async function listWalletCases(
   if (!response.ok) {
     throw await walletCaseResponseError(response, "Wallet Case list failed");
   }
-  return parseWalletCaseListResponse(await response.json());
+  const catalog = parseWalletCaseListResponse(await response.json());
+  if (catalog.limit !== limit) {
+    throw new Error("Wallet Case list response does not match the requested limit");
+  }
+  return catalog;
 }
 
 export async function getWalletCase(

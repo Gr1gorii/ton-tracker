@@ -112,6 +112,17 @@ describe("Wallet Case API", () => {
     },
   );
 
+  it("binds a Wallet Case catalog response to the requested page size", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      cases: [walletCaseFixture()],
+      limit: 8,
+      truncated: false,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listWalletCases(7)).rejects.toThrow(/requested limit/);
+  });
+
   it("deletes a case only from a strictly bound lifecycle receipt", async () => {
     const receipt = {
       deleted: true as const,
