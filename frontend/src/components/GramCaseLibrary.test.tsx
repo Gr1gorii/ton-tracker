@@ -72,8 +72,14 @@ describe("GramCaseLibrary", () => {
     expect(listMock).toHaveBeenCalledTimes(2);
   });
 
-  it("expands the bounded catalog to 50 and aborts the superseded request", async () => {
+  it("appends a signed continuation and aborts the active request on unmount", async () => {
     const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
+    const second = emptyWalletCaseFixture({
+      public_id: SECOND_CASE_ID,
+      canonical_wallet_key: `0:${"b".repeat(64)}`,
+      display_address: "EQC-second-wallet",
+      label: "Operations",
+    });
     let expansionSignal: AbortSignal | undefined;
     listMock
       .mockResolvedValueOnce({
@@ -82,17 +88,38 @@ describe("GramCaseLibrary", () => {
       .mockImplementationOnce(async (_limit, _cursor, signal) => {
         expansionSignal = signal;
         return {
-          cases: [walletCase], limit: 50, truncated: true, next_cursor: "page.three",
+          cases: [second], limit: 12, truncated: false, next_cursor: null,
         };
       });
     const view = render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
 
     await screen.findByRole("heading", { name: "Treasury" });
-    await userEvent.setup().click(screen.getByRole("button", { name: "Show up to 50 Cases" }));
-    expect(await screen.findByText(/Showing the newest 50 Cases/)).toBeTruthy();
-    expect(listMock.mock.calls[1]?.[0]).toBe(50);
-    expect(listMock.mock.calls[1]?.[1]).toBeNull();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Load more Cases" }));
+    expect(await screen.findByRole("heading", { name: "Operations" })).toBeTruthy();
+    expect(screen.getByText("2 Cases")).toBeTruthy();
+    expect(screen.getByText("End of this Case catalog snapshot.")).toBeTruthy();
+    expect(listMock.mock.calls[1]?.[0]).toBe(12);
+    expect(listMock.mock.calls[1]?.[1]).toBe("page.two");
     view.unmount();
     await waitFor(() => expect(expansionSignal?.aborted).toBe(true));
+  });
+
+  it("keeps loaded Cases when a continuation overlaps the current catalog", async () => {
+    const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
+    listMock
+      .mockResolvedValueOnce({
+        cases: [walletCase], limit: 12, truncated: true, next_cursor: "page.two",
+      })
+      .mockResolvedValueOnce({
+        cases: [walletCase], limit: 12, truncated: false, next_cursor: null,
+      });
+    render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Treasury" });
+    await userEvent.setup().click(screen.getByRole("button", { name: "Load more Cases" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("overlaps");
+    expect(screen.getByRole("heading", { name: "Treasury" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry loading more" })).toBeTruthy();
   });
 });
