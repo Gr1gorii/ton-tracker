@@ -50,7 +50,7 @@ def client(tmp_path, monkeypatch):
     database_path = tmp_path / "wallet-cases.sqlite3"
     engine = create_database_engine(f"sqlite:///{database_path}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260710_0024"
+    assert report.revision_after == "20260710_0025"
     testing_session = sessionmaker(
         autocommit=False,
         autoflush=False,
@@ -190,6 +190,7 @@ def test_case_create_is_canonical_idempotent_and_scope_separated(
         "display_address": BOUNCEABLE_MAINNET,
         "label": "Primary wallet",
         "note": "Keep the first metadata values.",
+        "metadata_version": 1,
         "created_at": first["case"]["created_at"],
         "updated_at": first["case"]["updated_at"],
         "latest_sync": None,
@@ -241,6 +242,104 @@ def test_case_create_is_canonical_idempotent_and_scope_separated(
     assert catalog.json()["limit"] == 3
     assert catalog.json()["truncated"] is False
     assert len(catalog.json()["cases"]) == 3
+
+
+def test_case_metadata_update_is_versioned_trimmed_and_scope_preserving(client):
+    created = _create_case(
+        client,
+        label="Primary wallet",
+        note="Initial note",
+    )["case"]
+    case_id = created["public_id"]
+
+    response = client.patch(
+        f"/api/v1/cases/{case_id}",
+        json={
+            "expected_metadata_version": 1,
+            "label": "  Treasury review  ",
+            "note": "  Evidence requested from compliance.  ",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    updated = response.json()
+    assert updated["label"] == "Treasury review"
+    assert updated["note"] == "Evidence requested from compliance."
+    assert updated["metadata_version"] == 2
+    assert updated["updated_at"] >= created["updated_at"]
+    for immutable in (
+        "public_id",
+        "network",
+        "data_environment",
+        "canonical_wallet_key",
+        "identity_version",
+        "display_address",
+        "created_at",
+    ):
+        assert updated[immutable] == created[immutable]
+
+    cleared = client.patch(
+        f"/api/v1/cases/{case_id}",
+        json={"expected_metadata_version": 2, "label": "   "},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["label"] is None
+    assert cleared.json()["note"] == "Evidence requested from compliance."
+    assert cleared.json()["metadata_version"] == 3
+
+    stored = client.get(f"/api/v1/cases/{case_id}")
+    assert stored.status_code == 200
+    assert stored.json() == cleared.json()
+
+
+def test_case_metadata_update_rejects_stale_or_invalid_edits_without_mutation(client):
+    case_id = _create_case(client, label="Original")["case"]["public_id"]
+    first = client.patch(
+        f"/api/v1/cases/{case_id}",
+        json={"expected_metadata_version": 1, "label": "Current"},
+    )
+    assert first.status_code == 200
+
+    stale = client.patch(
+        f"/api/v1/cases/{case_id}",
+        json={
+            "expected_metadata_version": 1,
+            "label": "Overwrite from stale tab",
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.headers["cache-control"] == "no-store"
+    assert stale.json() == {
+        "detail": {
+            "code": "case_metadata_changed",
+            "message_safe": (
+                "Wallet Case metadata changed after this editor was opened."
+            ),
+            "retryable": True,
+            "current_metadata_version": 2,
+        }
+    }
+
+    invalid_payloads = (
+        {"expected_metadata_version": 2},
+        {"expected_metadata_version": 0, "label": "Invalid"},
+        {"expected_metadata_version": 2, "label": "x" * 121},
+        {"expected_metadata_version": 2, "note": "x" * 4001},
+        {"expected_metadata_version": 2, "label": "Invalid", "extra": True},
+    )
+    for payload in invalid_payloads:
+        invalid = client.patch(f"/api/v1/cases/{case_id}", json=payload)
+        assert invalid.status_code == 422, invalid.text
+
+    missing = client.patch(
+        f"/api/v1/cases/{uuid4()}",
+        json={"expected_metadata_version": 1, "note": "No case"},
+    )
+    assert missing.status_code == 404
+    stored = client.get(f"/api/v1/cases/{case_id}").json()
+    assert stored["label"] == "Current"
+    assert stored["metadata_version"] == 2
 
 
 def test_case_create_rejects_invalid_or_mismatched_network_without_rows(client):

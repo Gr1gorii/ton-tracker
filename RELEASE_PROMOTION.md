@@ -1,10 +1,10 @@
-# GRAM Scope — v0.79.0 Promotion Checklist
+# GRAM Scope — v0.80.0 Promotion Checklist
 
-Current promotion gates for Wallet Case lifecycle deletion:
+Current promotion gates for versioned Wallet Case details:
 
-- Product label is `v0.79.0 CASE LIFECYCLE`; backend API version stays
+- Product label is `v0.80.0 CASE DETAILS`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic reaches revision `20260710_0024` with exact model parity from fresh,
+- Alembic reaches revision `20260710_0025` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
   path. Missing or changed columns, checks, foreign keys, delete actions, and
   indexes fail closed; downgrade remains unsupported. Revision 0020 versions
@@ -24,6 +24,10 @@ Current promotion gates for Wallet Case lifecycle deletion:
   upgrade, exact empty interrupted-DDL resume, same-name drift, row adoption,
   and forward-only behavior must pass fail-closed tests. The table has no case
   foreign key and retains no wallet address, label, note, payload, or proof.
+- Revision 0025 appends a positive, non-null `metadata_version` to every Wallet
+  Case. Fresh, 0024 upgrade, exact interrupted-DDL resume, column drift,
+  invalid existing values, model parity, and forward-only behavior must pass
+  fail-closed tests.
 - Evidence is bound to one owner-scoped case, usable pinned snapshot, exact
   source synchronization, and a revalidated provider-observed transaction.
   Demo fixtures, transfers, swaps, unknown linkage, and mismatched source scope
@@ -90,6 +94,10 @@ Current promotion gates for Wallet Case lifecycle deletion:
   runs and their normalized/proof artifacts, Evidence jobs, and Report
   revisions; unrelated cases and unscoped legacy runs remain. The UI requires
   exact typed confirmation and validates the returned case-bound receipt.
+- PATCH accepts only a bounded label and/or note plus the exact positive
+  `expected_metadata_version`. The owner-scoped conditional update increments
+  the version exactly once, returns safe structured conflict detail for a stale
+  editor, and cannot mutate canonical identity or revive an archived Case.
 - Report output always includes assurance, coverage, gaps, limitations,
   unverified claims, Activity/Evidence revision digests, and fixed false
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
@@ -108,7 +116,7 @@ Current promotion gates for Wallet Case lifecycle deletion:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.79.0 must not be promoted as a hosted Wallet Case release.
+  v0.80.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

@@ -26,7 +26,11 @@ from models import (
 from repositories.wallet_cases import WalletCaseRepository
 from services.ton_address_identity import derive_ton_wallet_identity
 from services.wallet_acquisition_bounds import resolve_wallet_acquisition_bounds
-from wallet_case_schemas import WalletCaseCreateRequest, WalletCaseSyncRequest
+from wallet_case_schemas import (
+    WalletCaseCreateRequest,
+    WalletCaseMetadataUpdateRequest,
+    WalletCaseSyncRequest,
+)
 
 
 class WalletCaseNotFound(LookupError):
@@ -63,6 +67,16 @@ class WalletCaseDeletionConflict(RuntimeError):
         )
         self.active_sync_public_id = active_sync_public_id
         self.active_evidence_public_id = active_evidence_public_id
+
+
+class WalletCaseMetadataConflict(RuntimeError):
+    """Raised when an update is based on stale Case metadata."""
+
+    def __init__(self, current_metadata_version: int) -> None:
+        super().__init__(
+            "Wallet Case metadata changed after this editor was opened."
+        )
+        self.current_metadata_version = current_metadata_version
 
 
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
@@ -226,6 +240,53 @@ class WalletCaseService:
             latest_sync=latest_sync,
             active_sync=active_sync,
             current_snapshot=current_snapshot,
+        )
+
+    def update_case_metadata(
+        self,
+        public_id: str,
+        payload: WalletCaseMetadataUpdateRequest,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Update mutable presentation fields with optimistic concurrency."""
+        wallet_case = self._required_case(public_id)
+        values: dict[str, Any] = {
+            "metadata_version": WalletCase.metadata_version + 1,
+            "updated_at": _as_utc(now or _utc_now()),
+        }
+        if "label" in payload.model_fields_set:
+            values["label"] = payload.label
+        if "note" in payload.model_fields_set:
+            values["note"] = payload.note
+
+        changed = self.session.execute(
+            update(WalletCase)
+            .where(
+                WalletCase.id == wallet_case.id,
+                WalletCase.owner_scope_id == self.owner_scope_id,
+                WalletCase.public_id == public_id,
+                WalletCase.archived_at.is_(None),
+                WalletCase.metadata_version == payload.expected_metadata_version,
+            )
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+        if changed.rowcount != 1:
+            self.session.rollback()
+            current = self.repository.get_by_public_id(
+                owner_scope_id=self.owner_scope_id,
+                public_id=public_id,
+            )
+            if current is None:
+                raise WalletCaseNotFound("Wallet Case not found")
+            raise WalletCaseMetadataConflict(current.metadata_version)
+
+        self.session.commit()
+        refreshed = self._required_case(public_id)
+        return self._case_response(
+            refreshed,
+            latest_sync=self._latest_sync(refreshed),
         )
 
     def delete_case(
@@ -683,6 +744,7 @@ class WalletCaseService:
             "display_address": wallet_case.display_address,
             "label": wallet_case.label,
             "note": wallet_case.note,
+            "metadata_version": wallet_case.metadata_version,
             "created_at": _isoformat(wallet_case.created_at),
             "updated_at": _isoformat(wallet_case.updated_at),
             "latest_sync": (

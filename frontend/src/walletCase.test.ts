@@ -183,6 +183,22 @@ describe("wallet case contracts", () => {
     expect(parseWalletCase(walletCaseFixture()).public_id).toBe(CASE_ID);
   });
 
+  it("requires bounded, positive Wallet Case metadata revisions", () => {
+    expect(parseWalletCase(walletCaseFixture()).metadata_version).toBe(1);
+    expect(() => parseWalletCase({
+      ...walletCaseFixture(),
+      metadata_version: 0,
+    })).toThrow(/metadata version/);
+    expect(() => parseWalletCase({
+      ...walletCaseFixture(),
+      label: "x".repeat(121),
+    })).toThrow(/label is too long/);
+    expect(() => parseWalletCase({
+      ...walletCaseFixture(),
+      note: "x".repeat(4_001),
+    })).toThrow(/note is too long/);
+  });
+
   it("validates a bounded deletion receipt and rejects identity/count drift", () => {
     const receipt = {
       deleted: true,

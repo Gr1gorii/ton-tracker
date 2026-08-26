@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowClockwise, ChartDonut, ChartLineUp, FileText, Gauge, ShieldCheck, SpinnerGap, Trash, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, ChartDonut, ChartLineUp, FileText, Gauge, PencilSimple, ShieldCheck, SpinnerGap, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { caseActivitySearch, DEFAULT_CASE_ACTIVITY_FILTERS } from "../caseActivityQuery";
 import { caseEvidenceSearch } from "../caseEvidenceQuery";
@@ -7,6 +7,7 @@ import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, 
 import { getWalletCase } from "../walletCaseApi";
 import type { WalletCase } from "../walletCase";
 import CaseDeleteDialog from "./CaseDeleteDialog";
+import CaseMetadataDialog from "./CaseMetadataDialog";
 import GramCaseActivity from "./GramCaseActivity";
 import GramCaseEvidence from "./GramCaseEvidence";
 import GramCaseFindings from "./GramCaseFindings";
@@ -37,6 +38,7 @@ export default function GramCaseWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [metadataOpen, setMetadataOpen] = useState(false);
   const generation = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
 
@@ -88,6 +90,16 @@ export default function GramCaseWorkspace({
     if (nextView !== view) onNavigate(nextView);
   }
 
+  function acceptMetadataUpdate(updated: WalletCase) {
+    generation.current += 1;
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    setRefreshing(false);
+    setRefreshError(null);
+    setWalletCase(updated);
+    setMetadataOpen(false);
+  }
+
   if (loading) {
     return (
       <section className="case-state-panel" aria-live="polite">
@@ -124,10 +136,18 @@ export default function GramCaseWorkspace({
           </div>
           <h1 id="case-wallet-title">{walletCase.label ?? shortAddress(walletCase.display_address)}</h1>
           <p>One persistent case for this canonical TON address. Every view remains bounded by a pinned snapshot and its recorded evidence source.</p>
+          {walletCase.note && <p className="case-heading-note">{walletCase.note}</p>}
           <code title={walletCase.canonical_wallet_key}>{walletCase.canonical_wallet_key}</code>
         </div>
         <div className="case-heading-actions">
           {refreshing && <span className="case-refreshing" role="status"><SpinnerGap className="spin" size={17} /> Publishing the new snapshot…</span>}
+          <button
+            type="button"
+            className="case-metadata-trigger"
+            onClick={() => setMetadataOpen(true)}
+          >
+            <PencilSimple size={17} /> Edit case
+          </button>
           <button
             type="button"
             className="case-delete-trigger"
@@ -228,6 +248,12 @@ export default function GramCaseWorkspace({
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onDeleted={onDeleted}
+      />
+      <CaseMetadataDialog
+        walletCase={walletCase}
+        open={metadataOpen}
+        onClose={() => setMetadataOpen(false)}
+        onUpdated={acceptMetadataUpdate}
       />
     </div>
   );

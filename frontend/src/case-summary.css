@@ -201,6 +201,9 @@
 .case-state-panel.is-error { color: var(--danger); }
 
 .case-heading-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; }
+.case-heading-note { max-width: 720px; margin-top: 10px !important; padding-left: 11px; border-left: 2px solid color-mix(in srgb, var(--accent) 42%, var(--border)); white-space: pre-wrap; overflow-wrap: anywhere; }
+.case-metadata-trigger { display: inline-flex; min-height: 42px; padding: 0 13px; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 13px; color: var(--text-soft); background: var(--surface-solid); cursor: pointer; font: inherit; font-size: 0.75rem; font-weight: 720; }
+.case-metadata-trigger:hover { border-color: color-mix(in srgb, var(--accent) 36%, var(--border)); color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--surface-solid)); }
 .case-delete-trigger { display: inline-flex; min-height: 42px; padding: 0 13px; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border)); border-radius: 13px; color: var(--case-danger-text); background: color-mix(in srgb, var(--danger) 6%, var(--surface-solid)); cursor: pointer; font: inherit; font-size: 0.75rem; font-weight: 720; }
 .case-delete-trigger:hover { background: color-mix(in srgb, var(--danger) 11%, var(--surface-solid)); }
 .case-delete-dialog { width: min(560px, 100%); overflow: hidden; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border)); border-radius: 22px; background: var(--surface-solid); box-shadow: 0 28px 100px rgba(0, 0, 0, 0.38); }
@@ -221,6 +224,25 @@
 .case-delete-error { padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border)); border-radius: 11px; color: var(--case-danger-text) !important; background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
 .case-delete-dialog > footer { display: flex; padding: 16px 22px 20px; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--border); }
 .case-delete-dialog > footer button { gap: 7px; }
+.case-metadata-dialog { width: min(620px, 100%); overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 22px; background: var(--surface-solid); box-shadow: 0 28px 100px rgba(0, 0, 0, 0.36); }
+.case-metadata-dialog > header { display: grid; padding: 20px 22px; align-items: center; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; border-bottom: 1px solid var(--border); }
+.case-metadata-dialog > header > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.case-metadata-dialog > header small { color: var(--accent); font-size: 0.68rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
+.case-metadata-dialog h2 { margin: 3px 0 0; color: var(--text); font-size: 1.15rem; }
+.case-metadata-dialog > header button { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--text); background: var(--surface); cursor: pointer; }
+.case-metadata-content { display: grid; padding: 22px; gap: 10px; }
+.case-metadata-content > p { margin: 0 0 5px; color: var(--text-muted); font-size: 0.875rem; line-height: 1.65; }
+.case-metadata-content label { display: flex; margin-top: 5px; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-soft); font-size: 0.78rem; font-weight: 700; }
+.case-metadata-content label small { color: var(--text-muted); font-size: 0.68rem; font-variant-numeric: tabular-nums; }
+.case-metadata-content input,
+.case-metadata-content textarea { width: 100%; padding: 12px 13px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--surface); font: inherit; font-size: 0.875rem; line-height: 1.55; }
+.case-metadata-content input { min-height: 46px; }
+.case-metadata-content textarea { min-height: 145px; resize: vertical; }
+.case-metadata-content input:focus,
+.case-metadata-content textarea:focus { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); outline: 3px solid color-mix(in srgb, var(--accent) 14%, transparent); }
+.case-metadata-error { display: grid; margin-top: 5px; padding: 11px 12px; align-items: flex-start; grid-template-columns: auto 1fr; gap: 8px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border)); border-radius: 11px; color: var(--case-danger-text); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); font-size: 0.78rem; line-height: 1.5; }
+.case-metadata-dialog > footer { display: flex; padding: 16px 22px 20px; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--border); }
+.case-metadata-dialog > footer button { gap: 7px; }
 
 .case-activity-page { display: grid; gap: 16px; }
 .case-activity-toolbar,
@@ -663,6 +685,9 @@
   .case-delete-dialog { width: 100%; border-radius: 22px 22px 0 0; }
   .case-delete-dialog > footer { display: grid; grid-template-columns: 1fr; }
   .case-delete-dialog > footer button { width: 100%; }
+  .case-metadata-dialog { width: 100%; border-radius: 22px 22px 0 0; }
+  .case-metadata-dialog > footer { display: grid; grid-template-columns: 1fr; }
+  .case-metadata-dialog > footer button { width: 100%; }
   .case-detail-lead { align-items: flex-start; flex-wrap: wrap; }
   .case-detail-lead .case-evidence-chip { margin-left: 54px; }
   .case-source-observations li { grid-template-columns: 1fr; gap: 3px; }

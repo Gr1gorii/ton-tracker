@@ -9,6 +9,7 @@ import {
   type WalletCaseCreateRequest,
   type WalletCaseDeletionResponse,
   type WalletCaseListResponse,
+  type WalletCaseMetadataUpdateRequest,
   type WalletCaseSync,
   type WalletCaseSyncRequest,
   type WalletCaseUpsertResponse,
@@ -42,6 +43,7 @@ interface StructuredApiDetail {
   message_safe?: unknown;
   retryable?: unknown;
   active_sync_public_id?: unknown;
+  current_metadata_version?: unknown;
 }
 
 export class WalletCaseApiError extends Error {
@@ -50,6 +52,7 @@ export class WalletCaseApiError extends Error {
   readonly retryable: boolean;
   readonly retryAfterMs: number | null;
   readonly activeSyncPublicId: string | null;
+  readonly currentMetadataVersion: number | null;
 
   constructor({
     message,
@@ -58,6 +61,7 @@ export class WalletCaseApiError extends Error {
     retryable = false,
     retryAfterMs = null,
     activeSyncPublicId = null,
+    currentMetadataVersion = null,
   }: {
     message: string;
     status: number;
@@ -65,6 +69,7 @@ export class WalletCaseApiError extends Error {
     retryable?: boolean;
     retryAfterMs?: number | null;
     activeSyncPublicId?: string | null;
+    currentMetadataVersion?: number | null;
   }) {
     super(message);
     this.name = "WalletCaseApiError";
@@ -73,6 +78,7 @@ export class WalletCaseApiError extends Error {
     this.retryable = retryable;
     this.retryAfterMs = retryAfterMs;
     this.activeSyncPublicId = activeSyncPublicId;
+    this.currentMetadataVersion = currentMetadataVersion;
   }
 }
 
@@ -125,6 +131,68 @@ export async function getWalletCase(
     throw new Error("Wallet Case response does not match the requested case id");
   }
   return walletCase;
+}
+
+export async function updateWalletCaseMetadata(
+  current: WalletCase,
+  request: WalletCaseMetadataUpdateRequest,
+  signal?: AbortSignal,
+): Promise<WalletCase> {
+  assertPublicId(current.public_id, "Wallet Case id");
+  if (
+    !Number.isSafeInteger(request.expected_metadata_version) ||
+    request.expected_metadata_version < 1 ||
+    request.expected_metadata_version !== current.metadata_version
+  ) {
+    throw new Error("Wallet Case metadata version is invalid");
+  }
+  if (!("label" in request) && !("note" in request)) {
+    throw new Error("Wallet Case metadata update is empty");
+  }
+  if (
+    request.label !== undefined && request.label !== null &&
+    (typeof request.label !== "string" || request.label.length > 120)
+  ) {
+    throw new Error("Wallet Case label is invalid");
+  }
+  if (
+    request.note !== undefined && request.note !== null &&
+    (typeof request.note !== "string" || request.note.length > 4_000)
+  ) {
+    throw new Error("Wallet Case note is invalid");
+  }
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(current.public_id)}`,
+    {
+      method: "PATCH",
+      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+      signal,
+    },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(response, "Wallet Case metadata update failed");
+  }
+  const updated = parseWalletCase(await response.json());
+  const immutableKeys = [
+    "public_id",
+    "network",
+    "data_environment",
+    "canonical_wallet_key",
+    "identity_version",
+    "display_address",
+    "created_at",
+  ] as const;
+  if (
+    immutableKeys.some((key) => updated[key] !== current[key]) ||
+    updated.metadata_version !== current.metadata_version + 1 ||
+    ("label" in request && updated.label !== request.label) ||
+    ("note" in request && updated.note !== request.note)
+  ) {
+    throw new Error("Wallet Case metadata response does not match the request");
+  }
+  return updated;
 }
 
 export async function deleteWalletCase(
@@ -387,6 +455,7 @@ async function walletCaseResponseError(
   let code: string | null = null;
   let retryable = response.status === 429 || response.status >= 500;
   let activeSyncPublicId: string | null = null;
+  let currentMetadataVersion: number | null = null;
 
   try {
     const body = await response.json();
@@ -407,6 +476,12 @@ async function walletCaseResponseError(
       ) {
         activeSyncPublicId = structured.active_sync_public_id;
       }
+      if (
+        Number.isSafeInteger(structured.current_metadata_version) &&
+        (structured.current_metadata_version as number) > 0
+      ) {
+        currentMetadataVersion = structured.current_metadata_version as number;
+      }
     } else if (Array.isArray(detail) && detail.length > 0) {
       const first = detail[0];
       if (typeof first?.msg === "string" && first.msg) message = first.msg;
@@ -422,6 +497,7 @@ async function walletCaseResponseError(
     retryable,
     retryAfterMs: retryAfterMilliseconds(response.headers.get("Retry-After")),
     activeSyncPublicId,
+    currentMetadataVersion,
   });
 }
 
