@@ -129,7 +129,9 @@ describe("Wallet Case application flow", () => {
       if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
       if (url.pathname === "/api/v1/cases" && method === "GET") {
         expect(url.searchParams.getAll("limit")).toEqual(["12"]);
-        return jsonResponse({ cases: [walletCase], limit: 12, truncated: false });
+        return jsonResponse({
+          cases: [walletCase], limit: 12, truncated: false, next_cursor: null,
+        });
       }
       if (url.pathname === `/api/v1/cases/${CASE_ID}` && method === "GET") {
         return jsonResponse(walletCase);
@@ -156,7 +158,9 @@ describe("Wallet Case application flow", () => {
       const method = init?.method ?? "GET";
       if (url.pathname === "/api/providers/status") return jsonResponse(providersFixture());
       if (url.pathname === "/api/v1/cases" && method === "GET") {
-        return jsonResponse({ cases: [], limit: 12, truncated: false });
+        return jsonResponse({
+          cases: [], limit: 12, truncated: false, next_cursor: null,
+        });
       }
       throw new Error(`Unexpected request: ${method} ${url.pathname}`);
     });

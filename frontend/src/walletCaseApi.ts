@@ -101,12 +101,19 @@ export async function createWalletCase(
 
 export async function listWalletCases(
   limit = 20,
+  cursor: string | null = null,
   signal?: AbortSignal,
 ): Promise<WalletCaseListResponse> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
     throw new Error("Wallet Case list limit must be from 1 through 50");
   }
   const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor !== null) {
+    if (!cursor || cursor.length > 1_024 || cursor.trim() !== cursor) {
+      throw new Error("Wallet Case list cursor is invalid");
+    }
+    params.set("cursor", cursor);
+  }
   const response = await fetch(`${API_BASE}/api/v1/cases?${params}`, {
     cache: "no-store",
     signal,

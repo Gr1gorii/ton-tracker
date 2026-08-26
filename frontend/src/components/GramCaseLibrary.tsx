@@ -75,7 +75,7 @@ export default function GramCaseLibrary({
       setMoreError(null);
     }
     try {
-      const result = await listWalletCases(limit, controller.signal);
+      const result = await listWalletCases(limit, null, controller.signal);
       if (controller.signal.aborted || requestGeneration !== generation.current) return;
       setCatalog(result);
     } catch (caught) {

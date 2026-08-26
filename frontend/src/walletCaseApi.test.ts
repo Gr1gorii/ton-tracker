@@ -66,7 +66,9 @@ describe("Wallet Case API", () => {
     const populated = walletCaseFixture();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ created: false, case: empty }, 200))
-      .mockResolvedValueOnce(jsonResponse({ cases: [populated], limit: 7, truncated: false }))
+      .mockResolvedValueOnce(jsonResponse({
+        cases: [populated], limit: 7, truncated: false, next_cursor: null,
+      }))
       .mockResolvedValueOnce(jsonResponse(populated));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
@@ -81,8 +83,8 @@ describe("Wallet Case API", () => {
       created: false,
       case: empty,
     });
-    await expect(listWalletCases(7, controller.signal)).resolves.toEqual({
-      cases: [populated], limit: 7, truncated: false,
+    await expect(listWalletCases(7, null, controller.signal)).resolves.toEqual({
+      cases: [populated], limit: 7, truncated: false, next_cursor: null,
     });
     await expect(getWalletCase(CASE_ID, controller.signal)).resolves.toEqual(populated);
     expect(fetchMock.mock.calls[0]).toEqual([
@@ -117,10 +119,29 @@ describe("Wallet Case API", () => {
       cases: [walletCaseFixture()],
       limit: 8,
       truncated: false,
+      next_cursor: null,
     }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(listWalletCases(7)).rejects.toThrow(/requested limit/);
+  });
+
+  it("requests an opaque Case catalog continuation without rewriting it", async () => {
+    const cursor = "opaque-signed.cursor";
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      cases: [walletCaseFixture()],
+      limit: 1,
+      truncated: false,
+      next_cursor: null,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(listWalletCases(1, cursor, controller.signal)).resolves.toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases?limit=1&cursor=opaque-signed.cursor`,
+      { cache: "no-store", signal: controller.signal },
+    );
   });
 
   it("deletes a case only from a strictly bound lifecycle receipt", async () => {

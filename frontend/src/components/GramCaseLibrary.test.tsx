@@ -30,7 +30,9 @@ describe("GramCaseLibrary", () => {
       display_address: "EQC-second-wallet",
       updated_at: "2026-08-08T10:00:00Z",
     });
-    listMock.mockResolvedValue({ cases: [first, second], limit: 12, truncated: false });
+    listMock.mockResolvedValue({
+      cases: [first, second], limit: 12, truncated: false, next_cursor: null,
+    });
     const onOpenCase = vi.fn();
 
     render(<GramCaseLibrary onOpenCase={onOpenCase} onCreateCase={vi.fn()} />);
@@ -41,11 +43,13 @@ describe("GramCaseLibrary", () => {
     expect(screen.getByText("Not synchronized")).toBeTruthy();
     await userEvent.setup().click(screen.getByRole("button", { name: "Open Case Treasury" }));
     expect(onOpenCase).toHaveBeenCalledWith(first.public_id);
-    expect(listMock).toHaveBeenCalledWith(12, expect.any(AbortSignal));
+    expect(listMock).toHaveBeenCalledWith(12, null, expect.any(AbortSignal));
   });
 
   it("offers Case creation from a truthful empty state", async () => {
-    listMock.mockResolvedValue({ cases: [], limit: 12, truncated: false });
+    listMock.mockResolvedValue({
+      cases: [], limit: 12, truncated: false, next_cursor: null,
+    });
     const onCreateCase = vi.fn();
     render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={onCreateCase} />);
 
@@ -57,7 +61,9 @@ describe("GramCaseLibrary", () => {
   it("retries an initial catalog failure without reloading the route", async () => {
     listMock
       .mockRejectedValueOnce(new Error("Local storage is starting."))
-      .mockResolvedValueOnce({ cases: [], limit: 12, truncated: false });
+      .mockResolvedValueOnce({
+        cases: [], limit: 12, truncated: false, next_cursor: null,
+      });
     render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
 
     expect((await screen.findByRole("alert")).textContent).toContain("Local storage is starting.");
@@ -70,10 +76,14 @@ describe("GramCaseLibrary", () => {
     const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
     let expansionSignal: AbortSignal | undefined;
     listMock
-      .mockResolvedValueOnce({ cases: [walletCase], limit: 12, truncated: true })
-      .mockImplementationOnce(async (_limit, signal) => {
+      .mockResolvedValueOnce({
+        cases: [walletCase], limit: 12, truncated: true, next_cursor: "page.two",
+      })
+      .mockImplementationOnce(async (_limit, _cursor, signal) => {
         expansionSignal = signal;
-        return { cases: [walletCase], limit: 50, truncated: true };
+        return {
+          cases: [walletCase], limit: 50, truncated: true, next_cursor: "page.three",
+        };
       });
     const view = render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
 
@@ -81,6 +91,7 @@ describe("GramCaseLibrary", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Show up to 50 Cases" }));
     expect(await screen.findByText(/Showing the newest 50 Cases/)).toBeTruthy();
     expect(listMock.mock.calls[1]?.[0]).toBe(50);
+    expect(listMock.mock.calls[1]?.[1]).toBeNull();
     view.unmount();
     await waitFor(() => expect(expansionSignal?.aborted).toBe(true));
   });
