@@ -464,17 +464,23 @@ summary:focus-visible {
 }
 
 .browse-link {
+  display: inline-flex;
   margin-top: 13px;
   padding: 7px 12px;
   border: 0;
   color: var(--text-soft);
   background: transparent;
   cursor: pointer;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   text-decoration: underline;
   text-decoration-color: var(--border-strong);
   text-underline-offset: 4px;
 }
+
+.browse-link:disabled { opacity: 0.48; cursor: not-allowed; }
+.landing-secondary-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 4px 12px; }
 
 .landing-value-grid {
   display: grid;
