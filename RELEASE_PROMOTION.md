@@ -1,8 +1,8 @@
-# GRAM Scope — v0.80.0 Promotion Checklist
+# GRAM Scope — v0.81.0 Promotion Checklist
 
-Current promotion gates for versioned Wallet Case details:
+Current promotion gates for the Wallet Case library:
 
-- Product label is `v0.80.0 CASE DETAILS`; backend API version stays
+- Product label is `v0.81.0 CASE LIBRARY`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260710_0025` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -98,6 +98,10 @@ Current promotion gates for versioned Wallet Case details:
   `expected_metadata_version`. The owner-scoped conditional update increments
   the version exactly once, returns safe structured conflict detail for a stale
   editor, and cannot mutate canonical identity or revive an archived Case.
+- GET `/api/v1/cases` remains owner-scoped and accepts one canonical limit from
+  1 through 50. The `/cases` UI binds the response to the requested page size,
+  rejects duplicate or contradictory pages, aborts obsolete reads, preserves
+  an existing page when expansion fails, and explicitly discloses truncation.
 - Report output always includes assurance, coverage, gaps, limitations,
   unverified claims, Activity/Evidence revision digests, and fixed false
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
@@ -116,7 +120,7 @@ Current promotion gates for versioned Wallet Case details:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.80.0 must not be promoted as a hosted Wallet Case release.
+  v0.81.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 
