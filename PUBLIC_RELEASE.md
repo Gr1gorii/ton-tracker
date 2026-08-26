@@ -1,4 +1,4 @@
-# GRAM Scope - v0.78.0 Public Release
+# GRAM Scope - v0.79.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -6,6 +6,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 - Durable Wallet Cases keyed by canonical TON identity, network, and demo/live
   environment.
+- Permanent owner-scoped Wallet Case deletion with active-job conflict fencing,
+  full case-owned ingestion/proof/report cleanup, unrelated legacy-run
+  preservation, and a non-sensitive retained audit receipt.
 - Persisted, idempotent bounded sync jobs with polling, factual progress,
   bounded retry, cooperative cancellation, lease fencing, and restart recovery.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
@@ -49,14 +52,16 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.78.0 REPORT COMPARE`.
+- Product release label: `v0.79.0 CASE LIFECYCLE`.
 - Backend API `VERSION` remains `0.2.1`.
-- Alembic head is `20260710_0023`: 0019 adds durable Case Evidence jobs, 0020
+- Alembic head is `20260710_0024`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
   persists the verifier policy plus exact per-network application checkpoint
   and binds them into proof and catalog digests. Revision 0022 activates the
   application-owned strict proof-link policy without relabeling older rows.
   Revision 0023 adds owner-scoped immutable Case Report revision captures.
+  Revision 0024 adds retained, non-sensitive Wallet Case deletion audit
+  receipts without a foreign key to the deleted case.
 - Current verifier policy `ton_liteserver_checkpoint_strict_2026_08_v2` pins these
   masterchain checkpoint tuples as
   `(workchain, shard, seqno, root hash, file hash)`:
@@ -161,13 +166,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.78.0`, confirm:
+Before tagging `v0.79.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.78.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.79.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -188,6 +193,10 @@ Before tagging `v0.78.0`, confirm:
 - Report comparison direction, content identity, same/cross-snapshot scope,
   response redaction, strict URL restoration, stale-request rejection, and
   comparison focus tests pass.
+- Case deletion rejects active sync/Evidence work, removes only case-owned
+  ingestion/proof/report data, preserves unrelated legacy runs, retains only a
+  bounded audit receipt, validates exact typed UI confirmation, and returns to
+  home only after a case-bound response.
 - Case Findings reproducibility, content-ID binding, same-symbol asset
   separation, flow conservation, rule support, weakest-evidence labelling,
   strict URL state, response redaction, and Activity deep links pass.

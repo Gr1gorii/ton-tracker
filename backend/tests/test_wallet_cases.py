@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from adapters.wallet_activity import (
@@ -21,7 +21,15 @@ from adapters.wallet_activity import (
 )
 from database import create_database_engine, get_session
 from main import app
-from models import CaseSync, WalletCase, WalletIngestionRun
+from models import (
+    CaseEvidenceVerification,
+    CaseSync,
+    WalletCase,
+    WalletCaseLifecycleEvent,
+    WalletCaseReportRevision,
+    WalletIngestionRun,
+    WalletTransaction,
+)
 from services.database_migrations import run_database_migrations
 from services.case_sync_jobs import CaseSyncWorker, _retry_signal
 from services.wallet_activity_ingestion import build_wallet_ingestion_run
@@ -42,7 +50,7 @@ def client(tmp_path, monkeypatch):
     database_path = tmp_path / "wallet-cases.sqlite3"
     engine = create_database_engine(f"sqlite:///{database_path}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260710_0023"
+    assert report.revision_after == "20260710_0024"
     testing_session = sessionmaker(
         autocommit=False,
         autoflush=False,
@@ -256,6 +264,229 @@ def test_case_create_rejects_invalid_or_mismatched_network_without_rows(client):
     assert invalid.status_code == 400
     assert mismatch.status_code == 400
     assert "network" in mismatch.json()["detail"].lower()
+    assert _database_counts() == (0, 0, 0)
+
+
+def test_case_delete_removes_owned_data_preserves_legacy_rows_and_keeps_audit(
+    client,
+):
+    target = _create_case(
+        client,
+        label="Delete this case",
+        note="Sensitive operator note",
+    )["case"]
+    sibling = _create_case(
+        client,
+        address=BOUNCEABLE_TESTNET,
+        network="ton-testnet",
+        label="Keep this case",
+    )["case"]
+    completed = _sync_case(client, target["public_id"])
+    captured = client.post(
+        f"/api/v1/cases/{target['public_id']}/reports",
+        json={"snapshot_public_id": completed["public_id"]},
+    )
+    assert captured.status_code == 201, captured.text
+
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    with app.state.wallet_case_test_session() as session:
+        legacy_run = WalletIngestionRun(
+            wallet_address="legacy-unscoped-wallet",
+            time_window="24h",
+            data_mode="mock",
+            status="succeeded",
+            requested_surfaces_json="[]",
+            provider_summary_json="{}",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(legacy_run)
+        session.commit()
+        legacy_run_id = legacy_run.id
+
+    response = client.delete(f"/api/v1/cases/{target['public_id']}")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    payload = response.json()
+    assert payload["deleted"] is True
+    assert payload["case_public_id"] == target["public_id"]
+    assert payload["removed"] == {
+        "syncs": 1,
+        "ingestion_runs": 1,
+        "evidence_verifications": 0,
+        "report_revisions": 1,
+    }
+    assert client.get(f"/api/v1/cases/{target['public_id']}").status_code == 404
+    assert client.delete(f"/api/v1/cases/{target['public_id']}").status_code == 404
+    kept = client.get(f"/api/v1/cases/{sibling['public_id']}")
+    assert kept.status_code == 200
+    assert kept.json()["label"] == "Keep this case"
+
+    with app.state.wallet_case_test_session() as session:
+        assert session.scalar(select(func.count()).select_from(WalletCase)) == 1
+        assert session.scalar(select(func.count()).select_from(CaseSync)) == 0
+        assert session.scalar(
+            select(func.count()).select_from(WalletCaseReportRevision)
+        ) == 0
+        assert session.scalar(
+            select(func.count()).select_from(WalletIngestionRun)
+        ) == 1
+        assert session.get(WalletIngestionRun, legacy_run_id) is not None
+        event = session.scalar(select(WalletCaseLifecycleEvent))
+        assert event is not None
+        assert event.public_id == payload["audit_event_public_id"]
+        assert event.case_public_id == target["public_id"]
+        assert json.loads(event.details_json) == {"removed": payload["removed"]}
+        assert target["display_address"] not in event.details_json
+        assert "Sensitive operator note" not in event.details_json
+
+    recreated = _create_case(client)
+    assert recreated["created"] is True
+    assert recreated["case"]["public_id"] != target["public_id"]
+
+
+def test_case_delete_rejects_active_sync_without_mutating_rows(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    queued = client.post(
+        f"/api/v1/cases/{case_id}/syncs",
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"time_window": "24h", "surfaces": ["transactions"]},
+    ).json()
+
+    response = client.delete(f"/api/v1/cases/{case_id}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "case_delete_jobs_active",
+        "message_safe": (
+            "Cancel or wait for active Wallet Case jobs before deleting this case."
+        ),
+        "retryable": False,
+        "active_sync_public_id": queued["public_id"],
+        "active_evidence_public_id": None,
+    }
+    assert _database_counts() == (1, 1, 0)
+    with app.state.wallet_case_test_session() as session:
+        assert session.scalar(
+            select(func.count()).select_from(WalletCaseLifecycleEvent)
+        ) == 0
+
+
+def test_case_delete_rejects_active_evidence_verification(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    completed = _sync_case(client, case_id)
+    now = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
+    with app.state.wallet_case_test_session() as session:
+        wallet_case = session.scalar(
+            select(WalletCase).where(WalletCase.public_id == case_id)
+        )
+        case_sync = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == completed["public_id"])
+        )
+        transaction = session.scalar(
+            select(WalletTransaction).where(
+                WalletTransaction.run_id == case_sync.ingestion_run_id
+            )
+        )
+        assert wallet_case is not None
+        assert case_sync is not None
+        assert transaction is not None
+        verification = CaseEvidenceVerification(
+            case_id=wallet_case.id,
+            snapshot_sync_id=case_sync.id,
+            source_sync_id=case_sync.id,
+            source_transaction_id=transaction.id,
+            activity_public_id=f"wca_{'ab' * 32}",
+            activity_semantic_fingerprint="cd" * 32,
+            policy="transaction_inclusion_v1",
+            state="queued",
+            stage="queued",
+            progress_current=0,
+            status_version=1,
+            highest_evidence_level="normalized",
+            provider="mock",
+            network="ton-mainnet",
+            wallet_account_canonical=RAW_ADDRESS,
+            transaction_hash="ef" * 32,
+            transaction_logical_time="1",
+            idempotency_key=str(uuid4()),
+            request_fingerprint="12" * 32,
+            attempt_count=0,
+            max_attempts=4,
+            next_attempt_at=now,
+            checkpoint_json="{}",
+            message_safe="Queued for lifecycle conflict coverage.",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(verification)
+        session.commit()
+        verification_public_id = verification.public_id
+
+    response = client.delete(f"/api/v1/cases/{case_id}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["active_sync_public_id"] is None
+    assert response.json()["detail"]["active_evidence_public_id"] == (
+        verification_public_id
+    )
+    assert _database_counts() == (1, 1, 1)
+
+
+def test_case_delete_write_fence_blocks_late_sync_before_cleanup_inventory(
+    client,
+    monkeypatch,
+):
+    case_id = _create_case(client)["case"]["public_id"]
+    session_factory = app.state.wallet_case_test_session
+    writer_errors: list[Exception] = []
+
+    with session_factory() as delete_session:
+        service = WalletCaseService(delete_session)
+        original_row_count = service._row_count
+        interleaved = False
+
+        def try_late_enqueue(model, predicate):
+            nonlocal interleaved
+            if not interleaved:
+                interleaved = True
+
+                def enqueue() -> None:
+                    with session_factory() as writer_session:
+                        writer_session.connection().exec_driver_sql(
+                            "PRAGMA busy_timeout=100"
+                        )
+                        try:
+                            WalletCaseService(writer_session).enqueue_sync(
+                                case_id,
+                                WalletCaseSyncRequest(
+                                    time_window="24h",
+                                    surfaces=["transactions"],
+                                ),
+                                str(uuid4()),
+                            )
+                        except Exception as exc:  # captured for the parent test
+                            writer_errors.append(exc)
+
+                writer = Thread(target=enqueue)
+                writer.start()
+                writer.join(timeout=2)
+                assert not writer.is_alive()
+            return original_row_count(model, predicate)
+
+        monkeypatch.setattr(service, "_row_count", try_late_enqueue)
+        receipt = service.delete_case(case_id)
+
+    assert receipt["deleted"] is True
+    assert receipt["removed"] == {
+        "syncs": 0,
+        "ingestion_runs": 0,
+        "evidence_verifications": 0,
+        "report_revisions": 0,
+    }
+    assert len(writer_errors) == 1
+    assert isinstance(writer_errors[0], OperationalError)
     assert _database_counts() == (0, 0, 0)
 
 

@@ -1,10 +1,10 @@
-# GRAM Scope — v0.78.0 Promotion Checklist
+# GRAM Scope — v0.79.0 Promotion Checklist
 
-Current promotion gates for Wallet Case Report Compare:
+Current promotion gates for Wallet Case lifecycle deletion:
 
-- Product label is `v0.78.0 REPORT COMPARE`; backend API version stays
+- Product label is `v0.79.0 CASE LIFECYCLE`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic reaches revision `20260710_0023` with exact model parity from fresh,
+- Alembic reaches revision `20260710_0024` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
   path. Missing or changed columns, checks, foreign keys, delete actions, and
   indexes fail closed; downgrade remains unsupported. Revision 0020 versions
@@ -20,6 +20,10 @@ Current promotion gates for Wallet Case Report Compare:
 - Revision 0023 adds the immutable Wallet Case Report revision table. Fresh,
   0022 upgrade, exact empty interrupted-DDL resume, same-name drift, row
   adoption, and forward-only behavior must all pass fail-closed tests.
+- Revision 0024 adds retained Wallet Case lifecycle audit receipts. Fresh, 0023
+  upgrade, exact empty interrupted-DDL resume, same-name drift, row adoption,
+  and forward-only behavior must pass fail-closed tests. The table has no case
+  foreign key and retains no wallet address, label, note, payload, or proof.
 - Evidence is bound to one owner-scoped case, usable pinned snapshot, exact
   source synchronization, and a revalidated provider-observed transaction.
   Demo fixtures, transfers, swaps, unknown linkage, and mismatched source scope
@@ -81,6 +85,11 @@ Current promotion gates for Wallet Case Report Compare:
   ordered baseline and target summaries, exact directional deltas, comparison
   limitations, and the distinction between same- and cross-snapshot scope.
   It never interprets a delta as causality or reconstructs uncaptured states.
+- DELETE requires the local owner scope and no queued/running CaseSync or
+  Evidence job. The transaction removes only case-owned syncs, unique ingestion
+  runs and their normalized/proof artifacts, Evidence jobs, and Report
+  revisions; unrelated cases and unscoped legacy runs remain. The UI requires
+  exact typed confirmation and validates the returned case-bound receipt.
 - Report output always includes assurance, coverage, gaps, limitations,
   unverified claims, Activity/Evidence revision digests, and fixed false
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
@@ -99,7 +108,7 @@ Current promotion gates for Wallet Case Report Compare:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.78.0 must not be promoted as a hosted Wallet Case release.
+  v0.79.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

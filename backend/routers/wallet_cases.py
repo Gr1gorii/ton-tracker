@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from database import get_session
 from services.wallet_cases import (
+    WalletCaseDeletionConflict,
     WalletCaseNotFound,
     WalletCaseIdempotencyConflict,
     WalletCaseRuntimeConflict,
@@ -17,6 +18,7 @@ from services.wallet_cases import (
 from services.wallet_case_access import require_local_wallet_case_access
 from wallet_case_schemas import (
     WalletCaseCreateRequest,
+    WalletCaseDeletionResponse,
     WalletCaseListResponse,
     WalletCaseResponse,
     WalletCaseSyncRequest,
@@ -136,6 +138,54 @@ def read_wallet_case(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.delete("/{public_id}", response_model=WalletCaseDeletionResponse)
+def delete_wallet_case(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Permanently delete one case after all case-owned jobs become terminal."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).delete_case(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseDeletionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_delete_jobs_active",
+                "message_safe": str(exc),
+                "retryable": False,
+                "active_sync_public_id": exc.active_sync_public_id,
+                "active_evidence_public_id": exc.active_evidence_public_id,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseRuntimeConflict as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_delete_changed",
+                "message_safe": str(exc),
+                "retryable": True,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case deletion storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

@@ -1,11 +1,13 @@
 import { API_BASE } from "./apiBase";
 import {
   parseWalletCase,
+  parseWalletCaseDeletionResponse,
   parseWalletCaseListResponse,
   parseWalletCaseSync,
   parseWalletCaseUpsertResponse,
   type WalletCase,
   type WalletCaseCreateRequest,
+  type WalletCaseDeletionResponse,
   type WalletCaseListResponse,
   type WalletCaseSync,
   type WalletCaseSyncRequest,
@@ -123,6 +125,25 @@ export async function getWalletCase(
     throw new Error("Wallet Case response does not match the requested case id");
   }
   return walletCase;
+}
+
+export async function deleteWalletCase(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseDeletionResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}`,
+    { method: "DELETE", cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(response, "Wallet Case deletion failed");
+  }
+  const receipt = parseWalletCaseDeletionResponse(await response.json());
+  if (receipt.case_public_id !== caseId) {
+    throw new Error("Wallet Case deletion response does not match the request");
+  }
+  return receipt;
 }
 
 export async function getWalletCaseActivity(

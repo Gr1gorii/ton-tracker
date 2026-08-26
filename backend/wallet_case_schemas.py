@@ -257,3 +257,18 @@ class WalletCaseListResponse(_StrictModel):
     cases: list[WalletCaseResponse]
     limit: int = Field(ge=1, le=50)
     truncated: bool
+
+
+class WalletCaseDeletionCounts(_StrictModel):
+    syncs: int = Field(ge=0)
+    ingestion_runs: int = Field(ge=0)
+    evidence_verifications: int = Field(ge=0)
+    report_revisions: int = Field(ge=0)
+
+
+class WalletCaseDeletionResponse(_StrictModel):
+    deleted: Literal[True]
+    case_public_id: CanonicalPublicId
+    audit_event_public_id: CanonicalPublicId
+    deleted_at: str
+    removed: WalletCaseDeletionCounts

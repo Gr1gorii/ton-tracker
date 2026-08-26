@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from models import CaseSync, WalletCase
+from models import CaseEvidenceVerification, CaseSync, WalletCase
 
 
 class WalletCaseRepository:
@@ -123,6 +123,18 @@ class WalletCaseRepository:
             select(CaseSync).where(
                 CaseSync.case_id == case_id,
                 CaseSync.state.in_(("queued", "running")),
+            )
+        )
+
+    def get_active_evidence_verification(
+        self,
+        *,
+        case_id: int,
+    ) -> CaseEvidenceVerification | None:
+        return self.session.scalar(
+            select(CaseEvidenceVerification).where(
+                CaseEvidenceVerification.case_id == case_id,
+                CaseEvidenceVerification.state.in_(("queued", "running")),
             )
         )
 

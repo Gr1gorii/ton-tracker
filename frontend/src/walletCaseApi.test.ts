@@ -7,6 +7,7 @@ import {
   cancelWalletCaseSync,
   createWalletCase,
   createWalletCaseSync,
+  deleteWalletCase,
   getWalletCase,
   getWalletCaseActivity,
   getWalletCaseActivityDetail,
@@ -93,6 +94,36 @@ describe("Wallet Case API", () => {
         signal: controller.signal,
       },
     ]);
+  });
+
+  it("deletes a case only from a strictly bound lifecycle receipt", async () => {
+    const receipt = {
+      deleted: true as const,
+      case_public_id: CASE_ID,
+      audit_event_public_id: OTHER_CASE_ID,
+      deleted_at: "2026-08-26T12:00:00Z",
+      removed: {
+        syncs: 1,
+        ingestion_runs: 1,
+        evidence_verifications: 0,
+        report_revisions: 2,
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(receipt));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(deleteWalletCase(CASE_ID, controller.signal)).resolves.toEqual(receipt);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}`,
+      { method: "DELETE", cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...receipt,
+      case_public_id: OTHER_CASE_ID,
+    }));
+    await expect(deleteWalletCase(CASE_ID)).rejects.toThrow(/does not match/);
   });
 
   it("starts a durable sync only from 202 with one explicit UUIDv4 idempotency key", async () => {

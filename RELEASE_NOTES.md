@@ -1,3 +1,35 @@
+# GRAM Scope — v0.79.0 CASE LIFECYCLE
+
+v0.79.0 completes the first permanent data-lifecycle action for Wallet Cases.
+The owner-scoped local API now exposes
+`DELETE /api/v1/cases/{case_public_id}` and returns a strict deletion receipt
+with the public case ID, a non-sequential audit-event ID, deletion time, and
+bounded counts of removed syncs, ingestion runs, Evidence verifications, and
+saved Report revisions.
+
+Deletion is transactional and fail-closed. A case with a queued or running
+CaseSync or Evidence verification returns a structured `409` instead of racing
+the worker. Once all work is terminal, the service removes the case-owned
+syncs, revisions, normalized activity, provider acquisition evidence, and proof
+artifacts in dependency order. Unrelated cases and unscoped legacy ingestion
+runs remain untouched. A failed cascade rolls the whole operation back.
+
+Revision `20260710_0024` adds a forward-only lifecycle-event table that remains
+after the case row is gone. Its audit receipt intentionally stores only owner
+scope, public case/event IDs, event time, and aggregate removal counts; wallet
+address, label, note, provider payloads, proof material, worker state, and
+credentials are not retained. Fresh, 0023 upgrade, exact interrupted-DDL
+resume, drift, row-adoption, and downgrade paths are tested fail-closed.
+
+Every Case view now exposes a guarded deletion action. The modal names the data
+that will disappear, explains the retained audit boundary, requires the exact
+text `DELETE`, disables dismissal while the request is active, preserves safe
+active-job errors for retry, and returns to the home route only after a
+case-bound receipt is validated. Wallet Cases remain direct-loopback only until
+authentication supplies a hosted owner scope.
+
+---
+
 # GRAM Scope — v0.78.0 REPORT COMPARE
 
 v0.78.0 adds a deterministic comparison view for two immutable Wallet Case

@@ -146,6 +146,19 @@ export interface WalletCaseListResponse {
   truncated: boolean;
 }
 
+export interface WalletCaseDeletionResponse {
+  deleted: true;
+  case_public_id: string;
+  audit_event_public_id: string;
+  deleted_at: string;
+  removed: {
+    syncs: number;
+    ingestion_runs: number;
+    evidence_verifications: number;
+    report_revisions: number;
+  };
+}
+
 export interface WalletCaseSyncRequest {
   time_window: TimeWindow;
   custom_start?: string;
@@ -658,6 +671,46 @@ export function parseWalletCaseListResponse(value: unknown): WalletCaseListRespo
         : (() => {
             throw new Error("wallet case list truncated flag is invalid");
           })(),
+  };
+}
+
+export function parseWalletCaseDeletionResponse(
+  value: unknown,
+): WalletCaseDeletionResponse {
+  const response = record(value, "wallet case deletion response");
+  const casePublicId = string(response.case_public_id, "deleted wallet case id");
+  const auditEventPublicId = string(
+    response.audit_event_public_id,
+    "wallet case deletion audit id",
+  );
+  if (
+    response.deleted !== true ||
+    !UUID_V4.test(casePublicId) ||
+    !UUID_V4.test(auditEventPublicId)
+  ) {
+    throw new Error("wallet case deletion identity is invalid");
+  }
+  const removed = record(response.removed, "wallet case deletion counts");
+  return {
+    deleted: true,
+    case_public_id: casePublicId,
+    audit_event_public_id: auditEventPublicId,
+    deleted_at: timestamp(response.deleted_at, "wallet case deletion time"),
+    removed: {
+      syncs: nonNegativeInteger(removed.syncs, "deleted case sync count"),
+      ingestion_runs: nonNegativeInteger(
+        removed.ingestion_runs,
+        "deleted ingestion run count",
+      ),
+      evidence_verifications: nonNegativeInteger(
+        removed.evidence_verifications,
+        "deleted evidence verification count",
+      ),
+      report_revisions: nonNegativeInteger(
+        removed.report_revisions,
+        "deleted report revision count",
+      ),
+    },
   };
 }
 
