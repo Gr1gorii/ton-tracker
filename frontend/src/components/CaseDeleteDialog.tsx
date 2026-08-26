@@ -29,6 +29,8 @@ export default function CaseDeleteDialog({
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const controllerRef = useRef<AbortController | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -37,7 +39,7 @@ export default function CaseDeleteDialog({
     setError(null);
     inputRef.current?.focus();
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && !controllerRef.current) onClose();
+      if (event.key === "Escape" && !controllerRef.current) onCloseRef.current();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -45,7 +47,7 @@ export default function CaseDeleteDialog({
       controllerRef.current?.abort();
       controllerRef.current = null;
     };
-  }, [onClose, open]);
+  }, [open]);
 
   if (!open) return null;
 

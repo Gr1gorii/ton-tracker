@@ -90,4 +90,49 @@ describe("CaseDeleteDialog", () => {
       name: "Delete Wallet Case",
     }) as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("keeps an in-flight deletion stable across parent callback changes", async () => {
+    let resolveDeletion!: (receipt: typeof RECEIPT) => void;
+    apiMocks.deleteWalletCase.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveDeletion = resolve;
+      }),
+    );
+    const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    const rendered = render(
+      <CaseDeleteDialog
+        caseId={CASE_ID}
+        caseName="Treasury"
+        open
+        onClose={vi.fn()}
+        onDeleted={onDeleted}
+      />,
+    );
+
+    await user.type(screen.getByLabelText(/Type DELETE/), "DELETE");
+    await user.click(screen.getByRole("button", { name: "Delete Wallet Case" }));
+    const signal = apiMocks.deleteWalletCase.mock.calls[0][1] as AbortSignal;
+
+    rendered.rerender(
+      <CaseDeleteDialog
+        caseId={CASE_ID}
+        caseName="Treasury"
+        open
+        onClose={vi.fn()}
+        onDeleted={onDeleted}
+      />,
+    );
+
+    expect(signal.aborted).toBe(false);
+    expect((screen.getByLabelText(/Type DELETE/) as HTMLInputElement).value).toBe(
+      "DELETE",
+    );
+    expect((screen.getByRole("button", {
+      name: "Keep case",
+    }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveDeletion(RECEIPT);
+    await waitFor(() => expect(onDeleted).toHaveBeenCalledWith(RECEIPT));
+  });
 });
