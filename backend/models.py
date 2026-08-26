@@ -102,6 +102,12 @@ class WalletCase(Base):
         nullable=False,
     )
     archived_at = Column(DateTime, nullable=True)
+    metadata_version = Column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
 
     syncs = relationship(
         "CaseSync",

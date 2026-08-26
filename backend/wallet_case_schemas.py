@@ -97,6 +97,26 @@ class WalletCaseSyncRequest(_StrictModel):
         return self
 
 
+class WalletCaseMetadataUpdateRequest(_StrictModel):
+    expected_metadata_version: int = Field(ge=1)
+    label: str | None = Field(default=None, max_length=120)
+    note: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("label", "note")
+    @classmethod
+    def _clean_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+    @model_validator(mode="after")
+    def _require_a_metadata_field(self):
+        if not ({"label", "note"} & self.model_fields_set):
+            raise ValueError("At least one Wallet Case metadata field is required")
+        return self
+
+
 class WalletCaseLimitation(_StrictModel):
     code: str = Field(min_length=1, max_length=64)
     message: str = Field(min_length=1, max_length=500)
@@ -238,6 +258,7 @@ class WalletCaseResponse(_StrictModel):
     display_address: str = Field(min_length=1, max_length=128)
     label: str | None = Field(default=None, max_length=120)
     note: str | None = Field(default=None, max_length=4000)
+    metadata_version: int = Field(ge=1)
     created_at: str
     updated_at: str
     latest_sync: WalletCaseSyncResponse | None = None

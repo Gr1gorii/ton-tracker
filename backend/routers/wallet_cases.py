@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from database import get_session
 from services.wallet_cases import (
     WalletCaseDeletionConflict,
+    WalletCaseMetadataConflict,
     WalletCaseNotFound,
     WalletCaseIdempotencyConflict,
     WalletCaseRuntimeConflict,
@@ -20,6 +21,7 @@ from wallet_case_schemas import (
     WalletCaseCreateRequest,
     WalletCaseDeletionResponse,
     WalletCaseListResponse,
+    WalletCaseMetadataUpdateRequest,
     WalletCaseResponse,
     WalletCaseSyncRequest,
     WalletCaseSyncResponse,
@@ -186,6 +188,43 @@ def delete_wallet_case(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case deletion storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.patch("/{public_id}", response_model=WalletCaseResponse)
+def update_wallet_case_metadata(
+    payload: WalletCaseMetadataUpdateRequest,
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Update the label or note without changing the canonical case scope."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).update_case_metadata(public_id, payload)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseMetadataConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_metadata_changed",
+                "message_safe": str(exc),
+                "retryable": True,
+                "current_metadata_version": exc.current_metadata_version,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case metadata storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 
