@@ -59,7 +59,8 @@ STRICT_TRANSACTION_INCLUSION_POLICY_REVISION = "20260710_0022"
 CASE_REPORT_REVISIONS_REVISION = "20260710_0023"
 WALLET_CASE_LIFECYCLE_REVISION = "20260710_0024"
 WALLET_CASE_METADATA_REVISION = "20260710_0025"
-CURRENT_REVISION = WALLET_CASE_METADATA_REVISION
+WALLET_CASE_CATALOG_REVISION = "20260827_0026"
+CURRENT_REVISION = WALLET_CASE_CATALOG_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -1468,6 +1469,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -1525,6 +1527,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1584,6 +1587,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1735,6 +1739,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1894,6 +1899,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -2057,6 +2063,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2501,6 +2508,7 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2605,6 +2613,7 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2816,6 +2825,7 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -3080,6 +3090,7 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_trace_boc_verification_schema(engine)
@@ -3113,6 +3124,7 @@ def test_upgrade_from_0007_reaches_current_model_parity(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert {
         "wallet_native_activity_ledgers",
@@ -3147,6 +3159,7 @@ def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert inspect(engine).get_table_names().count(
         JETTON_CONTRACT_VERIFICATIONS_TABLE
@@ -3184,6 +3197,7 @@ def test_wallet_ownership_challenge_upgrade_from_0009_reaches_model_parity(tmp_p
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -3226,6 +3240,7 @@ def test_account_state_inclusion_upgrade_from_0010_reaches_model_parity(tmp_path
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert "wallet_account_state_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3254,6 +3269,7 @@ def test_transaction_inclusion_upgrade_from_0011_reaches_model_parity(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert "wallet_transaction_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3281,6 +3297,7 @@ def test_dex_protocol_identity_upgrade_from_0012_reaches_model_parity(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     columns = {
         column["name"]
@@ -3311,6 +3328,7 @@ def test_ownership_network_scope_upgrade_from_0013_reaches_model_parity(tmp_path
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -3370,6 +3388,7 @@ def test_wallet_cases_upgrade_from_0014_preserves_runs_without_backfill(tmp_path
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     assert _wallet_case_counts(engine) == (0, 0)
@@ -3574,6 +3593,7 @@ def test_wallet_case_compact_results_upgrade_from_0015_preserves_rows(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     with engine.connect() as connection:
         row = connection.exec_driver_sql(
@@ -3740,6 +3760,7 @@ def test_case_sync_jobs_upgrade_normalizes_legacy_active_rows_and_enforces_slots
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     with engine.connect() as connection:
         legacy = connection.exec_driver_sql(
@@ -4909,6 +4930,7 @@ def test_case_report_revision_migration_creates_exact_current_schema(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     inspector = inspect(engine)
     assert [column["name"] for column in inspector.get_columns(
@@ -4960,6 +4982,7 @@ def test_case_report_revision_migration_resumes_exact_empty_table(tmp_path):
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -5030,10 +5053,11 @@ def test_wallet_case_lifecycle_migration_creates_retained_audit_table(tmp_path):
     report = run_database_migrations(engine)
 
     assert report.revision_before == CASE_REPORT_REVISIONS_REVISION
-    assert report.revision_after == WALLET_CASE_METADATA_REVISION
+    assert report.revision_after == WALLET_CASE_CATALOG_REVISION
     assert report.applied_revisions == (
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     inspector = inspect(engine)
     assert [
@@ -5071,10 +5095,11 @@ def test_wallet_case_lifecycle_migration_resumes_exact_empty_table(tmp_path):
 
     report = run_database_migrations(engine)
 
-    assert report.revision_after == WALLET_CASE_METADATA_REVISION
+    assert report.revision_after == WALLET_CASE_CATALOG_REVISION
     assert report.applied_revisions == (
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -5162,8 +5187,11 @@ def test_wallet_case_metadata_migration_versions_existing_rows(tmp_path):
     report = run_database_migrations(engine)
 
     assert report.revision_before == WALLET_CASE_LIFECYCLE_REVISION
-    assert report.revision_after == WALLET_CASE_METADATA_REVISION
-    assert report.applied_revisions == (WALLET_CASE_METADATA_REVISION,)
+    assert report.revision_after == WALLET_CASE_CATALOG_REVISION
+    assert report.applied_revisions == (
+        WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
+    )
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
             "SELECT metadata_version FROM wallet_cases"
@@ -5183,8 +5211,11 @@ def test_wallet_case_metadata_migration_resumes_exact_added_column(tmp_path):
 
     report = run_database_migrations(engine)
 
-    assert report.revision_after == WALLET_CASE_METADATA_REVISION
-    assert report.applied_revisions == (WALLET_CASE_METADATA_REVISION,)
+    assert report.revision_after == WALLET_CASE_CATALOG_REVISION
+    assert report.applied_revisions == (
+        WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
+    )
     _assert_schema_matches_models(engine)
     engine.dispose()
 
@@ -5257,6 +5288,96 @@ def test_wallet_case_metadata_migration_is_forward_only(tmp_path):
             command.downgrade(
                 migration_config(connection),
                 WALLET_CASE_LIFECYCLE_REVISION,
+            )
+    engine.dispose()
+
+
+def test_wallet_case_catalog_migration_seeds_frozen_positions(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-catalog.db")
+    _upgrade_to_revision(engine, WALLET_CASE_METADATA_REVISION)
+    wallet_cases = database.Base.metadata.tables[WALLET_CASES_TABLE]
+    with engine.begin() as connection:
+        case_id = connection.execute(
+            wallet_cases.insert().values(**_wallet_case_values())
+        ).inserted_primary_key[0]
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == WALLET_CASE_METADATA_REVISION
+    assert report.revision_after == WALLET_CASE_CATALOG_REVISION
+    assert report.applied_revisions == (WALLET_CASE_CATALOG_REVISION,)
+    inspector = inspect(engine)
+    assert [
+        column["name"]
+        for column in inspector.get_columns("wallet_case_catalog_events")
+    ] == ["id", "case_id", "recorded_at"]
+    assert {
+        item["name"]: (tuple(item["column_names"]), bool(item["unique"]))
+        for item in inspector.get_indexes("wallet_case_catalog_events")
+    } == {
+        "ix_wallet_case_catalog_events_case_position": (
+            ("case_id", "id"),
+            False,
+        )
+    }
+    foreign_key = inspector.get_foreign_keys("wallet_case_catalog_events")[0]
+    assert tuple(foreign_key["constrained_columns"]) == ("case_id",)
+    assert foreign_key["referred_table"] == "wallet_cases"
+    assert tuple(foreign_key["referred_columns"]) == ("id",)
+    assert foreign_key["options"]["ondelete"] == "CASCADE"
+    with engine.connect() as connection:
+        event = connection.exec_driver_sql(
+            "SELECT case_id, recorded_at FROM wallet_case_catalog_events"
+        ).one()
+    assert event.case_id == case_id
+    assert str(event.recorded_at).startswith("2026-")
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_case_catalog_migration_resumes_exact_empty_table(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-catalog-resume.db")
+    _upgrade_to_revision(engine, WALLET_CASE_METADATA_REVISION)
+    models.WalletCaseCatalogEvent.__table__.create(bind=engine)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_after == WALLET_CASE_CATALOG_REVISION
+    assert report.applied_revisions == (WALLET_CASE_CATALOG_REVISION,)
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_case_catalog_migration_never_adopts_existing_rows(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-catalog-row-adoption.db")
+    _upgrade_to_revision(engine, WALLET_CASE_METADATA_REVISION)
+    wallet_cases = database.Base.metadata.tables[WALLET_CASES_TABLE]
+    with engine.begin() as connection:
+        case_id = connection.execute(
+            wallet_cases.insert().values(**_wallet_case_values())
+        ).inserted_primary_key[0]
+    models.WalletCaseCatalogEvent.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(
+            models.WalletCaseCatalogEvent.__table__.insert().values(
+                case_id=case_id,
+                recorded_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="cannot be adopted"):
+        run_database_migrations(engine)
+    engine.dispose()
+
+
+def test_wallet_case_catalog_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-catalog-forward-only.db")
+    _upgrade_to_revision(engine, WALLET_CASE_CATALOG_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="intentionally unsupported"):
+            command.downgrade(
+                migration_config(connection),
+                WALLET_CASE_METADATA_REVISION,
             )
     engine.dispose()
 
@@ -5872,6 +5993,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         CASE_REPORT_REVISIONS_REVISION,
         WALLET_CASE_LIFECYCLE_REVISION,
         WALLET_CASE_METADATA_REVISION,
+        WALLET_CASE_CATALOG_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

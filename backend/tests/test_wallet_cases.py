@@ -25,6 +25,7 @@ from models import (
     CaseEvidenceVerification,
     CaseSync,
     WalletCase,
+    WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
     WalletIngestionRun,
@@ -50,7 +51,7 @@ def client(tmp_path, monkeypatch):
     database_path = tmp_path / "wallet-cases.sqlite3"
     engine = create_database_engine(f"sqlite:///{database_path}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260710_0025"
+    assert report.revision_after == "20260827_0026"
     testing_session = sessionmaker(
         autocommit=False,
         autoflush=False,
@@ -291,6 +292,17 @@ def test_case_metadata_update_is_versioned_trimmed_and_scope_preserving(client):
     stored = client.get(f"/api/v1/cases/{case_id}")
     assert stored.status_code == 200
     assert stored.json() == cleared.json()
+    with Session(app.state.wallet_case_test_engine) as session:
+        catalog_events = list(
+            session.scalars(
+                select(WalletCaseCatalogEvent)
+                .join(WalletCase)
+                .where(WalletCase.public_id == case_id)
+                .order_by(WalletCaseCatalogEvent.id)
+            )
+        )
+    assert len(catalog_events) == 3
+    assert all(event.recorded_at is not None for event in catalog_events)
 
 
 def test_case_metadata_update_rejects_stale_or_invalid_edits_without_mutation(client):
@@ -732,6 +744,9 @@ def test_demo_case_sync_links_legacy_run_and_restores_summary(client):
     assert _database_counts() == (1, 1, 1)
     engine = app.state.wallet_case_test_engine
     with Session(engine) as session:
+        assert session.scalar(
+            select(func.count()).select_from(WalletCaseCatalogEvent)
+        ) == 3
         stored_sync = session.scalar(select(CaseSync))
         assert stored_sync is not None
         assert stored_sync.ingestion_run_id is not None

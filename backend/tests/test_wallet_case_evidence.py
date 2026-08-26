@@ -105,7 +105,7 @@ class ManualEvidenceRunner:
 def evidence_api(tmp_path, monkeypatch):
     _clear_selection_cache_for_tests()
     engine = create_database_engine(f"sqlite:///{tmp_path / 'case-evidence.sqlite3'}")
-    assert run_database_migrations(engine).revision_after == "20260710_0025"
+    assert run_database_migrations(engine).revision_after == "20260827_0026"
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override():
@@ -1171,7 +1171,7 @@ def worker_context(tmp_path, monkeypatch):
         pool_size=4,
         max_overflow=0,
     )
-    assert run_database_migrations(engine).revision_after == "20260710_0025"
+    assert run_database_migrations(engine).revision_after == "20260827_0026"
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     context = SimpleNamespace(
         engine=engine,
@@ -2236,7 +2236,7 @@ def real_artifact_context(tmp_path, monkeypatch):
     engine = create_database_engine(
         f"sqlite:///{tmp_path / 'real-case-evidence.sqlite3'}"
     )
-    assert run_database_migrations(engine).revision_after == "20260710_0025"
+    assert run_database_migrations(engine).revision_after == "20260827_0026"
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     monkeypatch.setattr(
         TonapiAdapter,
@@ -2720,7 +2720,7 @@ def test_pool_connection_is_free_during_actual_provider_and_liteserver_calls(
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    assert run_database_migrations(engine).revision_after == "20260710_0025"
+    assert run_database_migrations(engine).revision_after == "20260827_0026"
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     context = SimpleNamespace(engine=engine, sessions=sessions)
     seeded = _seed_real_artifact_job(context)

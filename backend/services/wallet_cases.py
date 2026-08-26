@@ -19,6 +19,7 @@ from models import (
     CaseSync,
     LOCAL_SINGLE_USER_SCOPE,
     WalletCase,
+    WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
     WalletIngestionRun,
@@ -144,8 +145,10 @@ class WalletCaseService:
         )
         if existing is not None:
             if existing.archived_at is not None:
+                reopened_at = _utc_now()
                 existing.archived_at = None
-                existing.updated_at = _utc_now()
+                existing.updated_at = reopened_at
+                self._record_catalog_event(existing, recorded_at=reopened_at)
                 self.session.commit()
             return {
                 "created": False,
@@ -177,6 +180,7 @@ class WalletCaseService:
             updated_at=now,
         )
         self.repository.add_case(wallet_case)
+        self._record_catalog_event(wallet_case, recorded_at=now)
         try:
             self.session.commit()
         except IntegrityError:
@@ -282,6 +286,7 @@ class WalletCaseService:
                 raise WalletCaseNotFound("Wallet Case not found")
             raise WalletCaseMetadataConflict(current.metadata_version)
 
+        self._record_catalog_event(wallet_case, recorded_at=values["updated_at"])
         self.session.commit()
         refreshed = self._required_case(public_id)
         return self._case_response(
@@ -457,6 +462,7 @@ class WalletCaseService:
             ),
         )
         wallet_case.updated_at = queued_at
+        self._record_catalog_event(wallet_case, recorded_at=queued_at)
         self.repository.add_sync(case_sync)
         try:
             self.session.commit()
@@ -610,6 +616,19 @@ class WalletCaseService:
                     else None
                 ),
             )
+
+    def _record_catalog_event(
+        self,
+        wallet_case: WalletCase,
+        *,
+        recorded_at: datetime,
+    ) -> None:
+        self.session.add(
+            WalletCaseCatalogEvent(
+                case=wallet_case,
+                recorded_at=_as_utc(recorded_at),
+            )
+        )
 
     def _acquire_delete_write_fence(self, wallet_case: WalletCase) -> None:
         """Serialize the cleanup inventory against new SQLite writers."""
