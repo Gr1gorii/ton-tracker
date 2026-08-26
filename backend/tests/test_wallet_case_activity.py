@@ -40,7 +40,7 @@ TESTNET_COUNTERPARTY = "kQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPgpP"
 def activity_client(tmp_path):
     engine = create_database_engine(f"sqlite:///{tmp_path / 'activity.sqlite3'}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260710_0025"
+    assert report.revision_after == "20260827_0026"
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     def override():

@@ -25,6 +25,7 @@ from models import (
     CaseEvidenceVerification,
     CaseSync,
     WalletCase,
+    WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
     WalletIngestionRun,
@@ -33,7 +34,11 @@ from models import (
 from services.database_migrations import run_database_migrations
 from services.case_sync_jobs import CaseSyncWorker, _retry_signal
 from services.wallet_activity_ingestion import build_wallet_ingestion_run
-from services.wallet_cases import WalletCaseService, _compact_coverage_streams
+from services.wallet_cases import (
+    WalletCaseCatalogInvalidCursor,
+    WalletCaseService,
+    _compact_coverage_streams,
+)
 from wallet_case_schemas import WalletCaseSyncRequest
 
 
@@ -50,7 +55,7 @@ def client(tmp_path, monkeypatch):
     database_path = tmp_path / "wallet-cases.sqlite3"
     engine = create_database_engine(f"sqlite:///{database_path}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260710_0025"
+    assert report.revision_after == "20260827_0026"
     testing_session = sessionmaker(
         autocommit=False,
         autoflush=False,
@@ -242,6 +247,169 @@ def test_case_create_is_canonical_idempotent_and_scope_separated(
     assert catalog.json()["limit"] == 3
     assert catalog.json()["truncated"] is False
     assert len(catalog.json()["cases"]) == 3
+    assert catalog.json()["next_cursor"] is None
+
+
+def test_case_catalog_cursor_freezes_order_and_excludes_later_cases(client):
+    created = [
+        _create_case(
+            client,
+            address=f"0:{account_id:064x}",
+            label=f"Case {account_id}",
+        )["case"]
+        for account_id in range(1, 6)
+    ]
+    frozen_order = [item["public_id"] for item in reversed(created)]
+
+    first = client.get("/api/v1/cases?limit=2")
+    assert first.status_code == 200, first.text
+    assert [item["public_id"] for item in first.json()["cases"]] == frozen_order[:2]
+    assert first.json()["truncated"] is True
+    first_cursor = first.json()["next_cursor"]
+    assert isinstance(first_cursor, str)
+    assert len(first.json()["cases"]) == first.json()["limit"] == 2
+
+    moved = client.patch(
+        f"/api/v1/cases/{created[0]['public_id']}",
+        json={"expected_metadata_version": 1, "label": "Moved after page one"},
+    )
+    assert moved.status_code == 200, moved.text
+    later = _create_case(client, address=f"0:{6:064x}")["case"]
+
+    second = client.get(
+        "/api/v1/cases",
+        params={"limit": 2, "cursor": first_cursor},
+    )
+    assert second.status_code == 200, second.text
+    assert [item["public_id"] for item in second.json()["cases"]] == frozen_order[2:4]
+    assert second.json()["truncated"] is True
+    second_cursor = second.json()["next_cursor"]
+    assert isinstance(second_cursor, str)
+    assert second_cursor != first_cursor
+
+    final = client.get(
+        "/api/v1/cases",
+        params={"limit": 2, "cursor": second_cursor},
+    )
+    assert final.status_code == 200, final.text
+    assert [item["public_id"] for item in final.json()["cases"]] == frozen_order[4:]
+    assert final.json()["truncated"] is False
+    assert final.json()["next_cursor"] is None
+    assert later["public_id"] not in {
+        item["public_id"]
+        for page in (first.json(), second.json(), final.json())
+        for item in page["cases"]
+    }
+
+    repeated_second = client.get(
+        "/api/v1/cases",
+        params={"limit": 2, "cursor": first_cursor},
+    )
+    assert [
+        item["public_id"] for item in repeated_second.json()["cases"]
+    ] == frozen_order[2:4]
+
+    fresh = client.get("/api/v1/cases?limit=2")
+    assert [item["public_id"] for item in fresh.json()["cases"]] == [
+        later["public_id"],
+        created[0]["public_id"],
+    ]
+
+
+def test_case_catalog_cursor_excludes_cases_reopened_after_cutoff(client):
+    active = [
+        _create_case(client, address=f"0:{account_id:064x}")["case"]
+        for account_id in range(1, 4)
+    ]
+    archived = _create_case(client, address=f"0:{4:064x}")["case"]
+    archived_at = datetime.now(timezone.utc)
+    with app.state.wallet_case_test_session() as session:
+        wallet_case = session.scalar(
+            select(WalletCase).where(
+                WalletCase.public_id == archived["public_id"]
+            )
+        )
+        assert wallet_case is not None
+        wallet_case.archived_at = archived_at
+        session.add(
+            WalletCaseCatalogEvent(
+                case=wallet_case,
+                recorded_at=archived_at,
+                visible=False,
+            )
+        )
+        session.commit()
+
+    first = client.get("/api/v1/cases?limit=1").json()
+    assert first["truncated"] is True
+    assert first["next_cursor"] is not None
+    reopened = _create_case(client, address=f"0:{4:064x}")
+    assert reopened["created"] is False
+
+    frozen_ids = [first["cases"][0]["public_id"]]
+    cursor = first["next_cursor"]
+    while cursor is not None:
+        page = client.get(
+            "/api/v1/cases",
+            params={"limit": 1, "cursor": cursor},
+        ).json()
+        frozen_ids.extend(item["public_id"] for item in page["cases"])
+        cursor = page["next_cursor"]
+
+    assert frozen_ids == [item["public_id"] for item in reversed(active)]
+    fresh = client.get("/api/v1/cases?limit=1").json()
+    assert fresh["cases"][0]["public_id"] == archived["public_id"]
+
+
+def test_case_catalog_rejects_untrusted_or_cross_scope_cursors(client):
+    for account_id in range(1, 4):
+        _create_case(client, address=f"0:{account_id:064x}")
+    cursor = client.get("/api/v1/cases?limit=1").json()["next_cursor"]
+    assert isinstance(cursor, str)
+
+    replacement = "0" if cursor[-1] != "0" else "1"
+    tampered = client.get(
+        "/api/v1/cases",
+        params={"limit": 1, "cursor": cursor[:-1] + replacement},
+    )
+    assert tampered.status_code == 422
+    assert tampered.headers["cache-control"] == "no-store"
+    assert tampered.json()["detail"] == {
+        "code": "invalid_case_catalog_cursor",
+        "message_safe": "Wallet Case catalog cursor signature is invalid.",
+        "retryable": False,
+    }
+
+    malformed = client.get(
+        "/api/v1/cases",
+        params={"limit": 1, "cursor": "not-a-cursor"},
+    )
+    assert malformed.status_code == 422
+    assert malformed.json()["detail"]["code"] == "invalid_case_catalog_cursor"
+
+    engine = app.state.wallet_case_test_engine
+    with Session(engine) as session:
+        with pytest.raises(
+            WalletCaseCatalogInvalidCursor,
+            match="another owner scope",
+        ):
+            WalletCaseService(
+                session,
+                owner_scope_id="another-local-owner",
+            ).list_cases(limit=1, cursor=cursor)
+
+
+@pytest.mark.parametrize(
+    "query",
+    (
+        "limit=2&cursor=one&cursor=two",
+        "limit=2&cursor=one&extra=value",
+    ),
+)
+def test_case_catalog_rejects_ambiguous_query_parameters(client, query):
+    response = client.get(f"/api/v1/cases?{query}")
+
+    assert response.status_code == 422
 
 
 def test_case_metadata_update_is_versioned_trimmed_and_scope_preserving(client):
@@ -291,6 +459,17 @@ def test_case_metadata_update_is_versioned_trimmed_and_scope_preserving(client):
     stored = client.get(f"/api/v1/cases/{case_id}")
     assert stored.status_code == 200
     assert stored.json() == cleared.json()
+    with Session(app.state.wallet_case_test_engine) as session:
+        catalog_events = list(
+            session.scalars(
+                select(WalletCaseCatalogEvent)
+                .join(WalletCase)
+                .where(WalletCase.public_id == case_id)
+                .order_by(WalletCaseCatalogEvent.id)
+            )
+        )
+    assert len(catalog_events) == 3
+    assert all(event.recorded_at is not None for event in catalog_events)
 
 
 def test_case_metadata_update_rejects_stale_or_invalid_edits_without_mutation(client):
@@ -732,6 +911,9 @@ def test_demo_case_sync_links_legacy_run_and_restores_summary(client):
     assert _database_counts() == (1, 1, 1)
     engine = app.state.wallet_case_test_engine
     with Session(engine) as session:
+        assert session.scalar(
+            select(func.count()).select_from(WalletCaseCatalogEvent)
+        ) == 3
         stored_sync = session.scalar(select(CaseSync))
         assert stored_sync is not None
         assert stored_sync.ingestion_run_id is not None

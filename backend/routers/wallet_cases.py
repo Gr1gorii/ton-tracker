@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from database import get_session
 from services.wallet_cases import (
+    WalletCaseCatalogInvalidCursor,
     WalletCaseDeletionConflict,
     WalletCaseMetadataConflict,
     WalletCaseNotFound,
@@ -87,20 +88,27 @@ def list_wallet_cases(
         max_length=2,
         description="Canonical page size from 1 through 50.",
     ),
+    cursor: str | None = Query(
+        None,
+        min_length=1,
+        max_length=1024,
+        description="Authenticated continuation from the preceding Case page.",
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
-    """List a bounded newest-updated page in the local owner scope."""
+    """List a bounded, frozen-order page in the local owner scope."""
     query_pairs = request.query_params.multi_items()
-    if any(name != "limit" for name, _value in query_pairs):
+    if any(name not in {"limit", "cursor"} for name, _value in query_pairs):
         raise HTTPException(
             status_code=422,
-            detail="Wallet Case catalog accepts only the limit query parameter",
+            detail="Wallet Case catalog accepts only limit and cursor query parameters",
         )
-    if len(request.query_params.getlist("limit")) > 1:
-        raise HTTPException(
-            status_code=422,
-            detail="Wallet Case catalog limit must be provided at most once",
-        )
+    for name in ("limit", "cursor"):
+        if len(request.query_params.getlist(name)) > 1:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Wallet Case catalog {name} must be provided at most once",
+            )
     canonical_limit = int(limit, 10)
     if canonical_limit > _MAX_CASE_LIST_LIMIT:
         raise HTTPException(
@@ -109,7 +117,20 @@ def list_wallet_cases(
         )
     response.headers["Cache-Control"] = "no-store"
     try:
-        return WalletCaseService(session).list_cases(limit=canonical_limit)
+        return WalletCaseService(session).list_cases(
+            limit=canonical_limit,
+            cursor=cursor,
+        )
+    except WalletCaseCatalogInvalidCursor as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
     except SQLAlchemyError as exc:
         session.rollback()
         raise HTTPException(

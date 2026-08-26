@@ -22,7 +22,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import get_settings
-from models import CaseSync, WalletCase
+from models import CaseSync, WalletCase, WalletCaseCatalogEvent
 from schemas import WalletIngestionPreviewRequest
 from services.wallet_activity_ingestion import (
     WalletIngestionScopeMismatch,
@@ -949,6 +949,13 @@ class CaseSyncWorker:
                 published = False
             else:
                 wallet_case.updated_at = now
+                session.add(
+                    WalletCaseCatalogEvent(
+                        case=wallet_case,
+                        recorded_at=now,
+                        visible=True,
+                    )
+                )
                 session.commit()
                 published = True
         if not published:

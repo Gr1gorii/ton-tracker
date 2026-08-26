@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import replace
 from datetime import datetime, timezone
 import hashlib
+import hmac
 import json
+import secrets
 from typing import Any
 
 from sqlalchemy import delete, exists, func, select, update
@@ -19,6 +22,7 @@ from models import (
     CaseSync,
     LOCAL_SINGLE_USER_SCOPE,
     WalletCase,
+    WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
     WalletIngestionRun,
@@ -79,8 +83,16 @@ class WalletCaseMetadataConflict(RuntimeError):
         self.current_metadata_version = current_metadata_version
 
 
+class WalletCaseCatalogInvalidCursor(ValueError):
+    """Raised when a Case catalog continuation cannot be authenticated."""
+
+    code = "invalid_case_catalog_cursor"
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
+_CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
+_CASE_CATALOG_CURSOR_VERSION = 1
 _UNSET = object()
 _ZERO_SUMMARY: dict[str, Any] = {
     "activity_counts": {
@@ -144,8 +156,10 @@ class WalletCaseService:
         )
         if existing is not None:
             if existing.archived_at is not None:
+                reopened_at = _utc_now()
                 existing.archived_at = None
-                existing.updated_at = _utc_now()
+                existing.updated_at = reopened_at
+                self._record_catalog_event(existing, recorded_at=reopened_at)
                 self.session.commit()
             return {
                 "created": False,
@@ -177,6 +191,7 @@ class WalletCaseService:
             updated_at=now,
         )
         self.repository.add_case(wallet_case)
+        self._record_catalog_event(wallet_case, recorded_at=now)
         try:
             self.session.commit()
         except IntegrityError:
@@ -200,11 +215,53 @@ class WalletCaseService:
         self.session.refresh(wallet_case)
         return {"created": True, "case": self._case_response(wallet_case)}
 
-    def list_cases(self, *, limit: int) -> dict[str, Any]:
-        cases, truncated = self.repository.list_active(
+    def list_cases(
+        self,
+        *,
+        limit: int,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        if limit < 1 or limit > 50:
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog limit must be between 1 and 50."
+            )
+        cursor_document = (
+            _decode_case_catalog_cursor(cursor) if cursor is not None else None
+        )
+        scope_digest = _case_catalog_scope_digest(self.owner_scope_id)
+        if (
+            cursor_document is not None
+            and cursor_document["scope"] != scope_digest
+        ):
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog cursor belongs to another owner scope."
+            )
+        cutoff = (
+            int(cursor_document["cutoff"])
+            if cursor_document is not None
+            else self.repository.active_catalog_cutoff(
+                owner_scope_id=self.owner_scope_id
+            )
+        )
+        after = (
+            int(cursor_document["after"])
+            if cursor_document is not None
+            else None
+        )
+        if cutoff is None:
+            return {
+                "cases": [],
+                "limit": limit,
+                "truncated": False,
+                "next_cursor": None,
+            }
+        positioned_cases, truncated = self.repository.list_active_at_catalog_cutoff(
             owner_scope_id=self.owner_scope_id,
             limit=limit,
+            cutoff=cutoff,
+            after=after,
         )
+        cases = [wallet_case for wallet_case, _position in positioned_cases]
         latest_syncs = self.repository.latest_syncs(
             [wallet_case.id for wallet_case in cases]
         )
@@ -214,6 +271,16 @@ class WalletCaseService:
         usable_syncs = self.repository.latest_usable_syncs(
             [wallet_case.id for wallet_case in cases]
         )
+        next_cursor = None
+        if truncated:
+            next_cursor = _encode_case_catalog_cursor(
+                {
+                    "v": _CASE_CATALOG_CURSOR_VERSION,
+                    "scope": scope_digest,
+                    "cutoff": cutoff,
+                    "after": positioned_cases[-1][1],
+                }
+            )
         return {
             "cases": [
                 self._case_response(
@@ -226,6 +293,7 @@ class WalletCaseService:
             ],
             "limit": limit,
             "truncated": truncated,
+            "next_cursor": next_cursor,
         }
 
     def get_case(self, public_id: str) -> dict[str, Any]:
@@ -282,6 +350,7 @@ class WalletCaseService:
                 raise WalletCaseNotFound("Wallet Case not found")
             raise WalletCaseMetadataConflict(current.metadata_version)
 
+        self._record_catalog_event(wallet_case, recorded_at=values["updated_at"])
         self.session.commit()
         refreshed = self._required_case(public_id)
         return self._case_response(
@@ -457,6 +526,7 @@ class WalletCaseService:
             ),
         )
         wallet_case.updated_at = queued_at
+        self._record_catalog_event(wallet_case, recorded_at=queued_at)
         self.repository.add_sync(case_sync)
         try:
             self.session.commit()
@@ -610,6 +680,20 @@ class WalletCaseService:
                     else None
                 ),
             )
+
+    def _record_catalog_event(
+        self,
+        wallet_case: WalletCase,
+        *,
+        recorded_at: datetime,
+    ) -> None:
+        self.session.add(
+            WalletCaseCatalogEvent(
+                case=wallet_case,
+                recorded_at=_as_utc(recorded_at),
+                visible=True,
+            )
+        )
 
     def _acquire_delete_write_fence(self, wallet_case: WalletCase) -> None:
         """Serialize the cleanup inventory against new SQLite writers."""
@@ -1298,6 +1382,96 @@ def _compact_coverage_streams(value: Any) -> list[dict[str, Any]]:
 
 def _nonnegative_int(value: Any) -> int:
     return value if type(value) is int and value >= 0 else 0
+
+
+def _case_catalog_scope_digest(owner_scope_id: str) -> str:
+    return hashlib.sha256(owner_scope_id.encode("utf-8")).hexdigest()
+
+
+def _case_catalog_cursor_json(value: dict[str, Any]) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+
+
+def _encode_case_catalog_cursor(document: dict[str, Any]) -> str:
+    payload = _case_catalog_cursor_json(document)
+    encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        _CASE_CATALOG_CURSOR_KEY,
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
+    if not value or len(value) > 1024 or value.count(".") != 1:
+        raise WalletCaseCatalogInvalidCursor(
+            "Wallet Case catalog cursor is invalid."
+        )
+    encoded, signature = value.split(".", 1)
+    if (
+        not encoded
+        or len(signature) != 64
+        or any(char not in "0123456789abcdef" for char in signature)
+        or any(
+            char
+            not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for char in encoded
+        )
+    ):
+        raise WalletCaseCatalogInvalidCursor(
+            "Wallet Case catalog cursor is invalid."
+        )
+    try:
+        padding = "=" * ((4 - len(encoded) % 4) % 4)
+        raw = base64.urlsafe_b64decode((encoded + padding).encode("ascii"))
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise WalletCaseCatalogInvalidCursor(
+            "Wallet Case catalog cursor is invalid."
+        ) from exc
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"v", "scope", "cutoff", "after"}
+        or document.get("v") != _CASE_CATALOG_CURSOR_VERSION
+    ):
+        raise WalletCaseCatalogInvalidCursor(
+            "Wallet Case catalog cursor shape is invalid."
+        )
+    expected = hmac.new(
+        _CASE_CATALOG_CURSOR_KEY,
+        raw,
+        hashlib.sha256,
+    ).hexdigest()
+    if (
+        not hmac.compare_digest(signature, expected)
+        or _encode_case_catalog_cursor(document) != value
+    ):
+        raise WalletCaseCatalogInvalidCursor(
+            "Wallet Case catalog cursor signature is invalid."
+        )
+    scope = document.get("scope")
+    cutoff = document.get("cutoff")
+    after = document.get("after")
+    if (
+        not isinstance(scope, str)
+        or len(scope) != 64
+        or any(char not in "0123456789abcdef" for char in scope)
+        or type(cutoff) is not int
+        or type(after) is not int
+        or cutoff < 1
+        or after < 1
+        or after > cutoff
+    ):
+        raise WalletCaseCatalogInvalidCursor(
+            "Wallet Case catalog cursor values are invalid."
+        )
+    return document
 
 
 def _json_dumps(value: Any) -> str:

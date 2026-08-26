@@ -278,6 +278,17 @@ class WalletCaseListResponse(_StrictModel):
     cases: list[WalletCaseResponse]
     limit: int = Field(ge=1, le=50)
     truncated: bool
+    next_cursor: str | None = Field(default=None, min_length=1, max_length=1024)
+
+    @model_validator(mode="after")
+    def _validate_page(self):
+        if len(self.cases) > self.limit:
+            raise ValueError("Case catalog cannot exceed its requested limit")
+        if self.truncated != (self.next_cursor is not None):
+            raise ValueError("truncated Case catalog pages require a cursor")
+        if self.truncated and len(self.cases) != self.limit:
+            raise ValueError("truncated Case catalog pages must be full")
+        return self
 
 
 class WalletCaseDeletionCounts(_StrictModel):

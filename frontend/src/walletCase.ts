@@ -151,6 +151,7 @@ export interface WalletCaseListResponse {
   cases: WalletCase[];
   limit: number;
   truncated: boolean;
+  next_cursor: string | null;
 }
 
 export interface WalletCaseDeletionResponse {
@@ -696,6 +697,16 @@ export function parseWalletCaseListResponse(value: unknown): WalletCaseListRespo
   if (typeof response.truncated !== "boolean") {
     throw new Error("wallet case list truncated flag is invalid");
   }
+  const nextCursor = nullableString(
+    response.next_cursor,
+    "wallet case list next cursor",
+  );
+  if (nextCursor !== null && nextCursor.length > 1_024) {
+    throw new Error("wallet case list next cursor is too long");
+  }
+  if (response.truncated !== (nextCursor !== null)) {
+    throw new Error("wallet case list cursor contradicts its truncated flag");
+  }
   if (response.truncated && cases.length !== limit) {
     throw new Error("truncated wallet case list does not fill its bounded page");
   }
@@ -703,6 +714,7 @@ export function parseWalletCaseListResponse(value: unknown): WalletCaseListRespo
     cases,
     limit,
     truncated: response.truncated,
+    next_cursor: nextCursor,
   };
 }
 

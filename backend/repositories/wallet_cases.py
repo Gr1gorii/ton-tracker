@@ -5,7 +5,12 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from models import CaseEvidenceVerification, CaseSync, WalletCase
+from models import (
+    CaseEvidenceVerification,
+    CaseSync,
+    WalletCase,
+    WalletCaseCatalogEvent,
+)
 
 
 class WalletCaseRepository:
@@ -43,22 +48,57 @@ class WalletCaseRepository:
         )
         return self.session.scalar(statement)
 
-    def list_active(
-        self,
-        *,
-        owner_scope_id: str,
-        limit: int,
-    ) -> tuple[list[WalletCase], bool]:
-        statement = (
-            select(WalletCase)
+    def active_catalog_cutoff(self, *, owner_scope_id: str) -> int | None:
+        return self.session.scalar(
+            select(func.max(WalletCaseCatalogEvent.id))
+            .join(WalletCase, WalletCase.id == WalletCaseCatalogEvent.case_id)
             .where(
                 WalletCase.owner_scope_id == owner_scope_id,
                 WalletCase.archived_at.is_(None),
             )
-            .order_by(WalletCase.updated_at.desc(), WalletCase.id.desc())
+        )
+
+    def list_active_at_catalog_cutoff(
+        self,
+        *,
+        owner_scope_id: str,
+        limit: int,
+        cutoff: int,
+        after: int | None,
+    ) -> tuple[list[tuple[WalletCase, int]], bool]:
+        frozen_positions = (
+            select(
+                WalletCaseCatalogEvent.case_id.label("case_id"),
+                func.max(WalletCaseCatalogEvent.id).label("position"),
+            )
+            .where(WalletCaseCatalogEvent.id <= cutoff)
+            .group_by(WalletCaseCatalogEvent.case_id)
+            .subquery()
+        )
+        statement = (
+            select(WalletCase, frozen_positions.c.position)
+            .join(
+                frozen_positions,
+                frozen_positions.c.case_id == WalletCase.id,
+            )
+            .join(
+                WalletCaseCatalogEvent,
+                WalletCaseCatalogEvent.id == frozen_positions.c.position,
+            )
+            .where(
+                WalletCase.owner_scope_id == owner_scope_id,
+                WalletCase.archived_at.is_(None),
+                WalletCaseCatalogEvent.visible.is_(True),
+            )
+            .order_by(frozen_positions.c.position.desc())
             .limit(limit + 1)
         )
-        candidates = list(self.session.scalars(statement).unique())
+        if after is not None:
+            statement = statement.where(frozen_positions.c.position < after)
+        candidates = [
+            (wallet_case, int(position))
+            for wallet_case, position in self.session.execute(statement).all()
+        ]
         return candidates[:limit], len(candidates) > limit
 
     def latest_syncs(self, case_ids: list[int]) -> dict[int, CaseSync]:

@@ -114,6 +114,36 @@ class WalletCase(Base):
         back_populates="case",
         cascade="all, delete-orphan",
     )
+    catalog_events = relationship(
+        "WalletCaseCatalogEvent",
+        back_populates="case",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+
+
+class WalletCaseCatalogEvent(Base):
+    """Append-only position used to freeze deterministic Case catalog pages."""
+
+    __tablename__ = "wallet_case_catalog_events"
+    __table_args__ = (
+        Index(
+            "ix_wallet_case_catalog_events_case_position",
+            "case_id",
+            "id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    case_id = Column(
+        Integer,
+        ForeignKey("wallet_cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    recorded_at = Column(DateTime, nullable=False)
+    visible = Column(Boolean, nullable=False)
+
+    case = relationship("WalletCase", back_populates="catalog_events")
 
 
 class WalletCaseLifecycleEvent(Base):

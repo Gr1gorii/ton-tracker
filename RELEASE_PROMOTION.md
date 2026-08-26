@@ -1,10 +1,10 @@
-# GRAM Scope — v0.81.0 Promotion Checklist
+# GRAM Scope — v0.82.0 Promotion Checklist
 
 Current promotion gates for the Wallet Case library:
 
-- Product label is `v0.81.0 CASE LIBRARY`; backend API version stays
+- Product label is `v0.82.0 PAGED CASE LIBRARY`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic reaches revision `20260710_0025` with exact model parity from fresh,
+- Alembic reaches revision `20260827_0026` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
   path. Missing or changed columns, checks, foreign keys, delete actions, and
   indexes fail closed; downgrade remains unsupported. Revision 0020 versions
@@ -28,6 +28,10 @@ Current promotion gates for the Wallet Case library:
   Case. Fresh, 0024 upgrade, exact interrupted-DDL resume, column drift,
   invalid existing values, model parity, and forward-only behavior must pass
   fail-closed tests.
+- Revision 0026 adds a case-owned append-only Wallet Case catalog event journal. Existing
+  active and archived Cases receive one deterministic visibility/position seed;
+  exact empty interrupted-DDL resume, row adoption, foreign-key/index drift,
+  schema parity, cascade, and forward-only behavior must pass fail-closed tests.
 - Evidence is bound to one owner-scoped case, usable pinned snapshot, exact
   source synchronization, and a revalidated provider-observed transaction.
   Demo fixtures, transfers, swaps, unknown linkage, and mismatched source scope
@@ -99,9 +103,10 @@ Current promotion gates for the Wallet Case library:
   the version exactly once, returns safe structured conflict detail for a stale
   editor, and cannot mutate canonical identity or revive an archived Case.
 - GET `/api/v1/cases` remains owner-scoped and accepts one canonical limit from
-  1 through 50. The `/cases` UI binds the response to the requested page size,
-  rejects duplicate or contradictory pages, aborts obsolete reads, preserves
-  an existing page when expansion fails, and explicitly discloses truncation.
+  1 through 50 plus one optional signed continuation. The cursor binds the
+  owner, frozen event cutoff, and keyset position. The `/cases` UI appends
+  bounded pages, rejects duplicate, overlapping, contradictory, or stalled
+  continuations, aborts obsolete reads, and preserves loaded pages on failure.
 - Report output always includes assurance, coverage, gaps, limitations,
   unverified claims, Activity/Evidence revision digests, and fixed false
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
@@ -120,7 +125,7 @@ Current promotion gates for the Wallet Case library:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.81.0 must not be promoted as a hosted Wallet Case release.
+  v0.82.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

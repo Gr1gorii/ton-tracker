@@ -1,3 +1,30 @@
+# GRAM Scope — v0.82.0 PAGED CASE LIBRARY
+
+v0.82.0 removes the 50-Case visibility ceiling from the local Wallet Case
+library. `GET /api/v1/cases` now accepts an optional authenticated continuation
+cursor and returns `next_cursor` whenever another bounded page exists. The UI
+loads pages of 12 into the current library without replacing prior cards, and
+keeps the loaded catalog available when a continuation fails.
+
+Catalog order is frozen at the first page. Revision `20260827_0026` adds an
+case-owned append-only Case catalog event journal and seeds every existing Case with its
+current visibility and update position. A signed cursor binds the local owner
+scope, frozen event cutoff, and last returned keyset position. New, updated, or
+reopened Cases after page one do not jump into that traversal; opening a fresh
+first page sees the new order. Deletion can shorten an in-progress traversal
+but cannot expose a foreign owner or duplicate a surviving Case. Permanent
+Case deletion also removes its internal catalog events.
+
+The API rejects unknown or duplicate query parameters, malformed, tampered,
+cross-scope, noncanonical, and oversized cursors with a safe structured 422.
+The frontend independently enforces page size, uniqueness, full-page
+continuations, cursor/truncation agreement, non-overlap across pages, cursor
+advancement, stale-response fencing, and abort on unmount. Cursor signing is
+intentionally process-local: after a backend restart the user starts a fresh
+catalog traversal.
+
+---
+
 # GRAM Scope — v0.81.0 CASE LIBRARY
 
 v0.81.0 completes the missing return path into durable Wallet Cases. The new

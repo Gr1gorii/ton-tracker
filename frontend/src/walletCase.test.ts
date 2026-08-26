@@ -29,23 +29,30 @@ describe("wallet case contracts", () => {
       cases: [first, second],
       limit: 2,
       truncated: true,
+      next_cursor: "opaque.cursor",
     }).cases).toHaveLength(2);
   });
 
   it("rejects unbounded, duplicate, and contradictory Wallet Case catalogs", () => {
     const walletCase = walletCaseFixture();
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 0, truncated: false,
+      cases: [walletCase], limit: 0, truncated: false, next_cursor: null,
     })).toThrow(/limit/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 51, truncated: false,
+      cases: [walletCase], limit: 51, truncated: false, next_cursor: null,
     })).toThrow(/bounded limit/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase, walletCase], limit: 2, truncated: false,
+      cases: [walletCase, walletCase], limit: 2, truncated: false, next_cursor: null,
     })).toThrow(/duplicate/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 2, truncated: true,
+      cases: [walletCase], limit: 2, truncated: true, next_cursor: "opaque.cursor",
     })).toThrow(/does not fill/);
+    expect(() => parseWalletCaseListResponse({
+      cases: [walletCase], limit: 1, truncated: true, next_cursor: null,
+    })).toThrow(/cursor contradicts/);
+    expect(() => parseWalletCaseListResponse({
+      cases: [walletCase], limit: 1, truncated: false, next_cursor: "opaque.cursor",
+    })).toThrow(/cursor contradicts/);
   });
 
   it("accepts a terminal snapshot with explicit published-result provenance", () => {
@@ -207,7 +214,9 @@ describe("wallet case contracts", () => {
   it("validates upsert and list envelopes", () => {
     expect(parseWalletCaseUpsertResponse({ created: true, case: walletCaseFixture() }).created).toBe(true);
     expect(
-      parseWalletCaseListResponse({ cases: [walletCaseFixture()], limit: 20, truncated: false }).cases,
+      parseWalletCaseListResponse({
+        cases: [walletCaseFixture()], limit: 20, truncated: false, next_cursor: null,
+      }).cases,
     ).toHaveLength(1);
     expect(parseWalletCase(walletCaseFixture()).public_id).toBe(CASE_ID);
   });

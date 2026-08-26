@@ -9,11 +9,17 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 
-import type { WalletCase, WalletCaseListResponse } from "../walletCase";
+import type { WalletCase } from "../walletCase";
 import { listWalletCases } from "../walletCaseApi";
 
 const INITIAL_LIMIT = 12;
-const MAXIMUM_LIMIT = 50;
+
+interface CaseLibraryCatalog {
+  cases: WalletCase[];
+  continued: boolean;
+  hasMore: boolean;
+  nextCursor: string | null;
+}
 
 function shortAddress(value: string): string {
   if (value.length <= 24) return value;
@@ -53,15 +59,26 @@ export default function GramCaseLibrary({
   onOpenCase: (caseId: string) => void;
   onCreateCase: () => void;
 }) {
-  const [catalog, setCatalog] = useState<WalletCaseListResponse | null>(null);
+  const [catalog, setCatalog] = useState<CaseLibraryCatalog | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [moreError, setMoreError] = useState<string | null>(null);
   const generation = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
+  const catalogRef = useRef<CaseLibraryCatalog | null>(null);
 
-  async function load(limit: number, expanding = false) {
+  function commitCatalog(next: CaseLibraryCatalog) {
+    catalogRef.current = next;
+    setCatalog(next);
+  }
+
+  async function load(cursor: string | null = null, expanding = false) {
+    const startingCatalog = catalogRef.current;
+    if (
+      expanding &&
+      (cursor === null || startingCatalog?.nextCursor !== cursor)
+    ) return;
     controllerRef.current?.abort();
     const controller = new AbortController();
     controllerRef.current = controller;
@@ -75,9 +92,38 @@ export default function GramCaseLibrary({
       setMoreError(null);
     }
     try {
-      const result = await listWalletCases(limit, controller.signal);
+      const result = await listWalletCases(
+        INITIAL_LIMIT,
+        cursor,
+        controller.signal,
+      );
       if (controller.signal.aborted || requestGeneration !== generation.current) return;
-      setCatalog(result);
+      if (!expanding) {
+        commitCatalog({
+          cases: result.cases,
+          continued: false,
+          hasMore: result.truncated,
+          nextCursor: result.next_cursor,
+        });
+        return;
+      }
+      const current = catalogRef.current;
+      if (current === null || current.nextCursor !== cursor) return;
+      const knownIds = new Set(current.cases.map((walletCase) => walletCase.public_id));
+      if (result.cases.some((walletCase) => knownIds.has(walletCase.public_id))) {
+        throw new Error(
+          "Wallet Case catalog continuation overlaps previously loaded Cases.",
+        );
+      }
+      if (result.next_cursor !== null && result.next_cursor === cursor) {
+        throw new Error("Wallet Case catalog continuation did not advance.");
+      }
+      commitCatalog({
+        cases: [...current.cases, ...result.cases],
+        continued: true,
+        hasMore: result.truncated,
+        nextCursor: result.next_cursor,
+      });
     } catch (caught) {
       if (controller.signal.aborted || requestGeneration !== generation.current) return;
       const message = caught instanceof Error
@@ -94,7 +140,7 @@ export default function GramCaseLibrary({
   }
 
   useEffect(() => {
-    void load(INITIAL_LIMIT);
+    void load();
     return () => {
       generation.current += 1;
       controllerRef.current?.abort();
@@ -129,7 +175,7 @@ export default function GramCaseLibrary({
         <div className="case-library-state is-error" role="alert">
           <WarningCircle size={25} weight="fill" />
           <div><h2>Case library unavailable</h2><p>{error}</p></div>
-          <button type="button" className="button-secondary" onClick={() => void load(INITIAL_LIMIT)}>
+          <button type="button" className="button-secondary" onClick={() => void load()}>
             <ArrowsClockwise size={17} /> Retry
           </button>
         </div>
@@ -184,22 +230,26 @@ export default function GramCaseLibrary({
             })}
           </div>
 
-          {catalog.truncated && catalog.limit < MAXIMUM_LIMIT && (
+          {catalog.hasMore && catalog.nextCursor && (
             <div className="case-library-more">
               <button
                 type="button"
                 className="button-secondary"
                 disabled={loadingMore}
-                onClick={() => void load(MAXIMUM_LIMIT, true)}
+                onClick={() => void load(catalog.nextCursor, true)}
               >
                 {loadingMore ? <SpinnerGap className="spin" size={17} /> : <FolderOpen size={17} />}
-                {loadingMore ? "Loading…" : "Show up to 50 Cases"}
+                {loadingMore
+                  ? "Loading…"
+                  : moreError
+                    ? "Retry loading more"
+                    : "Load more Cases"}
               </button>
             </div>
           )}
-          {catalog.truncated && catalog.limit === MAXIMUM_LIMIT && (
+          {!catalog.hasMore && catalog.continued && (
             <p className="case-library-boundary">
-              Showing the newest 50 Cases. The local API intentionally bounds one catalog response.
+              End of this Case catalog snapshot.
             </p>
           )}
           {moreError && <p className="case-library-more-error" role="alert">{moreError}</p>}
