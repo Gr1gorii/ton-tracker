@@ -1,4 +1,4 @@
-# GRAM Scope - v0.81.0 Public Release
+# GRAM Scope - v0.82.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -6,8 +6,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 - Durable Wallet Cases keyed by canonical TON identity, network, and demo/live
   environment.
-- A refresh-safe local Wallet Case library with bounded newest-updated cards,
-  explicit catalog states, strict page binding, and direct Case restoration.
+- A refresh-safe local Wallet Case library with bounded append pagination,
+  frozen newest-updated order, authenticated owner-scoped cursors, explicit
+  catalog states, strict page binding, and direct Case restoration.
 - Versioned Wallet Case label and note editing with bounded canonical values,
   atomic stale-write rejection, and immutable identity checks in the client.
 - Permanent owner-scoped Wallet Case deletion with active-job conflict fencing,
@@ -56,9 +57,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.81.0 CASE LIBRARY`.
+- Product release label: `v0.82.0 PAGED CASE LIBRARY`.
 - Backend API `VERSION` remains `0.2.1`.
-- Alembic head is `20260710_0025`: 0019 adds durable Case Evidence jobs, 0020
+- Alembic head is `20260827_0026`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
   persists the verifier policy plus exact per-network application checkpoint
   and binds them into proof and catalog digests. Revision 0022 activates the
@@ -67,6 +68,9 @@ Public release handoff for the current TON wallet intelligence workspace.
   Revision 0024 adds retained, non-sensitive Wallet Case deletion audit
   receipts without a foreign key to the deleted case. Revision 0025 adds the
   positive optimistic-concurrency version for bounded Case metadata updates.
+  Revision 0026 adds the case-owned append-only Case catalog position and visibility
+  journal, including a deterministic seed for existing active and archived
+  Cases.
 - Current verifier policy `ton_liteserver_checkpoint_strict_2026_08_v2` pins these
   masterchain checkpoint tuples as
   `(workchain, shard, seqno, root hash, file hash)`:
@@ -94,9 +98,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Case metadata updates require the exact current `metadata_version`; a stale
   write returns a structured conflict and never silently overwrites another
   editor. Label and note changes do not mutate canonical Case identity.
-- The Case catalog is owner-scoped, newest-updated, and limited to 50 rows per
-  request. The UI starts at 12, binds the returned limit to the request, and
-  discloses truncation instead of implying that every local Case was returned.
+- The Case catalog is owner-scoped and limited to 50 rows per request. Its
+  signed cursor freezes newest-updated order at the first page and binds owner,
+  cutoff, and keyset position. The UI appends pages of 12, rejects overlap or a
+  stalled cursor, and never treats a bounded page as the complete catalog.
 - Multi-asset readiness performs no provider request and never returns BOC or
   message-body contents.
 - Provider snapshot matches are not local jetton-master proofs. Exact fee
@@ -153,6 +158,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Report-history cursors are signed and bound to a frozen case revision cutoff,
   but their signing key is process-local. A cursor is not portable across a
   backend restart; opening a fresh first page remains supported.
+- Case-catalog cursors are likewise authenticated only for the current backend
+  process. Restarting invalidates an in-progress continuation without changing
+  stored Cases; refreshing the library starts a new frozen traversal.
 - The local worker replays the whole bounded crawl after an in-flight crash;
   accepted provider pages are not yet committed as resumable checkpoints.
 - Case-sync cancellation is immediate while queued and cooperative around the
@@ -177,13 +185,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.81.0`, confirm:
+Before tagging `v0.82.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.81.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.82.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -211,9 +219,10 @@ Before tagging `v0.81.0`, confirm:
 - Case metadata update tests cover bounded canonical values, identity
   immutability, atomic version increments, stale-write conflict detail,
   deleted-case absence, draft preservation, and stale shell-load rejection.
-- Case Library tests cover strict `/cases` routing, exact request/response page
-  binding, duplicate and truncation rejection, loading/empty/error/retry
-  states, bounded expansion, abort on unmount, direct restoration, and focus.
+- Case Library tests cover strict `/cases` routing, signed owner/cutoff/keyset
+  cursors, frozen ordering under create/update/reopen races, exact page binding,
+  tamper and overlap rejection, loading/empty/error/retry states, append
+  pagination, abort on unmount, direct restoration, and focus.
 - Case Findings reproducibility, content-ID binding, same-symbol asset
   separation, flow conservation, rule support, weakest-evidence labelling,
   strict URL state, response redaction, and Activity deep links pass.
