@@ -8,13 +8,21 @@ import hashlib
 import json
 from typing import Any
 
-from sqlalchemy import update
+from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from adapters.wallet_activity import get_wallet_activity_provider_status
 from config import get_settings
-from models import CaseSync, LOCAL_SINGLE_USER_SCOPE, WalletCase
+from models import (
+    CaseEvidenceVerification,
+    CaseSync,
+    LOCAL_SINGLE_USER_SCOPE,
+    WalletCase,
+    WalletCaseLifecycleEvent,
+    WalletCaseReportRevision,
+    WalletIngestionRun,
+)
 from repositories.wallet_cases import WalletCaseRepository
 from services.ton_address_identity import derive_ton_wallet_identity
 from services.wallet_acquisition_bounds import resolve_wallet_acquisition_bounds
@@ -39,6 +47,22 @@ class WalletCaseSyncAlreadyActive(RuntimeError):
 
 class WalletCaseIdempotencyConflict(RuntimeError):
     """Raised when an idempotency key is reused for another request body."""
+
+
+class WalletCaseDeletionConflict(RuntimeError):
+    """Raised when active case-owned work makes deletion unsafe."""
+
+    def __init__(
+        self,
+        *,
+        active_sync_public_id: str | None,
+        active_evidence_public_id: str | None,
+    ) -> None:
+        super().__init__(
+            "Cancel or wait for active Wallet Case jobs before deleting this case."
+        )
+        self.active_sync_public_id = active_sync_public_id
+        self.active_evidence_public_id = active_evidence_public_id
 
 
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
@@ -203,6 +227,93 @@ class WalletCaseService:
             active_sync=active_sync,
             current_snapshot=current_snapshot,
         )
+
+    def delete_case(
+        self,
+        public_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Delete one owner-scoped case and its uniquely owned persisted data."""
+        wallet_case = self._required_case(public_id)
+        self._raise_if_delete_conflicts(wallet_case.id)
+
+        ingestion_runs = list(
+            self.session.scalars(
+                select(WalletIngestionRun)
+                .join(CaseSync, CaseSync.ingestion_run_id == WalletIngestionRun.id)
+                .where(CaseSync.case_id == wallet_case.id)
+            )
+        )
+        removed = {
+            "syncs": self._row_count(CaseSync, CaseSync.case_id == wallet_case.id),
+            "ingestion_runs": len(ingestion_runs),
+            "evidence_verifications": self._row_count(
+                CaseEvidenceVerification,
+                CaseEvidenceVerification.case_id == wallet_case.id,
+            ),
+            "report_revisions": self._row_count(
+                WalletCaseReportRevision,
+                WalletCaseReportRevision.case_id == wallet_case.id,
+            ),
+        }
+        deleted_at = _as_utc(now or _utc_now())
+        case_delete = self.session.execute(
+            delete(WalletCase)
+            .where(
+                WalletCase.id == wallet_case.id,
+                WalletCase.owner_scope_id == self.owner_scope_id,
+                ~exists().where(
+                    CaseSync.case_id == wallet_case.id,
+                    CaseSync.state.in_(("queued", "running")),
+                ),
+                ~exists().where(
+                    CaseEvidenceVerification.case_id == wallet_case.id,
+                    CaseEvidenceVerification.state.in_(("queued", "running")),
+                ),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        if case_delete.rowcount != 1:
+            self.session.rollback()
+            current = self.repository.get_by_public_id(
+                owner_scope_id=self.owner_scope_id,
+                public_id=public_id,
+            )
+            if current is None:
+                raise WalletCaseNotFound("Wallet Case not found")
+            self._raise_if_delete_conflicts(current.id)
+            raise WalletCaseDeletionConflict(
+                active_sync_public_id=None,
+                active_evidence_public_id=None,
+            )
+
+        audit_event = WalletCaseLifecycleEvent(
+            owner_scope_id=self.owner_scope_id,
+            case_public_id=wallet_case.public_id,
+            event_type="deleted",
+            occurred_at=deleted_at,
+            details_json=_json_dumps({"removed": removed}),
+        )
+        self.session.add(audit_event)
+        self.session.flush()
+        audit_event_public_id = audit_event.public_id
+
+        # The original ingestion tables predate database-level cascades. Use
+        # their complete ORM ownership graph after the CaseSync RESTRICT edge
+        # has been removed, so normalized rows and proof artifacts disappear
+        # in dependency order without touching unrelated legacy runs.
+        for ingestion_run in ingestion_runs:
+            self.session.delete(ingestion_run)
+        self.session.flush()
+        self.session.commit()
+        return {
+            "deleted": True,
+            "case_public_id": public_id,
+            "audit_event_public_id": audit_event_public_id,
+            "deleted_at": _isoformat(deleted_at),
+            "removed": removed,
+        }
 
     def enqueue_sync(
         self,
@@ -431,6 +542,31 @@ class WalletCaseService:
         if wallet_case is None:
             raise WalletCaseNotFound("Wallet Case not found")
         return wallet_case
+
+    def _raise_if_delete_conflicts(self, case_id: int) -> None:
+        active_sync = self.repository.get_active_sync(case_id=case_id)
+        active_evidence = self.repository.get_active_evidence_verification(
+            case_id=case_id
+        )
+        if active_sync is not None or active_evidence is not None:
+            raise WalletCaseDeletionConflict(
+                active_sync_public_id=(
+                    active_sync.public_id if active_sync is not None else None
+                ),
+                active_evidence_public_id=(
+                    active_evidence.public_id
+                    if active_evidence is not None
+                    else None
+                ),
+            )
+
+    def _row_count(self, model, predicate) -> int:
+        return int(
+            self.session.scalar(
+                select(func.count()).select_from(model).where(predicate)
+            )
+            or 0
+        )
 
     def _latest_sync(self, wallet_case: WalletCase) -> CaseSync | None:
         return self.repository.latest_syncs([wallet_case.id]).get(wallet_case.id)

@@ -11,6 +11,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from alembic import command
@@ -56,7 +57,8 @@ TRANSACTION_INCLUSION_TRUST_REVISION = "20260710_0020"
 TRANSACTION_INCLUSION_CHECKPOINT_REVISION = "20260710_0021"
 STRICT_TRANSACTION_INCLUSION_POLICY_REVISION = "20260710_0022"
 CASE_REPORT_REVISIONS_REVISION = "20260710_0023"
-CURRENT_REVISION = CASE_REPORT_REVISIONS_REVISION
+WALLET_CASE_LIFECYCLE_REVISION = "20260710_0024"
+CURRENT_REVISION = WALLET_CASE_LIFECYCLE_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -1448,6 +1450,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -1503,6 +1506,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1560,6 +1564,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1709,6 +1714,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1866,6 +1872,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -2027,6 +2034,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2469,6 +2477,7 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2571,6 +2580,7 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2780,6 +2790,7 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -3042,6 +3053,7 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_trace_boc_verification_schema(engine)
@@ -3073,6 +3085,7 @@ def test_upgrade_from_0007_reaches_current_model_parity(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert {
         "wallet_native_activity_ledgers",
@@ -3105,6 +3118,7 @@ def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert inspect(engine).get_table_names().count(
         JETTON_CONTRACT_VERIFICATIONS_TABLE
@@ -3140,6 +3154,7 @@ def test_wallet_ownership_challenge_upgrade_from_0009_reaches_model_parity(tmp_p
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -3180,6 +3195,7 @@ def test_account_state_inclusion_upgrade_from_0010_reaches_model_parity(tmp_path
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert "wallet_account_state_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3206,6 +3222,7 @@ def test_transaction_inclusion_upgrade_from_0011_reaches_model_parity(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert "wallet_transaction_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3231,6 +3248,7 @@ def test_dex_protocol_identity_upgrade_from_0012_reaches_model_parity(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     columns = {
         column["name"]
@@ -3259,6 +3277,7 @@ def test_ownership_network_scope_upgrade_from_0013_reaches_model_parity(tmp_path
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -3316,6 +3335,7 @@ def test_wallet_cases_upgrade_from_0014_preserves_runs_without_backfill(tmp_path
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     assert _wallet_case_counts(engine) == (0, 0)
@@ -3503,6 +3523,7 @@ def test_wallet_case_compact_results_upgrade_from_0015_preserves_rows(tmp_path):
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     with engine.connect() as connection:
         row = connection.exec_driver_sql(
@@ -3667,6 +3688,7 @@ def test_case_sync_jobs_upgrade_normalizes_legacy_active_rows_and_enforces_slots
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     with engine.connect() as connection:
         legacy = connection.exec_driver_sql(
@@ -4831,8 +4853,11 @@ def test_case_report_revision_migration_creates_exact_current_schema(tmp_path):
     report = run_database_migrations(engine)
 
     assert report.revision_before == STRICT_TRANSACTION_INCLUSION_POLICY_REVISION
-    assert report.revision_after == CASE_REPORT_REVISIONS_REVISION
-    assert report.applied_revisions == (CASE_REPORT_REVISIONS_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
+    )
     inspector = inspect(engine)
     assert [column["name"] for column in inspector.get_columns(
         "wallet_case_report_revisions"
@@ -4878,8 +4903,11 @@ def test_case_report_revision_migration_resumes_exact_empty_table(tmp_path):
 
     report = run_database_migrations(engine)
 
-    assert report.revision_after == CASE_REPORT_REVISIONS_REVISION
-    assert report.applied_revisions == (CASE_REPORT_REVISIONS_REVISION,)
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (
+        CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
+    )
     _assert_schema_matches_models(engine)
     engine.dispose()
 
@@ -4938,6 +4966,114 @@ def test_case_report_revision_migration_is_forward_only(tmp_path):
             command.downgrade(
                 migration_config(connection),
                 STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
+            )
+    engine.dispose()
+
+
+def test_wallet_case_lifecycle_migration_creates_retained_audit_table(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-lifecycle.db")
+    _upgrade_to_revision(engine, CASE_REPORT_REVISIONS_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == CASE_REPORT_REVISIONS_REVISION
+    assert report.revision_after == WALLET_CASE_LIFECYCLE_REVISION
+    assert report.applied_revisions == (WALLET_CASE_LIFECYCLE_REVISION,)
+    inspector = inspect(engine)
+    assert [
+        column["name"]
+        for column in inspector.get_columns("wallet_case_lifecycle_events")
+    ] == [
+        "id",
+        "public_id",
+        "owner_scope_id",
+        "case_public_id",
+        "event_type",
+        "occurred_at",
+        "details_json",
+    ]
+    assert inspector.get_foreign_keys("wallet_case_lifecycle_events") == []
+    assert {
+        item["name"]: (tuple(item["column_names"]), bool(item["unique"]))
+        for item in inspector.get_indexes("wallet_case_lifecycle_events")
+    } == {
+        "uq_wallet_case_lifecycle_events_public_id": (("public_id",), True),
+        "uq_wallet_case_lifecycle_events_case_id": (("case_public_id",), True),
+        "ix_wallet_case_lifecycle_events_scope_time": (
+            ("owner_scope_id", "occurred_at", "id"),
+            False,
+        ),
+    }
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_case_lifecycle_migration_resumes_exact_empty_table(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-lifecycle-resume.db")
+    _upgrade_to_revision(engine, CASE_REPORT_REVISIONS_REVISION)
+    models.WalletCaseLifecycleEvent.__table__.create(bind=engine)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_after == WALLET_CASE_LIFECYCLE_REVISION
+    assert report.applied_revisions == (WALLET_CASE_LIFECYCLE_REVISION,)
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_case_lifecycle_migration_never_adopts_existing_rows(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-lifecycle-row-adoption.db")
+    _upgrade_to_revision(engine, CASE_REPORT_REVISIONS_REVISION)
+    models.WalletCaseLifecycleEvent.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "INSERT INTO wallet_case_lifecycle_events "
+            "(public_id, owner_scope_id, case_public_id, event_type, "
+            "occurred_at, details_json) VALUES (?, ?, ?, 'deleted', ?, ?)",
+            (
+                str(uuid4()),
+                "local-single-user",
+                str(uuid4()),
+                "2026-08-26 12:00:00",
+                '{"removed":{}}',
+            ),
+        )
+
+    with pytest.raises(RuntimeError, match="cannot be adopted"):
+        run_database_migrations(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT version_num FROM alembic_version"
+        ).scalar_one() == CASE_REPORT_REVISIONS_REVISION
+    engine.dispose()
+
+
+def test_wallet_case_lifecycle_migration_rejects_wrong_index_signature(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-lifecycle-wrong-index.db")
+    _upgrade_to_revision(engine, CASE_REPORT_REVISIONS_REVISION)
+    models.WalletCaseLifecycleEvent.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DROP INDEX uq_wallet_case_lifecycle_events_public_id"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX uq_wallet_case_lifecycle_events_public_id "
+            "ON wallet_case_lifecycle_events(public_id)"
+        )
+
+    with pytest.raises(RuntimeError, match="differs from revision 0024"):
+        run_database_migrations(engine)
+    engine.dispose()
+
+
+def test_wallet_case_lifecycle_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-lifecycle-forward-only.db")
+    _upgrade_to_revision(engine, WALLET_CASE_LIFECYCLE_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="intentionally unsupported"):
+            command.downgrade(
+                migration_config(connection),
+                CASE_REPORT_REVISIONS_REVISION,
             )
     engine.dispose()
 
@@ -5551,6 +5687,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         TRANSACTION_INCLUSION_CHECKPOINT_REVISION,
         STRICT_TRANSACTION_INCLUSION_POLICY_REVISION,
         CASE_REPORT_REVISIONS_REVISION,
+        WALLET_CASE_LIFECYCLE_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

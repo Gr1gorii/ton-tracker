@@ -110,6 +110,51 @@ class WalletCase(Base):
     )
 
 
+class WalletCaseLifecycleEvent(Base):
+    """Non-sensitive audit receipt retained after a Wallet Case is deleted."""
+
+    __tablename__ = "wallet_case_lifecycle_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type = 'deleted'",
+            name="ck_wallet_case_lifecycle_events_type",
+        ),
+        CheckConstraint(
+            "length(details_json) > 2",
+            name="ck_wallet_case_lifecycle_events_details",
+        ),
+        Index(
+            "uq_wallet_case_lifecycle_events_public_id",
+            "public_id",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_case_lifecycle_events_case_id",
+            "case_public_id",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_case_lifecycle_events_scope_time",
+            "owner_scope_id",
+            "occurred_at",
+            "id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(String(36), nullable=False, default=_new_public_id)
+    owner_scope_id = Column(String(64), nullable=False)
+    case_public_id = Column(String(36), nullable=False)
+    event_type = Column(
+        String(16),
+        nullable=False,
+        default="deleted",
+        server_default="deleted",
+    )
+    occurred_at = Column(DateTime, nullable=False)
+    details_json = Column(Text, nullable=False)
+
+
 class WalletIngestionRun(Base):
     """Source-aware wallet activity ingestion run scaffold.
 
