@@ -95,16 +95,22 @@ def list_wallet_cases(
         max_length=1024,
         description="Authenticated continuation from the preceding Case page.",
     ),
+    state: str = Query(
+        "active",
+        pattern=r"^(active|archived)$",
+        max_length=8,
+        description="Lifecycle catalog to read.",
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
     """List a bounded, frozen-order page in the local owner scope."""
     query_pairs = request.query_params.multi_items()
-    if any(name not in {"limit", "cursor"} for name, _value in query_pairs):
+    if any(name not in {"limit", "cursor", "state"} for name, _value in query_pairs):
         raise HTTPException(
             status_code=422,
             detail="Wallet Case catalog accepts only limit and cursor query parameters",
         )
-    for name in ("limit", "cursor"):
+    for name in ("limit", "cursor", "state"):
         if len(request.query_params.getlist(name)) > 1:
             raise HTTPException(
                 status_code=422,
@@ -120,6 +126,7 @@ def list_wallet_cases(
     try:
         return WalletCaseService(session).list_cases(
             limit=canonical_limit,
+            state=state,
             cursor=cursor,
         )
     except WalletCaseCatalogInvalidCursor as exc:

@@ -247,6 +247,7 @@ def test_case_create_is_canonical_idempotent_and_scope_separated(
     assert catalog.status_code == 200
     assert catalog.headers["cache-control"] == "no-store"
     assert catalog.json()["limit"] == 3
+    assert catalog.json()["state"] == "active"
     assert catalog.json()["truncated"] is False
     assert len(catalog.json()["cases"]) == 3
     assert catalog.json()["next_cursor"] is None
@@ -363,6 +364,78 @@ def test_case_catalog_cursor_excludes_cases_reopened_after_cutoff(client):
     assert fresh["cases"][0]["public_id"] == archived["public_id"]
 
 
+def test_archived_case_catalog_is_paged_and_freezes_lifecycle_membership(client):
+    created = [
+        _create_case(
+            client,
+            address=f"0:{account_id:064x}",
+            label=f"Archived {account_id}",
+        )["case"]
+        for account_id in range(1, 5)
+    ]
+    for wallet_case in created:
+        response = client.post(
+            f"/api/v1/cases/{wallet_case['public_id']}/archive"
+        )
+        assert response.status_code == 200, response.text
+
+    first = client.get("/api/v1/cases?limit=1&state=archived")
+    assert first.status_code == 200, first.text
+    first_page = first.json()
+    assert first_page["state"] == "archived"
+    assert first_page["cases"][0]["public_id"] == created[3]["public_id"]
+    assert first_page["cases"][0]["archived_at"] is not None
+    assert first_page["truncated"] is True
+    cursor = first_page["next_cursor"]
+    assert isinstance(cursor, str)
+
+    wrong_state = client.get(
+        "/api/v1/cases",
+        params={"limit": 1, "state": "active", "cursor": cursor},
+    )
+    assert wrong_state.status_code == 422
+    assert wrong_state.json()["detail"]["message_safe"].endswith(
+        "another lifecycle state."
+    )
+
+    restored = client.post(
+        f"/api/v1/cases/{created[1]['public_id']}/restore"
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["archived_at"] is None
+
+    frozen_ids = [first_page["cases"][0]["public_id"]]
+    frozen_states = [first_page["cases"][0]["archived_at"]]
+    while cursor is not None:
+        page = client.get(
+            "/api/v1/cases",
+            params={"limit": 1, "state": "archived", "cursor": cursor},
+        )
+        assert page.status_code == 200, page.text
+        document = page.json()
+        assert document["state"] == "archived"
+        frozen_ids.extend(item["public_id"] for item in document["cases"])
+        frozen_states.extend(item["archived_at"] for item in document["cases"])
+        cursor = document["next_cursor"]
+
+    assert frozen_ids == [item["public_id"] for item in reversed(created)]
+    restored_index = frozen_ids.index(created[1]["public_id"])
+    assert frozen_states[restored_index] is None
+
+    fresh_archived = client.get(
+        "/api/v1/cases?limit=4&state=archived"
+    ).json()
+    assert [item["public_id"] for item in fresh_archived["cases"]] == [
+        created[3]["public_id"],
+        created[2]["public_id"],
+        created[0]["public_id"],
+    ]
+    active = client.get("/api/v1/cases?limit=4&state=active").json()
+    assert [item["public_id"] for item in active["cases"]] == [
+        created[1]["public_id"]
+    ]
+
+
 def test_case_catalog_rejects_untrusted_or_cross_scope_cursors(client):
     for account_id in range(1, 4):
         _create_case(client, address=f"0:{account_id:064x}")
@@ -406,6 +479,7 @@ def test_case_catalog_rejects_untrusted_or_cross_scope_cursors(client):
     (
         "limit=2&cursor=one&cursor=two",
         "limit=2&cursor=one&extra=value",
+        "limit=2&state=active&state=archived",
     ),
 )
 def test_case_catalog_rejects_ambiguous_query_parameters(client, query):

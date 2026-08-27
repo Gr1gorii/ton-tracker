@@ -108,7 +108,7 @@ class WalletCaseCatalogInvalidCursor(ValueError):
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
-_CASE_CATALOG_CURSOR_VERSION = 1
+_CASE_CATALOG_CURSOR_VERSION = 2
 _UNSET = object()
 _ZERO_SUMMARY: dict[str, Any] = {
     "activity_counts": {
@@ -235,11 +235,16 @@ class WalletCaseService:
         self,
         *,
         limit: int,
+        state: str = "active",
         cursor: str | None = None,
     ) -> dict[str, Any]:
         if limit < 1 or limit > 50:
             raise WalletCaseCatalogInvalidCursor(
                 "Wallet Case catalog limit must be between 1 and 50."
+            )
+        if state not in {"active", "archived"}:
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog state must be active or archived."
             )
         cursor_document = (
             _decode_case_catalog_cursor(cursor) if cursor is not None else None
@@ -252,10 +257,14 @@ class WalletCaseService:
             raise WalletCaseCatalogInvalidCursor(
                 "Wallet Case catalog cursor belongs to another owner scope."
             )
+        if cursor_document is not None and cursor_document["state"] != state:
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog cursor belongs to another lifecycle state."
+            )
         cutoff = (
             int(cursor_document["cutoff"])
             if cursor_document is not None
-            else self.repository.active_catalog_cutoff(
+            else self.repository.catalog_cutoff(
                 owner_scope_id=self.owner_scope_id
             )
         )
@@ -268,11 +277,13 @@ class WalletCaseService:
             return {
                 "cases": [],
                 "limit": limit,
+                "state": state,
                 "truncated": False,
                 "next_cursor": None,
             }
-        positioned_cases, truncated = self.repository.list_active_at_catalog_cutoff(
+        positioned_cases, truncated = self.repository.list_at_catalog_cutoff(
             owner_scope_id=self.owner_scope_id,
+            archived=state == "archived",
             limit=limit,
             cutoff=cutoff,
             after=after,
@@ -293,6 +304,7 @@ class WalletCaseService:
                 {
                     "v": _CASE_CATALOG_CURSOR_VERSION,
                     "scope": scope_digest,
+                    "state": state,
                     "cutoff": cutoff,
                     "after": positioned_cases[-1][1],
                 }
@@ -308,6 +320,7 @@ class WalletCaseService:
                 for wallet_case in cases
             ],
             "limit": limit,
+            "state": state,
             "truncated": truncated,
             "next_cursor": next_cursor,
         }
@@ -1608,7 +1621,7 @@ def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
         ) from exc
     if (
         not isinstance(document, dict)
-        or set(document) != {"v", "scope", "cutoff", "after"}
+        or set(document) != {"v", "scope", "state", "cutoff", "after"}
         or document.get("v") != _CASE_CATALOG_CURSOR_VERSION
     ):
         raise WalletCaseCatalogInvalidCursor(
@@ -1627,12 +1640,14 @@ def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
             "Wallet Case catalog cursor signature is invalid."
         )
     scope = document.get("scope")
+    state = document.get("state")
     cutoff = document.get("cutoff")
     after = document.get("after")
     if (
         not isinstance(scope, str)
         or len(scope) != 64
         or any(char not in "0123456789abcdef" for char in scope)
+        or state not in {"active", "archived"}
         or type(cutoff) is not int
         or type(after) is not int
         or cutoff < 1

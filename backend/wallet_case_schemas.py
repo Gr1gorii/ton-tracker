@@ -278,6 +278,7 @@ class WalletCaseUpsertResponse(_StrictModel):
 class WalletCaseListResponse(_StrictModel):
     cases: list[WalletCaseResponse]
     limit: int = Field(ge=1, le=50)
+    state: Literal["active", "archived"]
     truncated: bool
     next_cursor: str | None = Field(default=None, min_length=1, max_length=1024)
 

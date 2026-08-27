@@ -62,20 +62,18 @@ class WalletCaseRepository:
             )
         )
 
-    def active_catalog_cutoff(self, *, owner_scope_id: str) -> int | None:
+    def catalog_cutoff(self, *, owner_scope_id: str) -> int | None:
         return self.session.scalar(
             select(func.max(WalletCaseCatalogEvent.id))
             .join(WalletCase, WalletCase.id == WalletCaseCatalogEvent.case_id)
-            .where(
-                WalletCase.owner_scope_id == owner_scope_id,
-                WalletCase.archived_at.is_(None),
-            )
+            .where(WalletCase.owner_scope_id == owner_scope_id)
         )
 
-    def list_active_at_catalog_cutoff(
+    def list_at_catalog_cutoff(
         self,
         *,
         owner_scope_id: str,
+        archived: bool,
         limit: int,
         cutoff: int,
         after: int | None,
@@ -101,8 +99,7 @@ class WalletCaseRepository:
             )
             .where(
                 WalletCase.owner_scope_id == owner_scope_id,
-                WalletCase.archived_at.is_(None),
-                WalletCaseCatalogEvent.visible.is_(True),
+                WalletCaseCatalogEvent.visible.is_(not archived),
             )
             .order_by(frozen_positions.c.position.desc())
             .limit(limit + 1)
