@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from database import get_session
 from services.wallet_cases import (
+    WalletCaseArchiveConflict,
     WalletCaseCatalogInvalidCursor,
     WalletCaseDeletionConflict,
     WalletCaseMetadataConflict,
@@ -94,16 +95,22 @@ def list_wallet_cases(
         max_length=1024,
         description="Authenticated continuation from the preceding Case page.",
     ),
+    state: str = Query(
+        "active",
+        pattern=r"^(active|archived)$",
+        max_length=8,
+        description="Lifecycle catalog to read.",
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
     """List a bounded, frozen-order page in the local owner scope."""
     query_pairs = request.query_params.multi_items()
-    if any(name not in {"limit", "cursor"} for name, _value in query_pairs):
+    if any(name not in {"limit", "cursor", "state"} for name, _value in query_pairs):
         raise HTTPException(
             status_code=422,
             detail="Wallet Case catalog accepts only limit and cursor query parameters",
         )
-    for name in ("limit", "cursor"):
+    for name in ("limit", "cursor", "state"):
         if len(request.query_params.getlist(name)) > 1:
             raise HTTPException(
                 status_code=422,
@@ -119,6 +126,7 @@ def list_wallet_cases(
     try:
         return WalletCaseService(session).list_cases(
             limit=canonical_limit,
+            state=state,
             cursor=cursor,
         )
     except WalletCaseCatalogInvalidCursor as exc:
@@ -209,6 +217,90 @@ def delete_wallet_case(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case deletion storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.post("/{public_id}/archive", response_model=WalletCaseResponse)
+def archive_wallet_case(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Archive one idle Case while retaining its evidence and reports."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).archive_case(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseArchiveConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_archive_jobs_active",
+                "message_safe": str(exc),
+                "retryable": False,
+                "active_sync_public_id": exc.active_sync_public_id,
+                "active_evidence_public_id": exc.active_evidence_public_id,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseRuntimeConflict as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_archive_changed",
+                "message_safe": str(exc),
+                "retryable": True,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case archival storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.post("/{public_id}/restore", response_model=WalletCaseResponse)
+def restore_wallet_case(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Restore one archived Case to active owner-scoped workflows."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).restore_case(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseRuntimeConflict as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_restore_changed",
+                "message_safe": str(exc),
+                "retryable": True,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case restoration storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

@@ -1,3 +1,35 @@
+# GRAM Scope — v0.83.0 CASE ARCHIVE
+
+v0.83.0 adds a reversible Wallet Case lifecycle between active work and
+permanent deletion. `POST /api/v1/cases/{case}/archive` removes an idle Case
+from active workflows without deleting its snapshots, normalized Activity,
+Evidence jobs, Findings inputs, notes, or saved Report revisions. A queued or
+running synchronization or Evidence verification blocks archival with a safe
+structured conflict. `POST /api/v1/cases/{case}/restore` returns the retained
+Case to active workflows. Repeating either accepted transition is idempotent.
+
+`GET /api/v1/cases` now accepts the explicit `state=active|archived` contract.
+Its process-local signed cursor binds the owner scope, frozen event cutoff,
+lifecycle state, and keyset position, so an archived continuation cannot be
+replayed against the active library. Archive and restore events freeze both
+membership and order for an in-progress traversal while a fresh first page
+sees the current lifecycle state.
+
+The Case workspace presents archival as a reversible action distinct from the
+typed-confirmation permanent delete flow. The Case Library adds accessible
+Active and Archived tabs, independent loading/empty/error states, paged archive
+history, and a restore action that refreshes the archive snapshot only after a
+strict case-bound response. A Case transitioned after page one is labelled as
+stale snapshot state instead of being opened under a false lifecycle assumption.
+
+No database migration is added. Alembic remains at `20260827_0026`; its
+append-only visibility journal already records the active/archive transitions.
+Wallet Cases remain direct-loopback only until authentication derives a hosted
+owner scope. Archive is retention, not erasure; permanent deletion remains a
+separate guarded action.
+
+---
+
 # GRAM Scope — v0.82.0 PAGED CASE LIBRARY
 
 v0.82.0 removes the 50-Case visibility ceiling from the local Wallet Case

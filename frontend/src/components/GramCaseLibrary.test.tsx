@@ -8,13 +8,18 @@ import * as api from "../walletCaseApi";
 import { emptyWalletCaseFixture, walletCaseFixture } from "../test/walletCaseFixtures";
 import GramCaseLibrary from "./GramCaseLibrary";
 
-vi.mock("../walletCaseApi", () => ({ listWalletCases: vi.fn() }));
+vi.mock("../walletCaseApi", () => ({
+  listWalletCases: vi.fn(),
+  restoreWalletCase: vi.fn(),
+}));
 
 const listMock = vi.mocked(api.listWalletCases);
+const restoreMock = vi.mocked(api.restoreWalletCase);
 const SECOND_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
 
 beforeEach(() => {
   listMock.mockReset();
+  restoreMock.mockReset();
 });
 
 afterEach(cleanup);
@@ -31,7 +36,7 @@ describe("GramCaseLibrary", () => {
       updated_at: "2026-08-08T10:00:00Z",
     });
     listMock.mockResolvedValue({
-      cases: [first, second], limit: 12, truncated: false, next_cursor: null,
+      cases: [first, second], limit: 12, state: "active", truncated: false, next_cursor: null,
     });
     const onOpenCase = vi.fn();
 
@@ -43,12 +48,12 @@ describe("GramCaseLibrary", () => {
     expect(screen.getByText("Not synchronized")).toBeTruthy();
     await userEvent.setup().click(screen.getByRole("button", { name: "Open Case Treasury" }));
     expect(onOpenCase).toHaveBeenCalledWith(first.public_id);
-    expect(listMock).toHaveBeenCalledWith(12, null, expect.any(AbortSignal));
+    expect(listMock).toHaveBeenCalledWith(12, "active", null, expect.any(AbortSignal));
   });
 
   it("offers Case creation from a truthful empty state", async () => {
     listMock.mockResolvedValue({
-      cases: [], limit: 12, truncated: false, next_cursor: null,
+      cases: [], limit: 12, state: "active", truncated: false, next_cursor: null,
     });
     const onCreateCase = vi.fn();
     render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={onCreateCase} />);
@@ -62,7 +67,7 @@ describe("GramCaseLibrary", () => {
     listMock
       .mockRejectedValueOnce(new Error("Local storage is starting."))
       .mockResolvedValueOnce({
-        cases: [], limit: 12, truncated: false, next_cursor: null,
+        cases: [], limit: 12, state: "active", truncated: false, next_cursor: null,
       });
     render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
 
@@ -83,12 +88,12 @@ describe("GramCaseLibrary", () => {
     let expansionSignal: AbortSignal | undefined;
     listMock
       .mockResolvedValueOnce({
-        cases: [walletCase], limit: 12, truncated: true, next_cursor: "page.two",
+        cases: [walletCase], limit: 12, state: "active", truncated: true, next_cursor: "page.two",
       })
-      .mockImplementationOnce(async (_limit, _cursor, signal) => {
+      .mockImplementationOnce(async (_limit, _state, _cursor, signal) => {
         expansionSignal = signal;
         return {
-          cases: [second], limit: 12, truncated: false, next_cursor: null,
+          cases: [second], limit: 12, state: "active", truncated: false, next_cursor: null,
         };
       });
     const view = render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
@@ -99,7 +104,8 @@ describe("GramCaseLibrary", () => {
     expect(screen.getByText("2 Cases")).toBeTruthy();
     expect(screen.getByText("End of this Case catalog snapshot.")).toBeTruthy();
     expect(listMock.mock.calls[1]?.[0]).toBe(12);
-    expect(listMock.mock.calls[1]?.[1]).toBe("page.two");
+    expect(listMock.mock.calls[1]?.[1]).toBe("active");
+    expect(listMock.mock.calls[1]?.[2]).toBe("page.two");
     view.unmount();
     await waitFor(() => expect(expansionSignal?.aborted).toBe(true));
   });
@@ -108,10 +114,10 @@ describe("GramCaseLibrary", () => {
     const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
     listMock
       .mockResolvedValueOnce({
-        cases: [walletCase], limit: 12, truncated: true, next_cursor: "page.two",
+        cases: [walletCase], limit: 12, state: "active", truncated: true, next_cursor: "page.two",
       })
       .mockResolvedValueOnce({
-        cases: [walletCase], limit: 12, truncated: false, next_cursor: null,
+        cases: [walletCase], limit: 12, state: "active", truncated: false, next_cursor: null,
       });
     render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
 
@@ -121,5 +127,50 @@ describe("GramCaseLibrary", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("overlaps");
     expect(screen.getByRole("heading", { name: "Treasury" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry loading more" })).toBeTruthy();
+  });
+
+  it("switches to the archived catalog and restores a retained Case", async () => {
+    const active = walletCaseFixture({ overrides: { label: "Treasury" } });
+    const archived = emptyWalletCaseFixture({
+      public_id: SECOND_CASE_ID,
+      canonical_wallet_key: `0:${"b".repeat(64)}`,
+      display_address: "EQC-archived-wallet",
+      label: "Cold storage",
+      archived_at: "2026-08-27T12:00:00Z",
+      updated_at: "2026-08-27T12:00:00Z",
+    });
+    listMock
+      .mockResolvedValueOnce({
+        cases: [active], limit: 12, state: "active", truncated: false, next_cursor: null,
+      })
+      .mockResolvedValueOnce({
+        cases: [archived], limit: 12, state: "archived", truncated: false, next_cursor: null,
+      })
+      .mockResolvedValueOnce({
+        cases: [], limit: 12, state: "archived", truncated: false, next_cursor: null,
+      });
+    restoreMock.mockResolvedValueOnce({ ...archived, archived_at: null });
+    render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Treasury" });
+    await userEvent.setup().click(
+      screen.getByRole("tab", { name: "Archived Cases" }),
+    );
+    expect(await screen.findByRole("heading", { name: "Cold storage" })).toBeTruthy();
+    expect(screen.getByText(/Newest archives first/)).toBeTruthy();
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: "Restore Case Cold storage" }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "No archived Cases" })).toBeTruthy();
+    expect(restoreMock).toHaveBeenCalledWith(
+      archived.public_id,
+      expect.any(AbortSignal),
+    );
+    expect(listMock.mock.calls.map((call) => call[1])).toEqual([
+      "active",
+      "archived",
+      "archived",
+    ]);
   });
 });

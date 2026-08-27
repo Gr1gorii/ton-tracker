@@ -204,6 +204,8 @@
 .case-heading-note { max-width: 720px; margin-top: 10px !important; padding-left: 11px; border-left: 2px solid color-mix(in srgb, var(--accent) 42%, var(--border)); white-space: pre-wrap; overflow-wrap: anywhere; }
 .case-metadata-trigger { display: inline-flex; min-height: 42px; padding: 0 13px; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 13px; color: var(--text-soft); background: var(--surface-solid); cursor: pointer; font: inherit; font-size: 0.75rem; font-weight: 720; }
 .case-metadata-trigger:hover { border-color: color-mix(in srgb, var(--accent) 36%, var(--border)); color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--surface-solid)); }
+.case-archive-trigger { display: inline-flex; min-height: 42px; padding: 0 13px; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--border)); border-radius: 13px; color: var(--warning); background: color-mix(in srgb, var(--warning) 6%, var(--surface-solid)); cursor: pointer; font: inherit; font-size: 0.75rem; font-weight: 720; }
+.case-archive-trigger:hover { background: color-mix(in srgb, var(--warning) 11%, var(--surface-solid)); }
 .case-delete-trigger { display: inline-flex; min-height: 42px; padding: 0 13px; align-items: center; gap: 7px; border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--border)); border-radius: 13px; color: var(--case-danger-text); background: color-mix(in srgb, var(--danger) 6%, var(--surface-solid)); cursor: pointer; font: inherit; font-size: 0.75rem; font-weight: 720; }
 .case-delete-trigger:hover { background: color-mix(in srgb, var(--danger) 11%, var(--surface-solid)); }
 .case-delete-dialog { width: min(560px, 100%); overflow: hidden; border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border)); border-radius: 22px; background: var(--surface-solid); box-shadow: 0 28px 100px rgba(0, 0, 0, 0.38); }
@@ -224,6 +226,20 @@
 .case-delete-error { padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border)); border-radius: 11px; color: var(--case-danger-text) !important; background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
 .case-delete-dialog > footer { display: flex; padding: 16px 22px 20px; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--border); }
 .case-delete-dialog > footer button { gap: 7px; }
+.case-archive-dialog { width: min(560px, 100%); overflow: hidden; border: 1px solid color-mix(in srgb, var(--warning) 25%, var(--border)); border-radius: 22px; background: var(--surface-solid); box-shadow: 0 28px 100px rgba(0, 0, 0, 0.38); }
+.case-archive-dialog > header { display: grid; padding: 20px 22px; align-items: center; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; border-bottom: 1px solid var(--border); }
+.case-archive-dialog > header > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; color: var(--warning); background: color-mix(in srgb, var(--warning) 9%, var(--surface)); }
+.case-archive-dialog > header small { color: var(--warning); font-size: 0.68rem; font-weight: 750; letter-spacing: 0.06em; text-transform: uppercase; }
+.case-archive-dialog h2 { margin: 3px 0 0; color: var(--text); font-size: 1.15rem; }
+.case-archive-dialog > header button { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: var(--text); background: var(--surface); cursor: pointer; }
+.case-archive-content { display: grid; padding: 22px; gap: 15px; }
+.case-archive-content > p { margin: 0; color: var(--text-muted); font-size: 0.875rem; line-height: 1.65; }
+.case-archive-content > p strong { color: var(--text); }
+.case-archive-boundary { display: grid; padding: 13px 14px; align-items: flex-start; grid-template-columns: auto 1fr; gap: 10px; border: 1px solid color-mix(in srgb, var(--warning) 24%, var(--border)); border-radius: 13px; color: var(--warning); background: color-mix(in srgb, var(--warning) 6%, var(--surface)); }
+.case-archive-boundary p { margin: 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.55; }
+.case-archive-error { display: grid; padding: 11px 12px; align-items: flex-start; grid-template-columns: auto 1fr; gap: 8px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border)); border-radius: 11px; color: var(--case-danger-text) !important; background: color-mix(in srgb, var(--danger) 7%, var(--surface)); }
+.case-archive-dialog > footer { display: flex; padding: 16px 22px 20px; justify-content: flex-end; gap: 9px; border-top: 1px solid var(--border); }
+.case-archive-dialog > footer button { gap: 7px; }
 .case-metadata-dialog { width: min(620px, 100%); overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 22px; background: var(--surface-solid); box-shadow: 0 28px 100px rgba(0, 0, 0, 0.36); }
 .case-metadata-dialog > header { display: grid; padding: 20px 22px; align-items: center; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; border-bottom: 1px solid var(--border); }
 .case-metadata-dialog > header > span { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 13px; color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }

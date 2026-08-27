@@ -261,6 +261,7 @@ class WalletCaseResponse(_StrictModel):
     metadata_version: int = Field(ge=1)
     created_at: str
     updated_at: str
+    archived_at: str | None = None
     latest_sync: WalletCaseSyncResponse | None = None
     latest_sync_attempt: WalletCaseSyncResponse | None = None
     active_sync: WalletCaseSyncResponse | None = None
@@ -277,6 +278,7 @@ class WalletCaseUpsertResponse(_StrictModel):
 class WalletCaseListResponse(_StrictModel):
     cases: list[WalletCaseResponse]
     limit: int = Field(ge=1, le=50)
+    state: Literal["active", "archived"]
     truncated: bool
     next_cursor: str | None = Field(default=None, min_length=1, max_length=1024)
 

@@ -73,6 +73,22 @@ class WalletCaseDeletionConflict(RuntimeError):
         self.active_evidence_public_id = active_evidence_public_id
 
 
+class WalletCaseArchiveConflict(RuntimeError):
+    """Raised when active case-owned work makes archival unsafe."""
+
+    def __init__(
+        self,
+        *,
+        active_sync_public_id: str | None,
+        active_evidence_public_id: str | None,
+    ) -> None:
+        super().__init__(
+            "Cancel or wait for active Wallet Case jobs before archiving this case."
+        )
+        self.active_sync_public_id = active_sync_public_id
+        self.active_evidence_public_id = active_evidence_public_id
+
+
 class WalletCaseMetadataConflict(RuntimeError):
     """Raised when an update is based on stale Case metadata."""
 
@@ -92,7 +108,7 @@ class WalletCaseCatalogInvalidCursor(ValueError):
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
-_CASE_CATALOG_CURSOR_VERSION = 1
+_CASE_CATALOG_CURSOR_VERSION = 2
 _UNSET = object()
 _ZERO_SUMMARY: dict[str, Any] = {
     "activity_counts": {
@@ -219,11 +235,16 @@ class WalletCaseService:
         self,
         *,
         limit: int,
+        state: str = "active",
         cursor: str | None = None,
     ) -> dict[str, Any]:
         if limit < 1 or limit > 50:
             raise WalletCaseCatalogInvalidCursor(
                 "Wallet Case catalog limit must be between 1 and 50."
+            )
+        if state not in {"active", "archived"}:
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog state must be active or archived."
             )
         cursor_document = (
             _decode_case_catalog_cursor(cursor) if cursor is not None else None
@@ -236,10 +257,14 @@ class WalletCaseService:
             raise WalletCaseCatalogInvalidCursor(
                 "Wallet Case catalog cursor belongs to another owner scope."
             )
+        if cursor_document is not None and cursor_document["state"] != state:
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog cursor belongs to another lifecycle state."
+            )
         cutoff = (
             int(cursor_document["cutoff"])
             if cursor_document is not None
-            else self.repository.active_catalog_cutoff(
+            else self.repository.catalog_cutoff(
                 owner_scope_id=self.owner_scope_id
             )
         )
@@ -252,11 +277,13 @@ class WalletCaseService:
             return {
                 "cases": [],
                 "limit": limit,
+                "state": state,
                 "truncated": False,
                 "next_cursor": None,
             }
-        positioned_cases, truncated = self.repository.list_active_at_catalog_cutoff(
+        positioned_cases, truncated = self.repository.list_at_catalog_cutoff(
             owner_scope_id=self.owner_scope_id,
+            archived=state == "archived",
             limit=limit,
             cutoff=cutoff,
             after=after,
@@ -277,6 +304,7 @@ class WalletCaseService:
                 {
                     "v": _CASE_CATALOG_CURSOR_VERSION,
                     "scope": scope_digest,
+                    "state": state,
                     "cutoff": cutoff,
                     "after": positioned_cases[-1][1],
                 }
@@ -292,6 +320,7 @@ class WalletCaseService:
                 for wallet_case in cases
             ],
             "limit": limit,
+            "state": state,
             "truncated": truncated,
             "next_cursor": next_cursor,
         }
@@ -351,6 +380,138 @@ class WalletCaseService:
             raise WalletCaseMetadataConflict(current.metadata_version)
 
         self._record_catalog_event(wallet_case, recorded_at=values["updated_at"])
+        self.session.commit()
+        refreshed = self._required_case(public_id)
+        return self._case_response(
+            refreshed,
+            latest_sync=self._latest_sync(refreshed),
+        )
+
+    def archive_case(
+        self,
+        public_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Hide one Case from active workflows without deleting its evidence."""
+        wallet_case = self.repository.get_any_by_public_id(
+            owner_scope_id=self.owner_scope_id,
+            public_id=public_id,
+        )
+        if wallet_case is None:
+            raise WalletCaseNotFound("Wallet Case not found")
+        if wallet_case.archived_at is not None:
+            return self._case_response(
+                wallet_case,
+                latest_sync=self._latest_sync(wallet_case),
+                active_sync=None,
+            )
+
+        self._raise_if_archive_conflicts(wallet_case.id)
+        archived_at = _as_utc(now or _utc_now())
+        changed = self.session.execute(
+            update(WalletCase)
+            .where(
+                WalletCase.id == wallet_case.id,
+                WalletCase.owner_scope_id == self.owner_scope_id,
+                WalletCase.public_id == public_id,
+                WalletCase.archived_at.is_(None),
+                ~exists().where(
+                    CaseSync.case_id == wallet_case.id,
+                    CaseSync.state.in_(("queued", "running")),
+                ),
+                ~exists().where(
+                    CaseEvidenceVerification.case_id == wallet_case.id,
+                    CaseEvidenceVerification.state.in_(("queued", "running")),
+                ),
+            )
+            .values(archived_at=archived_at, updated_at=archived_at)
+            .execution_options(synchronize_session=False)
+        )
+        if changed.rowcount != 1:
+            self.session.rollback()
+            current = self.repository.get_any_by_public_id(
+                owner_scope_id=self.owner_scope_id,
+                public_id=public_id,
+            )
+            if current is None:
+                raise WalletCaseNotFound("Wallet Case not found")
+            if current.archived_at is not None:
+                return self._case_response(
+                    current,
+                    latest_sync=self._latest_sync(current),
+                    active_sync=None,
+                )
+            self._raise_if_archive_conflicts(current.id)
+            raise WalletCaseRuntimeConflict(
+                "Wallet Case changed while archival was being prepared."
+            )
+        self._record_catalog_event(
+            wallet_case,
+            recorded_at=archived_at,
+            visible=False,
+        )
+        self.session.commit()
+        refreshed = self.repository.get_any_by_public_id(
+            owner_scope_id=self.owner_scope_id,
+            public_id=public_id,
+        )
+        if refreshed is None:
+            raise WalletCaseNotFound("Wallet Case not found")
+        return self._case_response(
+            refreshed,
+            latest_sync=self._latest_sync(refreshed),
+            active_sync=None,
+        )
+
+    def restore_case(
+        self,
+        public_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Restore an archived Case as the newest active catalog entry."""
+        wallet_case = self.repository.get_any_by_public_id(
+            owner_scope_id=self.owner_scope_id,
+            public_id=public_id,
+        )
+        if wallet_case is None:
+            raise WalletCaseNotFound("Wallet Case not found")
+        if wallet_case.archived_at is None:
+            return self._case_response(
+                wallet_case,
+                latest_sync=self._latest_sync(wallet_case),
+            )
+
+        restored_at = _as_utc(now or _utc_now())
+        changed = self.session.execute(
+            update(WalletCase)
+            .where(
+                WalletCase.id == wallet_case.id,
+                WalletCase.owner_scope_id == self.owner_scope_id,
+                WalletCase.public_id == public_id,
+                WalletCase.archived_at.is_not(None),
+            )
+            .values(archived_at=None, updated_at=restored_at)
+            .execution_options(synchronize_session=False)
+        )
+        if changed.rowcount != 1:
+            self.session.rollback()
+            current = self.repository.get_any_by_public_id(
+                owner_scope_id=self.owner_scope_id,
+                public_id=public_id,
+            )
+            if current is None:
+                raise WalletCaseNotFound("Wallet Case not found")
+            if current.archived_at is None:
+                return self._case_response(
+                    current,
+                    latest_sync=self._latest_sync(current),
+                )
+            raise WalletCaseRuntimeConflict(
+                "Wallet Case changed while restoration was being prepared."
+            )
+        self._record_catalog_event(wallet_case, recorded_at=restored_at)
         self.session.commit()
         refreshed = self._required_case(public_id)
         return self._case_response(
@@ -681,17 +842,35 @@ class WalletCaseService:
                 ),
             )
 
+    def _raise_if_archive_conflicts(self, case_id: int) -> None:
+        active_sync = self.repository.get_active_sync(case_id=case_id)
+        active_evidence = self.repository.get_active_evidence_verification(
+            case_id=case_id
+        )
+        if active_sync is not None or active_evidence is not None:
+            raise WalletCaseArchiveConflict(
+                active_sync_public_id=(
+                    active_sync.public_id if active_sync is not None else None
+                ),
+                active_evidence_public_id=(
+                    active_evidence.public_id
+                    if active_evidence is not None
+                    else None
+                ),
+            )
+
     def _record_catalog_event(
         self,
         wallet_case: WalletCase,
         *,
         recorded_at: datetime,
+        visible: bool = True,
     ) -> None:
         self.session.add(
             WalletCaseCatalogEvent(
                 case=wallet_case,
                 recorded_at=_as_utc(recorded_at),
-                visible=True,
+                visible=visible,
             )
         )
 
@@ -831,6 +1010,11 @@ class WalletCaseService:
             "metadata_version": wallet_case.metadata_version,
             "created_at": _isoformat(wallet_case.created_at),
             "updated_at": _isoformat(wallet_case.updated_at),
+            "archived_at": (
+                _isoformat(wallet_case.archived_at)
+                if wallet_case.archived_at is not None
+                else None
+            ),
             "latest_sync": (
                 self._sync_response(
                     latest_sync,
@@ -1437,7 +1621,7 @@ def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
         ) from exc
     if (
         not isinstance(document, dict)
-        or set(document) != {"v", "scope", "cutoff", "after"}
+        or set(document) != {"v", "scope", "state", "cutoff", "after"}
         or document.get("v") != _CASE_CATALOG_CURSOR_VERSION
     ):
         raise WalletCaseCatalogInvalidCursor(
@@ -1456,12 +1640,14 @@ def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
             "Wallet Case catalog cursor signature is invalid."
         )
     scope = document.get("scope")
+    state = document.get("state")
     cutoff = document.get("cutoff")
     after = document.get("after")
     if (
         not isinstance(scope, str)
         or len(scope) != 64
         or any(char not in "0123456789abcdef" for char in scope)
+        or state not in {"active", "archived"}
         or type(cutoff) is not int
         or type(after) is not int
         or cutoff < 1

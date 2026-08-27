@@ -2,6 +2,7 @@ import type { TimeWindow, WalletIngestionSurface } from "./types";
 
 export type WalletCaseNetwork = "ton-mainnet" | "ton-testnet";
 export type WalletCaseDataEnvironment = "demo" | "live";
+export type WalletCaseCatalogState = "active" | "archived";
 export type WalletCaseSyncState =
   | "queued"
   | "running"
@@ -120,6 +121,7 @@ export interface WalletCase {
   metadata_version: number;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
   latest_sync: WalletCaseSync | null;
   latest_sync_attempt: WalletCaseSync | null;
   active_sync: WalletCaseSync | null;
@@ -150,6 +152,7 @@ export interface WalletCaseMetadataUpdateRequest {
 export interface WalletCaseListResponse {
   cases: WalletCase[];
   limit: number;
+  state: WalletCaseCatalogState;
   truncated: boolean;
   next_cursor: string | null;
 }
@@ -666,6 +669,7 @@ export function parseWalletCase(value: unknown): WalletCase {
     ),
     created_at: string(item.created_at, "wallet case created time"),
     updated_at: string(item.updated_at, "wallet case updated time"),
+    archived_at: nullableTimestamp(item.archived_at, "wallet case archived time"),
     latest_sync: latestSync,
     latest_sync_attempt: latestSyncAttempt,
     active_sync: activeSync,
@@ -697,6 +701,13 @@ export function parseWalletCaseListResponse(value: unknown): WalletCaseListRespo
   if (typeof response.truncated !== "boolean") {
     throw new Error("wallet case list truncated flag is invalid");
   }
+  const state = string(
+    response.state,
+    "wallet case list lifecycle state",
+  ) as WalletCaseCatalogState;
+  if (state !== "active" && state !== "archived") {
+    throw new Error("wallet case list lifecycle state is invalid");
+  }
   const nextCursor = nullableString(
     response.next_cursor,
     "wallet case list next cursor",
@@ -713,6 +724,7 @@ export function parseWalletCaseListResponse(value: unknown): WalletCaseListRespo
   return {
     cases,
     limit,
+    state,
     truncated: response.truncated,
     next_cursor: nextCursor,
   };

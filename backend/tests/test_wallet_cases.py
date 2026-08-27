@@ -36,6 +36,7 @@ from services.case_sync_jobs import CaseSyncWorker, _retry_signal
 from services.wallet_activity_ingestion import build_wallet_ingestion_run
 from services.wallet_cases import (
     WalletCaseCatalogInvalidCursor,
+    WalletCaseNotFound,
     WalletCaseService,
     _compact_coverage_streams,
 )
@@ -195,9 +196,10 @@ def test_case_create_is_canonical_idempotent_and_scope_separated(
         "display_address": BOUNCEABLE_MAINNET,
         "label": "Primary wallet",
         "note": "Keep the first metadata values.",
-        "metadata_version": 1,
-        "created_at": first["case"]["created_at"],
-        "updated_at": first["case"]["updated_at"],
+            "metadata_version": 1,
+            "created_at": first["case"]["created_at"],
+            "updated_at": first["case"]["updated_at"],
+            "archived_at": None,
         "latest_sync": None,
         "latest_sync_attempt": None,
         "active_sync": None,
@@ -245,6 +247,7 @@ def test_case_create_is_canonical_idempotent_and_scope_separated(
     assert catalog.status_code == 200
     assert catalog.headers["cache-control"] == "no-store"
     assert catalog.json()["limit"] == 3
+    assert catalog.json()["state"] == "active"
     assert catalog.json()["truncated"] is False
     assert len(catalog.json()["cases"]) == 3
     assert catalog.json()["next_cursor"] is None
@@ -361,6 +364,78 @@ def test_case_catalog_cursor_excludes_cases_reopened_after_cutoff(client):
     assert fresh["cases"][0]["public_id"] == archived["public_id"]
 
 
+def test_archived_case_catalog_is_paged_and_freezes_lifecycle_membership(client):
+    created = [
+        _create_case(
+            client,
+            address=f"0:{account_id:064x}",
+            label=f"Archived {account_id}",
+        )["case"]
+        for account_id in range(1, 5)
+    ]
+    for wallet_case in created:
+        response = client.post(
+            f"/api/v1/cases/{wallet_case['public_id']}/archive"
+        )
+        assert response.status_code == 200, response.text
+
+    first = client.get("/api/v1/cases?limit=1&state=archived")
+    assert first.status_code == 200, first.text
+    first_page = first.json()
+    assert first_page["state"] == "archived"
+    assert first_page["cases"][0]["public_id"] == created[3]["public_id"]
+    assert first_page["cases"][0]["archived_at"] is not None
+    assert first_page["truncated"] is True
+    cursor = first_page["next_cursor"]
+    assert isinstance(cursor, str)
+
+    wrong_state = client.get(
+        "/api/v1/cases",
+        params={"limit": 1, "state": "active", "cursor": cursor},
+    )
+    assert wrong_state.status_code == 422
+    assert wrong_state.json()["detail"]["message_safe"].endswith(
+        "another lifecycle state."
+    )
+
+    restored = client.post(
+        f"/api/v1/cases/{created[1]['public_id']}/restore"
+    )
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["archived_at"] is None
+
+    frozen_ids = [first_page["cases"][0]["public_id"]]
+    frozen_states = [first_page["cases"][0]["archived_at"]]
+    while cursor is not None:
+        page = client.get(
+            "/api/v1/cases",
+            params={"limit": 1, "state": "archived", "cursor": cursor},
+        )
+        assert page.status_code == 200, page.text
+        document = page.json()
+        assert document["state"] == "archived"
+        frozen_ids.extend(item["public_id"] for item in document["cases"])
+        frozen_states.extend(item["archived_at"] for item in document["cases"])
+        cursor = document["next_cursor"]
+
+    assert frozen_ids == [item["public_id"] for item in reversed(created)]
+    restored_index = frozen_ids.index(created[1]["public_id"])
+    assert frozen_states[restored_index] is None
+
+    fresh_archived = client.get(
+        "/api/v1/cases?limit=4&state=archived"
+    ).json()
+    assert [item["public_id"] for item in fresh_archived["cases"]] == [
+        created[3]["public_id"],
+        created[2]["public_id"],
+        created[0]["public_id"],
+    ]
+    active = client.get("/api/v1/cases?limit=4&state=active").json()
+    assert [item["public_id"] for item in active["cases"]] == [
+        created[1]["public_id"]
+    ]
+
+
 def test_case_catalog_rejects_untrusted_or_cross_scope_cursors(client):
     for account_id in range(1, 4):
         _create_case(client, address=f"0:{account_id:064x}")
@@ -404,6 +479,7 @@ def test_case_catalog_rejects_untrusted_or_cross_scope_cursors(client):
     (
         "limit=2&cursor=one&cursor=two",
         "limit=2&cursor=one&extra=value",
+        "limit=2&state=active&state=archived",
     ),
 )
 def test_case_catalog_rejects_ambiguous_query_parameters(client, query):
@@ -519,6 +595,99 @@ def test_case_metadata_update_rejects_stale_or_invalid_edits_without_mutation(cl
     stored = client.get(f"/api/v1/cases/{case_id}").json()
     assert stored["label"] == "Current"
     assert stored["metadata_version"] == 2
+
+
+def test_case_archive_and_restore_preserve_evidence_and_are_idempotent(client):
+    created = _create_case(client, label="Treasury archive")["case"]
+    case_id = created["public_id"]
+    completed = _sync_case(client, case_id)
+
+    archived = client.post(f"/api/v1/cases/{case_id}/archive")
+
+    assert archived.status_code == 200, archived.text
+    assert archived.headers["cache-control"] == "no-store"
+    archived_case = archived.json()
+    assert archived_case["public_id"] == case_id
+    assert archived_case["archived_at"] is not None
+    assert archived_case["updated_at"] == archived_case["archived_at"]
+    assert archived_case["current_snapshot"]["public_id"] == completed["public_id"]
+    assert archived_case["active_sync"] is None
+    assert client.get(f"/api/v1/cases/{case_id}").status_code == 404
+    assert client.get("/api/v1/cases").json()["cases"] == []
+    assert _database_counts() == (1, 1, 1)
+
+    repeated_archive = client.post(f"/api/v1/cases/{case_id}/archive")
+    assert repeated_archive.status_code == 200
+    assert repeated_archive.json()["archived_at"] == archived_case["archived_at"]
+
+    restored = client.post(f"/api/v1/cases/{case_id}/restore")
+
+    assert restored.status_code == 200, restored.text
+    assert restored.headers["cache-control"] == "no-store"
+    restored_case = restored.json()
+    assert restored_case["public_id"] == case_id
+    assert restored_case["archived_at"] is None
+    assert restored_case["updated_at"] > archived_case["updated_at"]
+    assert restored_case["current_snapshot"]["public_id"] == completed["public_id"]
+    assert client.get(f"/api/v1/cases/{case_id}").json() == restored_case
+    assert client.get("/api/v1/cases").json()["cases"][0]["public_id"] == case_id
+    assert _database_counts() == (1, 1, 1)
+
+    repeated_restore = client.post(f"/api/v1/cases/{case_id}/restore")
+    assert repeated_restore.status_code == 200
+    assert repeated_restore.json()["updated_at"] == restored_case["updated_at"]
+    with app.state.wallet_case_test_session() as session:
+        events = list(
+            session.scalars(
+                select(WalletCaseCatalogEvent)
+                .join(WalletCase)
+                .where(WalletCase.public_id == case_id)
+                .order_by(WalletCaseCatalogEvent.id)
+            )
+        )
+    assert [event.visible for event in events] == [True, True, True, False, True]
+
+
+def test_case_archive_rejects_active_jobs_without_hiding_the_case(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    queued = client.post(
+        f"/api/v1/cases/{case_id}/syncs",
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"time_window": "24h", "surfaces": ["transactions"]},
+    ).json()
+
+    response = client.post(f"/api/v1/cases/{case_id}/archive")
+
+    assert response.status_code == 409
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["detail"] == {
+        "code": "case_archive_jobs_active",
+        "message_safe": (
+            "Cancel or wait for active Wallet Case jobs before archiving this case."
+        ),
+        "retryable": False,
+        "active_sync_public_id": queued["public_id"],
+        "active_evidence_public_id": None,
+    }
+    assert client.get(f"/api/v1/cases/{case_id}").status_code == 200
+    with app.state.wallet_case_test_session() as session:
+        wallet_case = session.scalar(
+            select(WalletCase).where(WalletCase.public_id == case_id)
+        )
+        assert wallet_case is not None
+        assert wallet_case.archived_at is None
+
+
+def test_case_lifecycle_endpoints_do_not_disclose_another_owner_scope(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    engine = app.state.wallet_case_test_engine
+
+    with Session(engine) as session:
+        service = WalletCaseService(session, owner_scope_id="another-local-owner")
+        with pytest.raises(WalletCaseNotFound, match="not found"):
+            service.archive_case(case_id)
+        with pytest.raises(WalletCaseNotFound, match="not found"):
+            service.restore_case(case_id)
 
 
 def test_case_create_rejects_invalid_or_mismatched_network_without_rows(client):

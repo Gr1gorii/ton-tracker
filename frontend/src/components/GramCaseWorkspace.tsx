@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { ArrowClockwise, ChartDonut, ChartLineUp, FileText, Gauge, PencilSimple, ShieldCheck, SpinnerGap, Trash, WarningCircle } from "@phosphor-icons/react";
+import { Archive, ArrowClockwise, ChartDonut, ChartLineUp, FileText, Gauge, PencilSimple, ShieldCheck, SpinnerGap, Trash, WarningCircle } from "@phosphor-icons/react";
 
 import { caseActivitySearch, DEFAULT_CASE_ACTIVITY_FILTERS } from "../caseActivityQuery";
 import { caseEvidenceSearch } from "../caseEvidenceQuery";
 import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseReportsPath, caseSummaryPath } from "../caseRouting";
 import { getWalletCase } from "../walletCaseApi";
 import type { WalletCase } from "../walletCase";
+import CaseArchiveDialog from "./CaseArchiveDialog";
 import CaseDeleteDialog from "./CaseDeleteDialog";
 import CaseMetadataDialog from "./CaseMetadataDialog";
 import GramCaseActivity from "./GramCaseActivity";
@@ -25,11 +26,13 @@ export default function GramCaseWorkspace({
   caseId,
   view,
   onNavigate,
+  onArchived,
   onDeleted,
 }: {
   caseId: string;
   view: WalletCaseView;
   onNavigate: (view: WalletCaseView, search?: string) => void;
+  onArchived: () => void;
   onDeleted: () => void;
 }) {
   const [walletCase, setWalletCase] = useState<WalletCase | null>(null);
@@ -38,6 +41,7 @@ export default function GramCaseWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const generation = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
@@ -141,6 +145,13 @@ export default function GramCaseWorkspace({
         </div>
         <div className="case-heading-actions">
           {refreshing && <span className="case-refreshing" role="status"><SpinnerGap className="spin" size={17} /> Publishing the new snapshot…</span>}
+          <button
+            type="button"
+            className="case-archive-trigger"
+            onClick={() => setArchiveOpen(true)}
+          >
+            <Archive size={17} /> Archive case
+          </button>
           <button
             type="button"
             className="case-metadata-trigger"
@@ -248,6 +259,13 @@ export default function GramCaseWorkspace({
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onDeleted={onDeleted}
+      />
+      <CaseArchiveDialog
+        caseId={walletCase.public_id}
+        caseName={walletCase.label ?? shortAddress(walletCase.display_address)}
+        open={archiveOpen}
+        onClose={() => setArchiveOpen(false)}
+        onArchived={onArchived}
       />
       <CaseMetadataDialog
         walletCase={walletCase}

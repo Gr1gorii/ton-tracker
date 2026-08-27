@@ -6,6 +6,7 @@ import {
   parseWalletCaseSync,
   parseWalletCaseUpsertResponse,
   type WalletCase,
+  type WalletCaseCatalogState,
   type WalletCaseCreateRequest,
   type WalletCaseDeletionResponse,
   type WalletCaseListResponse,
@@ -101,13 +102,17 @@ export async function createWalletCase(
 
 export async function listWalletCases(
   limit = 20,
+  state: WalletCaseCatalogState = "active",
   cursor: string | null = null,
   signal?: AbortSignal,
 ): Promise<WalletCaseListResponse> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
     throw new Error("Wallet Case list limit must be from 1 through 50");
   }
-  const params = new URLSearchParams({ limit: String(limit) });
+  if (state !== "active" && state !== "archived") {
+    throw new Error("Wallet Case list lifecycle state is invalid");
+  }
+  const params = new URLSearchParams({ limit: String(limit), state });
   if (cursor !== null) {
     if (!cursor || cursor.length > 1_024 || cursor.trim() !== cursor) {
       throw new Error("Wallet Case list cursor is invalid");
@@ -125,7 +130,50 @@ export async function listWalletCases(
   if (catalog.limit !== limit) {
     throw new Error("Wallet Case list response does not match the requested limit");
   }
+  if (catalog.state !== state) {
+    throw new Error("Wallet Case list response does not match the requested lifecycle state");
+  }
   return catalog;
+}
+
+export async function archiveWalletCase(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCase> {
+  return transitionWalletCaseLifecycle(caseId, "archive", signal);
+}
+
+export async function restoreWalletCase(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCase> {
+  return transitionWalletCaseLifecycle(caseId, "restore", signal);
+}
+
+async function transitionWalletCaseLifecycle(
+  caseId: string,
+  action: "archive" | "restore",
+  signal?: AbortSignal,
+): Promise<WalletCase> {
+  assertPublicId(caseId, "Wallet Case id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/${action}`,
+    { method: "POST", cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      `Wallet Case ${action === "archive" ? "archival" : "restoration"} failed`,
+    );
+  }
+  const walletCase = parseWalletCase(await response.json());
+  if (
+    walletCase.public_id !== caseId ||
+    (action === "archive") !== (walletCase.archived_at !== null)
+  ) {
+    throw new Error("Wallet Case lifecycle response does not match the request");
+  }
+  return walletCase;
 }
 
 export async function getWalletCase(
