@@ -319,6 +319,168 @@ def test_case_catalog_cursor_freezes_order_and_excludes_later_cases(client):
     ]
 
 
+def test_case_catalog_searches_metadata_and_literal_address_text(
+    client,
+    monkeypatch,
+):
+    treasury = _create_case(
+        client,
+        address=f"0:{1:064x}",
+        label="ALPHA Treasury 100%",
+        note="Priority_blue review",
+    )["case"]
+    reserve = _create_case(
+        client,
+        address=f"0:{2:064x}",
+        label="alpha reserve 100x",
+    )["case"]
+    testnet = _create_case(
+        client,
+        address=f"0:{3:064x}",
+        network="ton-testnet",
+        label="Alpha Testnet",
+    )["case"]
+    _configure_guarded_live_runtime(monkeypatch)
+    live = _create_case(
+        client,
+        address=f"0:{4:064x}",
+        environment="live",
+        label="Alpha Live",
+    )["case"]
+
+    searched = client.get(
+        "/api/v1/cases",
+        params={"limit": 10, "q": "  alpha  "},
+    )
+    assert searched.status_code == 200, searched.text
+    assert searched.json()["query"] == "alpha"
+    assert searched.json()["network"] is None
+    assert searched.json()["data_environment"] is None
+    assert [item["public_id"] for item in searched.json()["cases"]] == [
+        live["public_id"],
+        testnet["public_id"],
+        reserve["public_id"],
+        treasury["public_id"],
+    ]
+
+    literal_percent = client.get(
+        "/api/v1/cases",
+        params={"limit": 10, "q": "100%"},
+    )
+    assert [item["public_id"] for item in literal_percent.json()["cases"]] == [
+        treasury["public_id"]
+    ]
+    literal_underscore = client.get(
+        "/api/v1/cases",
+        params={"limit": 10, "q": "_blue"},
+    )
+    assert [
+        item["public_id"] for item in literal_underscore.json()["cases"]
+    ] == [treasury["public_id"]]
+
+    canonical_fragment = treasury["canonical_wallet_key"][-12:]
+    by_address = client.get(
+        "/api/v1/cases",
+        params={"limit": 10, "q": canonical_fragment},
+    )
+    assert [item["public_id"] for item in by_address.json()["cases"]] == [
+        treasury["public_id"]
+    ]
+
+
+def test_case_catalog_combines_exact_network_and_environment_filters(
+    client,
+    monkeypatch,
+):
+    mainnet = _create_case(
+        client,
+        address=f"0:{1:064x}",
+        label="Investigate bridge",
+    )["case"]
+    testnet = _create_case(
+        client,
+        address=f"0:{2:064x}",
+        network="ton-testnet",
+        label="Investigate bridge",
+    )["case"]
+    _configure_guarded_live_runtime(monkeypatch)
+    live = _create_case(
+        client,
+        address=f"0:{3:064x}",
+        environment="live",
+        label="Investigate bridge",
+    )["case"]
+
+    filtered = client.get(
+        "/api/v1/cases",
+        params={
+            "limit": 10,
+            "q": "bridge",
+            "network": "ton-mainnet",
+            "data_environment": "demo",
+        },
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["query"] == "bridge"
+    assert filtered.json()["network"] == "ton-mainnet"
+    assert filtered.json()["data_environment"] == "demo"
+    assert [item["public_id"] for item in filtered.json()["cases"]] == [
+        mainnet["public_id"]
+    ]
+
+    testnet_only = client.get(
+        "/api/v1/cases",
+        params={"limit": 10, "network": "ton-testnet"},
+    )
+    assert [item["public_id"] for item in testnet_only.json()["cases"]] == [
+        testnet["public_id"]
+    ]
+    live_only = client.get(
+        "/api/v1/cases",
+        params={"limit": 10, "data_environment": "live"},
+    )
+    assert [item["public_id"] for item in live_only.json()["cases"]] == [
+        live["public_id"]
+    ]
+
+
+def test_case_catalog_cursor_is_bound_to_normalized_discovery_filters(client):
+    for account_id in range(1, 4):
+        _create_case(
+            client,
+            address=f"0:{account_id:064x}",
+            label=f"Needle {account_id}",
+        )
+
+    first = client.get(
+        "/api/v1/cases",
+        params={"limit": 1, "q": "  Needle  "},
+    )
+    assert first.status_code == 200, first.text
+    cursor = first.json()["next_cursor"]
+    assert isinstance(cursor, str)
+
+    continued = client.get(
+        "/api/v1/cases",
+        params={"limit": 1, "q": "Needle", "cursor": cursor},
+    )
+    assert continued.status_code == 200, continued.text
+
+    for changed_filter in (
+        {"q": "different"},
+        {"q": "Needle", "network": "ton-mainnet"},
+        {"q": "Needle", "data_environment": "demo"},
+    ):
+        mismatch = client.get(
+            "/api/v1/cases",
+            params={"limit": 1, "cursor": cursor, **changed_filter},
+        )
+        assert mismatch.status_code == 422
+        assert mismatch.json()["detail"]["message_safe"].endswith(
+            "another filter set."
+        )
+
+
 def test_case_catalog_cursor_excludes_cases_reopened_after_cutoff(client):
     active = [
         _create_case(client, address=f"0:{account_id:064x}")["case"]
@@ -480,6 +642,10 @@ def test_case_catalog_rejects_untrusted_or_cross_scope_cursors(client):
         "limit=2&cursor=one&cursor=two",
         "limit=2&cursor=one&extra=value",
         "limit=2&state=active&state=archived",
+        "limit=2&q=one&q=two",
+        "limit=2&network=ton-mainnet&network=ton-testnet",
+        "limit=2&data_environment=demo&data_environment=live",
+        "limit=2&q=%20%20%20",
     ),
 )
 def test_case_catalog_rejects_ambiguous_query_parameters(client, query):
