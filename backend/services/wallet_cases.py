@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -105,10 +105,16 @@ class WalletCaseCatalogInvalidCursor(ValueError):
     code = "invalid_case_catalog_cursor"
 
 
+class WalletCaseIncrementalSyncUnavailable(RuntimeError):
+    """Raised when a Case has no safe forward-refresh baseline."""
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
 _CASE_CATALOG_CURSOR_VERSION = 3
+_INCREMENTAL_OVERLAP = timedelta(minutes=15)
+_ACQUISITION_PLAN_KEY = "_acquisition"
 _UNSET = object()
 _ZERO_SUMMARY: dict[str, Any] = {
     "activity_counts": {
@@ -684,27 +690,77 @@ class WalletCaseService:
             wallet_case,
             settings or get_settings(),
         )
-        bounds = resolve_wallet_acquisition_bounds(
-            time_window=payload.time_window,
-            custom_start=payload.custom_start,
-            custom_end=payload.custom_end,
-            now=queued_at,
-        )
+        if payload.mode == "incremental":
+            base_sync = self.repository.latest_usable_syncs(
+                [wallet_case.id]
+            ).get(wallet_case.id)
+            if base_sync is None:
+                raise WalletCaseIncrementalSyncUnavailable(
+                    "Build a usable bounded snapshot before requesting an incremental refresh."
+                )
+            if set(_json_list(base_sync.requested_surfaces_json)) != set(
+                payload.surfaces
+            ):
+                raise WalletCaseIncrementalSyncUnavailable(
+                    "Incremental refresh surfaces must match the base snapshot."
+                )
+            base_end = _as_utc(base_sync.requested_end)
+            if queued_at <= base_end:
+                raise WalletCaseIncrementalSyncUnavailable(
+                    "The base snapshot already reaches or exceeds the current refresh time."
+                )
+            requested_start = _as_utc(base_sync.requested_start)
+            requested_end = queued_at
+            acquisition_start = max(
+                requested_start,
+                base_end - _INCREMENTAL_OVERLAP,
+            )
+            acquisition_plan = {
+                "version": 1,
+                "mode": "incremental",
+                "start_at": _isoformat(acquisition_start),
+                "end_at": _isoformat(requested_end),
+                "overlap_seconds": max(
+                    0,
+                    int((base_end - acquisition_start).total_seconds()),
+                ),
+                "base_snapshot_public_id": base_sync.public_id,
+            }
+            stored_time_window = "custom"
+        else:
+            bounds = resolve_wallet_acquisition_bounds(
+                time_window=payload.time_window,
+                custom_start=payload.custom_start,
+                custom_end=payload.custom_end,
+                now=queued_at,
+            )
+            requested_start = bounds.start
+            requested_end = bounds.end
+            acquisition_plan = {
+                "version": 1,
+                "mode": "bounded",
+                "start_at": _isoformat(bounds.start),
+                "end_at": _isoformat(bounds.end),
+                "overlap_seconds": 0,
+                "base_snapshot_public_id": None,
+            }
+            stored_time_window = payload.time_window
         expected_data_mode = _ENVIRONMENT_DATA_MODE[wallet_case.data_environment]
         coverage = _coverage_record(
             {"requested_surfaces": payload.surfaces, "data_mode": expected_data_mode},
-            start_at=bounds.start,
-            end_at=bounds.end,
+            start_at=requested_start,
+            end_at=requested_end,
             state="queued",
             requested_surfaces=payload.surfaces,
+            acquisition_plan=acquisition_plan,
         )
         case_sync = CaseSync(
             case=wallet_case,
-            time_window=payload.time_window,
+            time_window=stored_time_window,
             data_mode=expected_data_mode,
             provider=_queued_provider(ingestion_settings),
-            requested_start=bounds.start,
-            requested_end=bounds.end,
+            requested_start=requested_start,
+            requested_end=requested_end,
             requested_surfaces_json=_json_dumps(payload.surfaces),
             state="queued",
             stage="queued",
@@ -1098,6 +1154,7 @@ class WalletCaseService:
     ) -> dict[str, Any]:
         if case_public_id is None:
             case_public_id = case_sync.case.public_id
+        acquisition_plan = _sync_acquisition_plan(case_sync)
         coverage = _stored_coverage(case_sync)
         summary = _stored_summary(case_sync)
         limitations = _limitations_for_sync(case_sync, coverage)
@@ -1156,10 +1213,17 @@ class WalletCaseService:
             "provider": case_sync.provider,
             "data_mode": case_sync.data_mode,
             "requested_scope": {
+                "mode": acquisition_plan["mode"],
                 "time_window": case_sync.time_window,
                 "start_at": _isoformat(case_sync.requested_start),
                 "end_at": _isoformat(case_sync.requested_end),
                 "surfaces": _json_list(case_sync.requested_surfaces_json),
+                "acquisition_start_at": acquisition_plan["start_at"],
+                "acquisition_end_at": acquisition_plan["end_at"],
+                "overlap_seconds": acquisition_plan["overlap_seconds"],
+                "base_snapshot_public_id": acquisition_plan[
+                    "base_snapshot_public_id"
+                ],
             },
             "coverage": coverage,
             "summary": summary,
@@ -1193,7 +1257,8 @@ def _sync_request_fingerprint(payload: WalletCaseSyncRequest) -> str:
         )
     }
     document = {
-        "contract": "wallet_case_sync_request_v1",
+        "contract": "wallet_case_sync_request_v2",
+        "mode": payload.mode,
         "time_window": payload.time_window,
         "custom_start": (
             _canonical_request_timestamp(payload.custom_start)
@@ -1271,6 +1336,7 @@ def _coverage_record(
     end_at: datetime,
     state: str,
     requested_surfaces: list[str] | None = None,
+    acquisition_plan: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     unavailable = _surface_list(run_response.get("unavailable_surfaces"))
     incomplete = _surface_list(run_response.get("incomplete_surfaces"))
@@ -1283,10 +1349,16 @@ def _coverage_record(
         coverage_state = "bounded_partial"
     else:
         coverage_state = "bounded_complete"
+    if (
+        acquisition_plan is not None
+        and acquisition_plan.get("mode") == "incremental"
+        and coverage_state == "bounded_complete"
+    ):
+        coverage_state = "bounded_partial"
     streams = _compact_coverage_streams(
         run_response.get("acquisition_streams")
     )
-    return {
+    coverage = {
         "state": coverage_state,
         "requested_start_at": _isoformat(start_at),
         "requested_end_at": _isoformat(end_at),
@@ -1300,6 +1372,9 @@ def _coverage_record(
         "streams": streams,
         "full_history_proven": False,
     }
+    if acquisition_plan is not None:
+        coverage[_ACQUISITION_PLAN_KEY] = acquisition_plan
+    return coverage
 
 
 def _summary_from_run(run_response: dict[str, Any] | None) -> dict[str, Any]:
@@ -1355,8 +1430,73 @@ def _stored_summary(case_sync: CaseSync | None) -> dict[str, Any]:
     return summary if _valid_summary(summary) else _zero_summary()
 
 
+def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
+    stored = _json_object(case_sync.coverage_summary_json).get(
+        _ACQUISITION_PLAN_KEY
+    )
+    if stored is None:
+        return {
+            "version": 1,
+            "mode": "bounded",
+            "start_at": _isoformat(case_sync.requested_start),
+            "end_at": _isoformat(case_sync.requested_end),
+            "overlap_seconds": 0,
+            "base_snapshot_public_id": None,
+        }
+    if not isinstance(stored, dict) or set(stored) != {
+        "version",
+        "mode",
+        "start_at",
+        "end_at",
+        "overlap_seconds",
+        "base_snapshot_public_id",
+    }:
+        raise ValueError("Stored Wallet Case acquisition plan is invalid.")
+    mode = stored.get("mode")
+    start_at = stored.get("start_at")
+    end_at = stored.get("end_at")
+    overlap_seconds = stored.get("overlap_seconds")
+    base_public_id = stored.get("base_snapshot_public_id")
+    if (
+        stored.get("version") != 1
+        or mode not in {"bounded", "incremental"}
+        or not isinstance(start_at, str)
+        or not isinstance(end_at, str)
+        or type(overlap_seconds) is not int
+        or overlap_seconds < 0
+        or overlap_seconds > 86400
+    ):
+        raise ValueError("Stored Wallet Case acquisition plan is invalid.")
+    try:
+        canonical_start = _canonical_request_timestamp(start_at)
+        canonical_end = _canonical_request_timestamp(end_at)
+    except ValueError as exc:
+        raise ValueError("Stored Wallet Case acquisition plan is invalid.") from exc
+    requested_start = _isoformat(case_sync.requested_start)
+    requested_end = _isoformat(case_sync.requested_end)
+    if (
+        canonical_start != start_at
+        or canonical_end != end_at
+        or canonical_start >= canonical_end
+        or end_at != requested_end
+        or canonical_start < requested_start
+    ):
+        raise ValueError("Stored Wallet Case acquisition plan is invalid.")
+    if mode == "bounded":
+        if (
+            start_at != requested_start
+            or overlap_seconds != 0
+            or base_public_id is not None
+        ):
+            raise ValueError("Stored Wallet Case acquisition plan is invalid.")
+    elif not isinstance(base_public_id, str) or len(base_public_id) != 36:
+        raise ValueError("Stored Wallet Case acquisition plan is invalid.")
+    return dict(stored)
+
+
 def _stored_coverage(case_sync: CaseSync) -> dict[str, Any]:
     coverage = _json_object(case_sync.coverage_summary_json)
+    coverage.pop(_ACQUISITION_PLAN_KEY, None)
     if not _valid_coverage(coverage, case_sync):
         return _coverage_record(
             {},
@@ -1384,6 +1524,13 @@ def _limitations_for_sync(
             "This sync covers a bounded requested interval and does not prove full wallet history.",
         )
     ]
+    if _sync_acquisition_plan(case_sync)["mode"] == "incremental":
+        limitations.append(
+            _limitation(
+                "incremental_composite_not_full_history",
+                "This snapshot composes prior usable sources with a forward overlap refresh; it does not prove complete history and its summary reflects the latest acquisition run.",
+            )
+        )
     pending = case_sync.state in {"queued", "running"}
     if pending:
         limitations.append(
@@ -1452,6 +1599,11 @@ def _limitations_for_sync(
 
 
 def _valid_coverage(value: dict[str, Any], case_sync: CaseSync) -> bool:
+    value = {
+        key: item
+        for key, item in value.items()
+        if key != _ACQUISITION_PLAN_KEY
+    }
     required = {
         "state",
         "requested_start_at",

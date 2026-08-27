@@ -8,6 +8,7 @@ import {
   activeSyncFixture,
   CASE_ID,
   IDEMPOTENCY_KEY,
+  incrementalSyncFixture,
   succeededSyncFixture,
 } from "./test/walletCaseFixtures";
 
@@ -26,6 +27,7 @@ import { WalletCaseApiError } from "./walletCaseApi";
 import { useWalletCaseSyncJob } from "./useWalletCaseSyncJob";
 
 const REQUEST: WalletCaseSyncRequest = {
+  mode: "bounded",
   time_window: "24h",
   surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
 };
@@ -139,6 +141,40 @@ describe("useWalletCaseSyncJob", () => {
     expect(apiMocks.createWalletCaseSync.mock.calls[0][2]).toBe(IDEMPOTENCY_KEY);
     expect(apiMocks.createWalletCaseSync.mock.calls[1][2]).toBe(IDEMPOTENCY_KEY);
     expect(result.current.sync?.state).toBe("queued");
+  });
+
+  it("retries an incremental failure as a fresh forward refresh", async () => {
+    const failedRefresh = incrementalSyncFixture({
+      state: "failed",
+      stage: "failed",
+      status_version: 5,
+      result: null,
+      error: {
+        code: "provider_unavailable",
+        message_safe: "Provider unavailable.",
+        retryable: true,
+      },
+      completed_at: "2026-08-09T12:02:00Z",
+    });
+    apiMocks.createWalletCaseSync.mockResolvedValue(activeSyncFixture("queued"));
+    const { result } = renderHook(() => useWalletCaseSyncJob({
+      caseId: CASE_ID,
+      initialSync: failedRefresh,
+      onTerminal: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.retry(); });
+
+    expect(apiMocks.createWalletCaseSync).toHaveBeenCalledWith(
+      CASE_ID,
+      {
+        mode: "incremental",
+        time_window: "24h",
+        surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
+      },
+      IDEMPOTENCY_KEY,
+      expect.any(AbortSignal),
+    );
   });
 
   it("uses Retry-After for reconnect backoff without converting transport loss into job failure", async () => {

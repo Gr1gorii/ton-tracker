@@ -12,6 +12,7 @@ import {
   CASE_ID,
   emptyWalletCaseFixture,
   failedSyncFixture,
+  incrementalSyncFixture,
   retryWaitSyncFixture,
   succeededSyncFixture,
   walletCaseFixture,
@@ -146,6 +147,42 @@ describe("wallet case contracts", () => {
     expect(() => parseWalletCaseSync(activeSyncFixture("queued", { stage: "retry_wait" }))).toThrow(
       /retry metadata contradicts/,
     );
+  });
+
+  it("accepts explicit incremental acquisition lineage and fails closed on contradictions", () => {
+    const incremental = incrementalSyncFixture();
+    expect(parseWalletCaseSync(incremental).requested_scope).toMatchObject({
+      mode: "incremental",
+      time_window: "custom",
+      overlap_seconds: 900,
+      base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
+    });
+    expect(() => parseWalletCaseSync({
+      ...incremental,
+      requested_scope: {
+        ...incremental.requested_scope,
+        acquisition_start_at: "2026-08-08T11:59:59Z",
+      },
+    })).toThrow(/acquisition scope/);
+    expect(() => parseWalletCaseSync({
+      ...incremental,
+      requested_scope: {
+        ...incremental.requested_scope,
+        base_snapshot_public_id: null,
+      },
+    })).toThrow(/acquisition mode/);
+    expect(() => parseWalletCaseSync({
+      ...incremental,
+      limitations: incremental.limitations.filter(
+        (item) => item.code !== "incremental_composite_not_full_history",
+      ),
+      result: {
+        ...incremental.result!,
+        limitations: incremental.result!.limitations.filter(
+          (item) => item.code !== "incremental_composite_not_full_history",
+        ),
+      },
+    })).toThrow(/composite-history limitation/);
   });
 
   it("fails closed on invalid version, polling, progress, and timestamps", () => {

@@ -86,10 +86,15 @@ export function succeededSyncFixture(
     provider: "mock_wallet_activity",
     data_mode: "mock",
     requested_scope: {
+      mode: "bounded",
       time_window: "24h",
       start_at: "2026-08-08T12:00:00Z",
       end_at: "2026-08-09T12:00:00Z",
       surfaces: [...ALL_SURFACES],
+      acquisition_start_at: "2026-08-08T12:00:00Z",
+      acquisition_end_at: "2026-08-09T12:00:00Z",
+      overlap_seconds: 0,
+      base_snapshot_public_id: null,
     },
     coverage: result.coverage,
     summary: result.summary,
@@ -102,6 +107,39 @@ export function succeededSyncFixture(
     updated_at: "2026-08-09T12:01:00Z",
     started_at: "2026-08-09T12:00:01Z",
     completed_at: "2026-08-09T12:01:00Z",
+    ...overrides,
+  };
+}
+
+export function incrementalSyncFixture(
+  overrides: Partial<WalletCaseSync> = {},
+): WalletCaseSync {
+  const bounded = succeededSyncFixture();
+  const limitations = [
+    ...bounded.limitations,
+    {
+      code: "incremental_composite_not_full_history",
+      message: "This snapshot composes a base snapshot with a forward overlap refresh.",
+    },
+  ];
+  return {
+    ...bounded,
+    requested_scope: {
+      mode: "incremental",
+      time_window: "custom",
+      start_at: bounded.requested_scope.start_at,
+      end_at: bounded.requested_scope.end_at,
+      surfaces: [...bounded.requested_scope.surfaces],
+      acquisition_start_at: "2026-08-09T11:45:00Z",
+      acquisition_end_at: bounded.requested_scope.end_at,
+      overlap_seconds: 900,
+      base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
+    },
+    limitations,
+    result: {
+      ...bounded.result!,
+      limitations,
+    },
     ...overrides,
   };
 }

@@ -1,4 +1,4 @@
-# GRAM Scope - v0.84.0 Public Release
+# GRAM Scope - v0.85.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -20,8 +20,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Permanent owner-scoped Wallet Case deletion with active-job conflict fencing,
   full case-owned ingestion/proof/report cleanup, unrelated legacy-run
   preservation, and a non-sensitive retained audit receipt.
-- Persisted, idempotent bounded sync jobs with polling, factual progress,
-  bounded retry, cooperative cancellation, lease fencing, and restart recovery.
+- Persisted, idempotent bounded and incremental sync jobs with polling, factual
+  progress, bounded retry, cooperative cancellation, lease fencing, and restart
+  recovery. Incremental refreshes acquire only a 15-minute overlap plus the
+  forward interval and retain explicit base-snapshot lineage.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -63,7 +65,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.84.0 CASE DISCOVERY`.
+- Product release label: `v0.85.0 INCREMENTAL REFRESH`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260827_0026`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -98,6 +100,11 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Guarded live wallet ingestion requires explicit real/TonAPI/live settings.
 - Demo syncs are deterministic fixtures; live syncs reject mock fallback
   evidence and network/identity mismatches before persistence.
+- Incremental sync requires the latest usable snapshot and the exact same
+  surfaces. Its public requested scope distinguishes the composed snapshot
+  interval from the narrower provider acquisition interval and names the base
+  snapshot and overlap. Incremental coverage never claims bounded-complete or
+  full-history evidence.
 - Wallet Cases are direct-loopback only in this pre-authentication slice.
   Hosted production access remains disabled until authentication derives the
   owner scope.
@@ -131,7 +138,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Activity combines only usable case syncs up to its pinned revision. Rows
   without a fully revalidated identity are intentionally not deduplicated, and
   semantic identity conflicts are published as gaps rather than guessed.
-- The compact Summary remains based on the case's latest usable run while
+- The compact Summary remains based on the latest acquisition run while
   Activity publishes a separately labelled cross-sync aggregate at an explicit
   pinned revision. The counts are not claimed to be equivalent; unified
   Summary aggregation is deferred.
@@ -171,10 +178,10 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Archive retains all Case-owned evidence until the user restores or permanently
   deletes the Case. Archived resources are intentionally unavailable to active
   Case routes and jobs until restoration; archive is not an erasure guarantee.
-- The local worker replays the whole bounded crawl after an in-flight crash;
+- The local worker replays the whole current provider acquisition after an in-flight crash;
   accepted provider pages are not yet committed as resumable checkpoints.
 - Case-sync cancellation is immediate while queued and cooperative around the
-  current monolithic bounded provider crawl while running. Evidence cancellation
+  current monolithic provider acquisition while running. Evidence cancellation
   is cooperatively polled while running; during inclusion, its wait cannot exceed
   the whole-operation child-process deadline plus the bounded terminate/kill
   grace.
@@ -195,13 +202,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.84.0`, confirm:
+Before tagging `v0.85.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.84.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.85.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the

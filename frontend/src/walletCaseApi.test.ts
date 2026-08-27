@@ -22,6 +22,7 @@ import {
   CASE_ID,
   emptyWalletCaseFixture,
   IDEMPOTENCY_KEY,
+  incrementalSyncFixture,
   succeededSyncFixture,
   SYNC_ID,
   walletCaseFixture,
@@ -359,6 +360,7 @@ describe("Wallet Case API", () => {
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
     const request = {
+      mode: "bounded" as const,
       time_window: "24h" as const,
       surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"] as const,
     };
@@ -383,6 +385,39 @@ describe("Wallet Case API", () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(queued, 201));
     await expect(createWalletCaseSync(CASE_ID, { ...request, surfaces: [...request.surfaces] }, IDEMPOTENCY_KEY))
       .rejects.toMatchObject({ status: 201 });
+  });
+
+  it("binds an incremental request to a custom acquisition response", async () => {
+    const incremental = incrementalSyncFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(incremental, 202));
+    vi.stubGlobal("fetch", fetchMock);
+    const request = {
+      mode: "incremental" as const,
+      time_window: "24h" as const,
+      surfaces: [...incremental.requested_scope.surfaces],
+    };
+
+    await expect(
+      createWalletCaseSync(CASE_ID, request, IDEMPOTENCY_KEY),
+    ).resolves.toEqual(incremental);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(request);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(activeSyncFixture("queued"), 202));
+    await expect(
+      createWalletCaseSync(CASE_ID, request, IDEMPOTENCY_KEY),
+    ).rejects.toThrow(/requested scope/);
+  });
+
+  it("rejects invalid incremental bounds before issuing a request", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createWalletCaseSync(CASE_ID, {
+      mode: "incremental",
+      time_window: "3d",
+      surfaces: ["transactions"],
+    }, IDEMPOTENCY_KEY)).rejects.toThrow(/cannot define time bounds/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("polls and cancels with strict URL identity binding", async () => {
@@ -585,7 +620,7 @@ describe("Wallet Case API", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const conflict = await createWalletCaseSync(CASE_ID, {
-      time_window: "24h", surfaces: ["transactions"],
+      mode: "bounded", time_window: "24h", surfaces: ["transactions"],
     }, IDEMPOTENCY_KEY).catch((error: unknown) => error);
     expect(conflict).toBeInstanceOf(WalletCaseApiError);
     expect(conflict).toMatchObject({

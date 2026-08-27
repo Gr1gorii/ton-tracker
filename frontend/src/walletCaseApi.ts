@@ -474,6 +474,7 @@ export async function createWalletCaseSync(
 ): Promise<WalletCaseSync> {
   assertPublicId(caseId, "Wallet Case id");
   assertPublicId(idempotencyKey, "Wallet Case sync idempotency key");
+  assertWalletCaseSyncRequest(request);
   const response = await fetch(
     `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/syncs`,
     {
@@ -490,7 +491,9 @@ export async function createWalletCaseSync(
   if (response.status !== 202) {
     throw await walletCaseResponseError(response, "Wallet Case sync failed");
   }
-  return bindSyncToRequest(await response.json(), caseId);
+  const sync = bindSyncToRequest(await response.json(), caseId);
+  assertSyncMatchesRequest(sync, request);
+  return sync;
 }
 
 export async function getWalletCaseSync(
@@ -541,6 +544,77 @@ function bindSyncToRequest(value: unknown, caseId: string): WalletCaseSync {
     throw new Error("Wallet Case sync response does not match the requested case id");
   }
   return sync;
+}
+
+function assertWalletCaseSyncRequest(request: WalletCaseSyncRequest): void {
+  const allowedSurfaces = new Set([
+    "transfers",
+    "transactions",
+    "swaps",
+    "balances",
+    "jettons",
+  ]);
+  if (
+    (request.mode !== "bounded" && request.mode !== "incremental") ||
+    request.surfaces.length === 0 ||
+    new Set(request.surfaces).size !== request.surfaces.length ||
+    request.surfaces.some((surface) => !allowedSurfaces.has(surface))
+  ) {
+    throw new Error("Wallet Case sync request is invalid");
+  }
+  if (request.mode === "incremental") {
+    if (
+      request.time_window !== "24h" ||
+      request.custom_start !== undefined ||
+      request.custom_end !== undefined
+    ) {
+      throw new Error("Incremental Wallet Case refresh cannot define time bounds");
+    }
+    return;
+  }
+  if (request.time_window === "custom") {
+    const start = parseRfc3339Instant(request.custom_start);
+    const end = parseRfc3339Instant(request.custom_end);
+    if (start === null || end === null || start >= end) {
+      throw new Error("Custom Wallet Case sync bounds are invalid");
+    }
+  } else if (request.custom_start !== undefined || request.custom_end !== undefined) {
+    throw new Error("Wallet Case sync bounds require a custom window");
+  }
+}
+
+function assertSyncMatchesRequest(
+  sync: WalletCaseSync,
+  request: WalletCaseSyncRequest,
+): void {
+  if (
+    sync.requested_scope.mode !== request.mode ||
+    JSON.stringify(sync.requested_scope.surfaces) !== JSON.stringify(request.surfaces)
+  ) {
+    throw new Error("Wallet Case sync response does not match the requested scope");
+  }
+  if (request.mode === "incremental") {
+    if (
+      sync.requested_scope.time_window !== "custom" ||
+      sync.requested_scope.base_snapshot_public_id === null
+    ) {
+      throw new Error("Wallet Case incremental response is missing its base snapshot");
+    }
+    return;
+  }
+  if (sync.requested_scope.time_window !== request.time_window) {
+    throw new Error("Wallet Case sync response does not match the requested window");
+  }
+  if (request.time_window === "custom") {
+    const requestedStart = parseRfc3339Instant(request.custom_start);
+    const requestedEnd = parseRfc3339Instant(request.custom_end);
+    if (
+      requestedStart !== parseRfc3339Instant(sync.requested_scope.start_at) ||
+      requestedEnd !== parseRfc3339Instant(sync.requested_scope.end_at)
+    ) {
+      throw new Error("Wallet Case sync response does not match the requested bounds");
+    }
+  }
 }
 
 function assertPublicId(value: string, label: string): void {

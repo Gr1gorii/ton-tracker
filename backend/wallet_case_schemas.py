@@ -60,6 +60,7 @@ class WalletCaseCreateRequest(_StrictModel):
 
 
 class WalletCaseSyncRequest(_StrictModel):
+    mode: Literal["bounded", "incremental"] = "bounded"
     time_window: Literal["24h", "3d", "7d", "custom"] = "24h"
     custom_start: str | None = None
     custom_end: str | None = None
@@ -85,6 +86,16 @@ class WalletCaseSyncRequest(_StrictModel):
 
     @model_validator(mode="after")
     def _validate_window_scope(self):
+        if self.mode == "incremental":
+            if self.time_window != "24h":
+                raise ValueError(
+                    "incremental sync uses the latest snapshot instead of a time_window"
+                )
+            if self.custom_start is not None or self.custom_end is not None:
+                raise ValueError(
+                    "incremental sync does not accept custom bounds"
+                )
+            return self
         if self.time_window == "custom":
             if not self.custom_start or not self.custom_end:
                 raise ValueError(
@@ -154,10 +165,29 @@ class WalletCaseSyncProgress(_StrictModel):
 
 
 class WalletCaseRequestedScope(_StrictModel):
+    mode: Literal["bounded", "incremental"]
     time_window: Literal["24h", "3d", "7d", "custom"]
     start_at: str
     end_at: str
     surfaces: list[WalletIngestionSurface]
+    acquisition_start_at: str
+    acquisition_end_at: str
+    overlap_seconds: int = Field(ge=0, le=86400)
+    base_snapshot_public_id: CanonicalPublicId | None = None
+
+    @model_validator(mode="after")
+    def _validate_acquisition_scope(self):
+        if self.mode == "bounded":
+            if (
+                self.acquisition_start_at != self.start_at
+                or self.acquisition_end_at != self.end_at
+                or self.overlap_seconds != 0
+                or self.base_snapshot_public_id is not None
+            ):
+                raise ValueError("bounded sync acquisition must equal its requested scope")
+        elif self.base_snapshot_public_id is None:
+            raise ValueError("incremental sync requires a base snapshot")
+        return self
 
 
 class WalletCaseCoverageStream(_StrictModel):

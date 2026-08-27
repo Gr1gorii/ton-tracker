@@ -293,9 +293,11 @@ export function useWalletCaseSyncJob({
     const current = syncRef.current;
     if (!current || isActiveWalletCaseSync(current)) return;
     pendingStartRef.current = null;
+    const incremental = current.requested_scope.mode === "incremental";
     await start({
-      time_window: current.requested_scope.time_window,
-      ...(current.requested_scope.time_window === "custom"
+      mode: current.requested_scope.mode,
+      time_window: incremental ? "24h" : current.requested_scope.time_window,
+      ...(!incremental && current.requested_scope.time_window === "custom"
         ? {
             custom_start: current.requested_scope.start_at,
             custom_end: current.requested_scope.end_at,

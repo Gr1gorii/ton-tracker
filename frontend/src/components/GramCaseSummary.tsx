@@ -18,7 +18,8 @@ import {
 import { useWalletCaseSyncJob } from "../useWalletCaseSyncJob";
 import CaseSyncPanel from "./CaseSyncPanel";
 
-const DEFAULT_SYNC_REQUEST: WalletCaseSyncRequest = {
+const INITIAL_SYNC_REQUEST: WalletCaseSyncRequest = {
+  mode: "bounded",
   time_window: "24h",
   surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
 };
@@ -87,13 +88,20 @@ export default function GramCaseSummary({
   const summaryUnavailable = result === null || limitations.some(
     (item) => item.code === "summary_unavailable",
   );
+  const defaultSyncRequest: WalletCaseSyncRequest = snapshot
+    ? {
+        mode: "incremental",
+        time_window: "24h",
+        surfaces: [...snapshot.requested_scope.surfaces],
+      }
+    : INITIAL_SYNC_REQUEST;
 
   return (
     <div className="case-summary-page">
       <CaseSyncPanel
         controller={syncController}
         hasSnapshot={snapshot !== null}
-        defaultRequest={DEFAULT_SYNC_REQUEST}
+        defaultRequest={defaultSyncRequest}
       />
 
       {refreshError && (
@@ -125,9 +133,17 @@ export default function GramCaseSummary({
             <dl className="case-definition-list">
               <div><dt>Snapshot ID</dt><dd><code>{snapshot.public_id}</code></dd></div>
               <div><dt>Provider</dt><dd>{snapshot.provider}</dd></div>
-              <div><dt>Requested window</dt><dd>{snapshot.requested_scope.time_window}</dd></div>
-              <div><dt>Interval start</dt><dd>{formatDate(snapshot.requested_scope.start_at)}</dd></div>
-              <div><dt>Interval end</dt><dd>{formatDate(snapshot.requested_scope.end_at)}</dd></div>
+              <div><dt>Refresh mode</dt><dd>{snapshot.requested_scope.mode === "incremental" ? "Incremental overlap" : "Bounded interval"}</dd></div>
+              <div><dt>Snapshot start</dt><dd>{formatDate(snapshot.requested_scope.start_at)}</dd></div>
+              <div><dt>Snapshot end</dt><dd>{formatDate(snapshot.requested_scope.end_at)}</dd></div>
+              <div><dt>Acquisition start</dt><dd>{formatDate(snapshot.requested_scope.acquisition_start_at)}</dd></div>
+              <div><dt>Acquisition end</dt><dd>{formatDate(snapshot.requested_scope.acquisition_end_at)}</dd></div>
+              {snapshot.requested_scope.mode === "incremental" && (
+                <>
+                  <div><dt>Safety overlap</dt><dd>{Math.round(snapshot.requested_scope.overlap_seconds / 60)} minutes</dd></div>
+                  <div><dt>Base snapshot</dt><dd><code>{snapshot.requested_scope.base_snapshot_public_id}</code></dd></div>
+                </>
+              )}
               <div><dt>Surfaces</dt><dd>{snapshot.requested_scope.surfaces.join(", ")}</dd></div>
               <div><dt>Result note</dt><dd>{result.message}</dd></div>
             </dl>

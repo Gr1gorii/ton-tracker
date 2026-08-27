@@ -8,12 +8,14 @@ import type { WalletCaseSyncJobController } from "../useWalletCaseSyncJob";
 import {
   activeSyncFixture,
   failedSyncFixture,
+  incrementalSyncFixture,
   retryWaitSyncFixture,
   succeededSyncFixture,
 } from "../test/walletCaseFixtures";
 import CaseSyncPanel from "./CaseSyncPanel";
 
 const DEFAULT_REQUEST = {
+  mode: "bounded" as const,
   time_window: "24h" as const,
   surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"] as const,
 };
@@ -117,7 +119,47 @@ describe("CaseSyncPanel", () => {
     />);
 
     expect(screen.queryByRole("button", { name: "Cancel sync" })).toBeNull();
-    expect(screen.getByText(/bounded provider crawl returns/)).toBeTruthy();
+    expect(screen.getByText(/provider acquisition returns/)).toBeTruthy();
+  });
+
+  it("labels forward acquisition and starts the next incremental refresh", async () => {
+    const controller = controllerFixture({ sync: incrementalSyncFixture() });
+    const user = userEvent.setup();
+    const request = {
+      mode: "incremental" as const,
+      time_window: "24h" as const,
+      surfaces: ["transactions"] as const,
+    };
+    render(<CaseSyncPanel
+      controller={controller}
+      hasSnapshot
+      defaultRequest={{ ...request, surfaces: [...request.surfaces] }}
+    />);
+
+    await user.click(screen.getByRole("button", { name: "Refresh incrementally" }));
+    expect(controller.start).toHaveBeenCalledWith({
+      ...request,
+      surfaces: ["transactions"],
+    });
+    expect(screen.getByText(/next refresh starts 15 minutes before/i)).toBeTruthy();
+
+    cleanup();
+    render(<CaseSyncPanel
+      controller={controllerFixture({
+        sync: {
+          ...incrementalSyncFixture(),
+          state: "running",
+          stage: "ingesting",
+          result: null,
+          error: null,
+          completed_at: null,
+        },
+        transportState: "polling",
+      })}
+      hasSnapshot
+      defaultRequest={{ ...request, surfaces: [...request.surfaces] }}
+    />);
+    expect(screen.getByRole("heading", { name: "Acquiring forward overlap" })).toBeTruthy();
   });
 
   it("announces safe terminal errors and retries only the same scope", async () => {

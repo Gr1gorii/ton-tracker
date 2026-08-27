@@ -532,6 +532,81 @@ def test_overlapping_exact_transactions_deduplicate_with_sanitized_detail(activi
     assert "raw_json" not in detail.text
 
 
+def test_incremental_snapshot_composes_base_with_its_actual_acquisition_period(
+    activity_client,
+):
+    base_end = START + timedelta(days=1)
+    refresh_start = base_end - timedelta(minutes=15)
+    refresh_end = base_end + timedelta(hours=6)
+    with app.state.activity_test_sessions() as session:
+        wallet_case = _case(session)
+        base_run, base_sync = _run_and_sync(
+            session,
+            wallet_case,
+            start=START,
+            end=base_end,
+        )
+        base_run.transactions.append(
+            _transaction(
+                base_run,
+                tx_hash="a1" * 32,
+                logical_time="101",
+                timestamp=START + timedelta(hours=1),
+            )
+        )
+        refresh_run, refresh_sync = _run_and_sync(
+            session,
+            wallet_case,
+            start=refresh_start,
+            end=refresh_end,
+            coverage_state="bounded_partial",
+        )
+        refresh_run.transactions.append(
+            _transaction(
+                refresh_run,
+                tx_hash="a2" * 32,
+                logical_time="102",
+                timestamp=base_end + timedelta(hours=1),
+            )
+        )
+        refresh_sync.requested_start = START
+        refresh_sync.coverage_summary_json = json.dumps(
+            {
+                "state": "bounded_partial",
+                "requested_start_at": _iso(START),
+                "requested_end_at": _iso(refresh_end),
+                "requested_surfaces": ["transactions"],
+                "unavailable_surfaces": [],
+                "incomplete_surfaces": [],
+                "streams": [],
+                "full_history_proven": False,
+                "_acquisition": {
+                    "version": 1,
+                    "mode": "incremental",
+                    "start_at": _iso(refresh_start),
+                    "end_at": _iso(refresh_end),
+                    "overlap_seconds": 900,
+                    "base_snapshot_public_id": base_sync.public_id,
+                },
+            }
+        )
+        case_id, snapshot_id = wallet_case.public_id, refresh_sync.public_id
+        session.commit()
+
+    response = activity_client.get(
+        f"/api/v1/cases/{case_id}/activity?snapshot={snapshot_id}"
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["logical_time"] for item in body["items"]] == ["102", "101"]
+    assert body["aggregate"]["source_sync_count"] == 2
+    assert body["snapshot"]["public_id"] == snapshot_id
+    assert body["snapshot"]["requested_period"] == {
+        "start_at": _iso(START),
+        "end_at": _iso(refresh_end),
+    }
+
+
 def test_same_identity_with_changed_semantics_is_omitted_fail_closed(activity_client):
     with app.state.activity_test_sessions() as session:
         wallet_case = _case(session)
