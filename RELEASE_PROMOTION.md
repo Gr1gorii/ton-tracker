@@ -1,8 +1,8 @@
-# GRAM Scope — v0.82.0 Promotion Checklist
+# GRAM Scope — v0.83.0 Promotion Checklist
 
-Current promotion gates for the Wallet Case library:
+Current promotion gates for reversible Wallet Case archival:
 
-- Product label is `v0.82.0 PAGED CASE LIBRARY`; backend API version stays
+- Product label is `v0.83.0 CASE ARCHIVE`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260827_0026` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -103,10 +103,20 @@ Current promotion gates for the Wallet Case library:
   the version exactly once, returns safe structured conflict detail for a stale
   editor, and cannot mutate canonical identity or revive an archived Case.
 - GET `/api/v1/cases` remains owner-scoped and accepts one canonical limit from
-  1 through 50 plus one optional signed continuation. The cursor binds the
-  owner, frozen event cutoff, and keyset position. The `/cases` UI appends
-  bounded pages, rejects duplicate, overlapping, contradictory, or stalled
-  continuations, aborts obsolete reads, and preserves loaded pages on failure.
+  1 through 50, one explicit `active|archived` state, and one optional signed
+  continuation. The cursor binds the owner, lifecycle state, frozen event
+  cutoff, and keyset position. The `/cases` UI appends bounded pages, rejects
+  duplicate, overlapping, cross-state, contradictory, or stalled continuations,
+  aborts obsolete reads, and preserves loaded pages on failure.
+- POST archive requires the local owner scope and no queued/running CaseSync or
+  Evidence job. It appends an invisible catalog event and retains every
+  case-owned snapshot, normalized row, proof artifact, note, and Report revision.
+  POST restore appends a visible event and returns the Case as the newest active
+  catalog entry. Both transitions are response-bound and idempotent.
+- The workspace distinguishes reversible archive from permanent typed-confirmation
+  deletion. The Library exposes accessible Active and Archived tabs, truthful
+  state-specific empty/error/loading views, paged archive history, stale-snapshot
+  guards, and restore only after a strictly validated case-bound response.
 - Report output always includes assurance, coverage, gaps, limitations,
   unverified claims, Activity/Evidence revision digests, and fixed false
   boundaries for complete history, cost basis, PnL, raw payload inclusion, and
@@ -125,7 +135,7 @@ Current promotion gates for the Wallet Case library:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.82.0 must not be promoted as a hosted Wallet Case release.
+  v0.83.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 
