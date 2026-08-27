@@ -307,6 +307,7 @@ describe("Wallet Case application flow", () => {
       });
       expect(syncCall).toBeTruthy();
       expect(JSON.parse(String(syncCall?.[1]?.body))).toEqual({
+        mode: "bounded",
         time_window: "24h",
         surfaces: [...ALL_SURFACES],
       });

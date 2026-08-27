@@ -25,7 +25,9 @@ function stageLabel(sync: WalletCaseSync): string {
   const labels: Record<string, string> = {
     queued: "Queued safely",
     validating: "Validating case scope",
-    ingesting: "Acquiring bounded evidence",
+    ingesting: sync.requested_scope.mode === "incremental"
+      ? "Acquiring forward overlap"
+      : "Acquiring bounded evidence",
     finalizing: "Publishing the snapshot",
     cancelling: "Cancellation requested",
     starting: "Preparing bounded sync",
@@ -61,6 +63,8 @@ export default function CaseSyncPanel({
   const restoreCancelFocusRef = useRef(false);
   const active = isActiveWalletCaseSync(sync);
   const busy = transportState === "starting" || transportState === "cancelling";
+  const nextIsIncremental = defaultRequest.mode === "incremental";
+  const actionLabel = nextIsIncremental ? "Refresh incrementally" : "Sync last 24 hours";
 
   useEffect(() => {
     restoreCancelFocusRef.current = false;
@@ -81,7 +85,7 @@ export default function CaseSyncPanel({
       <section className="case-sync-panel" aria-labelledby="case-sync-title">
         <div className="case-sync-panel-heading">
           <div>
-            <span className="eyebrow">Bounded synchronization</span>
+            <span className="eyebrow">{nextIsIncremental ? "Incremental refresh" : "Bounded synchronization"}</span>
             <h2 id="case-sync-title">Build the first usable snapshot</h2>
             <p>Fetch the selected 24-hour interval. This does not claim complete wallet history.</p>
           </div>
@@ -96,7 +100,7 @@ export default function CaseSyncPanel({
             ) : (
               <ArrowClockwise size={18} />
             )}
-            {transportState === "starting" ? "Starting safely…" : "Sync last 24 hours"}
+            {transportState === "starting" ? "Starting safely…" : actionLabel}
           </button>
         </div>
         {transportError && (
@@ -119,12 +123,15 @@ export default function CaseSyncPanel({
   const failedMessage = sync.error?.message_safe ?? (
     sync.state === "cancelled" ? "This synchronization was cancelled safely." : null
   );
+  const displayedMode = active || isTerminalFailure(sync)
+    ? sync.requested_scope.mode
+    : defaultRequest.mode;
 
   return (
     <section className={`case-sync-panel is-${sync.state}`} aria-labelledby="case-sync-title">
       <div className="case-sync-panel-heading">
         <div>
-          <span className="eyebrow">Bounded synchronization</span>
+          <span className="eyebrow">{displayedMode === "incremental" ? "Incremental refresh" : "Bounded synchronization"}</span>
           <h2 id="case-sync-title">{stageLabel(sync)}</h2>
           <p>{sync.message}</p>
         </div>
@@ -140,7 +147,7 @@ export default function CaseSyncPanel({
             ) : (
               <ArrowClockwise size={18} />
             )}
-            {transportState === "starting" ? "Starting safely…" : "Sync last 24 hours"}
+            {transportState === "starting" ? "Starting safely…" : actionLabel}
           </button>
         )}
       </div>
@@ -182,6 +189,13 @@ export default function CaseSyncPanel({
         </div>
       )}
 
+      {!active && !isTerminalFailure(sync) && hasSnapshot && nextIsIncremental && (
+        <div className="case-sync-message is-snapshot">
+          <ArrowClockwise size={19} />
+          <span>The next refresh starts 15 minutes before this snapshot ends, then acquires only the forward interval. The composed snapshot still does not prove full wallet history.</span>
+        </div>
+      )}
+
       {transportError && (
         <div
           className={`case-sync-message ${active ? "is-waiting" : "is-error"}`}
@@ -212,7 +226,7 @@ export default function CaseSyncPanel({
         <div className="case-sync-message is-waiting" role="status" aria-live="polite">
           <StopCircle size={19} />
           <span>
-            Cancellation requested. The server will stop safely after the current bounded provider crawl returns.
+            Cancellation requested. The server will stop safely after the current provider acquisition returns.
           </span>
         </div>
       )}
@@ -231,7 +245,7 @@ export default function CaseSyncPanel({
         )}
         {active && !sync.cancel_requested && confirmingCancel && (
           <div className="case-cancel-confirm" role="group" aria-label="Confirm sync cancellation">
-            <p>Stop this job? The current bounded provider crawl will return safely first.</p>
+            <p>Stop this job? The current provider acquisition will return safely first.</p>
             <button
               ref={keepSyncingRef}
               type="button"
@@ -265,7 +279,11 @@ export default function CaseSyncPanel({
             ) : (
               <ArrowClockwise size={17} />
             )}
-            {transportState === "starting" ? "Starting safely…" : "Retry same scope"}
+            {transportState === "starting"
+              ? "Starting safely…"
+              : sync.requested_scope.mode === "incremental"
+                ? "Retry refresh"
+                : "Retry same scope"}
           </button>
         )}
       </div>

@@ -70,9 +70,35 @@ describe("GramCaseSummary", () => {
     await user.click(screen.getByRole("button", { name: "Sync last 24 hours" }));
 
     expect(controller.start).toHaveBeenCalledWith({
+      mode: "bounded",
       time_window: "24h",
       surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
     });
+  });
+
+  it("refreshes a usable snapshot incrementally with its exact surfaces", async () => {
+    const controller = controllerFixture({ sync: succeededSyncFixture() });
+    mocks.useWalletCaseSyncJob.mockReturnValue(controller);
+    const user = userEvent.setup();
+    const snapshot = succeededSyncFixture({
+      requested_scope: {
+        ...succeededSyncFixture().requested_scope,
+        surfaces: ["transactions", "balances"],
+      },
+    });
+    renderSummary(walletCaseFixture({
+      latestAttempt: snapshot,
+      currentSnapshot: snapshot,
+    }));
+
+    await user.click(screen.getByRole("button", { name: "Refresh incrementally" }));
+
+    expect(controller.start).toHaveBeenCalledWith({
+      mode: "incremental",
+      time_window: "24h",
+      surfaces: ["transactions", "balances"],
+    });
+    expect(screen.getByText(/next refresh starts 15 minutes before/i)).toBeTruthy();
   });
 
   it("keeps the previous usable snapshot visible while a newer job runs", async () => {
