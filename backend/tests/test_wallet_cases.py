@@ -144,6 +144,12 @@ def _sync_case(
     return completed.json()
 
 
+def _parse_utc(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(
+        timezone.utc
+    )
+
+
 def _database_counts() -> tuple[int, int, int]:
     engine = app.state.wallet_case_test_engine
     with Session(engine) as session:
@@ -1198,6 +1204,7 @@ def test_demo_case_sync_links_legacy_run_and_restores_summary(client):
     assert sync["provider"] == "mock_wallet_activity"
     assert sync["data_mode"] == "mock"
     assert sync["requested_scope"]["time_window"] == "24h"
+    assert sync["requested_scope"]["mode"] == "bounded"
     assert sync["requested_scope"]["surfaces"] == [
         "transfers",
         "transactions",
@@ -1207,6 +1214,14 @@ def test_demo_case_sync_links_legacy_run_and_restores_summary(client):
     ]
     assert sync["requested_scope"]["start_at"].endswith("Z")
     assert sync["requested_scope"]["end_at"].endswith("Z")
+    assert sync["requested_scope"]["acquisition_start_at"] == sync[
+        "requested_scope"
+    ]["start_at"]
+    assert sync["requested_scope"]["acquisition_end_at"] == sync[
+        "requested_scope"
+    ]["end_at"]
+    assert sync["requested_scope"]["overlap_seconds"] == 0
+    assert sync["requested_scope"]["base_snapshot_public_id"] is None
     assert sync["coverage"] == {
         "state": "unknown",
         "requested_start_at": sync["requested_scope"]["start_at"],
@@ -1638,6 +1653,148 @@ def test_sync_enqueue_is_durable_idempotent_and_globally_pollable(client):
         "attempt_count",
     ):
         assert internal_name not in serialized_public_payloads
+
+
+def test_incremental_sync_requires_a_usable_matching_base_snapshot(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    without_base = client.post(
+        f"/api/v1/cases/{case_id}/syncs",
+        headers={"Idempotency-Key": str(uuid4())},
+        json={
+            "mode": "incremental",
+            "surfaces": ["transactions"],
+        },
+    )
+    assert without_base.status_code == 409
+    assert without_base.json()["detail"] == {
+        "code": "incremental_sync_unavailable",
+        "message_safe": (
+            "Build a usable bounded snapshot before requesting an incremental "
+            "refresh."
+        ),
+        "retryable": False,
+    }
+    assert _database_counts() == (1, 0, 0)
+
+    _sync_case(client, case_id, surfaces=["transactions"])
+    mismatched = client.post(
+        f"/api/v1/cases/{case_id}/syncs",
+        headers={"Idempotency-Key": str(uuid4())},
+        json={
+            "mode": "incremental",
+            "surfaces": ["balances"],
+        },
+    )
+    assert mismatched.status_code == 409
+    assert mismatched.json()["detail"] == {
+        "code": "incremental_sync_unavailable",
+        "message_safe": (
+            "Incremental refresh surfaces must match the base snapshot."
+        ),
+        "retryable": False,
+    }
+    assert _database_counts() == (1, 1, 1)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "mode": "incremental",
+            "time_window": "3d",
+            "surfaces": ["transactions"],
+        },
+        {
+            "mode": "incremental",
+            "time_window": "24h",
+            "custom_start": "2026-08-01T00:00:00Z",
+            "custom_end": "2026-08-02T00:00:00Z",
+            "surfaces": ["transactions"],
+        },
+    ],
+)
+def test_incremental_sync_rejects_caller_defined_time_bounds(client, payload):
+    case_id = _create_case(client)["case"]["public_id"]
+    response = client.post(
+        f"/api/v1/cases/{case_id}/syncs",
+        headers={"Idempotency-Key": str(uuid4())},
+        json=payload,
+    )
+    assert response.status_code == 422
+    assert _database_counts() == (1, 0, 0)
+
+
+def test_incremental_sync_acquires_only_forward_overlap_and_keeps_lineage(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    base = _sync_case(client, case_id, surfaces=["transactions"])
+    seen_payloads = []
+
+    def recording_builder(payload, *args, **kwargs):
+        seen_payloads.append(payload)
+        return build_wallet_ingestion_run(payload, *args, **kwargs)
+
+    queued = client.post(
+        f"/api/v1/cases/{case_id}/syncs",
+        headers={"Idempotency-Key": str(uuid4())},
+        json={
+            "mode": "incremental",
+            "surfaces": ["transactions"],
+        },
+    )
+    assert queued.status_code == 202, queued.text
+    scope = queued.json()["requested_scope"]
+    assert scope["mode"] == "incremental"
+    assert scope["time_window"] == "custom"
+    assert scope["start_at"] == base["requested_scope"]["start_at"]
+    assert scope["base_snapshot_public_id"] == base["public_id"]
+    assert scope["overlap_seconds"] == 900
+    assert scope["acquisition_end_at"] == scope["end_at"]
+    assert _parse_utc(scope["acquisition_start_at"]) == (
+        _parse_utc(base["requested_scope"]["end_at"])
+        - timedelta(minutes=15)
+    )
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=recording_builder,
+    )
+    assert worker.run_once() is True
+    assert len(seen_payloads) == 1
+    acquisition = seen_payloads[0]
+    assert acquisition.time_window == "custom"
+    assert _parse_utc(acquisition.custom_start) == _parse_utc(
+        scope["acquisition_start_at"]
+    )
+    assert _parse_utc(acquisition.custom_end) == _parse_utc(
+        scope["acquisition_end_at"]
+    )
+
+    completed = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{queued.json()['public_id']}"
+    )
+    assert completed.status_code == 200, completed.text
+    body = completed.json()
+    assert body["state"] == "succeeded"
+    assert body["coverage"]["state"] == "unknown"
+    assert "_acquisition" not in json.dumps(body)
+    assert "incremental_composite_not_full_history" in {
+        item["code"] for item in body["limitations"]
+    }
+
+    with Session(app.state.wallet_case_test_engine) as session:
+        stored = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == body["public_id"])
+        )
+        assert stored is not None
+        persisted_coverage = json.loads(stored.coverage_summary_json)
+        assert persisted_coverage["_acquisition"] == {
+            "version": 1,
+            "mode": "incremental",
+            "start_at": scope["acquisition_start_at"],
+            "end_at": scope["acquisition_end_at"],
+            "overlap_seconds": 900,
+            "base_snapshot_public_id": base["public_id"],
+        }
 
 
 def test_custom_idempotency_fingerprint_canonicalizes_equivalent_utc_instants(
