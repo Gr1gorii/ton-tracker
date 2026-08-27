@@ -16,6 +16,11 @@ vi.mock("../walletCaseApi", () => ({
 const listMock = vi.mocked(api.listWalletCases);
 const restoreMock = vi.mocked(api.restoreWalletCase);
 const SECOND_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
+const EMPTY_FILTERS = {
+  query: null,
+  network: null,
+  data_environment: null,
+} as const;
 
 beforeEach(() => {
   listMock.mockReset();
@@ -36,6 +41,7 @@ describe("GramCaseLibrary", () => {
       updated_at: "2026-08-08T10:00:00Z",
     });
     listMock.mockResolvedValue({
+      ...EMPTY_FILTERS,
       cases: [first, second], limit: 12, state: "active", truncated: false, next_cursor: null,
     });
     const onOpenCase = vi.fn();
@@ -48,11 +54,17 @@ describe("GramCaseLibrary", () => {
     expect(screen.getByText("Not synchronized")).toBeTruthy();
     await userEvent.setup().click(screen.getByRole("button", { name: "Open Case Treasury" }));
     expect(onOpenCase).toHaveBeenCalledWith(first.public_id);
-    expect(listMock).toHaveBeenCalledWith(12, "active", null, expect.any(AbortSignal));
+    expect(listMock).toHaveBeenCalledWith({
+      limit: 12,
+      state: "active",
+      cursor: null,
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("offers Case creation from a truthful empty state", async () => {
     listMock.mockResolvedValue({
+      ...EMPTY_FILTERS,
       cases: [], limit: 12, state: "active", truncated: false, next_cursor: null,
     });
     const onCreateCase = vi.fn();
@@ -67,6 +79,7 @@ describe("GramCaseLibrary", () => {
     listMock
       .mockRejectedValueOnce(new Error("Local storage is starting."))
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [], limit: 12, state: "active", truncated: false, next_cursor: null,
       });
     render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
@@ -88,11 +101,13 @@ describe("GramCaseLibrary", () => {
     let expansionSignal: AbortSignal | undefined;
     listMock
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [walletCase], limit: 12, state: "active", truncated: true, next_cursor: "page.two",
       })
-      .mockImplementationOnce(async (_limit, _state, _cursor, signal) => {
-        expansionSignal = signal;
+      .mockImplementationOnce(async (request = {}) => {
+        expansionSignal = request.signal;
         return {
+          ...EMPTY_FILTERS,
           cases: [second], limit: 12, state: "active", truncated: false, next_cursor: null,
         };
       });
@@ -103,9 +118,11 @@ describe("GramCaseLibrary", () => {
     expect(await screen.findByRole("heading", { name: "Operations" })).toBeTruthy();
     expect(screen.getByText("2 Cases")).toBeTruthy();
     expect(screen.getByText("End of this Case catalog snapshot.")).toBeTruthy();
-    expect(listMock.mock.calls[1]?.[0]).toBe(12);
-    expect(listMock.mock.calls[1]?.[1]).toBe("active");
-    expect(listMock.mock.calls[1]?.[2]).toBe("page.two");
+    expect(listMock.mock.calls[1]?.[0]).toMatchObject({
+      limit: 12,
+      state: "active",
+      cursor: "page.two",
+    });
     view.unmount();
     await waitFor(() => expect(expansionSignal?.aborted).toBe(true));
   });
@@ -114,9 +131,11 @@ describe("GramCaseLibrary", () => {
     const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
     listMock
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [walletCase], limit: 12, state: "active", truncated: true, next_cursor: "page.two",
       })
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [walletCase], limit: 12, state: "active", truncated: false, next_cursor: null,
       });
     render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
@@ -141,12 +160,15 @@ describe("GramCaseLibrary", () => {
     });
     listMock
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [active], limit: 12, state: "active", truncated: false, next_cursor: null,
       })
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [archived], limit: 12, state: "archived", truncated: false, next_cursor: null,
       })
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [], limit: 12, state: "archived", truncated: false, next_cursor: null,
       });
     restoreMock.mockResolvedValueOnce({ ...archived, archived_at: null });
@@ -167,7 +189,7 @@ describe("GramCaseLibrary", () => {
       archived.public_id,
       expect.any(AbortSignal),
     );
-    expect(listMock.mock.calls.map((call) => call[1])).toEqual([
+    expect(listMock.mock.calls.map((call) => call[0]?.state)).toEqual([
       "active",
       "archived",
       "archived",

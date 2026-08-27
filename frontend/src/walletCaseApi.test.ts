@@ -69,7 +69,8 @@ describe("Wallet Case API", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ created: false, case: empty }, 200))
       .mockResolvedValueOnce(jsonResponse({
-        cases: [populated], limit: 7, state: "active", truncated: false, next_cursor: null,
+        cases: [populated], limit: 7, state: "active", query: null,
+        network: null, data_environment: null, truncated: false, next_cursor: null,
       }))
       .mockResolvedValueOnce(jsonResponse(populated));
     vi.stubGlobal("fetch", fetchMock);
@@ -85,8 +86,9 @@ describe("Wallet Case API", () => {
       created: false,
       case: empty,
     });
-    await expect(listWalletCases(7, "active", null, controller.signal)).resolves.toEqual({
-      cases: [populated], limit: 7, state: "active", truncated: false, next_cursor: null,
+    await expect(listWalletCases({ limit: 7, signal: controller.signal })).resolves.toEqual({
+      cases: [populated], limit: 7, state: "active", query: null,
+      network: null, data_environment: null, truncated: false, next_cursor: null,
     });
     await expect(getWalletCase(CASE_ID, controller.signal)).resolves.toEqual(populated);
     expect(fetchMock.mock.calls[0]).toEqual([
@@ -111,7 +113,7 @@ describe("Wallet Case API", () => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
 
-      await expect(listWalletCases(limit)).rejects.toThrow(/from 1 through 50/);
+      await expect(listWalletCases({ limit })).rejects.toThrow(/from 1 through 50/);
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
@@ -121,12 +123,15 @@ describe("Wallet Case API", () => {
       cases: [walletCaseFixture()],
       limit: 8,
       state: "active",
+      query: null,
+      network: null,
+      data_environment: null,
       truncated: false,
       next_cursor: null,
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(listWalletCases(7)).rejects.toThrow(/requested limit/);
+    await expect(listWalletCases({ limit: 7 })).rejects.toThrow(/requested limit/);
   });
 
   it("requests an opaque Case catalog continuation without rewriting it", async () => {
@@ -135,18 +140,84 @@ describe("Wallet Case API", () => {
       cases: [walletCaseFixture()],
       limit: 1,
       state: "archived",
+      query: null,
+      network: null,
+      data_environment: null,
       truncated: false,
       next_cursor: null,
     }));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
 
-    await expect(listWalletCases(1, "archived", cursor, controller.signal)).resolves.toBeTruthy();
+    await expect(listWalletCases({
+      limit: 1,
+      state: "archived",
+      cursor,
+      signal: controller.signal,
+    })).resolves.toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases?limit=1&state=archived&cursor=opaque-signed.cursor`,
       { cache: "no-store", signal: controller.signal },
     );
   });
+
+  it("canonicalizes and strictly binds Wallet Case discovery filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      cases: [],
+      limit: 12,
+      state: "archived",
+      query: "Treasury 100%",
+      network: "ton-testnet",
+      data_environment: "demo",
+      truncated: false,
+      next_cursor: null,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listWalletCases({
+      limit: 12,
+      state: "archived",
+      query: "  Treasury 100%  ",
+      network: "ton-testnet",
+      dataEnvironment: "demo",
+    })).resolves.toMatchObject({
+      query: "Treasury 100%",
+      network: "ton-testnet",
+      data_environment: "demo",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases?limit=12&state=archived&q=Treasury+100%25&network=ton-testnet&data_environment=demo`,
+      { cache: "no-store", signal: undefined },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      cases: [],
+      limit: 12,
+      state: "archived",
+      query: "different",
+      network: "ton-testnet",
+      data_environment: "demo",
+      truncated: false,
+      next_cursor: null,
+    }));
+    await expect(listWalletCases({
+      limit: 12,
+      state: "archived",
+      query: "Treasury 100%",
+      network: "ton-testnet",
+      dataEnvironment: "demo",
+    })).rejects.toThrow(/requested filters/);
+  });
+
+  it.each(["", "   ", "x".repeat(121)])(
+    "rejects an invalid Case discovery query before fetching: %j",
+    async (query) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      await expect(listWalletCases({ query })).rejects.toThrow(/1 through 120/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("archives and restores a Case only from state-bound responses", async () => {
     const archived = emptyWalletCaseFixture({

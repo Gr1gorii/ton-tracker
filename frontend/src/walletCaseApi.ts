@@ -8,9 +8,11 @@ import {
   type WalletCase,
   type WalletCaseCatalogState,
   type WalletCaseCreateRequest,
+  type WalletCaseDataEnvironment,
   type WalletCaseDeletionResponse,
   type WalletCaseListResponse,
   type WalletCaseMetadataUpdateRequest,
+  type WalletCaseNetwork,
   type WalletCaseSync,
   type WalletCaseSyncRequest,
   type WalletCaseUpsertResponse,
@@ -100,19 +102,48 @@ export async function createWalletCase(
   return parseWalletCaseUpsertResponse(await response.json());
 }
 
-export async function listWalletCases(
+export interface WalletCaseListRequest {
+  limit?: number;
+  state?: WalletCaseCatalogState;
+  query?: string | null;
+  network?: WalletCaseNetwork | null;
+  dataEnvironment?: WalletCaseDataEnvironment | null;
+  cursor?: string | null;
+  signal?: AbortSignal;
+}
+
+export async function listWalletCases({
   limit = 20,
-  state: WalletCaseCatalogState = "active",
-  cursor: string | null = null,
-  signal?: AbortSignal,
-): Promise<WalletCaseListResponse> {
+  state = "active",
+  query = null,
+  network = null,
+  dataEnvironment = null,
+  cursor = null,
+  signal,
+}: WalletCaseListRequest = {}): Promise<WalletCaseListResponse> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) {
     throw new Error("Wallet Case list limit must be from 1 through 50");
   }
   if (state !== "active" && state !== "archived") {
     throw new Error("Wallet Case list lifecycle state is invalid");
   }
+  if (query !== null && typeof query !== "string") {
+    throw new Error("Wallet Case list query must contain 1 through 120 characters");
+  }
+  const canonicalQuery = query?.trim() || null;
+  if (query !== null && (canonicalQuery === null || canonicalQuery.length > 120)) {
+    throw new Error("Wallet Case list query must contain 1 through 120 characters");
+  }
+  if (network !== null && network !== "ton-mainnet" && network !== "ton-testnet") {
+    throw new Error("Wallet Case list network is invalid");
+  }
+  if (dataEnvironment !== null && dataEnvironment !== "demo" && dataEnvironment !== "live") {
+    throw new Error("Wallet Case list data environment is invalid");
+  }
   const params = new URLSearchParams({ limit: String(limit), state });
+  if (canonicalQuery !== null) params.set("q", canonicalQuery);
+  if (network !== null) params.set("network", network);
+  if (dataEnvironment !== null) params.set("data_environment", dataEnvironment);
   if (cursor !== null) {
     if (!cursor || cursor.length > 1_024 || cursor.trim() !== cursor) {
       throw new Error("Wallet Case list cursor is invalid");
@@ -132,6 +163,13 @@ export async function listWalletCases(
   }
   if (catalog.state !== state) {
     throw new Error("Wallet Case list response does not match the requested lifecycle state");
+  }
+  if (
+    catalog.query !== canonicalQuery ||
+    catalog.network !== network ||
+    catalog.data_environment !== dataEnvironment
+  ) {
+    throw new Error("Wallet Case list response does not match the requested filters");
   }
   return catalog;
 }

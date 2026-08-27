@@ -153,6 +153,9 @@ export interface WalletCaseListResponse {
   cases: WalletCase[];
   limit: number;
   state: WalletCaseCatalogState;
+  query: string | null;
+  network: WalletCaseNetwork | null;
+  data_environment: WalletCaseDataEnvironment | null;
   truncated: boolean;
   next_cursor: string | null;
 }
@@ -708,6 +711,29 @@ export function parseWalletCaseListResponse(value: unknown): WalletCaseListRespo
   if (state !== "active" && state !== "archived") {
     throw new Error("wallet case list lifecycle state is invalid");
   }
+  const query = boundedNullableString(
+    response.query,
+    "wallet case list query",
+    120,
+  );
+  if (query !== null && (!query || query.trim() !== query)) {
+    throw new Error("wallet case list query is not canonical");
+  }
+  const network = response.network === null
+    ? null
+    : string(response.network, "wallet case list network") as WalletCaseNetwork;
+  if (network !== null && !NETWORKS.has(network)) {
+    throw new Error("wallet case list network is invalid");
+  }
+  const dataEnvironment = response.data_environment === null
+    ? null
+    : string(
+        response.data_environment,
+        "wallet case list data environment",
+      ) as WalletCaseDataEnvironment;
+  if (dataEnvironment !== null && !ENVIRONMENTS.has(dataEnvironment)) {
+    throw new Error("wallet case list data environment is invalid");
+  }
   const nextCursor = nullableString(
     response.next_cursor,
     "wallet case list next cursor",
@@ -725,6 +751,9 @@ export function parseWalletCaseListResponse(value: unknown): WalletCaseListRespo
     cases,
     limit,
     state,
+    query,
+    network,
+    data_environment: dataEnvironment,
     truncated: response.truncated,
     next_cursor: nextCursor,
   };

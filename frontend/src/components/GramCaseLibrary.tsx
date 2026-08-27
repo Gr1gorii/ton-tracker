@@ -102,12 +102,12 @@ export default function GramCaseLibrary({
       setMoreError(null);
     }
     try {
-      const result = await listWalletCases(
-        INITIAL_LIMIT,
+      const result = await listWalletCases({
+        limit: INITIAL_LIMIT,
         state,
         cursor,
-        controller.signal,
-      );
+        signal: controller.signal,
+      });
       if (controller.signal.aborted || requestGeneration !== generation.current) return;
       if (!expanding) {
         commitCatalog({
