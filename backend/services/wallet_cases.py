@@ -108,7 +108,7 @@ class WalletCaseCatalogInvalidCursor(ValueError):
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
-_CASE_CATALOG_CURSOR_VERSION = 2
+_CASE_CATALOG_CURSOR_VERSION = 3
 _UNSET = object()
 _ZERO_SUMMARY: dict[str, Any] = {
     "activity_counts": {
@@ -236,6 +236,9 @@ class WalletCaseService:
         *,
         limit: int,
         state: str = "active",
+        query: str | None = None,
+        network: str | None = None,
+        data_environment: str | None = None,
         cursor: str | None = None,
     ) -> dict[str, Any]:
         if limit < 1 or limit > 50:
@@ -246,10 +249,29 @@ class WalletCaseService:
             raise WalletCaseCatalogInvalidCursor(
                 "Wallet Case catalog state must be active or archived."
             )
+        if query is not None:
+            query = query.strip()
+            if not query or len(query) > 120:
+                raise WalletCaseCatalogInvalidCursor(
+                    "Wallet Case catalog query must contain 1 through 120 characters."
+                )
+        if network not in {None, "ton-mainnet", "ton-testnet"}:
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog network is invalid."
+            )
+        if data_environment not in {None, "demo", "live"}:
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog data environment is invalid."
+            )
         cursor_document = (
             _decode_case_catalog_cursor(cursor) if cursor is not None else None
         )
         scope_digest = _case_catalog_scope_digest(self.owner_scope_id)
+        filter_digest = _case_catalog_filter_digest(
+            query=query,
+            network=network,
+            data_environment=data_environment,
+        )
         if (
             cursor_document is not None
             and cursor_document["scope"] != scope_digest
@@ -260,6 +282,13 @@ class WalletCaseService:
         if cursor_document is not None and cursor_document["state"] != state:
             raise WalletCaseCatalogInvalidCursor(
                 "Wallet Case catalog cursor belongs to another lifecycle state."
+            )
+        if (
+            cursor_document is not None
+            and cursor_document["filters"] != filter_digest
+        ):
+            raise WalletCaseCatalogInvalidCursor(
+                "Wallet Case catalog cursor belongs to another filter set."
             )
         cutoff = (
             int(cursor_document["cutoff"])
@@ -278,12 +307,18 @@ class WalletCaseService:
                 "cases": [],
                 "limit": limit,
                 "state": state,
+                "query": query,
+                "network": network,
+                "data_environment": data_environment,
                 "truncated": False,
                 "next_cursor": None,
             }
         positioned_cases, truncated = self.repository.list_at_catalog_cutoff(
             owner_scope_id=self.owner_scope_id,
             archived=state == "archived",
+            query=query,
+            network=network,
+            data_environment=data_environment,
             limit=limit,
             cutoff=cutoff,
             after=after,
@@ -305,6 +340,7 @@ class WalletCaseService:
                     "v": _CASE_CATALOG_CURSOR_VERSION,
                     "scope": scope_digest,
                     "state": state,
+                    "filters": filter_digest,
                     "cutoff": cutoff,
                     "after": positioned_cases[-1][1],
                 }
@@ -321,6 +357,9 @@ class WalletCaseService:
             ],
             "limit": limit,
             "state": state,
+            "query": query,
+            "network": network,
+            "data_environment": data_environment,
             "truncated": truncated,
             "next_cursor": next_cursor,
         }
@@ -1572,6 +1611,22 @@ def _case_catalog_scope_digest(owner_scope_id: str) -> str:
     return hashlib.sha256(owner_scope_id.encode("utf-8")).hexdigest()
 
 
+def _case_catalog_filter_digest(
+    *,
+    query: str | None,
+    network: str | None,
+    data_environment: str | None,
+) -> str:
+    payload = _case_catalog_cursor_json(
+        {
+            "data_environment": data_environment,
+            "network": network,
+            "query": query,
+        }
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _case_catalog_cursor_json(value: dict[str, Any]) -> bytes:
     return json.dumps(
         value,
@@ -1621,7 +1676,14 @@ def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
         ) from exc
     if (
         not isinstance(document, dict)
-        or set(document) != {"v", "scope", "state", "cutoff", "after"}
+        or set(document) != {
+            "v",
+            "scope",
+            "state",
+            "filters",
+            "cutoff",
+            "after",
+        }
         or document.get("v") != _CASE_CATALOG_CURSOR_VERSION
     ):
         raise WalletCaseCatalogInvalidCursor(
@@ -1641,6 +1703,7 @@ def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
         )
     scope = document.get("scope")
     state = document.get("state")
+    filters = document.get("filters")
     cutoff = document.get("cutoff")
     after = document.get("after")
     if (
@@ -1648,6 +1711,9 @@ def _decode_case_catalog_cursor(value: str) -> dict[str, Any]:
         or len(scope) != 64
         or any(char not in "0123456789abcdef" for char in scope)
         or state not in {"active", "archived"}
+        or not isinstance(filters, str)
+        or len(filters) != 64
+        or any(char not in "0123456789abcdef" for char in filters)
         or type(cutoff) is not int
         or type(after) is not int
         or cutoff < 1

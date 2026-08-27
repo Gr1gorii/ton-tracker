@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from models import (
@@ -74,6 +74,9 @@ class WalletCaseRepository:
         *,
         owner_scope_id: str,
         archived: bool,
+        query: str | None,
+        network: str | None,
+        data_environment: str | None,
         limit: int,
         cutoff: int,
         after: int | None,
@@ -106,6 +109,27 @@ class WalletCaseRepository:
         )
         if after is not None:
             statement = statement.where(frozen_positions.c.position < after)
+        if network is not None:
+            statement = statement.where(WalletCase.network == network)
+        if data_environment is not None:
+            statement = statement.where(
+                WalletCase.data_environment == data_environment
+            )
+        if query is not None:
+            escaped_query = (
+                query.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            pattern = f"%{escaped_query}%"
+            statement = statement.where(
+                or_(
+                    WalletCase.label.ilike(pattern, escape="\\"),
+                    WalletCase.note.ilike(pattern, escape="\\"),
+                    WalletCase.display_address.ilike(pattern, escape="\\"),
+                    WalletCase.canonical_wallet_key.ilike(pattern, escape="\\"),
+                )
+            )
         candidates = [
             (wallet_case, int(position))
             for wallet_case, position in self.session.execute(statement).all()
