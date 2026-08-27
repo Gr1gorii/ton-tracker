@@ -1,4 +1,4 @@
-# GRAM Scope - v0.85.0 Public Release
+# GRAM Scope - v0.86.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -24,6 +24,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   progress, bounded retry, cooperative cancellation, lease fencing, and restart
   recovery. Incremental refreshes acquire only a 15-minute overlap plus the
   forward interval and retain explicit base-snapshot lineage.
+- Atomic, immutable Wallet Case sync acquisition manifests content-addressed by
+  canonical JSON, with actual acquisition bounds, base lineage, sanitized
+  stream/page checkpoints, and provider response digests. A case-scoped read
+  endpoint revalidates payload hash and identity before returning the document.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -65,9 +69,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.85.0 INCREMENTAL REFRESH`.
+- Product release label: `v0.86.0 ACQUISITION MANIFESTS`.
 - Backend API `VERSION` remains `0.2.1`.
-- Alembic head is `20260827_0026`: 0019 adds durable Case Evidence jobs, 0020
+- Alembic head is `20260827_0027`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
   persists the verifier policy plus exact per-network application checkpoint
   and binds them into proof and catalog digests. Revision 0022 activates the
@@ -78,7 +82,8 @@ Public release handoff for the current TON wallet intelligence workspace.
   positive optimistic-concurrency version for bounded Case metadata updates.
   Revision 0026 adds the case-owned append-only Case catalog position and visibility
   journal, including a deterministic seed for existing active and archived
-  Cases.
+  Cases. Revision 0027 adds the one-to-one immutable sync acquisition manifest
+  store with content-address identity and CaseSync cascade.
 - Current verifier policy `ton_liteserver_checkpoint_strict_2026_08_v2` pins these
   masterchain checkpoint tuples as
   `(workchain, shard, seqno, root hash, file hash)`:
@@ -105,6 +110,14 @@ Public release handoff for the current TON wallet intelligence workspace.
   interval from the narrower provider acquisition interval and names the base
   snapshot and overlap. Incremental coverage never claims bounded-complete or
   full-history evidence.
+- Every newly published ingestion run receives one manifest in the same
+  lease-fenced transaction as its terminal sync publication. Stale workers
+  cannot leave either an orphan run or an orphan manifest. Legacy snapshots
+  are not backfilled speculatively and disclose manifest unavailability.
+- Manifest documents contain only provider-safe checkpoints and SHA-256
+  digests. They do not expose provider payloads, headers, credentials, database
+  IDs, internal run IDs, or provider error text. Checkpoints are recorded for
+  future resume/backfill work; provider-crawl resume is not implemented here.
 - Wallet Cases are direct-loopback only in this pre-authentication slice.
   Hosted production access remains disabled until authentication derives the
   owner scope.
@@ -202,13 +215,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.85.0`, confirm:
+Before tagging `v0.86.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.85.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.86.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the

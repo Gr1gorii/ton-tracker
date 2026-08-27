@@ -1,10 +1,10 @@
-# GRAM Scope — v0.85.0 Promotion Checklist
+# GRAM Scope — v0.86.0 Promotion Checklist
 
-Current promotion gates for Wallet Case incremental refresh:
+Current promotion gates for Wallet Case acquisition manifests:
 
-- Product label is `v0.85.0 INCREMENTAL REFRESH`; backend API version stays
+- Product label is `v0.86.0 ACQUISITION MANIFESTS`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic reaches revision `20260827_0026` with exact model parity from fresh,
+- Alembic reaches revision `20260827_0027` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
   path. Missing or changed columns, checks, foreign keys, delete actions, and
   indexes fail closed; downgrade remains unsupported. Revision 0020 versions
@@ -32,9 +32,24 @@ Current promotion gates for Wallet Case incremental refresh:
   active and archived Cases receive one deterministic visibility/position seed;
   exact empty interrupted-DDL resume, row adoption, foreign-key/index drift,
   schema parity, cascade, and forward-only behavior must pass fail-closed tests.
-- No migration is added for v0.85.0. A versioned private acquisition plan uses
-  the existing CaseSync coverage record; it is validated on every read and is
-  excluded from the public coverage object. Existing rows infer bounded lineage.
+- Revision 0027 adds exactly one immutable acquisition manifest per published
+  CaseSync. Fresh creation, 0026 upgrade, exact empty interrupted-DDL resume,
+  row-adoption rejection, index/check/foreign-key parity, CaseSync cascade, and
+  forward-only behavior must pass fail-closed tests.
+- Manifest canonical JSON and its `smf_<sha256>` identity bind Case/sync scope,
+  provider and data mode, terminal state, snapshot/acquisition periods,
+  incremental lineage, requested surfaces, sanitized streams/pages, and valid
+  provider response digests. Raw payloads, provider queries/messages,
+  credentials, database IDs, and internal run IDs must remain absent.
+- Final publication inserts ingestion run, terminal sync state, catalog event,
+  and manifest under one lease-fenced transaction. A stale owner must roll all
+  of them back together. Existing usable rows without a manifest remain valid
+  only with `acquisition_manifest_unavailable`.
+- Sync responses expose only the compact descriptor. The case-scoped manifest
+  endpoint revalidates canonical JSON, SHA-256, and Case/sync identity before
+  returning the full provider-safe document; Summary loads it explicitly.
+- Page checkpoints are resume-ready evidence only. v0.86.0 must not be promoted
+  as implementing provider-crawl resume or speculative legacy backfill.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -158,7 +173,7 @@ Current promotion gates for Wallet Case incremental refresh:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.85.0 must not be promoted as a hosted Wallet Case release.
+  v0.86.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

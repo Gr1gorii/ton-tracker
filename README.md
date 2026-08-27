@@ -4,10 +4,30 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.85.0 — Incremental Refresh**<br>
+Current product release: **v0.86.0 — Acquisition Manifests**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.85.0 adds
+## What v0.86.0 adds
+
+Every Wallet Case sync that publishes an ingestion run now atomically publishes
+an immutable, content-addressed acquisition manifest. The canonical manifest
+records the composed snapshot period, actual provider acquisition bounds,
+incremental base lineage and overlap, sanitized stream/page checkpoints, and
+available provider response SHA-256 digests. Raw provider payloads, error
+messages, request headers, credentials, database IDs, and internal run IDs are
+excluded.
+
+Sync responses expose a compact manifest descriptor, while
+`GET /api/v1/cases/{case}/syncs/{sync}/manifest` revalidates the stored canonical
+JSON and hash before returning the full provider-safe document. Summary can
+load the document explicitly and shows page/digest counts. Legacy snapshots
+without a manifest remain readable with an explicit limitation. Revision
+`20260827_0027` adds the one-to-one manifest store; the worker writes the run,
+terminal sync state, and manifest under the same lease-fenced transaction.
+This release records resume-ready evidence but does not yet resume a provider
+crawl from those checkpoints.
+
+## v0.85.0 incremental refresh
 
 An existing usable Wallet Case can now refresh forward without reacquiring its
 entire composed interval. The server pins the latest usable snapshot, requires
@@ -19,7 +39,8 @@ acquisition and complete history is still not claimed.
 The Summary UI automatically keeps the first run bounded and changes later
 runs to an explicit incremental refresh. Strict client and server contracts
 validate the mode, actual acquisition bounds, overlap, base snapshot, coverage,
-and limitations. No migration is added; Alembic remains at `20260827_0026`.
+and limitations. Its acquisition lineage is now also bound into the v0.86.0
+manifest when a new sync publishes.
 
 ## v0.26.0 multi-asset PnL readiness foundation
 
@@ -96,6 +117,7 @@ profit, ownership proof, or complete wallet history.
 - v0.25.0 provider-free verified TEP-74 payload observations.
 - v0.26.0 multi-run jetton asset/fee evidence reconciliation with locked PnL.
 - v0.85.0 incremental Wallet Case refresh with durable acquisition lineage.
+- v0.86.0 immutable content-addressed acquisition manifests and checkpoints.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.
@@ -134,7 +156,7 @@ backend/
 Backend: FastAPI, SQLAlchemy, SQLite, Pydantic, Alembic.<br>
 Frontend: React, TypeScript, Vite, Vitest.
 
-The current schema head is `20260710_0008`. The application applies migrations
+The current schema head is `20260827_0027`. The application applies migrations
 on backend startup.
 
 ## Requirements

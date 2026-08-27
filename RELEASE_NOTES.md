@@ -1,3 +1,33 @@
+# GRAM Scope — v0.86.0 ACQUISITION MANIFESTS
+
+v0.86.0 gives every newly published Wallet Case ingestion run an immutable,
+content-addressed acquisition manifest. The canonical JSON binds the Case and
+sync public IDs, network and observed provider, terminal state, composed
+snapshot period, actual acquisition period, incremental base and overlap,
+requested surfaces, sanitized stream checkpoints, page cursors and counts, and
+valid provider response SHA-256 digests. It excludes raw responses, provider
+queries, headers, credentials, database/run IDs, and provider error messages.
+
+The worker builds and inserts the manifest in the same lease-fenced database
+transaction that publishes the ingestion run and terminal CaseSync state. A
+stale worker therefore rolls back the run and manifest together. Revision
+`20260827_0027` adds the one-to-one manifest table with content-address identity,
+contract, payload, foreign-key, and unique-sync constraints; exact empty
+interrupted DDL can resume, incompatible or populated pre-revision tables fail
+closed, CaseSync deletion cascades, and downgrade is intentionally unsupported.
+
+Sync responses include a compact descriptor with manifest ID, content hash,
+stream/page/digest counts, and creation time. The case-scoped
+`GET /api/v1/cases/{case}/syncs/{sync}/manifest` endpoint verifies canonical JSON,
+SHA-256, and Case/sync identity before returning the provider-safe document.
+Summary displays the descriptor and loads the verified details only on request.
+Older usable snapshots without manifests remain available with an explicit
+`acquisition_manifest_unavailable` limitation. Demo manifests truthfully have
+zero provider streams and response digests. The stored checkpoints prepare a
+future resume/backfill slice; v0.86.0 does not claim provider-crawl resume.
+
+---
+
 # GRAM Scope — v0.85.0 INCREMENTAL REFRESH
 
 v0.85.0 adds an explicit forward-refresh path for an existing usable Wallet
