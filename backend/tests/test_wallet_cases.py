@@ -1208,6 +1208,15 @@ def test_demo_case_sync_links_legacy_run_and_restores_summary(client):
     assert sync["progress"] == {"current": 3, "total": 3}
     assert sync["provider"] == "mock_wallet_activity"
     assert sync["data_mode"] == "mock"
+    descriptor = sync["acquisition_manifest"]
+    assert descriptor["public_id"].startswith("smf_")
+    assert descriptor["contract_version"] == "wallet_case_sync_manifest_v1"
+    assert descriptor["public_id"] == (
+        f"smf_{descriptor['content_hash_sha256']}"
+    )
+    assert descriptor["stream_count"] == 0
+    assert descriptor["page_count"] == 0
+    assert descriptor["response_digest_count"] == 0
     assert sync["requested_scope"]["time_window"] == "24h"
     assert sync["requested_scope"]["mode"] == "bounded"
     assert sync["requested_scope"]["surfaces"] == [
@@ -1287,6 +1296,18 @@ def test_demo_case_sync_links_legacy_run_and_restores_summary(client):
         assert document["streams"] == []
         legacy_run_id = stored_sync.ingestion_run_id
 
+    manifest_response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync['public_id']}/manifest"
+    )
+    assert manifest_response.status_code == 200, manifest_response.text
+    assert manifest_response.headers["cache-control"] == "no-store"
+    manifest_payload = manifest_response.json()
+    assert manifest_payload["manifest"] == descriptor
+    assert manifest_payload["document"] == document
+    assert "api_key" not in manifest_response.text
+    assert "error_message" not in manifest_response.text
+    assert '"run_id"' not in manifest_response.text
+
     legacy = client.get(f"/api/wallets/ingest/{legacy_run_id}")
     assert legacy.status_code == 200
     assert legacy.json()["activity_summary"]["counts"] == {
@@ -1348,6 +1369,61 @@ def test_sync_releases_the_case_read_transaction_before_provider_io(
 
     assert response["state"] == "succeeded"
     assert _database_counts() == (1, 1, 1)
+
+
+def test_legacy_usable_sync_without_manifest_is_labeled_honestly(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    sync = _sync_case(client, case_id, surfaces=["transactions"])
+    with app.state.wallet_case_test_session() as session:
+        manifest = session.scalar(select(WalletCaseSyncManifest))
+        assert manifest is not None
+        session.delete(manifest)
+        session.commit()
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync['public_id']}"
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["acquisition_manifest"] is None
+    assert "acquisition_manifest_unavailable" in {
+        item["code"] for item in body["limitations"]
+    }
+    assert client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync['public_id']}/manifest"
+    ).status_code == 404
+
+
+def test_manifest_read_fails_closed_when_payload_hash_is_corrupt(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    sync = _sync_case(client, case_id, surfaces=["transactions"])
+    with app.state.wallet_case_test_session() as session:
+        manifest = session.scalar(select(WalletCaseSyncManifest))
+        assert manifest is not None
+        manifest.manifest_json = '{"contract_version":"wallet_case_sync_manifest_v1"}'
+        session.commit()
+
+    manifest_response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync['public_id']}/manifest"
+    )
+    sync_response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync['public_id']}"
+    )
+
+    assert manifest_response.status_code == 503
+    assert manifest_response.headers["cache-control"] == "no-store"
+    assert manifest_response.json()["detail"] == {
+        "code": "acquisition_manifest_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case acquisition manifest failed integrity validation."
+        ),
+        "retryable": False,
+    }
+    assert sync_response.status_code == 503
+    assert sync_response.json()["detail"]["code"] == (
+        "acquisition_manifest_integrity_error"
+    )
 
 
 def test_orm_delete_cannot_detach_a_case_sync_from_its_source_run(client):
@@ -1589,12 +1665,17 @@ def test_sync_public_id_is_case_scoped_and_paths_are_strict(client):
     wrong_case = client.get(
         f"/api/v1/cases/{second['case']['public_id']}/syncs/{sync['public_id']}"
     )
+    wrong_manifest_case = client.get(
+        f"/api/v1/cases/{second['case']['public_id']}/syncs/"
+        f"{sync['public_id']}/manifest"
+    )
     sequential_case = client.get("/api/v1/cases/1")
     uppercase_case = client.get(
         f"/api/v1/cases/{first['case']['public_id'].upper()}"
     )
 
     assert wrong_case.status_code == 404
+    assert wrong_manifest_case.status_code == 404
     assert sequential_case.status_code == 422
     assert uppercase_case.status_code == 422
 
@@ -1621,10 +1702,19 @@ def test_sync_enqueue_is_durable_idempotent_and_globally_pollable(client):
     assert job["result"] is None
     assert job["error"] is None
     assert job["retry"] is None
+    assert job["acquisition_manifest"] is None
     assert {item["code"] for item in job["limitations"]}.isdisjoint(
         {"summary_unavailable", "coverage_unavailable"}
     )
     assert _database_counts() == (1, 1, 0)
+    unavailable_manifest = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{job['public_id']}/manifest"
+    )
+    assert unavailable_manifest.status_code == 404
+    assert unavailable_manifest.headers["cache-control"] == "no-store"
+    assert unavailable_manifest.json()["detail"]["code"] == (
+        "acquisition_manifest_not_found"
+    )
 
     replay = client.post(
         f"/api/v1/cases/{case_id}/syncs",
