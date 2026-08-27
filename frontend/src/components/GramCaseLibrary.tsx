@@ -11,6 +11,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 
+import type { CaseLibraryQuery } from "../caseRouting";
 import type { WalletCase, WalletCaseCatalogState } from "../walletCase";
 import { listWalletCases, restoreWalletCase } from "../walletCaseApi";
 
@@ -55,14 +56,18 @@ function syncLabel(walletCase: WalletCase): string {
 }
 
 export default function GramCaseLibrary({
+  catalogQuery,
+  onCatalogQueryChange,
   onOpenCase,
   onCreateCase,
 }: {
+  catalogQuery: CaseLibraryQuery;
+  onCatalogQueryChange: (query: CaseLibraryQuery) => void;
   onOpenCase: (caseId: string) => void;
   onCreateCase: () => void;
 }) {
   const [catalog, setCatalog] = useState<CaseLibraryCatalog | null>(null);
-  const [catalogState, setCatalogState] = useState<WalletCaseCatalogState>("active");
+  const catalogState = catalogQuery.state;
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +85,7 @@ export default function GramCaseLibrary({
   }
 
   async function load(
-    state: WalletCaseCatalogState,
+    filters: CaseLibraryQuery,
     cursor: string | null = null,
     expanding = false,
   ) {
@@ -104,7 +109,10 @@ export default function GramCaseLibrary({
     try {
       const result = await listWalletCases({
         limit: INITIAL_LIMIT,
-        state,
+        state: filters.state,
+        query: filters.query,
+        network: filters.network,
+        dataEnvironment: filters.dataEnvironment,
         cursor,
         signal: controller.signal,
       });
@@ -151,7 +159,7 @@ export default function GramCaseLibrary({
   }
 
   useEffect(() => {
-    void load(catalogState);
+    void load(catalogQuery);
     return () => {
       generation.current += 1;
       controllerRef.current?.abort();
@@ -159,7 +167,12 @@ export default function GramCaseLibrary({
       restoreControllerRef.current?.abort();
       restoreControllerRef.current = null;
     };
-  }, [catalogState]);
+  }, [
+    catalogQuery.state,
+    catalogQuery.query,
+    catalogQuery.network,
+    catalogQuery.dataEnvironment,
+  ]);
 
   function selectCatalogState(next: WalletCaseCatalogState) {
     if (next === catalogState) return;
@@ -172,7 +185,7 @@ export default function GramCaseLibrary({
     setCatalog(null);
     setLifecycleError(null);
     setRestoringId(null);
-    setCatalogState(next);
+    onCatalogQueryChange({ ...catalogQuery, state: next });
   }
 
   async function restoreCase(walletCase: WalletCase) {
@@ -185,7 +198,7 @@ export default function GramCaseLibrary({
     try {
       await restoreWalletCase(walletCase.public_id, controller.signal);
       if (controller.signal.aborted) return;
-      await load("archived");
+      await load(catalogQuery);
     } catch (caught) {
       if (controller.signal.aborted) return;
       setLifecycleError(
@@ -245,7 +258,7 @@ export default function GramCaseLibrary({
         <div className="case-library-state is-error" role="alert">
           <WarningCircle size={25} weight="fill" />
           <div><h2>Case library unavailable</h2><p>{error}</p></div>
-          <button type="button" className="button-secondary" onClick={() => void load(catalogState)}>
+          <button type="button" className="button-secondary" onClick={() => void load(catalogQuery)}>
             <ArrowsClockwise size={17} /> Retry
           </button>
         </div>
@@ -342,7 +355,7 @@ export default function GramCaseLibrary({
                 type="button"
                 className="button-secondary"
                 disabled={loadingMore}
-                onClick={() => void load(catalogState, catalog.nextCursor, true)}
+                onClick={() => void load(catalogQuery, catalog.nextCursor, true)}
               >
                 {loadingMore ? <SpinnerGap className="spin" size={17} /> : <FolderOpen size={17} />}
                 {loadingMore
