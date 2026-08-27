@@ -13,6 +13,7 @@ import {
   getWalletCaseActivity,
   getWalletCaseActivityDetail,
   getWalletCaseSync,
+  getWalletCaseSyncManifest,
   listWalletCases,
   restoreWalletCase,
   updateWalletCaseMetadata,
@@ -33,6 +34,7 @@ import {
   activityFiltersFixture,
   activityResponseFixture,
 } from "./test/walletCaseActivityFixtures";
+import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
 
 const OTHER_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
 const OTHER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440099";
@@ -450,6 +452,29 @@ describe("Wallet Case API", () => {
         { method: "POST", cache: "no-store", signal: controller.signal },
       ],
     ]);
+  });
+
+  it("reads a no-store acquisition manifest bound to its case and sync", async () => {
+    const payload = manifestResponseFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(
+      getWalletCaseSyncManifest(CASE_ID, SYNC_ID, controller.signal),
+    ).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/syncs/${SYNC_ID}/manifest`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...payload,
+      document: { ...payload.document, sync_public_id: OTHER_SYNC_ID },
+    }));
+    await expect(getWalletCaseSyncManifest(CASE_ID, SYNC_ID)).rejects.toThrow(
+      /requested sync/,
+    );
   });
 
   it("reads pinned Activity pages with exact repeatable server filters and no cache", async () => {

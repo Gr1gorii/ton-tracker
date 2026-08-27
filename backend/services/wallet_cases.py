@@ -25,11 +25,16 @@ from models import (
     WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
+    WalletCaseSyncManifest,
     WalletIngestionRun,
 )
 from repositories.wallet_cases import WalletCaseRepository
 from services.ton_address_identity import derive_ton_wallet_identity
 from services.wallet_acquisition_bounds import resolve_wallet_acquisition_bounds
+from services.wallet_case_sync_manifests import (
+    MANIFEST_CONTRACT_VERSION,
+    verify_wallet_case_sync_manifest,
+)
 from wallet_case_schemas import (
     WalletCaseCreateRequest,
     WalletCaseMetadataUpdateRequest,
@@ -107,6 +112,14 @@ class WalletCaseCatalogInvalidCursor(ValueError):
 
 class WalletCaseIncrementalSyncUnavailable(RuntimeError):
     """Raised when a Case has no safe forward-refresh baseline."""
+
+
+class WalletCaseSyncManifestNotFound(LookupError):
+    """Raised when a sync has no published acquisition manifest."""
+
+
+class WalletCaseSyncManifestCorrupt(RuntimeError):
+    """Raised when persisted manifest evidence fails integrity validation."""
 
 
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
@@ -825,6 +838,30 @@ class WalletCaseService:
             raise WalletCaseNotFound("Wallet Case sync not found")
         return self._sync_response(case_sync, case_public_id=wallet_case.public_id)
 
+    def get_sync_manifest(
+        self,
+        case_public_id: str,
+        sync_public_id: str,
+    ) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        case_sync = self.repository.get_sync(
+            case_id=wallet_case.id,
+            public_id=sync_public_id,
+        )
+        if case_sync is None:
+            raise WalletCaseNotFound("Wallet Case sync not found")
+        manifest = case_sync.acquisition_manifest
+        if manifest is None:
+            raise WalletCaseSyncManifestNotFound(
+                "Wallet Case sync acquisition manifest not found"
+            )
+        descriptor, document = _manifest_response(
+            manifest,
+            case_sync=case_sync,
+            case_public_id=wallet_case.public_id,
+        )
+        return {"manifest": descriptor, "document": document}
+
     def get_job(self, sync_public_id: str) -> dict[str, Any]:
         case_sync = self.repository.get_sync_by_public_id_for_owner(
             owner_scope_id=self.owner_scope_id,
@@ -1210,6 +1247,15 @@ class WalletCaseService:
             "retry": retry,
             "error": terminal_error,
             "result": result,
+            "acquisition_manifest": (
+                _manifest_response(
+                    case_sync.acquisition_manifest,
+                    case_sync=case_sync,
+                    case_public_id=case_public_id,
+                )[0]
+                if case_sync.acquisition_manifest is not None
+                else None
+            ),
             "provider": case_sync.provider,
             "data_mode": case_sync.data_mode,
             "requested_scope": {
@@ -1558,6 +1604,17 @@ def _limitations_for_sync(
                 "Stored coverage was missing or inconsistent; published coverage is reset to unknown.",
             )
         )
+    if (
+        case_sync.state in {"partial", "succeeded"}
+        and case_sync.ingestion_run_id is not None
+        and case_sync.acquisition_manifest is None
+    ):
+        limitations.append(
+            _limitation(
+                "acquisition_manifest_unavailable",
+                "This legacy snapshot predates immutable acquisition manifests; provider page digests and checkpoints are unavailable.",
+            )
+        )
     if case_sync.data_mode == "mock":
         limitations.append(
             _limitation(
@@ -1596,6 +1653,62 @@ def _limitations_for_sync(
             )
         )
     return limitations
+
+
+def _manifest_response(
+    manifest: WalletCaseSyncManifest,
+    *,
+    case_sync: CaseSync,
+    case_public_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        document = verify_wallet_case_sync_manifest(
+            manifest.manifest_json,
+            manifest.content_hash_sha256,
+        )
+    except ValueError as exc:
+        raise WalletCaseSyncManifestCorrupt(
+            "Stored Wallet Case acquisition manifest failed integrity validation."
+        ) from exc
+    if (
+        manifest.contract_version != MANIFEST_CONTRACT_VERSION
+        or manifest.public_id != f"smf_{manifest.content_hash_sha256}"
+        or document.get("case_public_id") != case_public_id
+        or document.get("sync_public_id") != case_sync.public_id
+    ):
+        raise WalletCaseSyncManifestCorrupt(
+            "Stored Wallet Case acquisition manifest identity is inconsistent."
+        )
+    streams = document.get("streams")
+    if not isinstance(streams, list) or not all(
+        isinstance(stream, dict) for stream in streams
+    ):
+        raise WalletCaseSyncManifestCorrupt(
+            "Stored Wallet Case acquisition manifest streams are invalid."
+        )
+    pages: list[dict[str, Any]] = []
+    for stream in streams:
+        stream_pages = stream.get("pages")
+        if not isinstance(stream_pages, list) or not all(
+            isinstance(page, dict) for page in stream_pages
+        ):
+            raise WalletCaseSyncManifestCorrupt(
+                "Stored Wallet Case acquisition manifest pages are invalid."
+            )
+        pages.extend(stream_pages)
+    descriptor = {
+        "public_id": manifest.public_id,
+        "contract_version": manifest.contract_version,
+        "content_hash_sha256": manifest.content_hash_sha256,
+        "stream_count": len(streams),
+        "page_count": len(pages),
+        "response_digest_count": sum(
+            isinstance(page.get("response_digest_sha256"), str)
+            for page in pages
+        ),
+        "created_at": _isoformat(manifest.created_at),
+    }
+    return descriptor, document
 
 
 def _valid_coverage(value: dict[str, Any], case_sync: CaseSync) -> bool:

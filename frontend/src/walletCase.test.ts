@@ -185,6 +185,39 @@ describe("wallet case contracts", () => {
     })).toThrow(/composite-history limitation/);
   });
 
+  it("binds acquisition manifest identity to honest sync lifecycle boundaries", () => {
+    const succeeded = succeededSyncFixture();
+    expect(parseWalletCaseSync(succeeded).acquisition_manifest?.public_id).toBe(
+      succeeded.acquisition_manifest?.public_id,
+    );
+    expect(() => parseWalletCaseSync({
+      ...succeeded,
+      acquisition_manifest: {
+        ...succeeded.acquisition_manifest!,
+        content_hash_sha256: "0".repeat(64),
+      },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseSync({
+      ...succeeded,
+      acquisition_manifest: null,
+    })).toThrow(/manifest boundary/);
+    expect(() => parseWalletCaseSync({
+      ...activeSyncFixture("running"),
+      acquisition_manifest: succeeded.acquisition_manifest,
+    })).toThrow(/contradicts its lifecycle/);
+
+    const legacyLimitations = [
+      ...succeeded.limitations,
+      { code: "acquisition_manifest_unavailable", message: "Legacy boundary." },
+    ];
+    expect(() => parseWalletCaseSync({
+      ...succeeded,
+      acquisition_manifest: null,
+      limitations: legacyLimitations,
+      result: { ...succeeded.result!, limitations: legacyLimitations },
+    })).not.toThrow();
+  });
+
   it("fails closed on invalid version, polling, progress, and timestamps", () => {
     expect(() => parseWalletCaseSync(activeSyncFixture("queued", { status_version: 0 }))).toThrow(
       /status version/,

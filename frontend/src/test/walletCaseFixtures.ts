@@ -6,11 +6,13 @@ import type {
   WalletCaseSync,
   WalletCaseSyncResult,
 } from "../walletCase";
+import type { WalletCaseSyncManifestDescriptor } from "../walletCaseSyncManifest";
 
 export const CASE_ID = "550e8400-e29b-41d4-a716-446655440000";
 export const SYNC_ID = "550e8400-e29b-41d4-b716-446655440001";
 export const OLDER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440002";
 export const IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440003";
+export const MANIFEST_HASH = "ab".repeat(32);
 export const ALL_SURFACES = [
   "transfers",
   "transactions",
@@ -70,6 +72,18 @@ export function resultFixture(): WalletCaseSyncResult {
   };
 }
 
+export function manifestDescriptorFixture(): WalletCaseSyncManifestDescriptor {
+  return {
+    public_id: `smf_${MANIFEST_HASH}`,
+    contract_version: "wallet_case_sync_manifest_v1",
+    content_hash_sha256: MANIFEST_HASH,
+    stream_count: 0,
+    page_count: 0,
+    response_digest_count: 0,
+    created_at: "2026-08-09T12:01:00Z",
+  };
+}
+
 export function succeededSyncFixture(
   overrides: Partial<WalletCaseSync> = {},
 ): WalletCaseSync {
@@ -103,6 +117,7 @@ export function succeededSyncFixture(
     retry: null,
     error: null,
     result,
+    acquisition_manifest: manifestDescriptorFixture(),
     created_at: "2026-08-09T12:00:00Z",
     updated_at: "2026-08-09T12:01:00Z",
     started_at: "2026-08-09T12:00:01Z",
@@ -165,6 +180,7 @@ export function activeSyncFixture(
     retry: null,
     error: null,
     result: null,
+    acquisition_manifest: null,
     updated_at: state === "queued" ? "2026-08-09T12:00:00Z" : "2026-08-09T12:00:15Z",
     started_at: state === "queued" ? null : "2026-08-09T12:00:01Z",
     completed_at: null,

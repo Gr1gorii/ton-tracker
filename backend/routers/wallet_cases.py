@@ -18,6 +18,8 @@ from services.wallet_cases import (
     WalletCaseRuntimeConflict,
     WalletCaseService,
     WalletCaseSyncAlreadyActive,
+    WalletCaseSyncManifestCorrupt,
+    WalletCaseSyncManifestNotFound,
 )
 from services.wallet_case_access import require_local_wallet_case_access
 from wallet_case_schemas import (
@@ -27,6 +29,7 @@ from wallet_case_schemas import (
     WalletCaseMetadataUpdateRequest,
     WalletCaseResponse,
     WalletCaseSyncRequest,
+    WalletCaseSyncManifestResponse,
     WalletCaseSyncResponse,
     WalletCaseUpsertResponse,
 )
@@ -515,11 +518,77 @@ def read_wallet_case_sync(
             detail=str(exc),
             headers={"Cache-Control": "no-store"},
         ) from exc
+    except WalletCaseSyncManifestCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "acquisition_manifest_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
     except SQLAlchemyError as exc:
         session.rollback()
         raise HTTPException(
             status_code=503,
             detail="Wallet Case sync storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/syncs/{sync_public_id}/manifest",
+    response_model=WalletCaseSyncManifestResponse,
+)
+def read_wallet_case_sync_manifest(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    sync_public_id: str = Path(
+        ...,
+        pattern=_PUBLIC_ID_PATTERN,
+        max_length=36,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read verified, provider-safe acquisition evidence for one sync."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_sync_manifest(
+            public_id,
+            sync_public_id,
+        )
+    except WalletCaseSyncManifestNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "acquisition_manifest_not_found",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseSyncManifestCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "acquisition_manifest_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case acquisition manifest storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

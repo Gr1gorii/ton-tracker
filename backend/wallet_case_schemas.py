@@ -29,6 +29,14 @@ CanonicalPublicId = Annotated[
         max_length=36,
     ),
 ]
+ManifestPublicId = Annotated[
+    str,
+    Field(pattern=r"^smf_[0-9a-f]{64}$", max_length=68),
+]
+Sha256Digest = Annotated[
+    str,
+    Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
+]
 
 
 class _StrictModel(BaseModel):
@@ -229,6 +237,86 @@ class WalletCaseSyncResult(_StrictModel):
     message: str = Field(min_length=1, max_length=1000)
 
 
+class WalletCaseSyncManifestDescriptor(_StrictModel):
+    public_id: ManifestPublicId
+    contract_version: Literal["wallet_case_sync_manifest_v1"]
+    content_hash_sha256: Sha256Digest
+    stream_count: int = Field(ge=0)
+    page_count: int = Field(ge=0)
+    response_digest_count: int = Field(ge=0)
+    created_at: str
+
+
+class WalletCaseSyncManifestPeriod(_StrictModel):
+    start_at: str | None
+    end_at: str | None
+
+
+class WalletCaseSyncManifestPage(_StrictModel):
+    page_index: int = Field(ge=0)
+    request_cursor: str | None = Field(default=None, max_length=128)
+    response_cursor: str | None = Field(default=None, max_length=128)
+    requested_limit: int = Field(ge=0)
+    raw_count: int = Field(ge=0)
+    normalized_count: int = Field(ge=0)
+    duplicate_count: int = Field(ge=0)
+    min_logical_time: str | None = Field(default=None, max_length=20)
+    max_logical_time: str | None = Field(default=None, max_length=20)
+    min_timestamp: str | None = None
+    max_timestamp: str | None = None
+    response_digest_sha256: Sha256Digest | None = None
+    attempt_count: int = Field(ge=0)
+    error_code: str | None = Field(default=None, max_length=64)
+    fetched_at: str | None = None
+
+
+class WalletCaseSyncManifestStream(_StrictModel):
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    contract_version: str = Field(min_length=1, max_length=48)
+    scope_kind: str = Field(min_length=1, max_length=24)
+    requested_period: WalletCaseSyncManifestPeriod
+    sort_order: str | None = Field(default=None, max_length=32)
+    page_size: int = Field(ge=0)
+    page_cap: int = Field(ge=0)
+    completion_state: str = Field(min_length=1, max_length=24)
+    termination_reason: str | None = Field(default=None, max_length=48)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    raw_count: int = Field(ge=0)
+    normalized_count: int = Field(ge=0)
+    duplicate_count: int = Field(ge=0)
+    first_cursor: str | None = Field(default=None, max_length=128)
+    terminal_cursor: str | None = Field(default=None, max_length=128)
+    bounds_verified: bool
+    error_code: str | None = Field(default=None, max_length=64)
+    started_at: str | None = None
+    finished_at: str | None = None
+    pages: list[WalletCaseSyncManifestPage]
+
+
+class WalletCaseSyncManifestDocument(_StrictModel):
+    contract_version: Literal["wallet_case_sync_manifest_v1"]
+    case_public_id: CanonicalPublicId
+    sync_public_id: CanonicalPublicId
+    network: WalletCaseNetwork
+    data_mode: Literal["mock", "real"]
+    provider: str = Field(min_length=1, max_length=64)
+    sync_state: CaseSyncState
+    snapshot_period: WalletCaseSyncManifestPeriod
+    acquisition_period: WalletCaseSyncManifestPeriod
+    acquisition_mode: Literal["bounded", "incremental"]
+    overlap_seconds: int = Field(ge=0, le=86400)
+    base_snapshot_public_id: CanonicalPublicId | None = None
+    requested_surfaces: list[WalletIngestionSurface]
+    streams: list[WalletCaseSyncManifestStream]
+
+
+class WalletCaseSyncManifestResponse(_StrictModel):
+    manifest: WalletCaseSyncManifestDescriptor
+    document: WalletCaseSyncManifestDocument
+
+
 class WalletCaseSyncResponse(_StrictModel):
     case_public_id: CanonicalPublicId
     public_id: CanonicalPublicId
@@ -241,6 +329,7 @@ class WalletCaseSyncResponse(_StrictModel):
     retry: WalletCaseSyncRetry | None = None
     error: WalletCaseSyncError | None = None
     result: WalletCaseSyncResult | None = None
+    acquisition_manifest: WalletCaseSyncManifestDescriptor | None = None
     provider: str = Field(min_length=1, max_length=64)
     data_mode: Literal["mock", "real"]
     requested_scope: WalletCaseRequestedScope

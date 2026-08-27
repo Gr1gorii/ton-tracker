@@ -18,6 +18,10 @@ import {
   type WalletCaseUpsertResponse,
 } from "./walletCase";
 import {
+  parseWalletCaseSyncManifestResponse,
+  type WalletCaseSyncManifestResponse,
+} from "./walletCaseSyncManifest";
+import {
   isWalletCaseAssetPublicId,
   isWalletCaseActivityPublicId,
   parseWalletCaseActivityDetailResponse,
@@ -515,6 +519,33 @@ export async function getWalletCaseSync(
     throw new Error("Wallet Case sync response does not match the requested sync id");
   }
   return sync;
+}
+
+export async function getWalletCaseSyncManifest(
+  caseId: string,
+  syncId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseSyncManifestResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  assertPublicId(syncId, "Wallet Case sync id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/syncs/${encodeURIComponent(syncId)}/manifest`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case acquisition manifest read failed",
+    );
+  }
+  const manifest = parseWalletCaseSyncManifestResponse(await response.json());
+  if (
+    manifest.document.case_public_id !== caseId ||
+    manifest.document.sync_public_id !== syncId
+  ) {
+    throw new Error("Wallet Case acquisition manifest does not match the requested sync");
+  }
+  return manifest;
 }
 
 export async function cancelWalletCaseSync(

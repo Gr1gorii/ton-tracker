@@ -1,4 +1,8 @@
 import type { TimeWindow, WalletIngestionSurface } from "./types";
+import {
+  parseWalletCaseSyncManifestDescriptor,
+  type WalletCaseSyncManifestDescriptor,
+} from "./walletCaseSyncManifest";
 
 export type WalletCaseNetwork = "ton-mainnet" | "ton-testnet";
 export type WalletCaseDataEnvironment = "demo" | "live";
@@ -109,6 +113,7 @@ export interface WalletCaseSync {
   retry: WalletCaseSyncRetry | null;
   error: WalletCaseSyncError | null;
   result: WalletCaseSyncResult | null;
+  acquisition_manifest: WalletCaseSyncManifestDescriptor | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -551,6 +556,22 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   }
   const summary = parseSummary(sync.summary);
   const limitations = parseLimitations(sync.limitations);
+  const acquisitionManifest = sync.acquisition_manifest === null
+    ? null
+    : parseWalletCaseSyncManifestDescriptor(sync.acquisition_manifest);
+  if (
+    (["queued", "running", "cancelled"] as WalletCaseSyncState[]).includes(state) &&
+    acquisitionManifest !== null
+  ) {
+    throw new Error("case sync acquisition manifest contradicts its lifecycle");
+  }
+  if (
+    (state === "partial" || state === "succeeded") &&
+    acquisitionManifest === null &&
+    !limitations.some((item) => item.code === "acquisition_manifest_unavailable")
+  ) {
+    throw new Error("usable case sync omits its acquisition manifest boundary");
+  }
   if (
     mode === "incremental" &&
     !limitations.some((item) => item.code === "incremental_composite_not_full_history")
@@ -632,6 +653,7 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
     retry,
     error,
     result,
+    acquisition_manifest: acquisitionManifest,
     created_at: createdAt,
     updated_at: updatedAt,
     started_at: startedAt,
