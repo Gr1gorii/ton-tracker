@@ -19,6 +19,7 @@ import { useWalletCaseSyncJob } from "../useWalletCaseSyncJob";
 import CaseSyncPanel from "./CaseSyncPanel";
 
 const DEFAULT_SYNC_REQUEST: WalletCaseSyncRequest = {
+  mode: "bounded",
   time_window: "24h",
   surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"],
 };

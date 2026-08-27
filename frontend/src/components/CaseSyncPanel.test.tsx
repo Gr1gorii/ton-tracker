@@ -14,6 +14,7 @@ import {
 import CaseSyncPanel from "./CaseSyncPanel";
 
 const DEFAULT_REQUEST = {
+  mode: "bounded" as const,
   time_window: "24h" as const,
   surfaces: ["transfers", "transactions", "swaps", "balances", "jettons"] as const,
 };

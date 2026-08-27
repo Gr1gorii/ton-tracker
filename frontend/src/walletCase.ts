@@ -10,6 +10,7 @@ export type WalletCaseSyncState =
   | "succeeded"
   | "failed"
   | "cancelled";
+export type WalletCaseSyncMode = "bounded" | "incremental";
 export type WalletCaseCoverageState =
   | "unknown"
   | "bounded_partial"
@@ -91,10 +92,15 @@ export interface WalletCaseSync {
   provider: string;
   data_mode: "mock" | "real";
   requested_scope: {
+    mode: WalletCaseSyncMode;
     time_window: TimeWindow;
     start_at: string;
     end_at: string;
     surfaces: WalletIngestionSurface[];
+    acquisition_start_at: string;
+    acquisition_end_at: string;
+    overlap_seconds: number;
+    base_snapshot_public_id: string | null;
   };
   coverage: WalletCaseCoverage;
   summary: WalletCaseSummary;
@@ -174,6 +180,7 @@ export interface WalletCaseDeletionResponse {
 }
 
 export interface WalletCaseSyncRequest {
+  mode: WalletCaseSyncMode;
   time_window: TimeWindow;
   custom_start?: string;
   custom_end?: string;
@@ -420,13 +427,37 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   }
   const timeWindow = string(requestedScope.time_window, "case sync window") as TimeWindow;
   if (!TIME_WINDOWS.has(timeWindow)) throw new Error("case sync window is invalid");
+  const mode = string(requestedScope.mode, "case sync mode") as WalletCaseSyncMode;
+  if (mode !== "bounded" && mode !== "incremental") {
+    throw new Error("case sync mode is invalid");
+  }
   const casePublicId = string(sync.case_public_id, "case sync case id");
   if (!UUID_V4.test(casePublicId)) throw new Error("case sync case id is invalid");
   const startAt = timestamp(requestedScope.start_at, "case sync start");
   const endAt = timestamp(requestedScope.end_at, "case sync end");
+  const acquisitionStartAt = timestamp(
+    requestedScope.acquisition_start_at,
+    "case sync acquisition start",
+  );
+  const acquisitionEndAt = timestamp(
+    requestedScope.acquisition_end_at,
+    "case sync acquisition end",
+  );
+  const overlapSeconds = nonNegativeInteger(
+    requestedScope.overlap_seconds,
+    "case sync overlap seconds",
+  );
+  const baseSnapshotPublicId = requestedScope.base_snapshot_public_id === null
+    ? null
+    : string(requestedScope.base_snapshot_public_id, "case sync base snapshot id");
+  if (baseSnapshotPublicId !== null && !UUID_V4.test(baseSnapshotPublicId)) {
+    throw new Error("case sync base snapshot id is invalid");
+  }
   const surfaces = surfaceArray(requestedScope.surfaces, "case sync surfaces");
   const startTime = Date.parse(startAt);
   const endTime = Date.parse(endAt);
+  const acquisitionStartTime = Date.parse(acquisitionStartAt);
+  const acquisitionEndTime = Date.parse(acquisitionEndAt);
   if (
     surfaces.length === 0 ||
     !Number.isFinite(startTime) ||
@@ -434,6 +465,28 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
     startTime >= endTime
   ) {
     throw new Error("case sync requested scope is invalid");
+  }
+  if (
+    overlapSeconds > 86_400 ||
+    acquisitionStartTime < startTime ||
+    acquisitionStartTime >= acquisitionEndTime ||
+    acquisitionEndTime !== endTime
+  ) {
+    throw new Error("case sync acquisition scope is invalid");
+  }
+  if (
+    (mode === "bounded" && (
+      acquisitionStartAt !== startAt ||
+      acquisitionEndAt !== endAt ||
+      overlapSeconds !== 0 ||
+      baseSnapshotPublicId !== null
+    )) ||
+    (mode === "incremental" && (
+      timeWindow !== "custom" ||
+      baseSnapshotPublicId === null
+    ))
+  ) {
+    throw new Error("case sync acquisition mode contradicts its scope");
   }
   const coverage = parseWalletCaseCoverage(sync.coverage);
   if (
@@ -446,7 +499,7 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   if (
     (dataMode === "mock" && coverage.state !== "unknown") ||
     (coverage.state === "bounded_complete" &&
-      (dataMode !== "real" || state !== "succeeded")) ||
+      (dataMode !== "real" || state !== "succeeded" || mode === "incremental")) ||
     (coverage.state === "bounded_partial" && dataMode !== "real")
   ) {
     throw new Error("case sync coverage state contradicts its evidence mode");
@@ -498,6 +551,12 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   }
   const summary = parseSummary(sync.summary);
   const limitations = parseLimitations(sync.limitations);
+  if (
+    mode === "incremental" &&
+    !limitations.some((item) => item.code === "incremental_composite_not_full_history")
+  ) {
+    throw new Error("incremental case sync omits its composite-history limitation");
+  }
   const coverageResult = coverage;
   const message = string(sync.message, "case sync message");
   const result = sync.result === null
@@ -556,10 +615,15 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
     provider: string(sync.provider, "case sync provider"),
     data_mode: dataMode,
     requested_scope: {
+      mode,
       time_window: timeWindow,
       start_at: startAt,
       end_at: endAt,
       surfaces,
+      acquisition_start_at: acquisitionStartAt,
+      acquisition_end_at: acquisitionEndAt,
+      overlap_seconds: overlapSeconds,
+      base_snapshot_public_id: baseSnapshotPublicId,
     },
     coverage,
     summary,
