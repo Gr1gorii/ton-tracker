@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   ArrowCounterClockwise,
@@ -6,9 +6,11 @@ import {
   ArrowsClockwise,
   ChartLineUp,
   FolderOpen,
+  MagnifyingGlass,
   Plus,
   SpinnerGap,
   WarningCircle,
+  X,
 } from "@phosphor-icons/react";
 
 import type { CaseLibraryQuery } from "../caseRouting";
@@ -68,6 +70,10 @@ export default function GramCaseLibrary({
 }) {
   const [catalog, setCatalog] = useState<CaseLibraryCatalog | null>(null);
   const catalogState = catalogQuery.state;
+  const hasFilters = catalogQuery.query !== null ||
+    catalogQuery.network !== null ||
+    catalogQuery.dataEnvironment !== null;
+  const [draftQuery, setDraftQuery] = useState(catalogQuery.query ?? "");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,8 +180,17 @@ export default function GramCaseLibrary({
     catalogQuery.dataEnvironment,
   ]);
 
-  function selectCatalogState(next: WalletCaseCatalogState) {
-    if (next === catalogState) return;
+  useEffect(() => {
+    setDraftQuery(catalogQuery.query ?? "");
+  }, [catalogQuery.query]);
+
+  function changeCatalogQuery(next: CaseLibraryQuery) {
+    if (
+      next.state === catalogQuery.state &&
+      next.query === catalogQuery.query &&
+      next.network === catalogQuery.network &&
+      next.dataEnvironment === catalogQuery.dataEnvironment
+    ) return;
     generation.current += 1;
     controllerRef.current?.abort();
     restoreControllerRef.current?.abort();
@@ -183,9 +198,32 @@ export default function GramCaseLibrary({
     restoreControllerRef.current = null;
     catalogRef.current = null;
     setCatalog(null);
+    setError(null);
+    setMoreError(null);
     setLifecycleError(null);
     setRestoringId(null);
-    onCatalogQueryChange({ ...catalogQuery, state: next });
+    onCatalogQueryChange(next);
+  }
+
+  function selectCatalogState(next: WalletCaseCatalogState) {
+    if (next === catalogState) return;
+    changeCatalogQuery({ ...catalogQuery, state: next });
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const query = draftQuery.trim() || null;
+    changeCatalogQuery({ ...catalogQuery, query });
+  }
+
+  function clearFilters() {
+    setDraftQuery("");
+    changeCatalogQuery({
+      ...catalogQuery,
+      query: null,
+      network: null,
+      dataEnvironment: null,
+    });
   }
 
   async function restoreCase(walletCase: WalletCase) {
@@ -247,6 +285,61 @@ export default function GramCaseLibrary({
         </button>
       </div>
 
+      <form className="case-library-discovery" aria-label="Discover Wallet Cases" onSubmit={submitSearch}>
+        <div className="case-library-search">
+          <label htmlFor="case-library-search">Search Cases</label>
+          <div>
+            <MagnifyingGlass size={18} aria-hidden="true" />
+            <input
+              id="case-library-search"
+              type="search"
+              value={draftQuery}
+              maxLength={120}
+              placeholder="Label, note, or TON address"
+              onChange={(event) => setDraftQuery(event.target.value)}
+            />
+            <button type="submit">Search</button>
+          </div>
+        </div>
+        <label>
+          <span>Network</span>
+          <select
+            value={catalogQuery.network ?? ""}
+            onChange={(event) => changeCatalogQuery({
+              ...catalogQuery,
+              network: event.target.value === ""
+                ? null
+                : event.target.value as CaseLibraryQuery["network"],
+            })}
+          >
+            <option value="">All networks</option>
+            <option value="ton-mainnet">TON mainnet</option>
+            <option value="ton-testnet">TON testnet</option>
+          </select>
+        </label>
+        <label>
+          <span>Data</span>
+          <select
+            value={catalogQuery.dataEnvironment ?? ""}
+            onChange={(event) => changeCatalogQuery({
+              ...catalogQuery,
+              dataEnvironment: event.target.value === ""
+                ? null
+                : event.target.value as CaseLibraryQuery["dataEnvironment"],
+            })}
+          >
+            <option value="">Demo and live</option>
+            <option value="demo">Demo data</option>
+            <option value="live">Live data</option>
+          </select>
+        </label>
+        {hasFilters && (
+          <button type="button" className="case-library-clear" onClick={clearFilters}>
+            <X size={16} weight="bold" /> Clear filters
+          </button>
+        )}
+      </form>
+
       {loading && !catalog && (
         <div className="case-library-state" role="status">
           <SpinnerGap className="spin" size={25} />
@@ -267,13 +360,23 @@ export default function GramCaseLibrary({
       {!loading && !error && catalog?.cases.length === 0 && (
         <div className="case-library-empty">
           <span>{catalogState === "active" ? <FolderOpen size={31} weight="duotone" /> : <Archive size={31} weight="duotone" />}</span>
-          <h2>{catalogState === "active" ? "No Wallet Cases yet" : "No archived Cases"}</h2>
+          <h2>
+            {hasFilters
+              ? "No Cases match these filters"
+              : catalogState === "active" ? "No Wallet Cases yet" : "No archived Cases"}
+          </h2>
           <p>
-            {catalogState === "active"
+            {hasFilters
+              ? "Try a broader search, another network, or include both demo and live data."
+              : catalogState === "active"
               ? "Create a Case from a TON address to start a durable evidence workspace."
               : "Archived Cases keep their snapshots, evidence, notes, and reports until you restore or permanently delete them."}
           </p>
-          {catalogState === "active" && (
+          {hasFilters ? (
+            <button type="button" className="button-secondary" onClick={clearFilters}>
+              <X size={17} /> Clear filters
+            </button>
+          ) : catalogState === "active" && (
             <button type="button" className="button-primary" onClick={onCreateCase}>
               <Plus size={17} /> Create your first Case
             </button>
@@ -290,7 +393,10 @@ export default function GramCaseLibrary({
       {catalog && catalog.cases.length > 0 && (
         <>
           <div className="case-library-summary" role="status">
-            <span>{catalog.cases.length} {catalog.cases.length === 1 ? "Case" : "Cases"}</span>
+            <span>
+              {catalog.cases.length} {hasFilters ? "matching " : ""}
+              {catalog.cases.length === 1 ? "Case" : "Cases"}
+            </span>
             <small>{catalogState === "active" ? "Newest updates first" : "Newest archives first"} · local owner scope</small>
           </div>
           <div className="case-library-grid">

@@ -113,6 +113,65 @@ describe("GramCaseLibrary", () => {
     expect(listMock).toHaveBeenCalledTimes(2);
   });
 
+  it("discovers Cases with URL-owned search, network, and data filters", async () => {
+    listMock.mockImplementation(async (request = {}) => ({
+      cases: [],
+      limit: 12,
+      state: request.state ?? "active",
+      query: request.query ?? null,
+      network: request.network ?? null,
+      data_environment: request.dataEnvironment ?? null,
+      truncated: false,
+      next_cursor: null,
+    }));
+    renderLibrary();
+    const user = userEvent.setup();
+
+    await screen.findByRole("heading", { name: "No Wallet Cases yet" });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Network" }),
+      "ton-testnet",
+    );
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ network: "ton-testnet" }),
+    ));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Data" }),
+      "live",
+    );
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        network: "ton-testnet",
+        dataEnvironment: "live",
+      }),
+    ));
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search Cases" }),
+      "  Treasury 100%  ",
+    );
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: "Treasury 100%",
+        network: "ton-testnet",
+        dataEnvironment: "live",
+      }),
+    ));
+    expect(await screen.findByRole("heading", {
+      name: "No Cases match these filters",
+    })).toBeTruthy();
+
+    await user.click(screen.getAllByRole("button", { name: "Clear filters" })[0]);
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: null,
+        network: null,
+        dataEnvironment: null,
+      }),
+    ));
+  });
+
   it("appends a signed continuation and aborts the active request on unmount", async () => {
     const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
     const second = emptyWalletCaseFixture({
