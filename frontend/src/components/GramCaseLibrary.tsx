@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
+  ArrowCounterClockwise,
+  Archive,
   ArrowsClockwise,
   ChartLineUp,
   FolderOpen,
@@ -9,8 +11,8 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 
-import type { WalletCase } from "../walletCase";
-import { listWalletCases } from "../walletCaseApi";
+import type { WalletCase, WalletCaseCatalogState } from "../walletCase";
+import { listWalletCases, restoreWalletCase } from "../walletCaseApi";
 
 const INITIAL_LIMIT = 12;
 
@@ -60,12 +62,16 @@ export default function GramCaseLibrary({
   onCreateCase: () => void;
 }) {
   const [catalog, setCatalog] = useState<CaseLibraryCatalog | null>(null);
+  const [catalogState, setCatalogState] = useState<WalletCaseCatalogState>("active");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [moreError, setMoreError] = useState<string | null>(null);
+  const [lifecycleError, setLifecycleError] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const generation = useRef(0);
   const controllerRef = useRef<AbortController | null>(null);
+  const restoreControllerRef = useRef<AbortController | null>(null);
   const catalogRef = useRef<CaseLibraryCatalog | null>(null);
 
   function commitCatalog(next: CaseLibraryCatalog) {
@@ -73,7 +79,11 @@ export default function GramCaseLibrary({
     setCatalog(next);
   }
 
-  async function load(cursor: string | null = null, expanding = false) {
+  async function load(
+    state: WalletCaseCatalogState,
+    cursor: string | null = null,
+    expanding = false,
+  ) {
     const startingCatalog = catalogRef.current;
     if (
       expanding &&
@@ -94,7 +104,7 @@ export default function GramCaseLibrary({
     try {
       const result = await listWalletCases(
         INITIAL_LIMIT,
-        "active",
+        state,
         cursor,
         controller.signal,
       );
@@ -141,13 +151,53 @@ export default function GramCaseLibrary({
   }
 
   useEffect(() => {
-    void load();
+    void load(catalogState);
     return () => {
       generation.current += 1;
       controllerRef.current?.abort();
       controllerRef.current = null;
+      restoreControllerRef.current?.abort();
+      restoreControllerRef.current = null;
     };
-  }, []);
+  }, [catalogState]);
+
+  function selectCatalogState(next: WalletCaseCatalogState) {
+    if (next === catalogState) return;
+    generation.current += 1;
+    controllerRef.current?.abort();
+    restoreControllerRef.current?.abort();
+    controllerRef.current = null;
+    restoreControllerRef.current = null;
+    catalogRef.current = null;
+    setCatalog(null);
+    setLifecycleError(null);
+    setRestoringId(null);
+    setCatalogState(next);
+  }
+
+  async function restoreCase(walletCase: WalletCase) {
+    if (walletCase.archived_at === null || restoringId !== null) return;
+    restoreControllerRef.current?.abort();
+    const controller = new AbortController();
+    restoreControllerRef.current = controller;
+    setRestoringId(walletCase.public_id);
+    setLifecycleError(null);
+    try {
+      await restoreWalletCase(walletCase.public_id, controller.signal);
+      if (controller.signal.aborted) return;
+      await load("archived");
+    } catch (caught) {
+      if (controller.signal.aborted) return;
+      setLifecycleError(
+        caught instanceof Error ? caught.message : "Wallet Case restoration failed.",
+      );
+    } finally {
+      if (!controller.signal.aborted) {
+        setRestoringId(null);
+        restoreControllerRef.current = null;
+      }
+    }
+  }
 
   return (
     <section className="case-library" aria-labelledby="case-library-title">
@@ -165,6 +215,25 @@ export default function GramCaseLibrary({
         </button>
       </header>
 
+      <div className="case-library-tabs" role="tablist" aria-label="Case lifecycle">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={catalogState === "active"}
+          onClick={() => selectCatalogState("active")}
+        >
+          <FolderOpen size={17} /> Active Cases
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={catalogState === "archived"}
+          onClick={() => selectCatalogState("archived")}
+        >
+          <Archive size={17} /> Archived Cases
+        </button>
+      </div>
+
       {loading && !catalog && (
         <div className="case-library-state" role="status">
           <SpinnerGap className="spin" size={25} />
@@ -176,7 +245,7 @@ export default function GramCaseLibrary({
         <div className="case-library-state is-error" role="alert">
           <WarningCircle size={25} weight="fill" />
           <div><h2>Case library unavailable</h2><p>{error}</p></div>
-          <button type="button" className="button-secondary" onClick={() => void load()}>
+          <button type="button" className="button-secondary" onClick={() => void load(catalogState)}>
             <ArrowsClockwise size={17} /> Retry
           </button>
         </div>
@@ -184,20 +253,32 @@ export default function GramCaseLibrary({
 
       {!loading && !error && catalog?.cases.length === 0 && (
         <div className="case-library-empty">
-          <span><FolderOpen size={31} weight="duotone" /></span>
-          <h2>No Wallet Cases yet</h2>
-          <p>Create a Case from a TON address to start a durable evidence workspace.</p>
-          <button type="button" className="button-primary" onClick={onCreateCase}>
-            <Plus size={17} /> Create your first Case
-          </button>
+          <span>{catalogState === "active" ? <FolderOpen size={31} weight="duotone" /> : <Archive size={31} weight="duotone" />}</span>
+          <h2>{catalogState === "active" ? "No Wallet Cases yet" : "No archived Cases"}</h2>
+          <p>
+            {catalogState === "active"
+              ? "Create a Case from a TON address to start a durable evidence workspace."
+              : "Archived Cases keep their snapshots, evidence, notes, and reports until you restore or permanently delete them."}
+          </p>
+          {catalogState === "active" && (
+            <button type="button" className="button-primary" onClick={onCreateCase}>
+              <Plus size={17} /> Create your first Case
+            </button>
+          )}
         </div>
+      )}
+
+      {lifecycleError && (
+        <p className="case-library-lifecycle-error" role="alert">
+          <WarningCircle size={17} weight="fill" /> {lifecycleError}
+        </p>
       )}
 
       {catalog && catalog.cases.length > 0 && (
         <>
           <div className="case-library-summary" role="status">
             <span>{catalog.cases.length} {catalog.cases.length === 1 ? "Case" : "Cases"}</span>
-            <small>Newest updates first · local owner scope</small>
+            <small>{catalogState === "active" ? "Newest updates first" : "Newest archives first"} · local owner scope</small>
           </div>
           <div className="case-library-grid">
             {catalog.cases.map((walletCase) => {
@@ -216,16 +297,40 @@ export default function GramCaseLibrary({
                   <dl>
                     <div><dt>State</dt><dd>{state}</dd></div>
                     <div><dt>Activity</dt><dd><ChartLineUp size={15} /> {count} rows</dd></div>
-                    <div><dt>Updated</dt><dd><time dateTime={walletCase.updated_at}>{formatDate(walletCase.updated_at)}</time></dd></div>
+                    <div>
+                      <dt>{catalogState === "active" ? "Updated" : "Archived"}</dt>
+                      <dd><time dateTime={walletCase.archived_at ?? walletCase.updated_at}>{formatDate(walletCase.archived_at ?? walletCase.updated_at)}</time></dd>
+                    </div>
                   </dl>
-                  <button
-                    type="button"
-                    className="case-library-open"
-                    aria-label={`Open Case ${title}`}
-                    onClick={() => onOpenCase(walletCase.public_id)}
-                  >
-                    Open Case <ArrowRight size={17} weight="bold" />
-                  </button>
+                  {catalogState === "active" ? (
+                    <button
+                      type="button"
+                      className="case-library-open"
+                      aria-label={`Open Case ${title}`}
+                      disabled={walletCase.archived_at !== null}
+                      onClick={() => onOpenCase(walletCase.public_id)}
+                    >
+                      {walletCase.archived_at === null ? "Open Case" : "Archived since snapshot"}
+                      <ArrowRight size={17} weight="bold" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      className="case-library-restore"
+                      aria-label={`Restore Case ${title}`}
+                      disabled={walletCase.archived_at === null || restoringId !== null}
+                      onClick={() => void restoreCase(walletCase)}
+                    >
+                      {restoringId === walletCase.public_id
+                        ? <SpinnerGap className="spin" size={17} />
+                        : <ArrowCounterClockwise size={17} weight="bold" />}
+                      {walletCase.archived_at === null
+                        ? "Already restored"
+                        : restoringId === walletCase.public_id
+                          ? "Restoring…"
+                          : "Restore Case"}
+                    </button>
+                  )}
                 </article>
               );
             })}
@@ -237,14 +342,14 @@ export default function GramCaseLibrary({
                 type="button"
                 className="button-secondary"
                 disabled={loadingMore}
-                onClick={() => void load(catalog.nextCursor, true)}
+                onClick={() => void load(catalogState, catalog.nextCursor, true)}
               >
                 {loadingMore ? <SpinnerGap className="spin" size={17} /> : <FolderOpen size={17} />}
                 {loadingMore
                   ? "Loading…"
                   : moreError
                     ? "Retry loading more"
-                    : "Load more Cases"}
+                    : catalogState === "active" ? "Load more Cases" : "Load more archived Cases"}
               </button>
             </div>
           )}

@@ -8,13 +8,18 @@ import * as api from "../walletCaseApi";
 import { emptyWalletCaseFixture, walletCaseFixture } from "../test/walletCaseFixtures";
 import GramCaseLibrary from "./GramCaseLibrary";
 
-vi.mock("../walletCaseApi", () => ({ listWalletCases: vi.fn() }));
+vi.mock("../walletCaseApi", () => ({
+  listWalletCases: vi.fn(),
+  restoreWalletCase: vi.fn(),
+}));
 
 const listMock = vi.mocked(api.listWalletCases);
+const restoreMock = vi.mocked(api.restoreWalletCase);
 const SECOND_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
 
 beforeEach(() => {
   listMock.mockReset();
+  restoreMock.mockReset();
 });
 
 afterEach(cleanup);
@@ -122,5 +127,50 @@ describe("GramCaseLibrary", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("overlaps");
     expect(screen.getByRole("heading", { name: "Treasury" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Retry loading more" })).toBeTruthy();
+  });
+
+  it("switches to the archived catalog and restores a retained Case", async () => {
+    const active = walletCaseFixture({ overrides: { label: "Treasury" } });
+    const archived = emptyWalletCaseFixture({
+      public_id: SECOND_CASE_ID,
+      canonical_wallet_key: `0:${"b".repeat(64)}`,
+      display_address: "EQC-archived-wallet",
+      label: "Cold storage",
+      archived_at: "2026-08-27T12:00:00Z",
+      updated_at: "2026-08-27T12:00:00Z",
+    });
+    listMock
+      .mockResolvedValueOnce({
+        cases: [active], limit: 12, state: "active", truncated: false, next_cursor: null,
+      })
+      .mockResolvedValueOnce({
+        cases: [archived], limit: 12, state: "archived", truncated: false, next_cursor: null,
+      })
+      .mockResolvedValueOnce({
+        cases: [], limit: 12, state: "archived", truncated: false, next_cursor: null,
+      });
+    restoreMock.mockResolvedValueOnce({ ...archived, archived_at: null });
+    render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
+
+    await screen.findByRole("heading", { name: "Treasury" });
+    await userEvent.setup().click(
+      screen.getByRole("tab", { name: "Archived Cases" }),
+    );
+    expect(await screen.findByRole("heading", { name: "Cold storage" })).toBeTruthy();
+    expect(screen.getByText(/Newest archives first/)).toBeTruthy();
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: "Restore Case Cold storage" }),
+    );
+
+    expect(await screen.findByRole("heading", { name: "No archived Cases" })).toBeTruthy();
+    expect(restoreMock).toHaveBeenCalledWith(
+      archived.public_id,
+      expect.any(AbortSignal),
+    );
+    expect(listMock.mock.calls.map((call) => call[1])).toEqual([
+      "active",
+      "archived",
+      "archived",
+    ]);
   });
 });
