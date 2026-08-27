@@ -37,7 +37,7 @@ from services.dex_protocols import SUPPORTED_DEX_PROTOCOL_IDS, classify_dex_prot
 from services.ton_address_identity import derive_ton_wallet_identity, parse_ton_address
 from services.ton_event_action_identity import derive_ton_event_action_identity
 from services.ton_transaction_identity import derive_ton_transaction_identity
-from services.wallet_cases import _stored_coverage
+from services.wallet_cases import _stored_coverage, _sync_acquisition_plan
 
 
 MAX_SOURCE_SYNCS = 256
@@ -923,6 +923,7 @@ def _run_matches_case(
     )
     sync_surfaces = _json_list(sync.requested_surfaces_json)
     run_surfaces = _json_list(run.requested_surfaces_json)
+    acquisition = _sync_acquisition_plan(sync)
     return (
         sync.case_id == wallet_case.id
         and sync.ingestion_run_id == run.id
@@ -941,8 +942,14 @@ def _run_matches_case(
         and (
             sync.time_window != "custom"
             or (
-                _same_datetime(run.custom_start, sync.requested_start)
-                and _same_datetime(run.custom_end, sync.requested_end)
+                _same_datetime(
+                    run.custom_start,
+                    _parse_plan_instant(acquisition["start_at"]),
+                )
+                and _same_datetime(
+                    run.custom_end,
+                    _parse_plan_instant(acquisition["end_at"]),
+                )
             )
         )
     )
@@ -980,7 +987,17 @@ def _row_matches_source_period(
     if run.data_mode == "mock" or timestamp is None:
         return True
     observed = _as_utc(timestamp)
-    return _as_utc(sync.requested_start) <= observed < _as_utc(sync.requested_end)
+    acquisition = _sync_acquisition_plan(sync)
+    return (
+        _parse_plan_instant(acquisition["start_at"])
+        <= observed
+        < _parse_plan_instant(acquisition["end_at"])
+    )
+
+
+def _parse_plan_instant(value: str) -> datetime:
+    cleaned = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    return _as_utc(datetime.fromisoformat(cleaned))
 
 
 def _json_list(value: str | None) -> list[str]:

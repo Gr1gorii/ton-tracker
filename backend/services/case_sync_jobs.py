@@ -37,6 +37,7 @@ from services.wallet_cases import (
     _coverage_record,
     _json_dumps,
     _json_list,
+    _sync_acquisition_plan,
     _summary_from_run,
     _sync_state,
 )
@@ -80,6 +81,11 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _parse_plan_instant(value: str) -> datetime:
+    cleaned = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    return _as_utc(datetime.fromisoformat(cleaned))
+
+
 def _checkpoint(phase: str, *, retryable: bool = False) -> str:
     return json.dumps(
         {
@@ -109,6 +115,10 @@ class ClaimedCaseSync:
     requested_start: datetime
     requested_end: datetime
     requested_surfaces: tuple[str, ...]
+    acquisition_mode: str
+    acquisition_start: datetime
+    acquisition_end: datetime
+    acquisition_plan: dict[str, Any]
 
 
 class CaseSyncWorker:
@@ -381,6 +391,7 @@ class CaseSyncWorker:
                 self._close_unavailable_claim(candidate_id, lease_token)
                 return None
             case_sync, wallet_case = row
+            acquisition_plan = _sync_acquisition_plan(case_sync)
             return ClaimedCaseSync(
                 id=case_sync.id,
                 public_id=case_sync.public_id,
@@ -399,6 +410,14 @@ class CaseSyncWorker:
                 requested_surfaces=tuple(
                     _json_list(case_sync.requested_surfaces_json)
                 ),
+                acquisition_mode=acquisition_plan["mode"],
+                acquisition_start=_parse_plan_instant(
+                    acquisition_plan["start_at"]
+                ),
+                acquisition_end=_parse_plan_instant(
+                    acquisition_plan["end_at"]
+                ),
+                acquisition_plan=acquisition_plan,
             )
 
     def _close_unavailable_claim(self, sync_id: int, lease_token: str) -> bool:
@@ -451,17 +470,22 @@ class CaseSyncWorker:
 
         if not self._advance_to_ingestion(claimed):
             return
+        acquisition_window = (
+            "custom"
+            if claimed.acquisition_mode == "incremental"
+            else claimed.time_window
+        )
         payload = WalletIngestionPreviewRequest(
             wallet_address=claimed.display_address,
-            time_window=claimed.time_window,
+            time_window=acquisition_window,
             custom_start=(
-                claimed.requested_start.isoformat()
-                if claimed.time_window == "custom"
+                claimed.acquisition_start.isoformat()
+                if acquisition_window == "custom"
                 else None
             ),
             custom_end=(
-                claimed.requested_end.isoformat()
-                if claimed.time_window == "custom"
+                claimed.acquisition_end.isoformat()
+                if acquisition_window == "custom"
                 else None
             ),
             surfaces=list(claimed.requested_surfaces),
@@ -638,7 +662,7 @@ class CaseSyncWorker:
                 result = self.builder(
                     payload,
                     settings,
-                    now=claimed.requested_end,
+                    now=claimed.acquisition_end,
                     expected_data_mode=(
                         "mock" if claimed.data_environment == "demo" else "real"
                     ),
@@ -874,6 +898,7 @@ class CaseSyncWorker:
             end_at=claimed.requested_end,
             state=state,
             requested_surfaces=list(claimed.requested_surfaces),
+            acquisition_plan=claimed.acquisition_plan,
         )
         summary = _summary_from_run(run_response)
         message = _bounded_message(run_response.get("message"))

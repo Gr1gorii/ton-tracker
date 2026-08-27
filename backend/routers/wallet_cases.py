@@ -14,6 +14,7 @@ from services.wallet_cases import (
     WalletCaseMetadataConflict,
     WalletCaseNotFound,
     WalletCaseIdempotencyConflict,
+    WalletCaseIncrementalSyncUnavailable,
     WalletCaseRuntimeConflict,
     WalletCaseService,
     WalletCaseSyncAlreadyActive,
@@ -449,6 +450,16 @@ def enqueue_wallet_case_sync(
             status_code=409,
             detail={
                 "code": "idempotency_conflict",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseIncrementalSyncUnavailable as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "incremental_sync_unavailable",
                 "message_safe": str(exc),
                 "retryable": False,
             },
