@@ -56,7 +56,7 @@ def client(tmp_path, monkeypatch):
     database_path = tmp_path / "wallet-cases.sqlite3"
     engine = create_database_engine(f"sqlite:///{database_path}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260827_0026"
+    assert report.revision_after == "20260827_0027"
     testing_session = sessionmaker(
         autocommit=False,
         autoflush=False,

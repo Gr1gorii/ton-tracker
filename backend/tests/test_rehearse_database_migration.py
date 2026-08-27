@@ -111,7 +111,7 @@ def test_rehearsal_applies_pending_target_image_revision(tmp_path):
     )
 
     assert result.source_revision == "20260710_0015"
-    assert result.target_revision == "20260827_0026"
+    assert result.target_revision == "20260827_0027"
     assert result.action == "upgraded"
     assert result.applied_revisions == (
         "20260710_0016",
@@ -125,6 +125,7 @@ def test_rehearsal_applies_pending_target_image_revision(tmp_path):
         "20260710_0024",
         "20260710_0025",
         "20260827_0026",
+        "20260827_0027",
     )
     assert sha256_file(backup) == digest_before
     assert list(workspace.iterdir()) == []

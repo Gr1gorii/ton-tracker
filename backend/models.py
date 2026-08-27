@@ -476,6 +476,69 @@ class CaseSync(Base):
         "WalletIngestionRun",
         back_populates="case_sync",
     )
+    acquisition_manifest = relationship(
+        "WalletCaseSyncManifest",
+        back_populates="case_sync",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        single_parent=True,
+        uselist=False,
+    )
+
+
+class WalletCaseSyncManifest(Base):
+    """Immutable content-addressed acquisition evidence for one CaseSync."""
+
+    __tablename__ = "wallet_case_sync_manifests"
+    __table_args__ = (
+        CheckConstraint(
+            "contract_version = 'wallet_case_sync_manifest_v1'",
+            name="ck_wallet_case_sync_manifests_contract",
+        ),
+        CheckConstraint(
+            "length(content_hash_sha256) = 64 AND "
+            "public_id = 'smf_' || content_hash_sha256",
+            name="ck_wallet_case_sync_manifests_identity",
+        ),
+        CheckConstraint(
+            "length(manifest_json) > 2",
+            name="ck_wallet_case_sync_manifests_payload",
+        ),
+        Index(
+            "uq_wallet_case_sync_manifests_public_id",
+            "public_id",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_case_sync_manifests_sync",
+            "case_sync_id",
+            unique=True,
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(String(68), nullable=False)
+    case_sync_id = Column(
+        Integer,
+        ForeignKey("wallet_case_syncs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    contract_version = Column(
+        String(36),
+        nullable=False,
+        default="wallet_case_sync_manifest_v1",
+        server_default="wallet_case_sync_manifest_v1",
+    )
+    content_hash_sha256 = Column(String(64), nullable=False)
+    manifest_json = Column(Text, nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    case_sync = relationship(
+        "CaseSync",
+        back_populates="acquisition_manifest",
+    )
 
 
 class CaseEvidenceVerification(Base):
