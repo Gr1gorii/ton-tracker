@@ -48,6 +48,20 @@ class WalletCaseRepository:
         )
         return self.session.scalar(statement)
 
+    def get_any_by_public_id(
+        self,
+        *,
+        owner_scope_id: str,
+        public_id: str,
+    ) -> WalletCase | None:
+        """Load an active or archived Case without crossing the owner boundary."""
+        return self.session.scalar(
+            select(WalletCase).where(
+                WalletCase.owner_scope_id == owner_scope_id,
+                WalletCase.public_id == public_id,
+            )
+        )
+
     def active_catalog_cutoff(self, *, owner_scope_id: str) -> int | None:
         return self.session.scalar(
             select(func.max(WalletCaseCatalogEvent.id))
