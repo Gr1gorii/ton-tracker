@@ -1,8 +1,8 @@
-# GRAM Scope — v0.83.0 Promotion Checklist
+# GRAM Scope — v0.84.0 Promotion Checklist
 
-Current promotion gates for reversible Wallet Case archival:
+Current promotion gates for Wallet Case discovery:
 
-- Product label is `v0.83.0 CASE ARCHIVE`; backend API version stays
+- Product label is `v0.84.0 CASE DISCOVERY`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260827_0026` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -32,6 +32,16 @@ Current promotion gates for reversible Wallet Case archival:
   active and archived Cases receive one deterministic visibility/position seed;
   exact empty interrupted-DDL resume, row adoption, foreign-key/index drift,
   schema parity, cascade, and forward-only behavior must pass fail-closed tests.
+- Case catalog search matches label, note, display address, and canonical wallet
+  key case-insensitively while treating `%`, `_`, and `\\` as literal text.
+  Network and data-environment filters are exact, optional, and independently
+  echoed in every response.
+- Catalog cursor version 3 authenticates the normalized discovery filter digest
+  together with owner scope, lifecycle state, frozen cutoff, and keyset
+  position. Reusing a cursor after any filter change must fail closed.
+- The `/cases` URL round-trips lifecycle, applied search, network, and
+  demo/live state. Refresh and back/forward restore that state; ambiguous,
+  duplicate, noncanonical, and unsupported parameters resolve to not found.
 - Evidence is bound to one owner-scoped case, usable pinned snapshot, exact
   source synchronization, and a revalidated provider-observed transaction.
   Demo fixtures, transfers, swaps, unknown linkage, and mismatched source scope
@@ -135,7 +145,7 @@ Current promotion gates for reversible Wallet Case archival:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.83.0 must not be promoted as a hosted Wallet Case release.
+  v0.84.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 
