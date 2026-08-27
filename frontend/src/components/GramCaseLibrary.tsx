@@ -94,6 +94,7 @@ export default function GramCaseLibrary({
     try {
       const result = await listWalletCases(
         INITIAL_LIMIT,
+        "active",
         cursor,
         controller.signal,
       );

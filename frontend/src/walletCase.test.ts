@@ -28,6 +28,7 @@ describe("wallet case contracts", () => {
     expect(parseWalletCaseListResponse({
       cases: [first, second],
       limit: 2,
+      state: "active",
       truncated: true,
       next_cursor: "opaque.cursor",
     }).cases).toHaveLength(2);
@@ -36,22 +37,22 @@ describe("wallet case contracts", () => {
   it("rejects unbounded, duplicate, and contradictory Wallet Case catalogs", () => {
     const walletCase = walletCaseFixture();
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 0, truncated: false, next_cursor: null,
+      cases: [walletCase], limit: 0, state: "active", truncated: false, next_cursor: null,
     })).toThrow(/limit/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 51, truncated: false, next_cursor: null,
+      cases: [walletCase], limit: 51, state: "active", truncated: false, next_cursor: null,
     })).toThrow(/bounded limit/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase, walletCase], limit: 2, truncated: false, next_cursor: null,
+      cases: [walletCase, walletCase], limit: 2, state: "active", truncated: false, next_cursor: null,
     })).toThrow(/duplicate/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 2, truncated: true, next_cursor: "opaque.cursor",
+      cases: [walletCase], limit: 2, state: "active", truncated: true, next_cursor: "opaque.cursor",
     })).toThrow(/does not fill/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 1, truncated: true, next_cursor: null,
+      cases: [walletCase], limit: 1, state: "active", truncated: true, next_cursor: null,
     })).toThrow(/cursor contradicts/);
     expect(() => parseWalletCaseListResponse({
-      cases: [walletCase], limit: 1, truncated: false, next_cursor: "opaque.cursor",
+      cases: [walletCase], limit: 1, state: "active", truncated: false, next_cursor: "opaque.cursor",
     })).toThrow(/cursor contradicts/);
   });
 
@@ -215,7 +216,7 @@ describe("wallet case contracts", () => {
     expect(parseWalletCaseUpsertResponse({ created: true, case: walletCaseFixture() }).created).toBe(true);
     expect(
       parseWalletCaseListResponse({
-        cases: [walletCaseFixture()], limit: 20, truncated: false, next_cursor: null,
+        cases: [walletCaseFixture()], limit: 20, state: "active", truncated: false, next_cursor: null,
       }).cases,
     ).toHaveLength(1);
     expect(parseWalletCase(walletCaseFixture()).public_id).toBe(CASE_ID);
@@ -235,6 +236,20 @@ describe("wallet case contracts", () => {
       ...walletCaseFixture(),
       note: "x".repeat(4_001),
     })).toThrow(/note is too long/);
+  });
+
+  it("requires explicit Case lifecycle timestamps and catalog state", () => {
+    const archivedAt = "2026-08-27T12:00:00Z";
+    expect(parseWalletCase(walletCaseFixture({
+      overrides: { archived_at: archivedAt },
+    })).archived_at).toBe(archivedAt);
+    expect(() => parseWalletCase({
+      ...walletCaseFixture(),
+      archived_at: "not-a-time",
+    })).toThrow(/archived time/);
+    expect(() => parseWalletCaseListResponse({
+      cases: [], limit: 20, state: "deleted", truncated: false, next_cursor: null,
+    })).toThrow(/lifecycle state/);
   });
 
   it("validates a bounded deletion receipt and rejects identity/count drift", () => {

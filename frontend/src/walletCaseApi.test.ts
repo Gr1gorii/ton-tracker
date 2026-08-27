@@ -4,6 +4,7 @@ import { getProvidersStatus } from "./api";
 import { API_BASE } from "./apiBase";
 import {
   WalletCaseApiError,
+  archiveWalletCase,
   cancelWalletCaseSync,
   createWalletCase,
   createWalletCaseSync,
@@ -13,6 +14,7 @@ import {
   getWalletCaseActivityDetail,
   getWalletCaseSync,
   listWalletCases,
+  restoreWalletCase,
   updateWalletCaseMetadata,
 } from "./walletCaseApi";
 import {
@@ -67,7 +69,7 @@ describe("Wallet Case API", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ created: false, case: empty }, 200))
       .mockResolvedValueOnce(jsonResponse({
-        cases: [populated], limit: 7, truncated: false, next_cursor: null,
+        cases: [populated], limit: 7, state: "active", truncated: false, next_cursor: null,
       }))
       .mockResolvedValueOnce(jsonResponse(populated));
     vi.stubGlobal("fetch", fetchMock);
@@ -83,8 +85,8 @@ describe("Wallet Case API", () => {
       created: false,
       case: empty,
     });
-    await expect(listWalletCases(7, null, controller.signal)).resolves.toEqual({
-      cases: [populated], limit: 7, truncated: false, next_cursor: null,
+    await expect(listWalletCases(7, "active", null, controller.signal)).resolves.toEqual({
+      cases: [populated], limit: 7, state: "active", truncated: false, next_cursor: null,
     });
     await expect(getWalletCase(CASE_ID, controller.signal)).resolves.toEqual(populated);
     expect(fetchMock.mock.calls[0]).toEqual([
@@ -98,7 +100,7 @@ describe("Wallet Case API", () => {
       },
     ]);
     expect(fetchMock.mock.calls[1]).toEqual([
-      `${API_BASE}/api/v1/cases?limit=7`,
+      `${API_BASE}/api/v1/cases?limit=7&state=active`,
       { cache: "no-store", signal: controller.signal },
     ]);
   });
@@ -118,6 +120,7 @@ describe("Wallet Case API", () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       cases: [walletCaseFixture()],
       limit: 8,
+      state: "active",
       truncated: false,
       next_cursor: null,
     }));
@@ -131,17 +134,49 @@ describe("Wallet Case API", () => {
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
       cases: [walletCaseFixture()],
       limit: 1,
+      state: "archived",
       truncated: false,
       next_cursor: null,
     }));
     vi.stubGlobal("fetch", fetchMock);
     const controller = new AbortController();
 
-    await expect(listWalletCases(1, cursor, controller.signal)).resolves.toBeTruthy();
+    await expect(listWalletCases(1, "archived", cursor, controller.signal)).resolves.toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
-      `${API_BASE}/api/v1/cases?limit=1&cursor=opaque-signed.cursor`,
+      `${API_BASE}/api/v1/cases?limit=1&state=archived&cursor=opaque-signed.cursor`,
       { cache: "no-store", signal: controller.signal },
     );
+  });
+
+  it("archives and restores a Case only from state-bound responses", async () => {
+    const archived = emptyWalletCaseFixture({
+      archived_at: "2026-08-27T12:00:00Z",
+      updated_at: "2026-08-27T12:00:00Z",
+    });
+    const restored = emptyWalletCaseFixture({
+      updated_at: "2026-08-27T12:01:00Z",
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(archived))
+      .mockResolvedValueOnce(jsonResponse(restored));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(archiveWalletCase(CASE_ID, controller.signal)).resolves.toEqual(archived);
+    await expect(restoreWalletCase(CASE_ID, controller.signal)).resolves.toEqual(restored);
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        `${API_BASE}/api/v1/cases/${CASE_ID}/archive`,
+        { method: "POST", cache: "no-store", signal: controller.signal },
+      ],
+      [
+        `${API_BASE}/api/v1/cases/${CASE_ID}/restore`,
+        { method: "POST", cache: "no-store", signal: controller.signal },
+      ],
+    ]);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(restored));
+    await expect(archiveWalletCase(CASE_ID)).rejects.toThrow(/does not match/);
   });
 
   it("deletes a case only from a strictly bound lifecycle receipt", async () => {

@@ -200,6 +200,7 @@ export function walletCaseFixture({
     metadata_version: 1,
     created_at: "2026-08-09T12:00:00Z",
     updated_at: "2026-08-09T12:01:00Z",
+    archived_at: null,
     latest_sync: latestAttempt,
     latest_sync_attempt: latestAttempt,
     active_sync: derivedActive,
