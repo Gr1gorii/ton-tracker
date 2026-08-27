@@ -18,6 +18,12 @@ import {
   zeroSummaryFixture,
 } from "./test/walletCaseFixtures";
 
+const EMPTY_CATALOG_FILTERS = {
+  query: null,
+  network: null,
+  data_environment: null,
+} as const;
+
 describe("wallet case contracts", () => {
   it("accepts a bounded unique Wallet Case catalog", () => {
     const first = walletCaseFixture();
@@ -26,6 +32,7 @@ describe("wallet case contracts", () => {
       canonical_wallet_key: `0:${"b".repeat(64)}`,
     });
     expect(parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [first, second],
       limit: 2,
       state: "active",
@@ -37,23 +44,60 @@ describe("wallet case contracts", () => {
   it("rejects unbounded, duplicate, and contradictory Wallet Case catalogs", () => {
     const walletCase = walletCaseFixture();
     expect(() => parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [walletCase], limit: 0, state: "active", truncated: false, next_cursor: null,
     })).toThrow(/limit/);
     expect(() => parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [walletCase], limit: 51, state: "active", truncated: false, next_cursor: null,
     })).toThrow(/bounded limit/);
     expect(() => parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [walletCase, walletCase], limit: 2, state: "active", truncated: false, next_cursor: null,
     })).toThrow(/duplicate/);
     expect(() => parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [walletCase], limit: 2, state: "active", truncated: true, next_cursor: "opaque.cursor",
     })).toThrow(/does not fill/);
     expect(() => parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [walletCase], limit: 1, state: "active", truncated: true, next_cursor: null,
     })).toThrow(/cursor contradicts/);
     expect(() => parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [walletCase], limit: 1, state: "active", truncated: false, next_cursor: "opaque.cursor",
     })).toThrow(/cursor contradicts/);
+  });
+
+  it("requires canonical discovery filters in Wallet Case catalog envelopes", () => {
+    expect(parseWalletCaseListResponse({
+      cases: [],
+      limit: 20,
+      state: "archived",
+      query: "Treasury",
+      network: "ton-mainnet",
+      data_environment: "live",
+      truncated: false,
+      next_cursor: null,
+    })).toMatchObject({
+      query: "Treasury",
+      network: "ton-mainnet",
+      data_environment: "live",
+    });
+    for (const filters of [
+      { query: " padded ", network: null, data_environment: null },
+      { query: null, network: "ethereum", data_environment: null },
+      { query: null, network: null, data_environment: "staging" },
+    ]) {
+      expect(() => parseWalletCaseListResponse({
+        cases: [],
+        limit: 20,
+        state: "active",
+        ...filters,
+        truncated: false,
+        next_cursor: null,
+      })).toThrow(/query|network|environment/);
+    }
   });
 
   it("accepts a terminal snapshot with explicit published-result provenance", () => {
@@ -216,6 +260,7 @@ describe("wallet case contracts", () => {
     expect(parseWalletCaseUpsertResponse({ created: true, case: walletCaseFixture() }).created).toBe(true);
     expect(
       parseWalletCaseListResponse({
+        ...EMPTY_CATALOG_FILTERS,
         cases: [walletCaseFixture()], limit: 20, state: "active", truncated: false, next_cursor: null,
       }).cases,
     ).toHaveLength(1);
@@ -248,6 +293,7 @@ describe("wallet case contracts", () => {
       archived_at: "not-a-time",
     })).toThrow(/archived time/);
     expect(() => parseWalletCaseListResponse({
+      ...EMPTY_CATALOG_FILTERS,
       cases: [], limit: 20, state: "deleted", truncated: false, next_cursor: null,
     })).toThrow(/lifecycle state/);
   });

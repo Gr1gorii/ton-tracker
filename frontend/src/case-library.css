@@ -7,6 +7,18 @@
 .case-library-tabs { display: inline-flex; width: fit-content; padding: 4px; gap: 4px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface); }
 .case-library-tabs button { display: inline-flex; min-height: 39px; padding: 0 13px; align-items: center; gap: 7px; border: 0; border-radius: 11px; color: var(--text-muted); background: transparent; cursor: pointer; font: inherit; font-size: 0.74rem; font-weight: 740; }
 .case-library-tabs button[aria-selected="true"] { color: var(--accent); background: var(--surface-solid); box-shadow: var(--shadow-soft); }
+.case-library-discovery { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(150px, 0.28fr) minmax(150px, 0.28fr) auto; padding: 16px; align-items: end; gap: 12px; border: 1px solid var(--border); border-radius: 18px; background: var(--surface-solid); box-shadow: var(--shadow-soft); }
+.case-library-discovery label { display: grid; min-width: 0; gap: 7px; color: var(--text-muted); font-size: 0.68rem; font-weight: 730; }
+.case-library-search { display: grid; min-width: 0; gap: 7px; }
+.case-library-search > label { display: block; }
+.case-library-discovery select { width: 100%; min-height: 43px; padding: 0 36px 0 12px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--surface); font: inherit; font-size: 0.76rem; }
+.case-library-search > div { display: flex; min-height: 43px; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 12px; color: var(--text-muted); background: var(--surface); overflow: hidden; }
+.case-library-search > div:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.case-library-search svg { flex: 0 0 auto; margin-left: 12px; }
+.case-library-search input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; font: inherit; font-size: 0.78rem; }
+.case-library-search input::placeholder { color: var(--text-muted); }
+.case-library-search button { align-self: stretch; padding: 0 14px; border: 0; border-left: 1px solid var(--border); color: var(--accent); background: var(--surface-accent); cursor: pointer; font: inherit; font-size: 0.72rem; font-weight: 760; }
+.case-library-clear { display: inline-flex; min-height: 43px; padding: 0 12px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--border); border-radius: 12px; color: var(--text-muted); background: var(--surface); cursor: pointer; font: inherit; font-size: 0.71rem; font-weight: 720; white-space: nowrap; }
 .case-library-state { display: flex; min-height: 190px; padding: 28px; align-items: center; justify-content: center; gap: 14px; border: 1px solid var(--border); border-radius: 22px; color: var(--text-soft); background: var(--surface-solid); text-align: left; }
 .case-library-state h2 { margin: 0 0 5px; color: var(--text); font-size: 1.05rem; }
 .case-library-state p { margin: 0; }
@@ -41,6 +53,8 @@
 .case-library-lifecycle-error { display: flex; margin: 0; padding: 12px 14px; align-items: center; gap: 8px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border)); border-radius: 12px; color: var(--case-danger-text); background: color-mix(in srgb, var(--danger) 7%, var(--surface)); font-size: 0.78rem; }
 
 @media (max-width: 980px) {
+  .case-library-discovery { grid-template-columns: 1fr 1fr; }
+  .case-library-search { grid-column: 1 / -1; }
   .case-library-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -49,6 +63,9 @@
   .case-library-heading > button { width: 100%; }
   .case-library-tabs { display: grid; width: 100%; grid-template-columns: 1fr 1fr; }
   .case-library-tabs button { justify-content: center; }
+  .case-library-discovery { grid-template-columns: 1fr; }
+  .case-library-search { grid-column: auto; }
+  .case-library-clear { width: 100%; }
   .case-library-grid { grid-template-columns: 1fr; }
   .case-library-summary { align-items: flex-start; flex-direction: column; gap: 3px; }
   .case-library-state { align-items: flex-start; flex-direction: column; }

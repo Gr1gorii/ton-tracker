@@ -101,16 +101,42 @@ def list_wallet_cases(
         max_length=8,
         description="Lifecycle catalog to read.",
     ),
+    q: str | None = Query(
+        None,
+        min_length=1,
+        max_length=120,
+        description="Case-insensitive text search across Case metadata and address.",
+    ),
+    network: str | None = Query(
+        None,
+        pattern=r"^(ton-mainnet|ton-testnet)$",
+        max_length=11,
+        description="Exact TON network filter.",
+    ),
+    data_environment: str | None = Query(
+        None,
+        pattern=r"^(demo|live)$",
+        max_length=4,
+        description="Exact data environment filter.",
+    ),
     session: Session = Depends(get_session),
 ) -> dict:
     """List a bounded, frozen-order page in the local owner scope."""
     query_pairs = request.query_params.multi_items()
-    if any(name not in {"limit", "cursor", "state"} for name, _value in query_pairs):
+    allowed_query_parameters = {
+        "limit",
+        "cursor",
+        "state",
+        "q",
+        "network",
+        "data_environment",
+    }
+    if any(name not in allowed_query_parameters for name, _value in query_pairs):
         raise HTTPException(
             status_code=422,
-            detail="Wallet Case catalog accepts only limit and cursor query parameters",
+            detail="Wallet Case catalog contains an unsupported query parameter",
         )
-    for name in ("limit", "cursor", "state"):
+    for name in allowed_query_parameters:
         if len(request.query_params.getlist(name)) > 1:
             raise HTTPException(
                 status_code=422,
@@ -122,11 +148,20 @@ def list_wallet_cases(
             status_code=422,
             detail="limit must be no greater than 50",
         )
+    canonical_query = q.strip() if q is not None else None
+    if q is not None and not canonical_query:
+        raise HTTPException(
+            status_code=422,
+            detail="Wallet Case catalog q must contain a non-whitespace character",
+        )
     response.headers["Cache-Control"] = "no-store"
     try:
         return WalletCaseService(session).list_cases(
             limit=canonical_limit,
             state=state,
+            query=canonical_query,
+            network=network,
+            data_environment=data_environment,
             cursor=cursor,
         )
     except WalletCaseCatalogInvalidCursor as exc:

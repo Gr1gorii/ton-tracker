@@ -1,3 +1,35 @@
+# GRAM Scope — v0.84.0 CASE DISCOVERY
+
+v0.84.0 makes a growing local Wallet Case catalog discoverable without
+weakening its bounded pagination contract. `GET /api/v1/cases` accepts an
+optional case-insensitive `q` over label, note, display address, and canonical
+wallet key, plus exact `network=ton-mainnet|ton-testnet` and
+`data_environment=demo|live` filters. Search wildcard characters are matched
+literally, unknown and duplicate parameters fail closed, and every response
+echoes the normalized filter scope.
+
+The signed catalog cursor is upgraded to version 3 and binds a digest of the
+normalized search, network, and data-environment filters in addition to owner
+scope, lifecycle state, event cutoff, and keyset position. A continuation
+cannot be replayed with broader or different discovery conditions. Existing
+event-cutoff behavior continues to freeze ordering and lifecycle membership;
+new or moved Cases appear on a fresh first page.
+
+The Case Library now provides accessible search, network, and demo/live
+controls for both Active and Archived catalogs. Its canonical `/cases` URL
+stores the applied discovery state, so refresh and browser back/forward restore
+the same catalog instead of silently returning to defaults. Every filter change
+abandons the old cursor snapshot, aborts stale work, and begins a new bounded
+traversal. Filtered empty results are distinct from a genuinely empty library
+and can be cleared directly.
+
+No database migration is added. Alembic remains at `20260827_0026`; v0.84.0
+uses the existing append-only catalog event journal and owner-scoped Case
+metadata. Wallet Cases and their catalog remain direct-loopback only until
+authentication derives a hosted owner scope.
+
+---
+
 # GRAM Scope — v0.83.0 CASE ARCHIVE
 
 v0.83.0 adds a reversible Wallet Case lifecycle between active work and

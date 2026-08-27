@@ -2,9 +2,11 @@
 
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as api from "../walletCaseApi";
+import { DEFAULT_CASE_LIBRARY_QUERY } from "../caseRouting";
 import { emptyWalletCaseFixture, walletCaseFixture } from "../test/walletCaseFixtures";
 import GramCaseLibrary from "./GramCaseLibrary";
 
@@ -16,6 +18,29 @@ vi.mock("../walletCaseApi", () => ({
 const listMock = vi.mocked(api.listWalletCases);
 const restoreMock = vi.mocked(api.restoreWalletCase);
 const SECOND_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
+const EMPTY_FILTERS = {
+  query: null,
+  network: null,
+  data_environment: null,
+} as const;
+
+function renderLibrary(
+  onOpenCase = vi.fn(),
+  onCreateCase = vi.fn(),
+) {
+  function Harness() {
+    const [catalogQuery, setCatalogQuery] = useState(DEFAULT_CASE_LIBRARY_QUERY);
+    return (
+      <GramCaseLibrary
+        catalogQuery={catalogQuery}
+        onCatalogQueryChange={setCatalogQuery}
+        onOpenCase={onOpenCase}
+        onCreateCase={onCreateCase}
+      />
+    );
+  }
+  return render(<Harness />);
+}
 
 beforeEach(() => {
   listMock.mockReset();
@@ -36,11 +61,12 @@ describe("GramCaseLibrary", () => {
       updated_at: "2026-08-08T10:00:00Z",
     });
     listMock.mockResolvedValue({
+      ...EMPTY_FILTERS,
       cases: [first, second], limit: 12, state: "active", truncated: false, next_cursor: null,
     });
     const onOpenCase = vi.fn();
 
-    render(<GramCaseLibrary onOpenCase={onOpenCase} onCreateCase={vi.fn()} />);
+    renderLibrary(onOpenCase);
 
     expect(await screen.findByRole("heading", { name: "Treasury" })).toBeTruthy();
     expect(screen.getByText("Monitor settlement flows.")).toBeTruthy();
@@ -48,15 +74,24 @@ describe("GramCaseLibrary", () => {
     expect(screen.getByText("Not synchronized")).toBeTruthy();
     await userEvent.setup().click(screen.getByRole("button", { name: "Open Case Treasury" }));
     expect(onOpenCase).toHaveBeenCalledWith(first.public_id);
-    expect(listMock).toHaveBeenCalledWith(12, "active", null, expect.any(AbortSignal));
+    expect(listMock).toHaveBeenCalledWith({
+      limit: 12,
+      state: "active",
+      query: null,
+      network: null,
+      dataEnvironment: null,
+      cursor: null,
+      signal: expect.any(AbortSignal),
+    });
   });
 
   it("offers Case creation from a truthful empty state", async () => {
     listMock.mockResolvedValue({
+      ...EMPTY_FILTERS,
       cases: [], limit: 12, state: "active", truncated: false, next_cursor: null,
     });
     const onCreateCase = vi.fn();
-    render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={onCreateCase} />);
+    renderLibrary(vi.fn(), onCreateCase);
 
     expect(await screen.findByRole("heading", { name: "No Wallet Cases yet" })).toBeTruthy();
     await userEvent.setup().click(screen.getByRole("button", { name: "Create your first Case" }));
@@ -67,14 +102,74 @@ describe("GramCaseLibrary", () => {
     listMock
       .mockRejectedValueOnce(new Error("Local storage is starting."))
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [], limit: 12, state: "active", truncated: false, next_cursor: null,
       });
-    render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
+    renderLibrary();
 
     expect((await screen.findByRole("alert")).textContent).toContain("Local storage is starting.");
     await userEvent.setup().click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("heading", { name: "No Wallet Cases yet" })).toBeTruthy();
     expect(listMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("discovers Cases with URL-owned search, network, and data filters", async () => {
+    listMock.mockImplementation(async (request = {}) => ({
+      cases: [],
+      limit: 12,
+      state: request.state ?? "active",
+      query: request.query ?? null,
+      network: request.network ?? null,
+      data_environment: request.dataEnvironment ?? null,
+      truncated: false,
+      next_cursor: null,
+    }));
+    renderLibrary();
+    const user = userEvent.setup();
+
+    await screen.findByRole("heading", { name: "No Wallet Cases yet" });
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Network" }),
+      "ton-testnet",
+    );
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ network: "ton-testnet" }),
+    ));
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Data" }),
+      "live",
+    );
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        network: "ton-testnet",
+        dataEnvironment: "live",
+      }),
+    ));
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search Cases" }),
+      "  Treasury 100%  ",
+    );
+    await user.click(screen.getByRole("button", { name: "Search" }));
+
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: "Treasury 100%",
+        network: "ton-testnet",
+        dataEnvironment: "live",
+      }),
+    ));
+    expect(await screen.findByRole("heading", {
+      name: "No Cases match these filters",
+    })).toBeTruthy();
+
+    await user.click(screen.getAllByRole("button", { name: "Clear filters" })[0]);
+    await waitFor(() => expect(listMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        query: null,
+        network: null,
+        dataEnvironment: null,
+      }),
+    ));
   });
 
   it("appends a signed continuation and aborts the active request on unmount", async () => {
@@ -88,24 +183,28 @@ describe("GramCaseLibrary", () => {
     let expansionSignal: AbortSignal | undefined;
     listMock
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [walletCase], limit: 12, state: "active", truncated: true, next_cursor: "page.two",
       })
-      .mockImplementationOnce(async (_limit, _state, _cursor, signal) => {
-        expansionSignal = signal;
+      .mockImplementationOnce(async (request = {}) => {
+        expansionSignal = request.signal;
         return {
+          ...EMPTY_FILTERS,
           cases: [second], limit: 12, state: "active", truncated: false, next_cursor: null,
         };
       });
-    const view = render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
+    const view = renderLibrary();
 
     await screen.findByRole("heading", { name: "Treasury" });
     await userEvent.setup().click(screen.getByRole("button", { name: "Load more Cases" }));
     expect(await screen.findByRole("heading", { name: "Operations" })).toBeTruthy();
     expect(screen.getByText("2 Cases")).toBeTruthy();
     expect(screen.getByText("End of this Case catalog snapshot.")).toBeTruthy();
-    expect(listMock.mock.calls[1]?.[0]).toBe(12);
-    expect(listMock.mock.calls[1]?.[1]).toBe("active");
-    expect(listMock.mock.calls[1]?.[2]).toBe("page.two");
+    expect(listMock.mock.calls[1]?.[0]).toMatchObject({
+      limit: 12,
+      state: "active",
+      cursor: "page.two",
+    });
     view.unmount();
     await waitFor(() => expect(expansionSignal?.aborted).toBe(true));
   });
@@ -114,12 +213,14 @@ describe("GramCaseLibrary", () => {
     const walletCase = walletCaseFixture({ overrides: { label: "Treasury" } });
     listMock
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [walletCase], limit: 12, state: "active", truncated: true, next_cursor: "page.two",
       })
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [walletCase], limit: 12, state: "active", truncated: false, next_cursor: null,
       });
-    render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
+    renderLibrary();
 
     await screen.findByRole("heading", { name: "Treasury" });
     await userEvent.setup().click(screen.getByRole("button", { name: "Load more Cases" }));
@@ -141,16 +242,19 @@ describe("GramCaseLibrary", () => {
     });
     listMock
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [active], limit: 12, state: "active", truncated: false, next_cursor: null,
       })
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [archived], limit: 12, state: "archived", truncated: false, next_cursor: null,
       })
       .mockResolvedValueOnce({
+        ...EMPTY_FILTERS,
         cases: [], limit: 12, state: "archived", truncated: false, next_cursor: null,
       });
     restoreMock.mockResolvedValueOnce({ ...archived, archived_at: null });
-    render(<GramCaseLibrary onOpenCase={vi.fn()} onCreateCase={vi.fn()} />);
+    renderLibrary();
 
     await screen.findByRole("heading", { name: "Treasury" });
     await userEvent.setup().click(
@@ -167,7 +271,7 @@ describe("GramCaseLibrary", () => {
       archived.public_id,
       expect.any(AbortSignal),
     );
-    expect(listMock.mock.calls.map((call) => call[1])).toEqual([
+    expect(listMock.mock.calls.map((call) => call[0]?.state)).toEqual([
       "active",
       "archived",
       "archived",

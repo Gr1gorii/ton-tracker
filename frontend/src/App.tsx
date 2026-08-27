@@ -36,13 +36,13 @@ import {
 } from "./api";
 import { createWalletCase } from "./walletCaseApi";
 import type { ProviderStatusInfo, ProvidersStatus, WalletIngestionRunResponse } from "./types";
-import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseListPath, caseReportsPath, caseSummaryPath, parseAppRoute, type AppRoute } from "./caseRouting";
+import { caseActivityPath, caseEvidencePath, caseFindingsPath, caseListPath, caseReportsPath, caseSummaryPath, DEFAULT_CASE_LIBRARY_QUERY, parseAppRoute, type AppRoute, type CaseLibraryQuery } from "./caseRouting";
 import GramActivityWorkspace from "./components/GramActivityWorkspace";
 import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWorkspace";
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.83.0";
+const RELEASE_LABEL = "v0.84.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramCaseLibrary = lazy(() => import("./components/GramCaseLibrary"));
@@ -106,7 +106,10 @@ function providerItems(providers: ProvidersStatus | null) {
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
-  const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location.pathname));
+  const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(
+    window.location.pathname,
+    window.location.search,
+  ));
   const routeRef = useRef(route);
   const [entered, setEntered] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>("overview");
@@ -122,7 +125,10 @@ export default function App() {
 
   useEffect(() => {
     function restoreRoute() {
-      const nextRoute = parseAppRoute(window.location.pathname);
+      const nextRoute = parseAppRoute(
+        window.location.pathname,
+        window.location.search,
+      );
       if (sameAppRoute(routeRef.current, nextRoute)) return;
       routeRef.current = nextRoute;
       setRoute(nextRoute);
@@ -209,7 +215,17 @@ export default function App() {
 
   function goCaseLibrary() {
     setEntered(false);
-    setAppRoute({ kind: "case-list" }, caseListPath());
+    setAppRoute(
+      { kind: "case-list", catalog: DEFAULT_CASE_LIBRARY_QUERY },
+      caseListPath(),
+    );
+  }
+
+  function updateCaseLibraryQuery(catalog: CaseLibraryQuery) {
+    const nextRoute: AppRoute = { kind: "case-list", catalog };
+    window.history.pushState({}, "", caseListPath(catalog));
+    routeRef.current = nextRoute;
+    setRoute(nextRoute);
   }
 
   function openCaseSummary(caseId: string) {
@@ -254,7 +270,12 @@ export default function App() {
         </header>
         <main className="case-route-main" data-route-focus tabIndex={-1} aria-label="Wallet Case library">
           <Suspense fallback={<section className="case-state-panel" role="status"><SpinnerGap className="spin" size={22} /> Loading Case library…</section>}>
-            <GramCaseLibrary onOpenCase={openCaseSummary} onCreateCase={goHome} />
+            <GramCaseLibrary
+              catalogQuery={route.catalog}
+              onCatalogQueryChange={updateCaseLibraryQuery}
+              onOpenCase={openCaseSummary}
+              onCreateCase={goHome}
+            />
           </Suspense>
         </main>
       </div>
@@ -477,6 +498,13 @@ export default function App() {
 
 function sameAppRoute(left: AppRoute, right: AppRoute): boolean {
   if (left.kind !== right.kind) return false;
+  if (left.kind === "case-list") {
+    return right.kind === "case-list" &&
+      left.catalog.state === right.catalog.state &&
+      left.catalog.query === right.catalog.query &&
+      left.catalog.network === right.catalog.network &&
+      left.catalog.dataEnvironment === right.catalog.dataEnvironment;
+  }
   if (left.kind === "case-summary" || left.kind === "case-activity" || left.kind === "case-findings" || left.kind === "case-evidence" || left.kind === "case-reports") {
     return right.kind === left.kind && right.caseId === left.caseId;
   }
