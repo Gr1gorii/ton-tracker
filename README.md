@@ -4,10 +4,24 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.26.0 — Multi-Asset PnL Readiness**<br>
+Current product release: **v0.85.0 — Incremental Refresh**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.26.0 adds
+## What v0.85.0 adds
+
+An existing usable Wallet Case can now refresh forward without reacquiring its
+entire composed interval. The server pins the latest usable snapshot, requires
+the same surfaces, reacquires a 15-minute safety overlap, and persists explicit
+base-snapshot and acquisition lineage. Activity composes the source snapshots
+and deduplicates overlap; compact Summary values remain scoped to the latest
+acquisition and complete history is still not claimed.
+
+The Summary UI automatically keeps the first run bounded and changes later
+runs to an explicit incremental refresh. Strict client and server contracts
+validate the mode, actual acquisition bounds, overlap, base snapshot, coverage,
+and limitations. No migration is added; Alembic remains at `20260827_0026`.
+
+## v0.26.0 multi-asset PnL readiness foundation
 
 The selected-run PnL evidence gate now reconciles four independent layers in
 one provider-free, digest-bound response:
@@ -81,6 +95,7 @@ profit, ownership proof, or complete wallet history.
 - v0.24.0 native TON flow reconciliation and fail-closed PnL readiness.
 - v0.25.0 provider-free verified TEP-74 payload observations.
 - v0.26.0 multi-run jetton asset/fee evidence reconciliation with locked PnL.
+- v0.85.0 incremental Wallet Case refresh with durable acquisition lineage.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

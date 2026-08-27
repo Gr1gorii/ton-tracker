@@ -1,8 +1,8 @@
-# GRAM Scope — v0.84.0 Promotion Checklist
+# GRAM Scope — v0.85.0 Promotion Checklist
 
-Current promotion gates for Wallet Case discovery:
+Current promotion gates for Wallet Case incremental refresh:
 
-- Product label is `v0.84.0 CASE DISCOVERY`; backend API version stays
+- Product label is `v0.85.0 INCREMENTAL REFRESH`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260827_0026` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -32,6 +32,19 @@ Current promotion gates for Wallet Case discovery:
   active and archived Cases receive one deterministic visibility/position seed;
   exact empty interrupted-DDL resume, row adoption, foreign-key/index drift,
   schema parity, cascade, and forward-only behavior must pass fail-closed tests.
+- No migration is added for v0.85.0. A versioned private acquisition plan uses
+  the existing CaseSync coverage record; it is validated on every read and is
+  excluded from the public coverage object. Existing rows infer bounded lineage.
+- Incremental enqueue requires the latest usable base snapshot, identical
+  surfaces, and a forward request time. It persists a composed snapshot period,
+  a 15-minute acquisition overlap, the actual provider bounds, and the base
+  snapshot public ID. Mode participates in idempotency.
+- Workers acquire only the persisted incremental bounds. Activity validates
+  runs and live rows against each source acquisition interval, composes sources
+  up to the pinned snapshot, and deduplicates overlap observations.
+- Incremental responses expose their mode, base, overlap, and acquisition
+  interval, remain partial with respect to the composed coverage claim, and
+  disclose that compact Summary counts describe only the latest acquisition.
 - Case catalog search matches label, note, display address, and canonical wallet
   key case-insensitively while treating `%`, `_`, and `\\` as literal text.
   Network and data-environment filters are exact, optional, and independently
@@ -145,7 +158,7 @@ Current promotion gates for Wallet Case discovery:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.84.0 must not be promoted as a hosted Wallet Case release.
+  v0.85.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

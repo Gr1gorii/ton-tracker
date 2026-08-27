@@ -1,3 +1,35 @@
+# GRAM Scope — v0.85.0 INCREMENTAL REFRESH
+
+v0.85.0 adds an explicit forward-refresh path for an existing usable Wallet
+Case snapshot. The first synchronization remains a bounded 24-hour acquisition.
+Every later Summary refresh can request `mode=incremental`; the backend anchors
+the new snapshot to the latest usable snapshot, acquires only from 15 minutes
+before its end through the new request time, and records the base snapshot ID,
+actual acquisition interval, and overlap in durable lineage.
+
+Incremental jobs require exactly the same activity surfaces as their base and
+reject missing, active, mismatched, or already-current baselines without
+persisting speculative work. The idempotency fingerprint binds the mode. The
+worker uses the narrower acquisition interval while the resulting snapshot
+retains the composed start and new end; Activity revalidates every source
+against its own acquisition interval and deterministically deduplicates overlap
+observations.
+
+The strict frontend contract independently validates mode, bounds, overlap,
+base identity, surfaces, coverage, and the explicit composite-history
+limitation. Summary changes from `Sync last 24 hours` to
+`Refresh incrementally` only after a usable snapshot exists, preserves that
+snapshot during the job, and displays both snapshot and acquisition intervals.
+The compact Summary still reflects only the latest acquisition run; Activity is
+the composed cross-sync view. Neither mode claims complete wallet history.
+
+No database migration is added. Alembic remains at `20260827_0026`; the private
+versioned acquisition plan is stored inside the existing sync coverage record
+and is removed from public coverage output. Older rows without a plan remain
+valid bounded snapshots.
+
+---
+
 # GRAM Scope — v0.84.0 CASE DISCOVERY
 
 v0.84.0 makes a growing local Wallet Case catalog discoverable without
