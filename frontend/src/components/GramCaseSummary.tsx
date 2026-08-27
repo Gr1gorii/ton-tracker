@@ -17,6 +17,7 @@ import {
 } from "../walletCase";
 import { useWalletCaseSyncJob } from "../useWalletCaseSyncJob";
 import CaseSyncPanel from "./CaseSyncPanel";
+import CaseAcquisitionManifest from "./CaseAcquisitionManifest";
 
 const INITIAL_SYNC_REQUEST: WalletCaseSyncRequest = {
   mode: "bounded",
@@ -165,6 +166,9 @@ export default function GramCaseSummary({
             <div className="case-card-empty"><p>Coverage will be published with the first usable snapshot.</p></div>
           )}
         </article>
+        {snapshot && result && (
+          <CaseAcquisitionManifest caseId={caseId} snapshot={snapshot} />
+        )}
       </div>
 
       <section className="case-limitations">

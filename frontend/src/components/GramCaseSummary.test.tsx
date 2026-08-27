@@ -13,6 +13,8 @@ import {
   walletCaseFixture,
   zeroSummaryFixture,
 } from "../test/walletCaseFixtures";
+import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
+import { API_BASE } from "../apiBase";
 
 const mocks = vi.hoisted(() => ({ useWalletCaseSyncJob: vi.fn() }));
 
@@ -41,7 +43,10 @@ beforeEach(() => {
   mocks.useWalletCaseSyncJob.mockReturnValue(controllerFixture());
 });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 function renderSummary(walletCase: WalletCase, onRefresh = vi.fn().mockResolvedValue(undefined)) {
   return {
@@ -166,5 +171,52 @@ describe("GramCaseSummary", () => {
     expect(screen.getByRole("heading", { name: "Available" })).toBeTruthy();
     expect(screen.getAllByText("Not available").length).toBeGreaterThanOrEqual(4);
     expect(screen.getByText(/Zero placeholders are not evidence/)).toBeTruthy();
+  });
+
+  it("shows and explicitly loads the content-addressed acquisition manifest", async () => {
+    const payload = manifestResponseFixture();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(payload),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderSummary(walletCaseFixture());
+
+    expect(screen.getByRole("heading", { name: "Content-addressed manifest" })).toBeTruthy();
+    expect(screen.getByText(payload.manifest.public_id)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Inspect manifest" }));
+
+    expect(await screen.findByText("Verified by the server integrity gate")).toBeTruthy();
+    expect(screen.getByText(/0 streams · 0 pages · 0 response digests/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/syncs/${payload.document.sync_public_id}/manifest`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+  });
+
+  it("labels a legacy snapshot without a manifest instead of inventing provenance", () => {
+    const snapshot = succeededSyncFixture();
+    const limitations = [
+      ...snapshot.limitations,
+      {
+        code: "acquisition_manifest_unavailable",
+        message: "This legacy snapshot predates immutable acquisition manifests.",
+      },
+    ];
+    const legacy = succeededSyncFixture({
+      acquisition_manifest: null,
+      limitations,
+      result: { ...snapshot.result!, limitations },
+    });
+
+    renderSummary(walletCaseFixture({
+      latestAttempt: legacy,
+      currentSnapshot: legacy,
+    }));
+
+    expect(screen.getByRole("heading", { name: "Manifest unavailable" })).toBeTruthy();
+    expect(screen.getByText(/legacy snapshot has no immutable/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Inspect manifest" })).toBeNull();
   });
 });

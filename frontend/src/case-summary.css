@@ -185,6 +185,12 @@
 .case-coverage-row strong { color: var(--text); }
 .case-card-empty { display: grid; min-height: 180px; place-items: center; color: var(--text-muted); text-align: center; }
 .case-card-empty p { max-width: 340px; font-size: 0.875rem; line-height: 1.7; }
+.case-manifest-card { grid-column: 1 / -1; }
+.case-manifest-actions { display: flex; margin-top: 16px; align-items: center; justify-content: space-between; gap: 20px; }
+.case-manifest-actions p { max-width: 720px; margin: 0; color: var(--text-muted); font-size: 0.8125rem; line-height: 1.55; }
+.case-manifest-actions button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.case-manifest-detail { display: grid; margin-top: 14px; padding: 14px 16px; gap: 5px; border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border)); border-radius: 13px; color: var(--text-muted); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); font-size: 0.8125rem; line-height: 1.5; }
+.case-manifest-detail strong { color: var(--case-success-text); }
 
 .case-limitations { padding: 24px; }
 .case-limitations > header { display: flex; align-items: flex-start; gap: 12px; color: var(--warning); }
@@ -679,6 +685,8 @@
   .case-metric { min-height: 128px; }
   .case-definition-list div { grid-template-columns: 1fr; gap: 4px; }
   .case-definition-list dd { text-align: left; }
+  .case-manifest-actions { align-items: stretch; flex-direction: column; }
+  .case-manifest-actions button { width: 100%; justify-content: center; }
   .case-limitations li { grid-template-columns: 1fr; gap: 5px; }
   .case-cancel-confirm { align-items: stretch; flex-direction: column; }
   .case-cancel-confirm p { margin: 0 0 5px; }
