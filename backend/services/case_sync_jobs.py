@@ -22,7 +22,12 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import get_settings
-from models import CaseSync, WalletCase, WalletCaseCatalogEvent
+from models import (
+    CaseSync,
+    WalletCase,
+    WalletCaseCatalogEvent,
+    WalletCaseSyncManifest,
+)
 from schemas import WalletIngestionPreviewRequest
 from services.wallet_activity_ingestion import (
     WalletIngestionScopeMismatch,
@@ -40,6 +45,10 @@ from services.wallet_cases import (
     _sync_acquisition_plan,
     _summary_from_run,
     _sync_state,
+)
+from services.wallet_case_sync_manifests import (
+    MANIFEST_CONTRACT_VERSION,
+    build_wallet_case_sync_manifest,
 )
 
 
@@ -910,6 +919,20 @@ class CaseSyncWorker:
             _retryable, classified_code = _retry_signal(run_response)
             error_code = classified_code or "ingestion_failed"
             error_detail = message
+        actual_provider = _actual_provider(run_response, settings)
+        built_manifest = build_wallet_case_sync_manifest(
+            case_public_id=claimed.case_public_id,
+            sync_public_id=claimed.public_id,
+            network=claimed.network,
+            data_mode=str(getattr(run, "data_mode", "unknown")),
+            provider=actual_provider,
+            sync_state=state,
+            snapshot_start=claimed.requested_start,
+            snapshot_end=claimed.requested_end,
+            acquisition_plan=claimed.acquisition_plan,
+            requested_surfaces=claimed.requested_surfaces,
+            run_response=run_response,
+        )
 
         with self.session_factory() as session:
             wallet_case = session.scalar(
@@ -946,7 +969,7 @@ class CaseSyncWorker:
                 )
                 .values(
                     ingestion_run_id=run.id,
-                    provider=_actual_provider(run_response, settings),
+                    provider=actual_provider,
                     state=state,
                     stage=stage,
                     progress_current=3,
@@ -973,6 +996,18 @@ class CaseSyncWorker:
                 session.rollback()
                 published = False
             else:
+                session.add(
+                    WalletCaseSyncManifest(
+                        public_id=built_manifest.public_id,
+                        case_sync_id=claimed.id,
+                        contract_version=MANIFEST_CONTRACT_VERSION,
+                        content_hash_sha256=(
+                            built_manifest.content_hash_sha256
+                        ),
+                        manifest_json=built_manifest.canonical_json,
+                        created_at=now,
+                    )
+                )
                 wallet_case.updated_at = now
                 session.add(
                     WalletCaseCatalogEvent(

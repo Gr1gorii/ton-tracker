@@ -28,18 +28,23 @@ from models import (
     WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
+    WalletCaseSyncManifest,
     WalletIngestionRun,
     WalletTransaction,
 )
 from services.database_migrations import run_database_migrations
 from services.case_sync_jobs import CaseSyncWorker, _retry_signal
-from services.wallet_activity_ingestion import build_wallet_ingestion_run
+from services.wallet_activity_ingestion import (
+    build_wallet_ingestion_run,
+    wallet_ingestion_run_to_response,
+)
 from services.wallet_cases import (
     WalletCaseCatalogInvalidCursor,
     WalletCaseNotFound,
     WalletCaseService,
     _compact_coverage_streams,
 )
+from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import WalletCaseSyncRequest
 
 
@@ -1267,6 +1272,19 @@ def test_demo_case_sync_links_legacy_run_and_restores_summary(client):
         stored_sync = session.scalar(select(CaseSync))
         assert stored_sync is not None
         assert stored_sync.ingestion_run_id is not None
+        manifest = session.scalar(select(WalletCaseSyncManifest))
+        assert manifest is not None
+        assert manifest.case_sync_id == stored_sync.id
+        assert manifest.public_id == f"smf_{manifest.content_hash_sha256}"
+        document = json.loads(manifest.manifest_json)
+        assert document["case_public_id"] == case_id
+        assert document["sync_public_id"] == sync["public_id"]
+        assert document["acquisition_mode"] == "bounded"
+        assert document["snapshot_period"] == {
+            "start_at": sync["requested_scope"]["start_at"],
+            "end_at": sync["requested_scope"]["end_at"],
+        }
+        assert document["streams"] == []
         legacy_run_id = stored_sync.ingestion_run_id
 
     legacy = client.get(f"/api/wallets/ingest/{legacy_run_id}")
@@ -2107,6 +2125,68 @@ def test_expired_lease_recovery_reclaims_and_fences_the_old_owner(client):
         assert row is not None
         assert row.state == "running"
         assert row.lease_token == replacement.lease_token
+
+
+def test_stale_final_publication_rolls_back_run_and_manifest_together(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    clock = [datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)]
+    with app.state.wallet_case_test_session() as session:
+        WalletCaseService(session).enqueue_sync(
+            case_id,
+            WalletCaseSyncRequest(
+                time_window="24h",
+                surfaces=["transactions"],
+            ),
+            str(uuid4()),
+            now=clock[0],
+        )
+    stale_worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        clock=lambda: clock[0],
+        lease_seconds=30,
+    )
+    stale_claim = stale_worker.claim_next()
+    assert stale_claim is not None
+    settings = stale_worker._validated_settings(stale_claim)
+    run = build_wallet_ingestion_run(
+        WalletIngestionPreviewRequest(
+            wallet_address=stale_claim.display_address,
+            time_window=stale_claim.time_window,
+            surfaces=list(stale_claim.requested_surfaces),
+        ),
+        settings,
+        now=clock[0],
+    )
+    run_response = wallet_ingestion_run_to_response(run)
+
+    clock[0] += timedelta(seconds=31)
+    replacement_worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        clock=lambda: clock[0],
+        lease_seconds=30,
+    )
+    assert replacement_worker.recover_expired() == 1
+    replacement = replacement_worker.claim_next()
+    assert replacement is not None
+
+    assert stale_worker._publish_final_run(
+        stale_claim,
+        run,
+        run_response,
+        settings,
+        last_error_retryable=False,
+    ) is False
+    with app.state.wallet_case_test_session() as session:
+        assert session.scalar(
+            select(func.count()).select_from(WalletIngestionRun)
+        ) == 0
+        assert session.scalar(
+            select(func.count()).select_from(WalletCaseSyncManifest)
+        ) == 0
+        current = session.scalar(select(CaseSync))
+        assert current is not None
+        assert current.state == "running"
+        assert current.lease_token == replacement.lease_token
 
 
 def test_two_concurrent_claimers_issue_only_one_lease(client):
