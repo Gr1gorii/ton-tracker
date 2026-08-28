@@ -312,6 +312,31 @@ def _wallet_case_sync_values(case_id: int, **overrides: Any) -> dict[str, Any]:
     return values
 
 
+def _wallet_case_stream_checkpoint_values(
+    case_id: int,
+    source_sync_id: int,
+    **overrides: Any,
+) -> dict[str, Any]:
+    digest = "ac" * 32
+    values: dict[str, Any] = {
+        "public_id": f"scp_{digest}",
+        "case_id": case_id,
+        "source_sync_id": source_sync_id,
+        "provider": "tonapi_wallet_activity_live",
+        "stream_key": "account_transactions",
+        "provider_contract_version": "tonapi_account_transactions_v1",
+        "resume_state": "ready",
+        "continuation_cursor": "cursor-2",
+        "continuation_page_index": 2,
+        "page_count": 1,
+        "pages_succeeded": 1,
+        "checkpoint_hash_sha256": digest,
+        "checkpoint_json": '{"version":1}',
+    }
+    values.update(overrides)
+    return values
+
+
 def _upgrade_to_revision(engine: Engine, revision: str) -> None:
     with engine.begin() as connection:
         command.upgrade(migration_config(connection), revision)
@@ -5684,6 +5709,94 @@ def test_wallet_case_stream_checkpoint_migration_resumes_exact_empty_table(
     assert report.revision_after == CURRENT_REVISION
     assert report.applied_revisions == (WALLET_CASE_STREAM_CHECKPOINT_REVISION,)
     _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_migration_never_adopts_existing_rows(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-adoption.db")
+    _upgrade_to_revision(engine, WALLET_CASE_SYNC_MANIFEST_REVISION)
+    wallet_cases = database.Base.metadata.tables[WALLET_CASES_TABLE]
+    case_syncs = database.Base.metadata.tables[WALLET_CASE_SYNCS_TABLE]
+    checkpoints = database.Base.metadata.tables[
+        WALLET_CASE_STREAM_CHECKPOINTS_TABLE
+    ]
+    models.WalletCaseStreamCheckpoint.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        case_id = connection.execute(
+            wallet_cases.insert().values(**_wallet_case_values())
+        ).inserted_primary_key[0]
+        sync_id = connection.execute(
+            case_syncs.insert().values(**_wallet_case_sync_values(case_id))
+        ).inserted_primary_key[0]
+        connection.execute(
+            checkpoints.insert().values(
+                **_wallet_case_stream_checkpoint_values(case_id, sync_id)
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="cannot be adopted"):
+        run_database_migrations(engine)
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_migration_rejects_wrong_index(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-index.db")
+    _upgrade_to_revision(engine, WALLET_CASE_SYNC_MANIFEST_REVISION)
+    models.WalletCaseStreamCheckpoint.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DROP INDEX uq_wallet_case_stream_checkpoints_public_id"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX uq_wallet_case_stream_checkpoints_public_id "
+            "ON wallet_case_stream_checkpoints(public_id)"
+        )
+
+    with pytest.raises(RuntimeError, match="differs from revision 0028"):
+        run_database_migrations(engine)
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_constraints_and_sync_cascade(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-constraints.db")
+    run_database_migrations(engine)
+    wallet_cases = database.Base.metadata.tables[WALLET_CASES_TABLE]
+    case_syncs = database.Base.metadata.tables[WALLET_CASE_SYNCS_TABLE]
+    checkpoints = database.Base.metadata.tables[
+        WALLET_CASE_STREAM_CHECKPOINTS_TABLE
+    ]
+    with engine.begin() as connection:
+        case_id = connection.execute(
+            wallet_cases.insert().values(**_wallet_case_values())
+        ).inserted_primary_key[0]
+        sync_id = connection.execute(
+            case_syncs.insert().values(**_wallet_case_sync_values(case_id))
+        ).inserted_primary_key[0]
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                checkpoints.insert().values(
+                    **_wallet_case_stream_checkpoint_values(
+                        case_id,
+                        sync_id,
+                        continuation_cursor=None,
+                    )
+                )
+            )
+
+    with engine.begin() as connection:
+        connection.execute(
+            checkpoints.insert().values(
+                **_wallet_case_stream_checkpoint_values(case_id, sync_id)
+            )
+        )
+        connection.execute(case_syncs.delete().where(case_syncs.c.id == sync_id))
+        remaining = connection.execute(
+            checkpoints.select().where(checkpoints.c.source_sync_id == sync_id)
+        ).all()
+
+    assert remaining == []
     engine.dispose()
 
 
