@@ -177,7 +177,7 @@ class WalletCaseSyncProgress(_StrictModel):
 
 
 class WalletCaseRequestedScope(_StrictModel):
-    mode: Literal["bounded", "incremental"]
+    mode: Literal["bounded", "incremental", "resume"]
     time_window: Literal["24h", "3d", "7d", "custom"]
     start_at: str
     end_at: str
@@ -186,6 +186,7 @@ class WalletCaseRequestedScope(_StrictModel):
     acquisition_end_at: str
     overlap_seconds: int = Field(ge=0, le=86400)
     base_snapshot_public_id: CanonicalPublicId | None = None
+    source_checkpoint_public_id: CheckpointPublicId | None = None
 
     @model_validator(mode="after")
     def _validate_acquisition_scope(self):
@@ -195,10 +196,24 @@ class WalletCaseRequestedScope(_StrictModel):
                 or self.acquisition_end_at != self.end_at
                 or self.overlap_seconds != 0
                 or self.base_snapshot_public_id is not None
+                or self.source_checkpoint_public_id is not None
             ):
                 raise ValueError("bounded sync acquisition must equal its requested scope")
-        elif self.base_snapshot_public_id is None:
-            raise ValueError("incremental sync requires a base snapshot")
+        elif self.mode == "incremental":
+            if (
+                self.base_snapshot_public_id is None
+                or self.source_checkpoint_public_id is not None
+            ):
+                raise ValueError("incremental sync requires only a base snapshot")
+        elif (
+            self.time_window != "custom"
+            or self.base_snapshot_public_id is None
+            or self.source_checkpoint_public_id is None
+            or self.overlap_seconds != 0
+        ):
+            raise ValueError(
+                "resume sync requires a custom scope, base snapshot, and source checkpoint"
+            )
         return self
 
 

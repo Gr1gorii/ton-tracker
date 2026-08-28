@@ -10,6 +10,7 @@ from database import get_session
 from services.wallet_cases import (
     WalletCaseArchiveConflict,
     WalletCaseCatalogInvalidCursor,
+    WalletCaseCheckpointResumeUnavailable,
     WalletCaseDeletionConflict,
     WalletCaseMetadataConflict,
     WalletCaseNotFound,
@@ -51,6 +52,7 @@ _PUBLIC_ID_PATTERN = (
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
     r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+_CHECKPOINT_ID_PATTERN = r"^scp_[0-9a-f]{64}$"
 _MAX_CASE_LIST_LIMIT = 50
 
 
@@ -573,6 +575,127 @@ def list_wallet_case_stream_checkpoints(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case stream checkpoint storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.post(
+    "/{public_id}/stream-checkpoints/{checkpoint_public_id}/resume",
+    response_model=WalletCaseSyncResponse,
+    status_code=202,
+)
+def enqueue_wallet_case_checkpoint_resume(
+    request: Request,
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    checkpoint_public_id: str = Path(
+        ...,
+        pattern=_CHECKPOINT_ID_PATTERN,
+        max_length=68,
+    ),
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+        max_length=36,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Continue one latest, verified, resume-ready provider stream."""
+    response.headers["Cache-Control"] = "no-store"
+    runner = getattr(request.app.state, "wallet_case_job_runner", None)
+    if runner is None or getattr(runner, "alive", False) is not True:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "case_sync_runner_unavailable",
+                "message_safe": (
+                    "Wallet Case synchronization is temporarily unavailable."
+                ),
+                "retryable": True,
+            },
+            headers={"Cache-Control": "no-store", "Retry-After": "5"},
+        )
+    if len(request.headers.getlist("idempotency-key")) != 1:
+        raise HTTPException(
+            status_code=422,
+            detail="Idempotency-Key must be provided exactly once.",
+            headers={"Cache-Control": "no-store"},
+        )
+    try:
+        result, replayed = WalletCaseService(session).enqueue_checkpoint_resume(
+            public_id,
+            checkpoint_public_id,
+            idempotency_key,
+        )
+        response.headers["Location"] = (
+            f"/api/v1/cases/{public_id}/syncs/{result['public_id']}"
+        )
+        response.headers["Retry-After"] = "1"
+        if not replayed:
+            runner.notify()
+        return result
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseRuntimeConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseCheckpointResumeUnavailable as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "checkpoint_resume_unavailable",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseIdempotencyConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "idempotency_conflict",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseSyncAlreadyActive as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "case_sync_already_active",
+                "message_safe": str(exc),
+                "retryable": False,
+                "active_sync_public_id": exc.public_id,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "stream_checkpoint_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case checkpoint resume storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

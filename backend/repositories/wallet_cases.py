@@ -269,6 +269,19 @@ class WalletCaseRepository:
         )
         return list(self.session.scalars(statement).unique())
 
+    def get_stream_checkpoint(
+        self,
+        *,
+        case_id: int,
+        public_id: str,
+    ) -> WalletCaseStreamCheckpoint | None:
+        return self.session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case_id == case_id,
+                WalletCaseStreamCheckpoint.public_id == public_id,
+            )
+        )
+
     def add_case(self, wallet_case: WalletCase) -> None:
         self.session.add(wallet_case)
 
