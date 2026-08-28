@@ -1,8 +1,8 @@
-# GRAM Scope — v0.87.0 Promotion Checklist
+# GRAM Scope — v0.88.0 Promotion Checklist
 
-Current promotion gates for Wallet Case provider-stream checkpoints:
+Current promotion gates for Wallet Case checkpoint resume execution:
 
-- Product label is `v0.87.0 STREAM CHECKPOINTS`; backend API version stays
+- Product label is `v0.88.0 CHECKPOINT RESUME`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -54,8 +54,19 @@ Current promotion gates for Wallet Case provider-stream checkpoints:
   returning the full provider-safe document; Summary loads it explicitly.
 - A checkpoint may be `ready` only when a successful page and the stream
   terminal cursor agree and termination is page-cap or provider-error based.
-  Complete and blocked states retain no continuation cursor. v0.87.0 must not
-  be promoted as automatically resuming provider crawls or backfilling history.
+  Complete and blocked states retain no continuation cursor.
+- Resume enqueue accepts only the latest verified `ready` checkpoint for a
+  supported TonAPI transaction or account-event stream. The checkpoint ID is
+  bound into the idempotency fingerprint and one active Case sync remains the
+  concurrency boundary.
+- Before provider I/O the worker must reload and revalidate checkpoint content
+  address, source manifest and sync, latest provider/stream revision, provider
+  contract, original bounds, requested surfaces, cursor, and next page index.
+  Stale, corrupt, blocked, complete, foreign, or incompatible state fails
+  closed without provider access.
+- Resume UI actions appear only for `ready` checkpoints and use the durable
+  sync polling/reconnect/cancel path. Resume snapshots expose base and source
+  checkpoint lineage and retain the explicit not-full-history limitation.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -179,7 +190,7 @@ Current promotion gates for Wallet Case provider-stream checkpoints:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.87.0 must not be promoted as a hosted Wallet Case release.
+  v0.88.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 
