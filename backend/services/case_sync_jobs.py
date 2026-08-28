@@ -23,6 +23,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from config import get_settings
+from adapters.wallet_activity import (
+    TONAPI_EVENT_ACQUISITION_CONTRACT,
+    TONAPI_TRANSACTION_ACQUISITION_CONTRACT,
+)
 from models import (
     CaseSync,
     WalletCase,
@@ -37,6 +41,7 @@ from services.wallet_activity_ingestion import (
     wallet_ingestion_run_to_response,
 )
 from services.wallet_cases import (
+    WalletCaseStreamCheckpointCorrupt,
     WalletCaseRuntimeConflict,
     WalletCaseService,
     _actual_provider,
@@ -47,6 +52,7 @@ from services.wallet_cases import (
     _sync_acquisition_plan,
     _summary_from_run,
     _sync_state,
+    _stream_checkpoint_response,
 )
 from services.wallet_case_sync_manifests import (
     MANIFEST_CONTRACT_VERSION,
@@ -134,6 +140,10 @@ class ClaimedCaseSync:
     acquisition_start: datetime
     acquisition_end: datetime
     acquisition_plan: dict[str, Any]
+    source_checkpoint_public_id: str | None
+    resume_stream_key: str | None
+    resume_cursor: str | None
+    resume_page_index: int | None
 
 
 class CaseSyncWorker:
@@ -433,6 +443,12 @@ class CaseSyncWorker:
                     acquisition_plan["end_at"]
                 ),
                 acquisition_plan=acquisition_plan,
+                source_checkpoint_public_id=acquisition_plan.get(
+                    "source_checkpoint_public_id"
+                ),
+                resume_stream_key=acquisition_plan.get("resume_stream_key"),
+                resume_cursor=acquisition_plan.get("resume_cursor"),
+                resume_page_index=acquisition_plan.get("resume_page_index"),
             )
 
     def _close_unavailable_claim(self, sync_id: int, lease_token: str) -> bool:
@@ -487,7 +503,7 @@ class CaseSyncWorker:
             return
         acquisition_window = (
             "custom"
-            if claimed.acquisition_mode == "incremental"
+            if claimed.acquisition_mode in {"incremental", "resume"}
             else claimed.time_window
         )
         payload = WalletIngestionPreviewRequest(
@@ -607,8 +623,100 @@ class CaseSyncWorker:
                 wallet_case,
                 self.settings_factory(),
             )
+            self._validate_resume_checkpoint(session, wallet_case, claimed)
             session.rollback()
             return settings
+
+    def _validate_resume_checkpoint(
+        self,
+        session: Session,
+        wallet_case: WalletCase,
+        claimed: ClaimedCaseSync,
+    ) -> None:
+        resume_values = (
+            claimed.source_checkpoint_public_id,
+            claimed.resume_stream_key,
+            claimed.resume_cursor,
+            claimed.resume_page_index,
+        )
+        if claimed.acquisition_mode != "resume":
+            if any(value is not None for value in resume_values):
+                raise WalletCaseRuntimeConflict(
+                    "Non-resume sync contains provider continuation state."
+                )
+            return
+        if any(value is None for value in resume_values):
+            raise WalletCaseRuntimeConflict(
+                "Checkpoint continuation state is incomplete."
+            )
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case_id == wallet_case.id,
+                WalletCaseStreamCheckpoint.public_id
+                == claimed.source_checkpoint_public_id,
+            )
+        )
+        if checkpoint is None:
+            raise WalletCaseRuntimeConflict(
+                "The source stream checkpoint is no longer available."
+            )
+        latest_id = session.scalar(
+            select(func.max(WalletCaseStreamCheckpoint.id)).where(
+                WalletCaseStreamCheckpoint.case_id == wallet_case.id,
+                WalletCaseStreamCheckpoint.provider == checkpoint.provider,
+                WalletCaseStreamCheckpoint.stream_key == checkpoint.stream_key,
+            )
+        )
+        try:
+            checkpoint_response = _stream_checkpoint_response(
+                checkpoint,
+                case_public_id=wallet_case.public_id,
+            )
+        except WalletCaseStreamCheckpointCorrupt as exc:
+            raise WalletCaseRuntimeConflict(
+                "The source stream checkpoint failed integrity validation."
+            ) from exc
+        document = checkpoint_response["document"]
+        expected_contract = {
+            "transactions": TONAPI_TRANSACTION_ACQUISITION_CONTRACT,
+            "account_events": TONAPI_EVENT_ACQUISITION_CONTRACT,
+        }.get(claimed.resume_stream_key)
+        source_sync = checkpoint.source_sync
+        source_surfaces = set(_json_list(source_sync.requested_surfaces_json))
+        expected_surfaces = (
+            {"transactions"}
+            if claimed.resume_stream_key == "transactions"
+            else source_surfaces & {"transfers", "swaps"}
+        )
+        requested_period = document.get("requested_period")
+        if not isinstance(requested_period, dict):
+            requested_period = {}
+        try:
+            period_start = _parse_plan_instant(requested_period["start_at"])
+            period_end = _parse_plan_instant(requested_period["end_at"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WalletCaseRuntimeConflict(
+                "The source stream checkpoint period is invalid."
+            ) from exc
+        if (
+            latest_id != checkpoint.id
+            or checkpoint.resume_state != "ready"
+            or checkpoint.provider != "tonapi"
+            or checkpoint.stream_key != claimed.resume_stream_key
+            or checkpoint.provider_contract_version != expected_contract
+            or checkpoint.continuation_cursor != claimed.resume_cursor
+            or checkpoint.continuation_page_index != claimed.resume_page_index
+            or source_sync.public_id
+            != claimed.acquisition_plan["base_snapshot_public_id"]
+            or source_sync.state not in {"partial", "succeeded"}
+            or source_sync.ingestion_run_id is None
+            or set(claimed.requested_surfaces) != expected_surfaces
+            or period_start != claimed.acquisition_start
+            or period_end != claimed.acquisition_end
+        ):
+            raise WalletCaseRuntimeConflict(
+                "The source stream checkpoint no longer matches this resume job."
+            )
 
     def _advance_to_ingestion(self, claimed: ClaimedCaseSync) -> bool:
         return self._advance(
@@ -683,6 +791,9 @@ class CaseSyncWorker:
                     ),
                     expected_network=claimed.network,
                     expected_canonical_wallet_key=claimed.canonical_wallet_key,
+                    resume_stream_key=claimed.resume_stream_key,
+                    resume_cursor=claimed.resume_cursor,
+                    resume_page_index=claimed.resume_page_index,
                 )
                 outcome.put((True, result))
             except Exception as exc:  # forwarded without logging provider detail

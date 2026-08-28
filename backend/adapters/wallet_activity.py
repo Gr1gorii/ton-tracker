@@ -208,6 +208,9 @@ class WalletActivityAdapterRequest:
     custom_end: str | None = None
     resolved_start: datetime | None = None
     resolved_end: datetime | None = None
+    resume_stream_key: Literal["transactions", "account_events"] | None = None
+    resume_cursor: str | None = None
+    resume_page_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -735,6 +738,10 @@ class TonapiWalletActivityLiveAdapter:
 
         try:
             bounds = _resolved_transaction_bounds(request)
+            cursor, first_page_index = _resume_position(
+                request,
+                "transactions",
+            )
         except ValueError as exc:
             error_message = _sanitize_provider_message(str(exc), self.settings)
             finished_at = _now_utc_iso()
@@ -779,7 +786,6 @@ class TonapiWalletActivityLiveAdapter:
         seen: dict[tuple[str, str], datetime | None] = {}
         total_raw = 0
         total_duplicates = 0
-        cursor: str | None = None
         last_unique_lt: int | None = None
         last_unique_timestamp: datetime | None = None
         completion_state = "incomplete"
@@ -788,7 +794,8 @@ class TonapiWalletActivityLiveAdapter:
         error_message: str | None = None
         fatal = False
 
-        for page_index in range(1, page_cap + 1):
+        for page_offset in range(page_cap):
+            page_index = first_page_index + page_offset
             fetched_at = _now_utc_iso()
             if bounded:
                 provider_result = self.tonapi.get_account_transactions_page(
@@ -1081,6 +1088,10 @@ class TonapiWalletActivityLiveAdapter:
         )
         try:
             bounds = _resolved_transaction_bounds(request)
+            cursor, first_page_index = _resume_position(
+                request,
+                "account_events",
+            )
         except ValueError as exc:
             error_message = _sanitize_provider_message(str(exc), self.settings)
             finished_at = _now_utc_iso()
@@ -1121,7 +1132,6 @@ class TonapiWalletActivityLiveAdapter:
         transfers: list[WalletActivityTransfer] = []
         swaps: list[WalletActivitySwap] = []
         seen: dict[str, tuple[str, datetime, str]] = {}
-        cursor: str | None = None
         last_lt: int | None = None
         last_timestamp: datetime | None = None
         total_raw = 0
@@ -1133,7 +1143,8 @@ class TonapiWalletActivityLiveAdapter:
         fatal = False
         saw_in_progress = False
 
-        for page_index in range(1, page_cap + 1):
+        for page_offset in range(page_cap):
+            page_index = first_page_index + page_offset
             fetched_at = _now_utc_iso()
             provider_result = self.tonapi.get_account_events_page(
                 request.wallet_address,
@@ -1860,6 +1871,30 @@ def _resolved_transaction_bounds(
     if start >= end:
         raise ValueError("resolved_start must be earlier than resolved_end.")
     return start, end
+
+
+def _resume_position(
+    request: WalletActivityAdapterRequest,
+    stream_key: Literal["transactions", "account_events"],
+) -> tuple[str | None, int]:
+    """Validate one fail-closed provider continuation position."""
+    if request.resume_stream_key is None:
+        if request.resume_cursor is not None or request.resume_page_index is not None:
+            raise ValueError(
+                "resume cursor and page index require a resume stream key."
+            )
+        return None, 1
+    if request.resume_stream_key != stream_key:
+        raise ValueError(
+            "resume stream key does not match the requested provider surface."
+        )
+    cursor = _strict_logical_time(request.resume_cursor)
+    page_index = request.resume_page_index
+    if cursor is None:
+        raise ValueError("resume cursor must be a canonical logical time.")
+    if type(page_index) is not int or page_index < 1:
+        raise ValueError("resume page index must be a positive integer.")
+    return cursor, page_index
 
 
 def _event_query_dates(

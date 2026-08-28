@@ -15,7 +15,10 @@ import {
   type WalletCaseCoverageState,
   type WalletCaseSyncRequest,
 } from "../walletCase";
-import { useWalletCaseSyncJob } from "../useWalletCaseSyncJob";
+import {
+  isActiveWalletCaseSync,
+  useWalletCaseSyncJob,
+} from "../useWalletCaseSyncJob";
 import CaseSyncPanel from "./CaseSyncPanel";
 import CaseAcquisitionManifest from "./CaseAcquisitionManifest";
 
@@ -54,6 +57,12 @@ function snapshotStateLabel(state: string | undefined): string {
   if (state === "succeeded") return "Available";
   if (state === "partial") return "Available with limitations";
   return "Not available";
+}
+
+function refreshModeLabel(mode: "bounded" | "incremental" | "resume"): string {
+  if (mode === "resume") return "Checkpoint continuation";
+  if (mode === "incremental") return "Incremental overlap";
+  return "Bounded interval";
 }
 
 export default function GramCaseSummary({
@@ -134,7 +143,7 @@ export default function GramCaseSummary({
             <dl className="case-definition-list">
               <div><dt>Snapshot ID</dt><dd><code>{snapshot.public_id}</code></dd></div>
               <div><dt>Provider</dt><dd>{snapshot.provider}</dd></div>
-              <div><dt>Refresh mode</dt><dd>{snapshot.requested_scope.mode === "incremental" ? "Incremental overlap" : "Bounded interval"}</dd></div>
+              <div><dt>Refresh mode</dt><dd>{refreshModeLabel(snapshot.requested_scope.mode)}</dd></div>
               <div><dt>Snapshot start</dt><dd>{formatDate(snapshot.requested_scope.start_at)}</dd></div>
               <div><dt>Snapshot end</dt><dd>{formatDate(snapshot.requested_scope.end_at)}</dd></div>
               <div><dt>Acquisition start</dt><dd>{formatDate(snapshot.requested_scope.acquisition_start_at)}</dd></div>
@@ -143,6 +152,12 @@ export default function GramCaseSummary({
                 <>
                   <div><dt>Safety overlap</dt><dd>{Math.round(snapshot.requested_scope.overlap_seconds / 60)} minutes</dd></div>
                   <div><dt>Base snapshot</dt><dd><code>{snapshot.requested_scope.base_snapshot_public_id}</code></dd></div>
+                </>
+              )}
+              {snapshot.requested_scope.mode === "resume" && (
+                <>
+                  <div><dt>Base snapshot</dt><dd><code>{snapshot.requested_scope.base_snapshot_public_id}</code></dd></div>
+                  <div><dt>Source checkpoint</dt><dd><code>{snapshot.requested_scope.source_checkpoint_public_id}</code></dd></div>
                 </>
               )}
               <div><dt>Surfaces</dt><dd>{snapshot.requested_scope.surfaces.join(", ")}</dd></div>
@@ -167,7 +182,15 @@ export default function GramCaseSummary({
           )}
         </article>
         {snapshot && result && (
-          <CaseAcquisitionManifest caseId={caseId} snapshot={snapshot} />
+          <CaseAcquisitionManifest
+            caseId={caseId}
+            snapshot={snapshot}
+            resumeDisabled={
+              isActiveWalletCaseSync(syncController.sync) ||
+              syncController.transportState !== "idle"
+            }
+            onResume={syncController.resume}
+          />
         )}
       </div>
 

@@ -131,6 +131,10 @@ class WalletCaseStreamCheckpointCorrupt(RuntimeError):
     """Raised when persisted provider continuation state fails validation."""
 
 
+class WalletCaseCheckpointResumeUnavailable(RuntimeError):
+    """Raised when a checkpoint cannot safely start a continuation job."""
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
@@ -847,6 +851,223 @@ class WalletCaseService:
             raise WalletCaseNotFound("Wallet Case sync not found")
         return self._sync_response(case_sync, case_public_id=wallet_case.public_id)
 
+    def enqueue_checkpoint_resume(
+        self,
+        case_public_id: str,
+        checkpoint_public_id: str,
+        idempotency_key: str,
+        *,
+        settings=None,
+        now: datetime | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue one continuation only from the latest verified ready checkpoint."""
+        wallet_case = self._required_case(case_public_id)
+        checkpoint = self.repository.get_stream_checkpoint(
+            case_id=wallet_case.id,
+            public_id=checkpoint_public_id,
+        )
+        if checkpoint is None:
+            raise WalletCaseNotFound("Wallet Case stream checkpoint not found")
+        checkpoint_response = _stream_checkpoint_response(
+            checkpoint,
+            case_public_id=wallet_case.public_id,
+        )
+        descriptor = checkpoint_response["checkpoint"]
+        document = checkpoint_response["document"]
+        latest = {
+            (item.provider, item.stream_key): item.public_id
+            for item in self.repository.latest_stream_checkpoints(
+                case_id=wallet_case.id
+            )
+        }
+        stream_identity = (checkpoint.provider, checkpoint.stream_key)
+        if latest.get(stream_identity) != checkpoint.public_id:
+            raise WalletCaseCheckpointResumeUnavailable(
+                "Only the latest verified checkpoint for a provider stream can be resumed."
+            )
+        if descriptor["resume_state"] != "ready":
+            raise WalletCaseCheckpointResumeUnavailable(
+                "This provider stream checkpoint is not ready to resume."
+            )
+        if checkpoint.provider != "tonapi":
+            raise WalletCaseCheckpointResumeUnavailable(
+                "This checkpoint provider is not supported by resume execution."
+            )
+        source_sync = checkpoint.source_sync
+        if (
+            source_sync.case_id != wallet_case.id
+            or source_sync.state not in {"partial", "succeeded"}
+            or source_sync.ingestion_run_id is None
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case stream checkpoint source sync is unusable."
+            )
+        source_surfaces = _json_list(source_sync.requested_surfaces_json)
+        if checkpoint.stream_key == "transactions":
+            resumed_surfaces = [
+                surface for surface in source_surfaces if surface == "transactions"
+            ]
+        elif checkpoint.stream_key == "account_events":
+            resumed_surfaces = [
+                surface
+                for surface in source_surfaces
+                if surface in {"transfers", "swaps"}
+            ]
+        else:
+            raise WalletCaseCheckpointResumeUnavailable(
+                "This provider stream does not have a supported resume adapter."
+            )
+        if not resumed_surfaces:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case stream checkpoint has no matching source surface."
+            )
+        requested_period = document.get("requested_period")
+        if not isinstance(requested_period, dict):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case stream checkpoint period is invalid."
+            )
+        try:
+            acquisition_start_text = _canonical_request_timestamp(
+                requested_period["start_at"]
+            )
+            acquisition_end_text = _canonical_request_timestamp(
+                requested_period["end_at"]
+            )
+            acquisition_start = _parse_canonical_timestamp(
+                acquisition_start_text
+            )
+            acquisition_end = _parse_canonical_timestamp(acquisition_end_text)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case stream checkpoint period is invalid."
+            ) from exc
+        requested_start = _as_utc(source_sync.requested_start)
+        requested_end = _as_utc(source_sync.requested_end)
+        if (
+            acquisition_start < requested_start
+            or acquisition_end != requested_end
+            or acquisition_start >= acquisition_end
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case stream checkpoint period escaped its source sync."
+            )
+        cursor = document.get("continuation_cursor")
+        page_index = document.get("continuation_page_index")
+        if _strict_logical_time(cursor) is None or (
+            type(page_index) is not int or page_index < 1
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case stream checkpoint continuation is invalid."
+            )
+
+        fingerprint = _checkpoint_resume_fingerprint(checkpoint.public_id)
+        replay = self.repository.get_by_idempotency_key(
+            case_id=wallet_case.id,
+            idempotency_key=idempotency_key,
+        )
+        if replay is not None:
+            if replay.request_fingerprint != fingerprint:
+                raise WalletCaseIdempotencyConflict(
+                    "Idempotency-Key was already used for another sync scope."
+                )
+            return self._sync_response(
+                replay,
+                case_public_id=wallet_case.public_id,
+            ), True
+        active = self.repository.get_active_sync(case_id=wallet_case.id)
+        if active is not None:
+            raise WalletCaseSyncAlreadyActive(active.public_id)
+
+        queued_at = _as_utc(now or _utc_now())
+        ingestion_settings = self._settings_for_case(
+            wallet_case,
+            settings or get_settings(),
+        )
+        acquisition_plan = {
+            "version": 2,
+            "mode": "resume",
+            "start_at": acquisition_start_text,
+            "end_at": acquisition_end_text,
+            "overlap_seconds": 0,
+            "base_snapshot_public_id": source_sync.public_id,
+            "source_checkpoint_public_id": checkpoint.public_id,
+            "resume_stream_key": checkpoint.stream_key,
+            "resume_cursor": cursor,
+            "resume_page_index": page_index,
+        }
+        expected_data_mode = _ENVIRONMENT_DATA_MODE[
+            wallet_case.data_environment
+        ]
+        coverage = _coverage_record(
+            {
+                "requested_surfaces": resumed_surfaces,
+                "data_mode": expected_data_mode,
+            },
+            start_at=requested_start,
+            end_at=requested_end,
+            state="queued",
+            requested_surfaces=resumed_surfaces,
+            acquisition_plan=acquisition_plan,
+        )
+        case_sync = CaseSync(
+            case=wallet_case,
+            time_window="custom",
+            data_mode=expected_data_mode,
+            provider=_queued_provider(ingestion_settings),
+            requested_start=requested_start,
+            requested_end=requested_end,
+            requested_surfaces_json=_json_dumps(resumed_surfaces),
+            state="queued",
+            stage="queued",
+            progress_current=0,
+            progress_total=_SYNC_PROGRESS_TOTAL,
+            coverage_summary_json=_json_dumps(coverage),
+            result_summary_json="{}",
+            message_safe="Wallet Case checkpoint continuation is queued.",
+            created_at=queued_at,
+            updated_at=queued_at,
+            status_version=1,
+            idempotency_key=idempotency_key,
+            request_fingerprint=fingerprint,
+            attempt_count=0,
+            max_attempts=int(ingestion_settings.wallet_case_job_max_attempts),
+            next_attempt_at=queued_at,
+            checkpoint_json=_json_dumps(
+                {"version": "case_sync_monolithic_v1", "phase": "queued"}
+            ),
+        )
+        wallet_case.updated_at = queued_at
+        self._record_catalog_event(wallet_case, recorded_at=queued_at)
+        self.repository.add_sync(case_sync)
+        try:
+            self.session.commit()
+        except IntegrityError:
+            self.session.rollback()
+            replay = self.repository.get_by_idempotency_key(
+                case_id=wallet_case.id,
+                idempotency_key=idempotency_key,
+            )
+            if replay is not None:
+                if replay.request_fingerprint != fingerprint:
+                    raise WalletCaseIdempotencyConflict(
+                        "Idempotency-Key was already used for another sync scope."
+                    )
+                return self._sync_response(
+                    replay,
+                    case_public_id=wallet_case.public_id,
+                ), True
+            active = self.repository.get_active_sync(case_id=wallet_case.id)
+            if active is not None:
+                raise WalletCaseSyncAlreadyActive(active.public_id)
+            raise
+        self.session.refresh(case_sync)
+        response = self._sync_response(
+            case_sync,
+            case_public_id=wallet_case.public_id,
+        )
+        self.session.rollback()
+        return response, False
+
     def get_sync_manifest(
         self,
         case_public_id: str,
@@ -1302,6 +1523,9 @@ class WalletCaseService:
                 "base_snapshot_public_id": acquisition_plan[
                     "base_snapshot_public_id"
                 ],
+                "source_checkpoint_public_id": acquisition_plan.get(
+                    "source_checkpoint_public_id"
+                ),
             },
             "coverage": coverage,
             "summary": summary,
@@ -1359,6 +1583,19 @@ def _sync_request_fingerprint(payload: WalletCaseSyncRequest) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
+def _checkpoint_resume_fingerprint(checkpoint_public_id: str) -> str:
+    canonical = json.dumps(
+        {
+            "contract": "wallet_case_checkpoint_resume_request_v1",
+            "checkpoint_public_id": checkpoint_public_id,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def _canonical_request_timestamp(value: str) -> str:
     """Canonicalize one valid custom-bound instant for semantic idempotency."""
     if value != value.strip():
@@ -1369,6 +1606,25 @@ def _canonical_request_timestamp(value: str) -> str:
     except ValueError as exc:
         raise ValueError("Custom sync bounds must be valid ISO datetimes.") from exc
     return _as_utc(parsed).isoformat().replace("+00:00", "Z")
+
+
+def _parse_canonical_timestamp(value: str) -> datetime:
+    cleaned = f"{value[:-1]}+00:00" if value.endswith("Z") else value
+    return _as_utc(datetime.fromisoformat(cleaned))
+
+
+def _strict_logical_time(value: Any) -> str | None:
+    if (
+        not isinstance(value, str)
+        or not value
+        or not value.isascii()
+        or not value.isdigit()
+        or value[0] == "0"
+        or len(value) > 20
+        or int(value, 10) > 2**64 - 1
+    ):
+        return None
+    return value
 
 
 def _queued_provider(_settings) -> str:
@@ -1429,7 +1685,7 @@ def _coverage_record(
         coverage_state = "bounded_complete"
     if (
         acquisition_plan is not None
-        and acquisition_plan.get("mode") == "incremental"
+        and acquisition_plan.get("mode") in {"incremental", "resume"}
         and coverage_state == "bounded_complete"
     ):
         coverage_state = "bounded_partial"
@@ -1521,13 +1777,23 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
             "overlap_seconds": 0,
             "base_snapshot_public_id": None,
         }
-    if not isinstance(stored, dict) or set(stored) != {
+    version_one_keys = {
         "version",
         "mode",
         "start_at",
         "end_at",
         "overlap_seconds",
         "base_snapshot_public_id",
+    }
+    version_two_keys = version_one_keys | {
+        "source_checkpoint_public_id",
+        "resume_stream_key",
+        "resume_cursor",
+        "resume_page_index",
+    }
+    if not isinstance(stored, dict) or frozenset(stored) not in {
+        frozenset(version_one_keys),
+        frozenset(version_two_keys),
     }:
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     mode = stored.get("mode")
@@ -1535,9 +1801,13 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     end_at = stored.get("end_at")
     overlap_seconds = stored.get("overlap_seconds")
     base_public_id = stored.get("base_snapshot_public_id")
+    source_checkpoint_public_id = stored.get("source_checkpoint_public_id")
+    resume_stream_key = stored.get("resume_stream_key")
+    resume_cursor = stored.get("resume_cursor")
+    resume_page_index = stored.get("resume_page_index")
     if (
-        stored.get("version") != 1
-        or mode not in {"bounded", "incremental"}
+        stored.get("version") not in {1, 2}
+        or mode not in {"bounded", "incremental", "resume"}
         or not isinstance(start_at, str)
         or not isinstance(end_at, str)
         or type(overlap_seconds) is not int
@@ -1562,14 +1832,38 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     if mode == "bounded":
         if (
-            start_at != requested_start
+            stored.get("version") != 1
+            or start_at != requested_start
             or overlap_seconds != 0
             or base_public_id is not None
         ):
             raise ValueError("Stored Wallet Case acquisition plan is invalid.")
-    elif not isinstance(base_public_id, str) or len(base_public_id) != 36:
+    elif mode == "incremental":
+        if (
+            stored.get("version") != 1
+            or not isinstance(base_public_id, str)
+            or len(base_public_id) != 36
+        ):
+            raise ValueError("Stored Wallet Case acquisition plan is invalid.")
+    elif (
+        stored.get("version") != 2
+        or not isinstance(base_public_id, str)
+        or len(base_public_id) != 36
+        or not isinstance(source_checkpoint_public_id, str)
+        or len(source_checkpoint_public_id) != 68
+        or not source_checkpoint_public_id.startswith("scp_")
+        or any(
+            char not in "0123456789abcdef"
+            for char in source_checkpoint_public_id[4:]
+        )
+        or resume_stream_key not in {"transactions", "account_events"}
+        or _strict_logical_time(resume_cursor) is None
+        or type(resume_page_index) is not int
+        or resume_page_index < 1
+        or overlap_seconds != 0
+    ):
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
-    return dict(stored)
+    return stored
 
 
 def _stored_coverage(case_sync: CaseSync) -> dict[str, Any]:
@@ -1607,6 +1901,13 @@ def _limitations_for_sync(
             _limitation(
                 "incremental_composite_not_full_history",
                 "This snapshot composes prior usable sources with a forward overlap refresh; it does not prove complete history and its summary reflects the latest acquisition run.",
+            )
+        )
+    if _sync_acquisition_plan(case_sync)["mode"] == "resume":
+        limitations.append(
+            _limitation(
+                "checkpoint_resume_composite_not_full_history",
+                "This snapshot continues one verified provider stream checkpoint; the composed observations remain bounded and do not prove complete wallet history.",
             )
         )
     pending = case_sync.state in {"queued", "running"}

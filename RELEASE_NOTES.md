@@ -1,3 +1,29 @@
+# GRAM Scope — v0.88.0 CHECKPOINT RESUME
+
+v0.88.0 turns the conservative `ready` checkpoint state from v0.87.0 into one
+explicit durable continuation operation. A caller posts a canonical checkpoint
+ID with one UUIDv4 idempotency key; the queued CaseSync records versioned resume
+lineage containing the source checkpoint and sync, original acquisition bounds,
+provider stream key, cursor, and next page index.
+
+Only the latest verified checkpoint for a supported TonAPI transaction or
+account-event stream can run. Enqueue verifies the content address and source
+manifest, and the worker repeats the integrity, latest-revision, provider
+contract, source-sync, surface, bound, cursor, and page-index checks immediately
+before provider I/O. Blocked, complete, stale, corrupt, foreign, and unsupported
+records fail closed. Ambiguous client transport retries reuse the same
+idempotency key; active-job recovery, polling, cancellation, lease fencing, and
+terminal publication continue through the existing sync machinery.
+
+Summary now offers `Resume stream` only for `ready` checkpoints. Complete and
+blocked records remain informational. A resumed snapshot names both its base
+snapshot and source checkpoint and always carries an explicit limitation: one
+continued bounded stream is not automatic backfill and does not prove complete
+wallet history. No database migration is added; Alembic remains at
+`20260828_0028` and backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.87.0 STREAM CHECKPOINTS
 
 v0.87.0 turns the sanitized stream/page evidence introduced in v0.86.0 into

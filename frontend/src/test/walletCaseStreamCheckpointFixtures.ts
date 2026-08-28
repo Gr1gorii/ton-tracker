@@ -1,5 +1,10 @@
 import type { WalletCaseStreamCheckpointCatalogResponse } from "../walletCaseStreamCheckpoint";
-import { CASE_ID, MANIFEST_HASH, SYNC_ID } from "./walletCaseFixtures";
+import {
+  CASE_ID,
+  CHECKPOINT_ID,
+  MANIFEST_HASH,
+  SYNC_ID,
+} from "./walletCaseFixtures";
 
 export const CHECKPOINT_HASH = "cd".repeat(32);
 
@@ -13,11 +18,11 @@ export function streamCheckpointCatalogFixture(): WalletCaseStreamCheckpointCata
     checkpoints: [
       {
         checkpoint: {
-          public_id: `scp_${CHECKPOINT_HASH}`,
+          public_id: CHECKPOINT_ID,
           contract_version: "wallet_case_stream_checkpoint_v1",
           checkpoint_hash_sha256: CHECKPOINT_HASH,
-          provider: "tonapi_wallet_activity_live",
-          stream_key: "account_transactions",
+          provider: "tonapi",
+          stream_key: "transactions",
           provider_contract_version: "tonapi_account_transactions_v1",
           source_sync_public_id: SYNC_ID,
           resume_state: "ready",
@@ -29,8 +34,8 @@ export function streamCheckpointCatalogFixture(): WalletCaseStreamCheckpointCata
           source_sync_public_id: SYNC_ID,
           source_manifest_public_id: `smf_${MANIFEST_HASH}`,
           source_manifest_hash_sha256: MANIFEST_HASH,
-          provider: "tonapi_wallet_activity_live",
-          stream_key: "account_transactions",
+          provider: "tonapi",
+          stream_key: "transactions",
           provider_contract_version: "tonapi_account_transactions_v1",
           acquisition_mode: "bounded",
           requested_period: {
@@ -46,11 +51,11 @@ export function streamCheckpointCatalogFixture(): WalletCaseStreamCheckpointCata
           pages_succeeded: 1,
           resume_state: "ready",
           resume_blocker: null,
-          continuation_cursor: "cursor-2",
+          continuation_cursor: "10",
           continuation_page_index: 2,
           last_successful_page: {
             page_index: 1,
-            response_cursor: "cursor-2",
+            response_cursor: "10",
             response_digest_sha256: "ab".repeat(32),
             min_logical_time: "10",
             max_logical_time: "20",

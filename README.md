@@ -4,10 +4,32 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.87.0 — Stream Checkpoints**<br>
+Current product release: **v0.88.0 — Checkpoint Resume**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.87.0 adds
+## What v0.88.0 adds
+
+A resume-ready provider-stream checkpoint can now start one explicit durable
+continuation job through
+`POST /api/v1/cases/{case}/stream-checkpoints/{checkpoint}/resume`. The server
+accepts only the latest content-addressed `ready` checkpoint for a supported
+TonAPI transaction or account-event stream, binds the request to one UUIDv4
+idempotency key, and records the source checkpoint, source snapshot, cursor,
+next page index, original acquisition period, and resumed surfaces in the sync
+lineage.
+
+The worker reloads and revalidates the checkpoint, source manifest, latest
+stream identity, current provider contract, source sync, bounds, cursor, page
+index, and requested surfaces immediately before provider I/O. Corrupt, stale,
+blocked, complete, foreign, or incompatible checkpoints fail closed. Summary
+offers a Resume action only for `ready` records and sends the resulting job
+through the existing polling, reconnect, retry, cancellation, and snapshot
+preservation workflow. Continuation remains bounded and partial: it does not
+claim automatic backfill, complete history, or a full-history aggregate.
+
+No migration is added; Alembic remains at `20260828_0028`.
+
+## v0.87.0 stream checkpoints
 
 Every provider stream emitted by a newly published Wallet Case sync now gets
 its own immutable, content-addressed continuation record. Each checkpoint is
@@ -21,8 +43,7 @@ remain blocked.
 `GET /api/v1/cases/{case}/stream-checkpoints` returns the latest verified
 revision for every provider/stream pair and fails closed on canonical JSON,
 hash, Case, sync, manifest, or row-identity mismatch. Summary displays those
-states alongside acquisition provenance and explicitly says that automatic
-page-resume execution is not enabled yet. Revision `20260828_0028` adds the
+states alongside acquisition provenance. Revision `20260828_0028` adds the
 append-only checkpoint store. The ingestion run, terminal sync state, manifest,
 and all stream checkpoints publish in one lease-fenced transaction.
 
@@ -138,6 +159,7 @@ profit, ownership proof, or complete wallet history.
 - v0.85.0 incremental Wallet Case refresh with durable acquisition lineage.
 - v0.86.0 immutable content-addressed acquisition manifests.
 - v0.87.0 append-only, manifest-bound provider stream checkpoints.
+- v0.88.0 explicit, idempotent execution from verified ready checkpoints.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

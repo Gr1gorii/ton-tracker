@@ -5,6 +5,7 @@ import {
   cancelWalletCaseSync,
   createWalletCaseSync,
   getWalletCaseSync,
+  resumeWalletCaseStreamCheckpoint,
 } from "./walletCaseApi";
 import type { WalletCaseSync, WalletCaseSyncRequest } from "./walletCase";
 
@@ -20,6 +21,8 @@ export interface WalletCaseSyncJobController {
   transportState: WalletCaseSyncTransportState;
   transportError: string | null;
   start: (request: WalletCaseSyncRequest) => Promise<void>;
+  resume: (checkpointPublicId: string) => Promise<void>;
+  retryPending: () => Promise<void>;
   retry: () => Promise<void>;
   cancel: () => Promise<void>;
   checkNow: () => void;
@@ -31,10 +34,16 @@ interface UseWalletCaseSyncJobOptions {
   onTerminal: (sync: WalletCaseSync) => void | Promise<void>;
 }
 
-interface PendingStart {
+type PendingStart = {
   idempotencyKey: string;
-  request: WalletCaseSyncRequest;
-}
+} & (
+  | { kind: "sync"; request: WalletCaseSyncRequest }
+  | { kind: "resume"; checkpointPublicId: string }
+);
+
+type RequestedStart =
+  | { kind: "sync"; request: WalletCaseSyncRequest }
+  | { kind: "resume"; checkpointPublicId: string };
 
 const TERMINAL_STATES = new Set(["partial", "succeeded", "failed", "cancelled"]);
 const MIN_POLL_MS = 500;
@@ -239,11 +248,26 @@ export function useWalletCaseSyncJob({
     };
   }, [acceptSync, activeJobId, caseId, pollEpoch]);
 
-  const start = useCallback(async (request: WalletCaseSyncRequest) => {
+  const begin = useCallback(async (requested: RequestedStart) => {
     if (isActiveWalletCaseSync(syncRef.current) || actionControllerRef.current) return;
-    const pending = pendingStartRef.current ?? {
+    const existing = pendingStartRef.current;
+    const matchesPending = existing === null || (
+      existing.kind === requested.kind && (
+        (existing.kind === "sync" && requested.kind === "sync" &&
+          JSON.stringify(existing.request) === JSON.stringify(requested.request)) ||
+        (existing.kind === "resume" && requested.kind === "resume" &&
+          existing.checkpointPublicId === requested.checkpointPublicId)
+      )
+    );
+    if (!matchesPending) {
+      setTransportError(
+        "A previous start request has an unknown outcome. Retry that action before starting another.",
+      );
+      return;
+    }
+    const pending: PendingStart = existing ?? {
+      ...requested,
       idempotencyKey: crypto.randomUUID(),
-      request,
     };
     pendingStartRef.current = pending;
     const controller = new AbortController();
@@ -251,12 +275,19 @@ export function useWalletCaseSyncJob({
     setTransportState("starting");
     setTransportError(null);
     try {
-      const next = await createWalletCaseSync(
-        caseId,
-        pending.request,
-        pending.idempotencyKey,
-        controller.signal,
-      );
+      const next = pending.kind === "sync"
+        ? await createWalletCaseSync(
+            caseId,
+            pending.request,
+            pending.idempotencyKey,
+            controller.signal,
+          )
+        : await resumeWalletCaseStreamCheckpoint(
+            caseId,
+            pending.checkpointPublicId,
+            pending.idempotencyKey,
+            controller.signal,
+          );
       pendingStartRef.current = null;
       acceptSync(next);
       if (isActiveWalletCaseSync(next)) setTransportState("polling");
@@ -289,13 +320,41 @@ export function useWalletCaseSyncJob({
     }
   }, [acceptSync, caseId]);
 
+  const start = useCallback(async (request: WalletCaseSyncRequest) => {
+    await begin({ kind: "sync", request });
+  }, [begin]);
+
+  const resume = useCallback(async (checkpointPublicId: string) => {
+    await begin({ kind: "resume", checkpointPublicId });
+  }, [begin]);
+
+  const retryPending = useCallback(async () => {
+    const pending = pendingStartRef.current;
+    if (!pending) return;
+    if (pending.kind === "sync") {
+      await begin({ kind: "sync", request: pending.request });
+    } else {
+      await begin({
+        kind: "resume",
+        checkpointPublicId: pending.checkpointPublicId,
+      });
+    }
+  }, [begin]);
+
   const retry = useCallback(async () => {
     const current = syncRef.current;
     if (!current || isActiveWalletCaseSync(current)) return;
     pendingStartRef.current = null;
+    if (
+      current.requested_scope.mode === "resume" &&
+      current.requested_scope.source_checkpoint_public_id
+    ) {
+      await resume(current.requested_scope.source_checkpoint_public_id);
+      return;
+    }
     const incremental = current.requested_scope.mode === "incremental";
     await start({
-      mode: current.requested_scope.mode,
+      mode: incremental ? "incremental" : "bounded",
       time_window: incremental ? "24h" : current.requested_scope.time_window,
       ...(!incremental && current.requested_scope.time_window === "custom"
         ? {
@@ -305,7 +364,7 @@ export function useWalletCaseSyncJob({
         : {}),
       surfaces: [...current.requested_scope.surfaces],
     });
-  }, [start]);
+  }, [resume, start]);
 
   const cancel = useCallback(async () => {
     const current = syncRef.current;
@@ -341,5 +400,15 @@ export function useWalletCaseSyncJob({
     else setPollEpoch((value) => value + 1);
   }, []);
 
-  return { sync, transportState, transportError, start, retry, cancel, checkNow };
+  return {
+    sync,
+    transportState,
+    transportError,
+    start,
+    resume,
+    retryPending,
+    retry,
+    cancel,
+    checkNow,
+  };
 }

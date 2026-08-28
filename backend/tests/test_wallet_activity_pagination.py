@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -220,6 +221,61 @@ def test_page_cap_is_incomplete_and_marks_transaction_surface(monkeypatch):
     assert stream.termination_reason == "page_cap_reached"
     assert stream.bounds_verified is False
     assert stream.page_count == 2
+
+
+def test_resume_starts_from_verified_cursor_and_continues_page_indexes(monkeypatch):
+    adapter = TonapiWalletActivityLiveAdapter(
+        _settings(page_size=1, page_cap=1)
+    )
+    calls = _install_pages(
+        monkeypatch,
+        adapter,
+        [
+            _page(
+                [_row("400", datetime(2026, 7, 10, 11, 0, tzinfo=timezone.utc), "B")],
+                request_cursor="500",
+                limit=1,
+            ),
+        ],
+    )
+
+    result = adapter.ingest(
+        replace(
+            _request(),
+            resume_stream_key="transactions",
+            resume_cursor="500",
+            resume_page_index=2,
+        )
+    )
+
+    stream = _stream(result)
+    assert calls == [("EQwallet", 1, "500")]
+    assert [row.tx_hash for row in result.transactions] == ["B"]
+    assert stream.first_cursor == "500"
+    assert stream.terminal_cursor == "400"
+    assert [page.page_index for page in stream.pages] == [2]
+    assert stream.completion_state == "incomplete"
+    assert stream.termination_reason == "page_cap_reached"
+
+
+def test_resume_rejects_a_stream_mismatch_before_provider_io(monkeypatch):
+    adapter = TonapiWalletActivityLiveAdapter(_settings())
+    calls = _install_pages(monkeypatch, adapter, [])
+
+    result = adapter.ingest(
+        replace(
+            _request(),
+            resume_stream_key="account_events",
+            resume_cursor="500",
+            resume_page_index=2,
+        )
+    )
+
+    stream = _stream(result)
+    assert calls == []
+    assert result.status == "error"
+    assert stream.completion_state == "error"
+    assert stream.termination_reason == "protocol_error"
 
 
 def test_overlap_is_deduplicated_by_lt_and_lowercase_hash(monkeypatch):

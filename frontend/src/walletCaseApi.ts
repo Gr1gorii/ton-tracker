@@ -43,6 +43,7 @@ import { parseRfc3339Instant } from "./rfc3339";
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const CHECKPOINT_ID = /^scp_[0-9a-f]{64}$/;
 const ACTIVITY_KINDS = ["transaction", "transfer", "swap"] as const;
 const ACTIVITY_DIRECTIONS = ["in", "out", "unknown"] as const;
 const ACTIVITY_OUTCOMES = ["success", "failed", "unknown"] as const;
@@ -574,6 +575,38 @@ export async function getWalletCaseStreamCheckpoints(
   return catalog;
 }
 
+export async function resumeWalletCaseStreamCheckpoint(
+  caseId: string,
+  checkpointId: string,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseSync> {
+  assertPublicId(caseId, "Wallet Case id");
+  assertCheckpointId(checkpointId);
+  assertPublicId(idempotencyKey, "Wallet Case sync idempotency key");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/stream-checkpoints/${encodeURIComponent(checkpointId)}/resume`,
+    {
+      method: "POST",
+      cache: "no-store",
+      headers: { "Idempotency-Key": idempotencyKey },
+      signal,
+    },
+  );
+  if (response.status !== 202) {
+    throw await walletCaseResponseError(response, "Wallet Case checkpoint resume failed");
+  }
+  const sync = bindSyncToRequest(await response.json(), caseId);
+  if (
+    sync.requested_scope.mode !== "resume" ||
+    sync.requested_scope.source_checkpoint_public_id !== checkpointId ||
+    sync.requested_scope.base_snapshot_public_id === null
+  ) {
+    throw new Error("Wallet Case checkpoint resume response does not match the request");
+  }
+  return sync;
+}
+
 export async function cancelWalletCaseSync(
   caseId: string,
   syncId: string,
@@ -676,6 +709,12 @@ function assertSyncMatchesRequest(
 
 function assertPublicId(value: string, label: string): void {
   if (!UUID_V4.test(value)) throw new Error(`${label} must be a canonical UUIDv4`);
+}
+
+function assertCheckpointId(value: string): void {
+  if (!CHECKPOINT_ID.test(value)) {
+    throw new Error("Wallet Case stream checkpoint id is invalid");
+  }
 }
 
 async function walletCaseResponseError(

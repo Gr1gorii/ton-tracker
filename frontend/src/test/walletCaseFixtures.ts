@@ -13,6 +13,7 @@ export const SYNC_ID = "550e8400-e29b-41d4-b716-446655440001";
 export const OLDER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440002";
 export const IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440003";
 export const MANIFEST_HASH = "ab".repeat(32);
+export const CHECKPOINT_ID = `scp_${"cd".repeat(32)}`;
 export const ALL_SURFACES = [
   "transfers",
   "transactions",
@@ -109,6 +110,7 @@ export function succeededSyncFixture(
       acquisition_end_at: "2026-08-09T12:00:00Z",
       overlap_seconds: 0,
       base_snapshot_public_id: null,
+      source_checkpoint_public_id: null,
     },
     coverage: result.coverage,
     summary: result.summary,
@@ -149,10 +151,53 @@ export function incrementalSyncFixture(
       acquisition_end_at: bounded.requested_scope.end_at,
       overlap_seconds: 900,
       base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
+      source_checkpoint_public_id: null,
     },
     limitations,
     result: {
       ...bounded.result!,
+      limitations,
+    },
+    ...overrides,
+  };
+}
+
+export function resumeSyncFixture(
+  overrides: Partial<WalletCaseSync> = {},
+): WalletCaseSync {
+  const bounded = succeededSyncFixture();
+  const limitations = [
+    ...bounded.limitations,
+    {
+      code: "checkpoint_resume_composite_not_full_history",
+      message: "This snapshot continues one verified provider checkpoint.",
+    },
+  ];
+  return {
+    ...bounded,
+    requested_scope: {
+      mode: "resume",
+      time_window: "custom",
+      start_at: bounded.requested_scope.start_at,
+      end_at: bounded.requested_scope.end_at,
+      surfaces: ["transactions"],
+      acquisition_start_at: bounded.requested_scope.start_at,
+      acquisition_end_at: bounded.requested_scope.end_at,
+      overlap_seconds: 0,
+      base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
+      source_checkpoint_public_id: CHECKPOINT_ID,
+    },
+    coverage: {
+      ...bounded.coverage,
+      requested_surfaces: ["transactions"],
+    },
+    limitations,
+    result: {
+      ...bounded.result!,
+      coverage: {
+        ...bounded.result!.coverage,
+        requested_surfaces: ["transactions"],
+      },
       limitations,
     },
     ...overrides,
@@ -184,6 +229,31 @@ export function activeSyncFixture(
     updated_at: state === "queued" ? "2026-08-09T12:00:00Z" : "2026-08-09T12:00:15Z",
     started_at: state === "queued" ? null : "2026-08-09T12:00:01Z",
     completed_at: null,
+    ...overrides,
+  };
+}
+
+export function activeResumeSyncFixture(
+  state: "queued" | "running" = "queued",
+  overrides: Partial<WalletCaseSync> = {},
+): WalletCaseSync {
+  const base = activeSyncFixture(state);
+  const resume = resumeSyncFixture();
+  return {
+    ...base,
+    public_id: "550e8400-e29b-41d4-b716-446655440004",
+    requested_scope: resume.requested_scope,
+    coverage: {
+      ...base.coverage,
+      requested_surfaces: ["transactions"],
+    },
+    limitations: [
+      {
+        code: "checkpoint_resume_composite_not_full_history",
+        message: "This snapshot continues one verified provider checkpoint.",
+      },
+      ...base.limitations,
+    ],
     ...overrides,
   };
 }

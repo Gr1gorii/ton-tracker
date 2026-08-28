@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  ArrowClockwise,
   Fingerprint,
   ShieldCheck,
   SpinnerGap,
@@ -17,9 +18,13 @@ import type { WalletCaseStreamCheckpointCatalogResponse } from "../walletCaseStr
 export default function CaseAcquisitionManifest({
   caseId,
   snapshot,
+  resumeDisabled,
+  onResume,
 }: {
   caseId: string;
   snapshot: WalletCaseSync;
+  resumeDisabled: boolean;
+  onResume: (checkpointPublicId: string) => Promise<void>;
 }) {
   const descriptor = snapshot.acquisition_manifest;
   const [detail, setDetail] = useState<WalletCaseSyncManifestResponse | null>(null);
@@ -113,9 +118,11 @@ export default function CaseAcquisitionManifest({
             <div className="case-manifest-detail" role="status">
               <strong>Verified by the server integrity gate</strong>
               <span>
-                {detail.document.acquisition_mode === "incremental"
-                  ? "Incremental overlap"
-                  : "Bounded interval"}
+                {detail.document.acquisition_mode === "resume"
+                  ? "Checkpoint continuation"
+                  : detail.document.acquisition_mode === "incremental"
+                    ? "Incremental overlap"
+                    : "Bounded interval"}
                 {" · "}{detail.document.streams.length} streams
                 {" · "}{detail.manifest.page_count} pages
                 {" · "}{detail.manifest.response_digest_count} response digests
@@ -147,13 +154,26 @@ export default function CaseAcquisitionManifest({
                             <b>{document.provider} / {document.stream_key}</b>
                             <small>
                               {document.resume_state === "ready"
-                                ? `Continuation recorded at page ${document.continuation_page_index}; automatic resume is not enabled yet.`
+                                ? `Continuation verified; the next request starts at page ${document.continuation_page_index}.`
                                 : document.resume_state === "complete"
                                   ? "Requested interval finished; no continuation cursor is retained."
                                   : `Continuation blocked: ${document.resume_blocker}.`}
                             </small>
                           </span>
-                          <code>{checkpoint.public_id}</code>
+                          <div className="case-checkpoint-actions">
+                            <code>{checkpoint.public_id}</code>
+                            {document.resume_state === "ready" && (
+                              <button
+                                className="button-secondary"
+                                type="button"
+                                disabled={resumeDisabled}
+                                aria-label={`Resume ${document.stream_key} stream`}
+                                onClick={() => void onResume(checkpoint.public_id)}
+                              >
+                                <ArrowClockwise size={15} /> Resume stream
+                              </button>
+                            )}
+                          </div>
                         </li>
                       ))}
                     </ul>

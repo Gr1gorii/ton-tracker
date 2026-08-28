@@ -1,4 +1,4 @@
-# GRAM Scope - v0.87.0 Public Release
+# GRAM Scope - v0.88.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -32,6 +32,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   content-address identity, source sync/manifest lineage, conservative
   ready/complete/blocked continuation classification, and a case-scoped latest
   catalog that revalidates every stored boundary before returning it.
+- Explicit, idempotent continuation of the latest verified `ready` TonAPI
+  transaction or account-event checkpoint, with durable source/cursor/page
+  lineage, worker-time revalidation before provider I/O, and the existing
+  polling, retry, cancellation, and snapshot-preservation workflow.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -73,7 +77,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.87.0 STREAM CHECKPOINTS`.
+- Product release label: `v0.88.0 CHECKPOINT RESUME`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -123,8 +127,9 @@ Public release handoff for the current TON wallet intelligence workspace.
   are not backfilled speculatively and disclose manifest unavailability.
 - Manifest documents contain only provider-safe checkpoints and SHA-256
   digests. They do not expose provider payloads, headers, credentials, database
-  IDs, internal run IDs, or provider error text. Checkpoints are recorded for
-  future resume/backfill work; provider-crawl resume is not implemented here.
+  IDs, internal run IDs, or provider error text. Only the latest verified
+  `ready` checkpoint for a supported stream can start an explicit continuation;
+  no automatic or full-history backfill is claimed.
 - Wallet Cases are direct-loopback only in this pre-authentication slice.
   Hosted production access remains disabled until authentication derives the
   owner scope.
@@ -198,8 +203,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Archive retains all Case-owned evidence until the user restores or permanently
   deletes the Case. Archived resources are intentionally unavailable to active
   Case routes and jobs until restoration; archive is not an erasure guarantee.
-- The local worker replays the whole current provider acquisition after an in-flight crash;
-  accepted provider pages are not yet committed as resumable checkpoints.
+- A checkpoint is published only with a terminal partial/succeeded sync. An
+  in-flight crash may replay the current bounded slice from its persisted start
+  checkpoint; stale workers still cannot publish a result.
 - Case-sync cancellation is immediate while queued and cooperative around the
   current monolithic provider acquisition while running. Evidence cancellation
   is cooperatively polled while running; during inclusion, its wait cannot exceed
@@ -222,13 +228,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.87.0`, confirm:
+Before tagging `v0.88.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.87.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.88.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the

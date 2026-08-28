@@ -10,6 +10,22 @@ describe("Wallet Case stream checkpoint contracts", () => {
     expect(parseWalletCaseStreamCheckpointCatalog(fixture)).toEqual(fixture);
   });
 
+  it("accepts a checkpoint emitted by a prior resume acquisition", () => {
+    const fixture = streamCheckpointCatalogFixture();
+    const resumed = {
+      ...fixture,
+      checkpoints: [{
+        ...fixture.checkpoints[0],
+        document: {
+          ...fixture.checkpoints[0].document,
+          acquisition_mode: "resume" as const,
+        },
+      }],
+    };
+
+    expect(parseWalletCaseStreamCheckpointCatalog(resumed)).toEqual(resumed);
+  });
+
   it("rejects identity, state, count, and shape contradictions", () => {
     const fixture = streamCheckpointCatalogFixture();
     expect(() => parseWalletCaseStreamCheckpointCatalog({

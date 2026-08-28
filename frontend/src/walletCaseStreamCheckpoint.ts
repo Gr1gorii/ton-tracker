@@ -212,7 +212,7 @@ function parseDocument(value: unknown): WalletCaseStreamCheckpointDocument {
     fail("stream checkpoint source manifest identity is invalid");
   }
   const mode = text(item.acquisition_mode, "stream checkpoint mode", 16);
-  if (mode !== "bounded" && mode !== "incremental") {
+  if (mode !== "bounded" && mode !== "incremental" && mode !== "resume") {
     fail("stream checkpoint mode is invalid");
   }
   const state = resumeState(item.resume_state, "stream checkpoint resume state");

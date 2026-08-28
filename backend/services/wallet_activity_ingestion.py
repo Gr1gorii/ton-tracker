@@ -95,6 +95,9 @@ def build_wallet_ingestion_run(
     expected_data_mode: str | None = None,
     expected_network: str | None = None,
     expected_canonical_wallet_key: str | None = None,
+    resume_stream_key: str | None = None,
+    resume_cursor: str | None = None,
+    resume_page_index: int | None = None,
 ) -> WalletIngestionRun:
     """Build one validated adapter-backed run without publishing it.
 
@@ -121,7 +124,16 @@ def build_wallet_ingestion_run(
             "Wallet identity does not match the Wallet Case."
         )
     adapter = build_wallet_activity_adapter(settings)
-    result = adapter.ingest(_adapter_request(payload, settings, bounds))
+    result = adapter.ingest(
+        _adapter_request(
+            payload,
+            settings,
+            bounds,
+            resume_stream_key=resume_stream_key,
+            resume_cursor=resume_cursor,
+            resume_page_index=resume_page_index,
+        )
+    )
     if expected_data_mode is not None and result.data_mode != expected_data_mode:
         raise WalletIngestionScopeMismatch(
             "Configured wallet activity adapter does not match the Wallet Case data environment."
@@ -584,6 +596,10 @@ def _adapter_request(
     payload: WalletIngestionPreviewRequest,
     settings,
     bounds: WalletAcquisitionBounds,
+    *,
+    resume_stream_key: str | None = None,
+    resume_cursor: str | None = None,
+    resume_page_index: int | None = None,
 ) -> WalletActivityAdapterRequest:
     return WalletActivityAdapterRequest(
         wallet_address=payload.wallet_address,
@@ -594,6 +610,9 @@ def _adapter_request(
         environment_data_mode=settings.data_mode,
         resolved_start=bounds.start,
         resolved_end=bounds.end,
+        resume_stream_key=resume_stream_key,
+        resume_cursor=resume_cursor,
+        resume_page_index=resume_page_index,
     )
 
 
