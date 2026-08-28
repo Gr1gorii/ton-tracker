@@ -224,6 +224,42 @@ def _attach_resumable_transaction_stream(run, claimed) -> None:
     run.acquisition_streams.append(stream)
 
 
+def _publish_resumable_checkpoint(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    with app.state.wallet_case_test_session() as session:
+        queued, _ = WalletCaseService(session).enqueue_sync(
+            case_id,
+            WalletCaseSyncRequest(
+                time_window="24h",
+                surfaces=["transactions"],
+            ),
+            str(uuid4()),
+        )
+    worker = CaseSyncWorker(app.state.wallet_case_test_session)
+    claimed = worker.claim_next()
+    assert claimed is not None
+    settings = worker._validated_settings(claimed)
+    run = build_wallet_ingestion_run(
+        WalletIngestionPreviewRequest(
+            wallet_address=claimed.display_address,
+            time_window=claimed.time_window,
+            surfaces=list(claimed.requested_surfaces),
+        ),
+        settings,
+        now=claimed.requested_end,
+    )
+    _attach_resumable_transaction_stream(run, claimed)
+    run_response = wallet_ingestion_run_to_response(run)
+    assert worker._publish_final_run(
+        claimed,
+        run,
+        run_response,
+        settings,
+        last_error_retryable=False,
+    ) is True
+    return case_id, queued, claimed
+
+
 def _configure_guarded_live_runtime(monkeypatch) -> None:
     monkeypatch.setenv("DATA_MODE", "real")
     monkeypatch.setenv("TON_NETWORK", "mainnet")
@@ -1431,39 +1467,7 @@ def test_sync_releases_the_case_read_transaction_before_provider_io(
 
 
 def test_final_publication_persists_manifest_bound_stream_checkpoint(client):
-    case_id = _create_case(client)["case"]["public_id"]
-    with app.state.wallet_case_test_session() as session:
-        queued, _ = WalletCaseService(session).enqueue_sync(
-            case_id,
-            WalletCaseSyncRequest(
-                time_window="24h",
-                surfaces=["transactions"],
-            ),
-            str(uuid4()),
-        )
-    worker = CaseSyncWorker(app.state.wallet_case_test_session)
-    claimed = worker.claim_next()
-    assert claimed is not None
-    settings = worker._validated_settings(claimed)
-    run = build_wallet_ingestion_run(
-        WalletIngestionPreviewRequest(
-            wallet_address=claimed.display_address,
-            time_window=claimed.time_window,
-            surfaces=list(claimed.requested_surfaces),
-        ),
-        settings,
-        now=claimed.requested_end,
-    )
-    _attach_resumable_transaction_stream(run, claimed)
-    run_response = wallet_ingestion_run_to_response(run)
-
-    assert worker._publish_final_run(
-        claimed,
-        run,
-        run_response,
-        settings,
-        last_error_retryable=False,
-    ) is True
+    case_id, queued, claimed = _publish_resumable_checkpoint(client)
 
     with app.state.wallet_case_test_session() as session:
         manifest = session.scalar(select(WalletCaseSyncManifest))
@@ -1489,6 +1493,52 @@ def test_final_publication_persists_manifest_bound_stream_checkpoint(client):
         assert document["last_successful_page"][
             "response_digest_sha256"
         ] == "ab" * 32
+
+    response = client.get(f"/api/v1/cases/{case_id}/stream-checkpoints")
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["case_public_id"] == case_id
+    assert body["checkpoint_count"] == 1
+    assert body["ready_count"] == 1
+    assert body["complete_count"] == 0
+    assert body["blocked_count"] == 0
+    assert body["checkpoints"][0]["checkpoint"] == {
+        "public_id": checkpoint.public_id,
+        "contract_version": "wallet_case_stream_checkpoint_v1",
+        "checkpoint_hash_sha256": checkpoint.checkpoint_hash_sha256,
+        "provider": "tonapi_wallet_activity_live",
+        "stream_key": "account_transactions",
+        "provider_contract_version": "tonapi_account_transactions_v1",
+        "source_sync_public_id": queued["public_id"],
+        "resume_state": "ready",
+        "created_at": body["checkpoints"][0]["checkpoint"]["created_at"],
+    }
+    assert body["checkpoints"][0]["document"] == document
+    assert "must-not-leak" not in response.text
+
+
+def test_stream_checkpoint_catalog_fails_closed_on_corrupt_payload(client):
+    case_id, _queued, _claimed = _publish_resumable_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(select(WalletCaseStreamCheckpoint))
+        assert checkpoint is not None
+        checkpoint.checkpoint_json = (
+            '{"contract_version":"wallet_case_stream_checkpoint_v1"}'
+        )
+        session.commit()
+
+    response = client.get(f"/api/v1/cases/{case_id}/stream-checkpoints")
+
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["detail"] == {
+        "code": "stream_checkpoint_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ),
+        "retryable": False,
+    }
 
 
 def test_legacy_usable_sync_without_manifest_is_labeled_honestly(client):
