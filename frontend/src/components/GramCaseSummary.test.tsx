@@ -32,6 +32,8 @@ function controllerFixture(overrides: Partial<WalletCaseSyncJobController> = {})
     transportState: "idle",
     transportError: null,
     start: vi.fn().mockResolvedValue(undefined),
+    resume: vi.fn().mockResolvedValue(undefined),
+    retryPending: vi.fn().mockResolvedValue(undefined),
     retry: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined),
     checkNow: vi.fn(),
@@ -187,6 +189,8 @@ describe("GramCaseSummary", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       ));
     vi.stubGlobal("fetch", fetchMock);
+    const controller = controllerFixture();
+    mocks.useWalletCaseSyncJob.mockReturnValue(controller);
     const user = userEvent.setup();
     renderSummary(walletCaseFixture());
 
@@ -198,7 +202,11 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText(/0 streams · 0 pages · 0 response digests/)).toBeTruthy();
     expect(screen.getByText("Durable stream checkpoints")).toBeTruthy();
     expect(screen.getByText(/1 ready · 0 complete · 0 blocked/)).toBeTruthy();
-    expect(screen.getByText(/automatic resume is not enabled yet/i)).toBeTruthy();
+    expect(screen.getByText(/continuation verified; the next request starts at page 2/i)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Resume transactions stream" }));
+    expect(controller.resume).toHaveBeenCalledWith(
+      checkpoints.checkpoints[0].checkpoint.public_id,
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/syncs/${payload.document.sync_public_id}/manifest`,
       expect.objectContaining({ cache: "no-store" }),
@@ -208,6 +216,47 @@ describe("GramCaseSummary", () => {
       expect.objectContaining({ cache: "no-store" }),
     );
   });
+
+  it.each(["blocked", "complete"] as const)(
+    "never offers resume for a %s checkpoint",
+    async (resumeState) => {
+      const payload = manifestResponseFixture();
+      const original = streamCheckpointCatalogFixture();
+      const checkpoint = original.checkpoints[0];
+      const catalog = {
+        ...original,
+        ready_count: 0,
+        complete_count: resumeState === "complete" ? 1 : 0,
+        blocked_count: resumeState === "blocked" ? 1 : 0,
+        checkpoints: [{
+          checkpoint: { ...checkpoint.checkpoint, resume_state: resumeState },
+          document: {
+            ...checkpoint.document,
+            completion_state: resumeState === "complete" ? "complete" : "incomplete",
+            termination_reason: resumeState === "complete"
+              ? "requested_start_reached"
+              : "protocol_error",
+            resume_state: resumeState,
+            resume_blocker: resumeState === "blocked"
+              ? "provider_protocol_error"
+              : null,
+            continuation_cursor: null,
+            continuation_page_index: null,
+          },
+        }],
+      };
+      vi.stubGlobal("fetch", vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(catalog), { status: 200 })));
+      const user = userEvent.setup();
+      renderSummary(walletCaseFixture());
+
+      await user.click(screen.getByRole("button", { name: "Inspect manifest" }));
+
+      expect(await screen.findByText("Durable stream checkpoints")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Resume .* stream/ })).toBeNull();
+    },
+  );
 
   it("labels a legacy snapshot without a manifest instead of inventing provenance", () => {
     const snapshot = succeededSyncFixture();

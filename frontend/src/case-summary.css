@@ -200,6 +200,8 @@
 .case-checkpoint-catalog small { color: var(--text-muted); line-height: 1.4; }
 .case-checkpoint-catalog code { overflow: hidden; max-width: 210px; color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
 .case-checkpoint-catalog li.is-blocked code { color: var(--warning); }
+.case-checkpoint-actions { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.case-checkpoint-actions button { display: inline-flex; flex: 0 0 auto; padding: 7px 10px; align-items: center; gap: 5px; font-size: 0.72rem; }
 
 .case-limitations { padding: 24px; }
 .case-limitations > header { display: flex; align-items: flex-start; gap: 12px; color: var(--warning); }
@@ -696,6 +698,9 @@
   .case-definition-list dd { text-align: left; }
   .case-manifest-actions { align-items: stretch; flex-direction: column; }
   .case-manifest-actions button { width: 100%; justify-content: center; }
+  .case-checkpoint-catalog li { align-items: stretch; flex-direction: column; }
+  .case-checkpoint-actions { align-items: stretch; flex-direction: column; }
+  .case-checkpoint-actions button { width: 100%; justify-content: center; }
   .case-limitations li { grid-template-columns: 1fr; gap: 5px; }
   .case-cancel-confirm { align-items: stretch; flex-direction: column; }
   .case-cancel-confirm p { margin: 0 0 5px; }
