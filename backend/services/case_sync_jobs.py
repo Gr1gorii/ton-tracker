@@ -26,6 +26,7 @@ from models import (
     CaseSync,
     WalletCase,
     WalletCaseCatalogEvent,
+    WalletCaseStreamCheckpoint,
     WalletCaseSyncManifest,
 )
 from schemas import WalletIngestionPreviewRequest
@@ -49,6 +50,10 @@ from services.wallet_cases import (
 from services.wallet_case_sync_manifests import (
     MANIFEST_CONTRACT_VERSION,
     build_wallet_case_sync_manifest,
+)
+from services.wallet_case_stream_checkpoints import (
+    CHECKPOINT_CONTRACT_VERSION,
+    build_wallet_case_stream_checkpoints,
 )
 
 
@@ -933,6 +938,9 @@ class CaseSyncWorker:
             requested_surfaces=claimed.requested_surfaces,
             run_response=run_response,
         )
+        built_checkpoints = build_wallet_case_stream_checkpoints(
+            built_manifest
+        )
 
         with self.session_factory() as session:
             wallet_case = session.scalar(
@@ -1007,6 +1015,36 @@ class CaseSyncWorker:
                         manifest_json=built_manifest.canonical_json,
                         created_at=now,
                     )
+                )
+                session.add_all(
+                    [
+                        WalletCaseStreamCheckpoint(
+                            public_id=checkpoint.public_id,
+                            case_id=claimed.case_id,
+                            source_sync_id=claimed.id,
+                            contract_version=CHECKPOINT_CONTRACT_VERSION,
+                            provider=checkpoint.provider,
+                            stream_key=checkpoint.stream_key,
+                            provider_contract_version=(
+                                checkpoint.provider_contract_version
+                            ),
+                            resume_state=checkpoint.resume_state,
+                            continuation_cursor=(
+                                checkpoint.continuation_cursor
+                            ),
+                            continuation_page_index=(
+                                checkpoint.continuation_page_index
+                            ),
+                            page_count=checkpoint.page_count,
+                            pages_succeeded=checkpoint.pages_succeeded,
+                            checkpoint_hash_sha256=(
+                                checkpoint.checkpoint_hash_sha256
+                            ),
+                            checkpoint_json=checkpoint.canonical_json,
+                            created_at=now,
+                        )
+                        for checkpoint in built_checkpoints
+                    ]
                 )
                 wallet_case.updated_at = now
                 session.add(
