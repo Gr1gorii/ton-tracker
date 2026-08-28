@@ -33,6 +33,10 @@ ManifestPublicId = Annotated[
     str,
     Field(pattern=r"^smf_[0-9a-f]{64}$", max_length=68),
 ]
+CheckpointPublicId = Annotated[
+    str,
+    Field(pattern=r"^scp_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -315,6 +319,92 @@ class WalletCaseSyncManifestDocument(_StrictModel):
 class WalletCaseSyncManifestResponse(_StrictModel):
     manifest: WalletCaseSyncManifestDescriptor
     document: WalletCaseSyncManifestDocument
+
+
+class WalletCaseStreamCheckpointLastPage(_StrictModel):
+    page_index: int = Field(ge=0)
+    response_cursor: str | None = Field(default=None, max_length=128)
+    response_digest_sha256: Sha256Digest | None = None
+    min_logical_time: str | None = Field(default=None, max_length=20)
+    max_logical_time: str | None = Field(default=None, max_length=20)
+    min_timestamp: str | None = None
+    max_timestamp: str | None = None
+    fetched_at: str | None = None
+
+
+class WalletCaseStreamCheckpointDocument(_StrictModel):
+    contract_version: Literal["wallet_case_stream_checkpoint_v1"]
+    case_public_id: CanonicalPublicId
+    source_sync_public_id: CanonicalPublicId
+    source_manifest_public_id: ManifestPublicId
+    source_manifest_hash_sha256: Sha256Digest
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    provider_contract_version: str = Field(min_length=1, max_length=48)
+    acquisition_mode: Literal["bounded", "incremental"]
+    requested_period: WalletCaseSyncManifestPeriod
+    sort_order: str | None = Field(default=None, max_length=32)
+    page_size: int = Field(ge=0)
+    page_cap: int = Field(ge=0)
+    completion_state: str = Field(min_length=1, max_length=24)
+    termination_reason: str | None = Field(default=None, max_length=48)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    resume_state: Literal["ready", "complete", "blocked"]
+    resume_blocker: str | None = Field(default=None, max_length=64)
+    continuation_cursor: str | None = Field(default=None, max_length=128)
+    continuation_page_index: int | None = Field(default=None, ge=1)
+    last_successful_page: WalletCaseStreamCheckpointLastPage | None = None
+
+    @model_validator(mode="after")
+    def _validate_continuation(self):
+        ready = self.resume_state == "ready"
+        if ready != (self.continuation_cursor is not None):
+            raise ValueError("ready stream checkpoints require a cursor")
+        if ready != (self.continuation_page_index is not None):
+            raise ValueError("ready stream checkpoints require a page index")
+        blocked = self.resume_state == "blocked"
+        if blocked != (self.resume_blocker is not None):
+            raise ValueError("only blocked stream checkpoints require a blocker")
+        if self.pages_succeeded > self.page_count:
+            raise ValueError("stream checkpoint page counts are inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointDescriptor(_StrictModel):
+    public_id: CheckpointPublicId
+    contract_version: Literal["wallet_case_stream_checkpoint_v1"]
+    checkpoint_hash_sha256: Sha256Digest
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    provider_contract_version: str = Field(min_length=1, max_length=48)
+    source_sync_public_id: CanonicalPublicId
+    resume_state: Literal["ready", "complete", "blocked"]
+    created_at: str
+
+
+class WalletCaseStreamCheckpointResponse(_StrictModel):
+    checkpoint: WalletCaseStreamCheckpointDescriptor
+    document: WalletCaseStreamCheckpointDocument
+
+
+class WalletCaseStreamCheckpointCatalogResponse(_StrictModel):
+    case_public_id: CanonicalPublicId
+    checkpoint_count: int = Field(ge=0)
+    ready_count: int = Field(ge=0)
+    complete_count: int = Field(ge=0)
+    blocked_count: int = Field(ge=0)
+    checkpoints: list[WalletCaseStreamCheckpointResponse]
+
+    @model_validator(mode="after")
+    def _validate_counts(self):
+        if self.checkpoint_count != len(self.checkpoints):
+            raise ValueError("stream checkpoint count is inconsistent")
+        if self.checkpoint_count != (
+            self.ready_count + self.complete_count + self.blocked_count
+        ):
+            raise ValueError("stream checkpoint state counts are inconsistent")
+        return self
 
 
 class WalletCaseSyncResponse(_StrictModel):

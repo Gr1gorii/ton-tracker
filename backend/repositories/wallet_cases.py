@@ -10,6 +10,7 @@ from models import (
     CaseSync,
     WalletCase,
     WalletCaseCatalogEvent,
+    WalletCaseStreamCheckpoint,
 )
 
 
@@ -243,6 +244,30 @@ class WalletCaseRepository:
             )
         )
         return self.session.scalar(statement)
+
+    def latest_stream_checkpoints(
+        self,
+        *,
+        case_id: int,
+    ) -> list[WalletCaseStreamCheckpoint]:
+        """Load the newest immutable revision for each provider stream."""
+        latest_ids = (
+            select(func.max(WalletCaseStreamCheckpoint.id))
+            .where(WalletCaseStreamCheckpoint.case_id == case_id)
+            .group_by(
+                WalletCaseStreamCheckpoint.provider,
+                WalletCaseStreamCheckpoint.stream_key,
+            )
+        )
+        statement = (
+            select(WalletCaseStreamCheckpoint)
+            .where(WalletCaseStreamCheckpoint.id.in_(latest_ids))
+            .order_by(
+                WalletCaseStreamCheckpoint.provider,
+                WalletCaseStreamCheckpoint.stream_key,
+            )
+        )
+        return list(self.session.scalars(statement).unique())
 
     def add_case(self, wallet_case: WalletCase) -> None:
         self.session.add(wallet_case)

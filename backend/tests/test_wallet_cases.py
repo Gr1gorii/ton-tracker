@@ -28,7 +28,10 @@ from models import (
     WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
+    WalletCaseStreamCheckpoint,
     WalletCaseSyncManifest,
+    WalletAcquisitionPage,
+    WalletAcquisitionStream,
     WalletIngestionRun,
     WalletTransaction,
 )
@@ -61,7 +64,7 @@ def client(tmp_path, monkeypatch):
     database_path = tmp_path / "wallet-cases.sqlite3"
     engine = create_database_engine(f"sqlite:///{database_path}")
     report = run_database_migrations(engine)
-    assert report.revision_after == "20260827_0027"
+    assert report.revision_after == "20260828_0028"
     testing_session = sessionmaker(
         autocommit=False,
         autoflush=False,
@@ -163,6 +166,98 @@ def _database_counts() -> tuple[int, int, int]:
             session.scalar(select(func.count()).select_from(CaseSync)),
             session.scalar(select(func.count()).select_from(WalletIngestionRun)),
         )
+
+
+def _attach_resumable_transaction_stream(run, claimed) -> None:
+    stream = WalletAcquisitionStream(
+        provider="tonapi_wallet_activity_live",
+        stream_key="account_transactions",
+        contract_version="tonapi_account_transactions_v1",
+        scope_kind="bounded_time",
+        resolved_start_at=claimed.requested_start,
+        resolved_end_at=claimed.requested_end,
+        request_query_json=json.dumps(
+            {"filters": {"bounded": True}, "sort_order": "desc"},
+            sort_keys=True,
+        ),
+        page_size=100,
+        max_pages=1,
+        max_items=100,
+        completion_state="incomplete",
+        termination_reason="page_cap_reached",
+        pages_attempted=1,
+        pages_succeeded=1,
+        raw_item_count=2,
+        normalized_item_count=2,
+        duplicate_item_count=0,
+        first_cursor=None,
+        terminal_cursor="cursor-2",
+        bounds_verified=False,
+        error_code=None,
+        error_message=None,
+        started_at=claimed.requested_start,
+        finished_at=claimed.requested_end,
+    )
+    stream.pages.append(
+        WalletAcquisitionPage(
+            page_index=1,
+            request_cursor=None,
+            response_cursor="cursor-2",
+            request_offset=None,
+            requested_limit=100,
+            request_query_json='{"limit":100}',
+            raw_item_count=2,
+            normalized_item_count=2,
+            duplicate_item_count=0,
+            newest_logical_time="20",
+            oldest_logical_time="10",
+            newest_activity_at=claimed.requested_end - timedelta(minutes=1),
+            oldest_activity_at=claimed.requested_end - timedelta(minutes=2),
+            response_digest_sha256="ab" * 32,
+            attempt_count=1,
+            fetch_status="success",
+            error_code=None,
+            error_message=None,
+            fetched_at=claimed.requested_end,
+        )
+    )
+    run.acquisition_streams.append(stream)
+
+
+def _publish_resumable_checkpoint(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    with app.state.wallet_case_test_session() as session:
+        queued, _ = WalletCaseService(session).enqueue_sync(
+            case_id,
+            WalletCaseSyncRequest(
+                time_window="24h",
+                surfaces=["transactions"],
+            ),
+            str(uuid4()),
+        )
+    worker = CaseSyncWorker(app.state.wallet_case_test_session)
+    claimed = worker.claim_next()
+    assert claimed is not None
+    settings = worker._validated_settings(claimed)
+    run = build_wallet_ingestion_run(
+        WalletIngestionPreviewRequest(
+            wallet_address=claimed.display_address,
+            time_window=claimed.time_window,
+            surfaces=list(claimed.requested_surfaces),
+        ),
+        settings,
+        now=claimed.requested_end,
+    )
+    _attach_resumable_transaction_stream(run, claimed)
+    run_response = wallet_ingestion_run_to_response(run)
+    assert worker._publish_final_run(
+        claimed,
+        run,
+        run_response,
+        settings,
+        last_error_retryable=False,
+    ) is True
+    return case_id, queued, claimed
 
 
 def _configure_guarded_live_runtime(monkeypatch) -> None:
@@ -1371,6 +1466,81 @@ def test_sync_releases_the_case_read_transaction_before_provider_io(
     assert _database_counts() == (1, 1, 1)
 
 
+def test_final_publication_persists_manifest_bound_stream_checkpoint(client):
+    case_id, queued, claimed = _publish_resumable_checkpoint(client)
+
+    with app.state.wallet_case_test_session() as session:
+        manifest = session.scalar(select(WalletCaseSyncManifest))
+        checkpoint = session.scalar(select(WalletCaseStreamCheckpoint))
+        assert manifest is not None
+        assert checkpoint is not None
+        assert checkpoint.case_id == claimed.case_id
+        assert checkpoint.source_sync_id == claimed.id
+        assert checkpoint.public_id == (
+            f"scp_{checkpoint.checkpoint_hash_sha256}"
+        )
+        assert checkpoint.provider == "tonapi_wallet_activity_live"
+        assert checkpoint.stream_key == "account_transactions"
+        assert checkpoint.resume_state == "ready"
+        assert checkpoint.continuation_cursor == "cursor-2"
+        assert checkpoint.continuation_page_index == 2
+        document = json.loads(checkpoint.checkpoint_json)
+        assert document["source_sync_public_id"] == queued["public_id"]
+        assert document["source_manifest_public_id"] == manifest.public_id
+        assert document["source_manifest_hash_sha256"] == (
+            manifest.content_hash_sha256
+        )
+        assert document["last_successful_page"][
+            "response_digest_sha256"
+        ] == "ab" * 32
+
+    response = client.get(f"/api/v1/cases/{case_id}/stream-checkpoints")
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["case_public_id"] == case_id
+    assert body["checkpoint_count"] == 1
+    assert body["ready_count"] == 1
+    assert body["complete_count"] == 0
+    assert body["blocked_count"] == 0
+    assert body["checkpoints"][0]["checkpoint"] == {
+        "public_id": checkpoint.public_id,
+        "contract_version": "wallet_case_stream_checkpoint_v1",
+        "checkpoint_hash_sha256": checkpoint.checkpoint_hash_sha256,
+        "provider": "tonapi_wallet_activity_live",
+        "stream_key": "account_transactions",
+        "provider_contract_version": "tonapi_account_transactions_v1",
+        "source_sync_public_id": queued["public_id"],
+        "resume_state": "ready",
+        "created_at": body["checkpoints"][0]["checkpoint"]["created_at"],
+    }
+    assert body["checkpoints"][0]["document"] == document
+    assert "must-not-leak" not in response.text
+
+
+def test_stream_checkpoint_catalog_fails_closed_on_corrupt_payload(client):
+    case_id, _queued, _claimed = _publish_resumable_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(select(WalletCaseStreamCheckpoint))
+        assert checkpoint is not None
+        checkpoint.checkpoint_json = (
+            '{"contract_version":"wallet_case_stream_checkpoint_v1"}'
+        )
+        session.commit()
+
+    response = client.get(f"/api/v1/cases/{case_id}/stream-checkpoints")
+
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json()["detail"] == {
+        "code": "stream_checkpoint_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ),
+        "retryable": False,
+    }
+
+
 def test_legacy_usable_sync_without_manifest_is_labeled_honestly(client):
     case_id = _create_case(client)["case"]["public_id"]
     sync = _sync_case(client, case_id, surfaces=["transactions"])
@@ -2217,7 +2387,7 @@ def test_expired_lease_recovery_reclaims_and_fences_the_old_owner(client):
         assert row.lease_token == replacement.lease_token
 
 
-def test_stale_final_publication_rolls_back_run_and_manifest_together(client):
+def test_stale_final_publication_rolls_back_run_manifest_and_checkpoints(client):
     case_id = _create_case(client)["case"]["public_id"]
     clock = [datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)]
     with app.state.wallet_case_test_session() as session:
@@ -2247,6 +2417,7 @@ def test_stale_final_publication_rolls_back_run_and_manifest_together(client):
         settings,
         now=clock[0],
     )
+    _attach_resumable_transaction_stream(run, stale_claim)
     run_response = wallet_ingestion_run_to_response(run)
 
     clock[0] += timedelta(seconds=31)
@@ -2272,6 +2443,9 @@ def test_stale_final_publication_rolls_back_run_and_manifest_together(client):
         ) == 0
         assert session.scalar(
             select(func.count()).select_from(WalletCaseSyncManifest)
+        ) == 0
+        assert session.scalar(
+            select(func.count()).select_from(WalletCaseStreamCheckpoint)
         ) == 0
         current = session.scalar(select(CaseSync))
         assert current is not None

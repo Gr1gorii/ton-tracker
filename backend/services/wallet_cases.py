@@ -25,6 +25,7 @@ from models import (
     WalletCaseCatalogEvent,
     WalletCaseLifecycleEvent,
     WalletCaseReportRevision,
+    WalletCaseStreamCheckpoint,
     WalletCaseSyncManifest,
     WalletIngestionRun,
 )
@@ -34,6 +35,10 @@ from services.wallet_acquisition_bounds import resolve_wallet_acquisition_bounds
 from services.wallet_case_sync_manifests import (
     MANIFEST_CONTRACT_VERSION,
     verify_wallet_case_sync_manifest,
+)
+from services.wallet_case_stream_checkpoints import (
+    CHECKPOINT_CONTRACT_VERSION,
+    verify_wallet_case_stream_checkpoint,
 )
 from wallet_case_schemas import (
     WalletCaseCreateRequest,
@@ -120,6 +125,10 @@ class WalletCaseSyncManifestNotFound(LookupError):
 
 class WalletCaseSyncManifestCorrupt(RuntimeError):
     """Raised when persisted manifest evidence fails integrity validation."""
+
+
+class WalletCaseStreamCheckpointCorrupt(RuntimeError):
+    """Raised when persisted provider continuation state fails validation."""
 
 
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
@@ -861,6 +870,29 @@ class WalletCaseService:
             case_public_id=wallet_case.public_id,
         )
         return {"manifest": descriptor, "document": document}
+
+    def list_stream_checkpoints(self, case_public_id: str) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        checkpoints = [
+            _stream_checkpoint_response(
+                checkpoint,
+                case_public_id=wallet_case.public_id,
+            )
+            for checkpoint in self.repository.latest_stream_checkpoints(
+                case_id=wallet_case.id
+            )
+        ]
+        counts = {"ready": 0, "complete": 0, "blocked": 0}
+        for item in checkpoints:
+            counts[item["checkpoint"]["resume_state"]] += 1
+        return {
+            "case_public_id": wallet_case.public_id,
+            "checkpoint_count": len(checkpoints),
+            "ready_count": counts["ready"],
+            "complete_count": counts["complete"],
+            "blocked_count": counts["blocked"],
+            "checkpoints": checkpoints,
+        }
 
     def get_job(self, sync_public_id: str) -> dict[str, Any]:
         case_sync = self.repository.get_sync_by_public_id_for_owner(
@@ -1709,6 +1741,81 @@ def _manifest_response(
         "created_at": _isoformat(manifest.created_at),
     }
     return descriptor, document
+
+
+def _stream_checkpoint_response(
+    checkpoint: WalletCaseStreamCheckpoint,
+    *,
+    case_public_id: str,
+) -> dict[str, Any]:
+    try:
+        document = verify_wallet_case_stream_checkpoint(
+            checkpoint.checkpoint_json,
+            checkpoint.checkpoint_hash_sha256,
+        )
+    except ValueError as exc:
+        raise WalletCaseStreamCheckpointCorrupt(
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ) from exc
+    source_sync = checkpoint.source_sync
+    source_manifest = source_sync.acquisition_manifest
+    if source_manifest is None:
+        raise WalletCaseStreamCheckpointCorrupt(
+            "Stored Wallet Case stream checkpoint has no source manifest."
+        )
+    try:
+        source_manifest_descriptor, _source_manifest_document = (
+            _manifest_response(
+                source_manifest,
+                case_sync=source_sync,
+                case_public_id=case_public_id,
+            )
+        )
+    except WalletCaseSyncManifestCorrupt as exc:
+        raise WalletCaseStreamCheckpointCorrupt(
+            "Stored Wallet Case stream checkpoint source manifest is invalid."
+        ) from exc
+    expected_public_id = f"scp_{checkpoint.checkpoint_hash_sha256}"
+    if (
+        checkpoint.contract_version != CHECKPOINT_CONTRACT_VERSION
+        or checkpoint.public_id != expected_public_id
+        or document.get("case_public_id") != case_public_id
+        or document.get("source_sync_public_id") != source_sync.public_id
+        or document.get("provider") != checkpoint.provider
+        or document.get("stream_key") != checkpoint.stream_key
+        or document.get("provider_contract_version")
+        != checkpoint.provider_contract_version
+        or document.get("resume_state") != checkpoint.resume_state
+        or document.get("continuation_cursor")
+        != checkpoint.continuation_cursor
+        or document.get("continuation_page_index")
+        != checkpoint.continuation_page_index
+        or document.get("page_count") != checkpoint.page_count
+        or document.get("pages_succeeded") != checkpoint.pages_succeeded
+        or document.get("source_manifest_public_id")
+        != source_manifest_descriptor["public_id"]
+        or document.get("source_manifest_hash_sha256")
+        != source_manifest_descriptor["content_hash_sha256"]
+    ):
+        raise WalletCaseStreamCheckpointCorrupt(
+            "Stored Wallet Case stream checkpoint identity is inconsistent."
+        )
+    return {
+        "checkpoint": {
+            "public_id": checkpoint.public_id,
+            "contract_version": checkpoint.contract_version,
+            "checkpoint_hash_sha256": checkpoint.checkpoint_hash_sha256,
+            "provider": checkpoint.provider,
+            "stream_key": checkpoint.stream_key,
+            "provider_contract_version": (
+                checkpoint.provider_contract_version
+            ),
+            "source_sync_public_id": source_sync.public_id,
+            "resume_state": checkpoint.resume_state,
+            "created_at": _isoformat(checkpoint.created_at),
+        },
+        "document": document,
+    }
 
 
 def _valid_coverage(value: dict[str, Any], case_sync: CaseSync) -> bool:

@@ -1,10 +1,10 @@
-# GRAM Scope — v0.86.0 Promotion Checklist
+# GRAM Scope — v0.87.0 Promotion Checklist
 
-Current promotion gates for Wallet Case acquisition manifests:
+Current promotion gates for Wallet Case provider-stream checkpoints:
 
-- Product label is `v0.86.0 ACQUISITION MANIFESTS`; backend API version stays
+- Product label is `v0.87.0 STREAM CHECKPOINTS`; backend API version stays
   independently frozen at `0.2.1`.
-- Alembic reaches revision `20260827_0027` with exact model parity from fresh,
+- Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
   path. Missing or changed columns, checks, foreign keys, delete actions, and
   indexes fail closed; downgrade remains unsupported. Revision 0020 versions
@@ -36,6 +36,10 @@ Current promotion gates for Wallet Case acquisition manifests:
   CaseSync. Fresh creation, 0026 upgrade, exact empty interrupted-DDL resume,
   row-adoption rejection, index/check/foreign-key parity, CaseSync cascade, and
   forward-only behavior must pass fail-closed tests.
+- Revision 0028 adds immutable checkpoint revisions per published provider
+  stream. Fresh creation, 0027 upgrade, exact empty interrupted-DDL resume,
+  row-adoption rejection, index/check/foreign-key parity, cascade behavior, and
+  forward-only behavior must pass fail-closed tests.
 - Manifest canonical JSON and its `smf_<sha256>` identity bind Case/sync scope,
   provider and data mode, terminal state, snapshot/acquisition periods,
   incremental lineage, requested surfaces, sanitized streams/pages, and valid
@@ -48,8 +52,10 @@ Current promotion gates for Wallet Case acquisition manifests:
 - Sync responses expose only the compact descriptor. The case-scoped manifest
   endpoint revalidates canonical JSON, SHA-256, and Case/sync identity before
   returning the full provider-safe document; Summary loads it explicitly.
-- Page checkpoints are resume-ready evidence only. v0.86.0 must not be promoted
-  as implementing provider-crawl resume or speculative legacy backfill.
+- A checkpoint may be `ready` only when a successful page and the stream
+  terminal cursor agree and termination is page-cap or provider-error based.
+  Complete and blocked states retain no continuation cursor. v0.87.0 must not
+  be promoted as automatically resuming provider crawls or backfilling history.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -173,7 +179,7 @@ Current promotion gates for Wallet Case acquisition manifests:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.86.0 must not be promoted as a hosted Wallet Case release.
+  v0.87.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

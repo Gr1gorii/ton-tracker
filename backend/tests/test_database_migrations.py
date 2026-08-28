@@ -61,7 +61,8 @@ WALLET_CASE_LIFECYCLE_REVISION = "20260710_0024"
 WALLET_CASE_METADATA_REVISION = "20260710_0025"
 WALLET_CASE_CATALOG_REVISION = "20260827_0026"
 WALLET_CASE_SYNC_MANIFEST_REVISION = "20260827_0027"
-CURRENT_REVISION = WALLET_CASE_SYNC_MANIFEST_REVISION
+WALLET_CASE_STREAM_CHECKPOINT_REVISION = "20260828_0028"
+CURRENT_REVISION = WALLET_CASE_STREAM_CHECKPOINT_REVISION
 
 ACQUISITION_STREAMS_TABLE = "wallet_acquisition_streams"
 ACQUISITION_PAGES_TABLE = "wallet_acquisition_pages"
@@ -76,6 +77,7 @@ JETTON_CONTRACT_VERIFICATIONS_TABLE = (
 WALLET_CASES_TABLE = "wallet_cases"
 WALLET_CASE_SYNCS_TABLE = "wallet_case_syncs"
 WALLET_CASE_SYNC_MANIFESTS_TABLE = "wallet_case_sync_manifests"
+WALLET_CASE_STREAM_CHECKPOINTS_TABLE = "wallet_case_stream_checkpoints"
 CASE_EVIDENCE_VERIFICATIONS_TABLE = "wallet_case_evidence_verifications"
 CASE_SYNC_JOB_PARTIAL_COLUMNS = (
     "status_version INTEGER DEFAULT 1 NOT NULL",
@@ -305,6 +307,31 @@ def _wallet_case_sync_values(case_id: int, **overrides: Any) -> dict[str, Any]:
         "requested_start": requested_start,
         "requested_end": requested_start + timedelta(days=1),
         "progress_total": 1,
+    }
+    values.update(overrides)
+    return values
+
+
+def _wallet_case_stream_checkpoint_values(
+    case_id: int,
+    source_sync_id: int,
+    **overrides: Any,
+) -> dict[str, Any]:
+    digest = "ac" * 32
+    values: dict[str, Any] = {
+        "public_id": f"scp_{digest}",
+        "case_id": case_id,
+        "source_sync_id": source_sync_id,
+        "provider": "tonapi_wallet_activity_live",
+        "stream_key": "account_transactions",
+        "provider_contract_version": "tonapi_account_transactions_v1",
+        "resume_state": "ready",
+        "continuation_cursor": "cursor-2",
+        "continuation_page_index": 2,
+        "page_count": 1,
+        "pages_succeeded": 1,
+        "checkpoint_hash_sha256": digest,
+        "checkpoint_json": '{"version":1}',
     }
     values.update(overrides)
     return values
@@ -1473,6 +1500,7 @@ def test_fresh_sqlite_reaches_head_with_full_schema_parity(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -1532,6 +1560,7 @@ def test_exact_unversioned_legacy_database_preserves_all_data(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _data_snapshot(engine) == before
     _assert_schema_matches_models(engine)
@@ -1593,6 +1622,7 @@ def test_legacy_adoption_preserves_unrelated_user_tables(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine, allowed_extra_tables={"user_notes"})
     with engine.connect() as connection:
@@ -1746,6 +1776,7 @@ def test_interrupted_wallet_identity_migration_retries_partial_sqlite_ddl(tmp_pa
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     identity = _identity_snapshot(engine)[1]
@@ -1907,6 +1938,7 @@ def test_transaction_identity_backfill_is_strict_and_preserves_source_rows(
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     rows = _transaction_identity_snapshot(engine)
@@ -2072,6 +2104,7 @@ def test_interrupted_transaction_identity_migration_retries_partial_sqlite_ddl(
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _transaction_legacy_snapshot(engine) == source_before
     assert _transaction_identity_snapshot(engine)[1][3] == "network_scoped"
@@ -2518,6 +2551,7 @@ def test_event_action_identity_backfill_is_strict_and_legacy_rows_unavailable(
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _data_snapshot(engine) == source_before
 
@@ -2624,6 +2658,7 @@ def test_event_action_identity_migration_repairs_partial_columns_and_index(
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _data_snapshot(engine) == source_before
     assert _event_action_identity_snapshot(
@@ -2837,6 +2872,7 @@ def test_trace_evidence_upgrade_from_0005_is_empty_and_preserves_prior_data(
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _data_snapshot(engine) == before
     assert _trace_evidence_counts(engine) == (0, 0, 0)
@@ -3103,6 +3139,7 @@ def test_trace_boc_verification_upgrade_from_0006_is_empty(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _trace_boc_verification_counts(engine) == (0, 0)
     _assert_trace_boc_verification_schema(engine)
@@ -3138,6 +3175,7 @@ def test_upgrade_from_0007_reaches_current_model_parity(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert {
         "wallet_native_activity_ledgers",
@@ -3174,6 +3212,7 @@ def test_jetton_contract_verification_upgrade_from_0008_is_empty(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert inspect(engine).get_table_names().count(
         JETTON_CONTRACT_VERIFICATIONS_TABLE
@@ -3213,6 +3252,7 @@ def test_wallet_ownership_challenge_upgrade_from_0009_reaches_model_parity(tmp_p
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -3257,6 +3297,7 @@ def test_account_state_inclusion_upgrade_from_0010_reaches_model_parity(tmp_path
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert "wallet_account_state_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3287,6 +3328,7 @@ def test_transaction_inclusion_upgrade_from_0011_reaches_model_parity(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert "wallet_transaction_inclusion_proofs" in inspect(engine).get_table_names()
     engine.dispose()
@@ -3316,6 +3358,7 @@ def test_dex_protocol_identity_upgrade_from_0012_reaches_model_parity(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     columns = {
         column["name"]
@@ -3348,6 +3391,7 @@ def test_ownership_network_scope_upgrade_from_0013_reaches_model_parity(tmp_path
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine)
     _assert_wallet_case_schema(engine)
@@ -3409,6 +3453,7 @@ def test_wallet_cases_upgrade_from_0014_preserves_runs_without_backfill(tmp_path
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     assert _data_snapshot(engine) == data_before
     assert _wallet_case_counts(engine) == (0, 0)
@@ -3615,6 +3660,7 @@ def test_wallet_case_compact_results_upgrade_from_0015_preserves_rows(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     with engine.connect() as connection:
         row = connection.exec_driver_sql(
@@ -3783,6 +3829,7 @@ def test_case_sync_jobs_upgrade_normalizes_legacy_active_rows_and_enforces_slots
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     with engine.connect() as connection:
         legacy = connection.exec_driver_sql(
@@ -4954,6 +5001,7 @@ def test_case_report_revision_migration_creates_exact_current_schema(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     inspector = inspect(engine)
     assert [column["name"] for column in inspector.get_columns(
@@ -5007,6 +5055,7 @@ def test_case_report_revision_migration_resumes_exact_empty_table(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -5083,6 +5132,7 @@ def test_wallet_case_lifecycle_migration_creates_retained_audit_table(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     inspector = inspect(engine)
     assert [
@@ -5126,6 +5176,7 @@ def test_wallet_case_lifecycle_migration_resumes_exact_empty_table(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -5218,6 +5269,7 @@ def test_wallet_case_metadata_migration_versions_existing_rows(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     with engine.connect() as connection:
         assert connection.exec_driver_sql(
@@ -5243,6 +5295,7 @@ def test_wallet_case_metadata_migration_resumes_exact_added_column(tmp_path):
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -5345,6 +5398,7 @@ def test_wallet_case_catalog_migration_seeds_frozen_positions(tmp_path):
     assert report.applied_revisions == (
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     inspector = inspect(engine)
     assert [
@@ -5388,6 +5442,7 @@ def test_wallet_case_catalog_migration_resumes_exact_empty_table(tmp_path):
     assert report.applied_revisions == (
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(engine)
     engine.dispose()
@@ -5436,7 +5491,10 @@ def test_wallet_case_sync_manifest_migration_creates_exact_schema(tmp_path):
 
     assert report.revision_before == WALLET_CASE_CATALOG_REVISION
     assert report.revision_after == CURRENT_REVISION
-    assert report.applied_revisions == (WALLET_CASE_SYNC_MANIFEST_REVISION,)
+    assert report.applied_revisions == (
+        WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
+    )
     inspector = inspect(engine)
     assert [
         column["name"]
@@ -5476,7 +5534,10 @@ def test_wallet_case_sync_manifest_migration_resumes_exact_empty_table(tmp_path)
     report = run_database_migrations(engine)
 
     assert report.revision_after == CURRENT_REVISION
-    assert report.applied_revisions == (WALLET_CASE_SYNC_MANIFEST_REVISION,)
+    assert report.applied_revisions == (
+        WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
+    )
     _assert_schema_matches_models(engine)
     engine.dispose()
 
@@ -5569,6 +5630,184 @@ def test_wallet_case_sync_manifest_migration_is_forward_only(tmp_path):
             command.downgrade(
                 migration_config(connection),
                 WALLET_CASE_CATALOG_REVISION,
+            )
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_migration_creates_exact_schema(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint.db")
+    _upgrade_to_revision(engine, WALLET_CASE_SYNC_MANIFEST_REVISION)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_before == WALLET_CASE_SYNC_MANIFEST_REVISION
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (WALLET_CASE_STREAM_CHECKPOINT_REVISION,)
+    inspector = inspect(engine)
+    assert [
+        column["name"]
+        for column in inspector.get_columns(WALLET_CASE_STREAM_CHECKPOINTS_TABLE)
+    ] == [
+        "id",
+        "public_id",
+        "case_id",
+        "source_sync_id",
+        "contract_version",
+        "provider",
+        "stream_key",
+        "provider_contract_version",
+        "resume_state",
+        "continuation_cursor",
+        "continuation_page_index",
+        "page_count",
+        "pages_succeeded",
+        "checkpoint_hash_sha256",
+        "checkpoint_json",
+        "created_at",
+    ]
+    assert {
+        item["name"]: (tuple(item["column_names"]), bool(item["unique"]))
+        for item in inspector.get_indexes(WALLET_CASE_STREAM_CHECKPOINTS_TABLE)
+    } == {
+        "uq_wallet_case_stream_checkpoints_public_id": (("public_id",), True),
+        "uq_wallet_case_stream_checkpoints_source_stream": (
+            ("source_sync_id", "provider", "stream_key"),
+            True,
+        ),
+        "ix_wallet_case_stream_checkpoints_case_stream": (
+            ("case_id", "provider", "stream_key", "id"),
+            False,
+        ),
+    }
+    assert {
+        (
+            tuple(item["constrained_columns"]),
+            item["referred_table"],
+            tuple(item["referred_columns"]),
+            item["options"]["ondelete"],
+        )
+        for item in inspector.get_foreign_keys(
+            WALLET_CASE_STREAM_CHECKPOINTS_TABLE
+        )
+    } == {
+        (("case_id",), WALLET_CASES_TABLE, ("id",), "CASCADE"),
+        (("source_sync_id",), WALLET_CASE_SYNCS_TABLE, ("id",), "CASCADE"),
+    }
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_migration_resumes_exact_empty_table(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-resume.db")
+    _upgrade_to_revision(engine, WALLET_CASE_SYNC_MANIFEST_REVISION)
+    models.WalletCaseStreamCheckpoint.__table__.create(bind=engine)
+
+    report = run_database_migrations(engine)
+
+    assert report.revision_after == CURRENT_REVISION
+    assert report.applied_revisions == (WALLET_CASE_STREAM_CHECKPOINT_REVISION,)
+    _assert_schema_matches_models(engine)
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_migration_never_adopts_existing_rows(
+    tmp_path,
+):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-adoption.db")
+    _upgrade_to_revision(engine, WALLET_CASE_SYNC_MANIFEST_REVISION)
+    wallet_cases = database.Base.metadata.tables[WALLET_CASES_TABLE]
+    case_syncs = database.Base.metadata.tables[WALLET_CASE_SYNCS_TABLE]
+    checkpoints = database.Base.metadata.tables[
+        WALLET_CASE_STREAM_CHECKPOINTS_TABLE
+    ]
+    models.WalletCaseStreamCheckpoint.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        case_id = connection.execute(
+            wallet_cases.insert().values(**_wallet_case_values())
+        ).inserted_primary_key[0]
+        sync_id = connection.execute(
+            case_syncs.insert().values(**_wallet_case_sync_values(case_id))
+        ).inserted_primary_key[0]
+        connection.execute(
+            checkpoints.insert().values(
+                **_wallet_case_stream_checkpoint_values(case_id, sync_id)
+            )
+        )
+
+    with pytest.raises(RuntimeError, match="cannot be adopted"):
+        run_database_migrations(engine)
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_migration_rejects_wrong_index(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-index.db")
+    _upgrade_to_revision(engine, WALLET_CASE_SYNC_MANIFEST_REVISION)
+    models.WalletCaseStreamCheckpoint.__table__.create(bind=engine)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "DROP INDEX uq_wallet_case_stream_checkpoints_public_id"
+        )
+        connection.exec_driver_sql(
+            "CREATE INDEX uq_wallet_case_stream_checkpoints_public_id "
+            "ON wallet_case_stream_checkpoints(public_id)"
+        )
+
+    with pytest.raises(RuntimeError, match="differs from revision 0028"):
+        run_database_migrations(engine)
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_constraints_and_sync_cascade(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-constraints.db")
+    run_database_migrations(engine)
+    wallet_cases = database.Base.metadata.tables[WALLET_CASES_TABLE]
+    case_syncs = database.Base.metadata.tables[WALLET_CASE_SYNCS_TABLE]
+    checkpoints = database.Base.metadata.tables[
+        WALLET_CASE_STREAM_CHECKPOINTS_TABLE
+    ]
+    with engine.begin() as connection:
+        case_id = connection.execute(
+            wallet_cases.insert().values(**_wallet_case_values())
+        ).inserted_primary_key[0]
+        sync_id = connection.execute(
+            case_syncs.insert().values(**_wallet_case_sync_values(case_id))
+        ).inserted_primary_key[0]
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                checkpoints.insert().values(
+                    **_wallet_case_stream_checkpoint_values(
+                        case_id,
+                        sync_id,
+                        continuation_cursor=None,
+                    )
+                )
+            )
+
+    with engine.begin() as connection:
+        connection.execute(
+            checkpoints.insert().values(
+                **_wallet_case_stream_checkpoint_values(case_id, sync_id)
+            )
+        )
+        connection.execute(case_syncs.delete().where(case_syncs.c.id == sync_id))
+        remaining = connection.execute(
+            checkpoints.select().where(checkpoints.c.source_sync_id == sync_id)
+        ).all()
+
+    assert remaining == []
+    engine.dispose()
+
+
+def test_wallet_case_stream_checkpoint_migration_is_forward_only(tmp_path):
+    engine = _engine(tmp_path / "wallet-case-stream-checkpoint-forward-only.db")
+    _upgrade_to_revision(engine, WALLET_CASE_STREAM_CHECKPOINT_REVISION)
+    with engine.begin() as connection:
+        with pytest.raises(RuntimeError, match="intentionally unsupported"):
+            command.downgrade(
+                migration_config(connection),
+                WALLET_CASE_SYNC_MANIFEST_REVISION,
             )
     engine.dispose()
 
@@ -6186,6 +6425,7 @@ def test_database_init_db_delegates_without_using_create_all(tmp_path, monkeypat
         WALLET_CASE_METADATA_REVISION,
         WALLET_CASE_CATALOG_REVISION,
         WALLET_CASE_SYNC_MANIFEST_REVISION,
+        WALLET_CASE_STREAM_CHECKPOINT_REVISION,
     )
     _assert_schema_matches_models(target_engine)
     target_engine.dispose()

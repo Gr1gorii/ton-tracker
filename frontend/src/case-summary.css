@@ -191,6 +191,15 @@
 .case-manifest-actions button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; }
 .case-manifest-detail { display: grid; margin-top: 14px; padding: 14px 16px; gap: 5px; border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border)); border-radius: 13px; color: var(--text-muted); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); font-size: 0.8125rem; line-height: 1.5; }
 .case-manifest-detail strong { color: var(--case-success-text); }
+.case-checkpoint-catalog { display: grid; margin-top: 9px; padding-top: 12px; gap: 6px; border-top: 1px solid color-mix(in srgb, var(--success) 22%, var(--border)); }
+.case-checkpoint-catalog ul { overflow: hidden; margin: 4px 0 0; padding: 0; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-solid); list-style: none; }
+.case-checkpoint-catalog li { display: flex; min-width: 0; padding: 10px 12px; align-items: center; justify-content: space-between; gap: 14px; }
+.case-checkpoint-catalog li + li { border-top: 1px solid var(--border); }
+.case-checkpoint-catalog li > span { display: grid; min-width: 0; gap: 3px; }
+.case-checkpoint-catalog b { color: var(--text); font-size: 0.75rem; }
+.case-checkpoint-catalog small { color: var(--text-muted); line-height: 1.4; }
+.case-checkpoint-catalog code { overflow: hidden; max-width: 210px; color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-checkpoint-catalog li.is-blocked code { color: var(--warning); }
 
 .case-limitations { padding: 24px; }
 .case-limitations > header { display: flex; align-items: flex-start; gap: 12px; color: var(--warning); }

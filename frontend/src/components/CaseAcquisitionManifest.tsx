@@ -7,8 +7,12 @@ import {
 } from "@phosphor-icons/react";
 
 import type { WalletCaseSync } from "../walletCase";
-import { getWalletCaseSyncManifest } from "../walletCaseApi";
+import {
+  getWalletCaseStreamCheckpoints,
+  getWalletCaseSyncManifest,
+} from "../walletCaseApi";
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
+import type { WalletCaseStreamCheckpointCatalogResponse } from "../walletCaseStreamCheckpoint";
 
 export default function CaseAcquisitionManifest({
   caseId,
@@ -19,6 +23,7 @@ export default function CaseAcquisitionManifest({
 }) {
   const descriptor = snapshot.acquisition_manifest;
   const [detail, setDetail] = useState<WalletCaseSyncManifestResponse | null>(null);
+  const [checkpoints, setCheckpoints] = useState<WalletCaseStreamCheckpointCatalogResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
@@ -27,6 +32,7 @@ export default function CaseAcquisitionManifest({
     requestRef.current?.abort();
     requestRef.current = null;
     setDetail(null);
+    setCheckpoints(null);
     setLoading(false);
     setError(null);
     return () => requestRef.current?.abort();
@@ -40,15 +46,19 @@ export default function CaseAcquisitionManifest({
     setLoading(true);
     setError(null);
     try {
-      const response = await getWalletCaseSyncManifest(
-        caseId,
-        snapshot.public_id,
-        controller.signal,
-      );
-      if (response.manifest.public_id !== descriptor.public_id) {
+      const [manifestResponse, checkpointResponse] = await Promise.all([
+        getWalletCaseSyncManifest(
+          caseId,
+          snapshot.public_id,
+          controller.signal,
+        ),
+        getWalletCaseStreamCheckpoints(caseId, controller.signal),
+      ]);
+      if (manifestResponse.manifest.public_id !== descriptor.public_id) {
         throw new Error("The loaded manifest does not match this snapshot descriptor.");
       }
-      setDetail(response);
+      setDetail(manifestResponse);
+      setCheckpoints(checkpointResponse);
     } catch (cause) {
       if (controller.signal.aborted) return;
       setError(cause instanceof Error ? cause.message : "Acquisition manifest read failed.");
@@ -116,6 +126,40 @@ export default function CaseAcquisitionManifest({
                   {" "}{stream.pages_succeeded}/{stream.page_count} pages succeeded
                 </span>
               ))}
+              {checkpoints && (
+                <section className="case-checkpoint-catalog">
+                  <strong>Durable stream checkpoints</strong>
+                  <span>
+                    {checkpoints.ready_count} ready
+                    {" · "}{checkpoints.complete_count} complete
+                    {" · "}{checkpoints.blocked_count} blocked
+                  </span>
+                  {checkpoints.checkpoints.length === 0 ? (
+                    <span>No provider stream emitted a continuation checkpoint.</span>
+                  ) : (
+                    <ul>
+                      {checkpoints.checkpoints.map(({ checkpoint, document }) => (
+                        <li
+                          className={`is-${document.resume_state}`}
+                          key={checkpoint.public_id}
+                        >
+                          <span>
+                            <b>{document.provider} / {document.stream_key}</b>
+                            <small>
+                              {document.resume_state === "ready"
+                                ? `Continuation recorded at page ${document.continuation_page_index}; automatic resume is not enabled yet.`
+                                : document.resume_state === "complete"
+                                  ? "Requested interval finished; no continuation cursor is retained."
+                                  : `Continuation blocked: ${document.resume_blocker}.`}
+                            </small>
+                          </span>
+                          <code>{checkpoint.public_id}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )}
             </div>
           )}
         </>

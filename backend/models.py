@@ -114,6 +114,12 @@ class WalletCase(Base):
         back_populates="case",
         cascade="all, delete-orphan",
     )
+    stream_checkpoints = relationship(
+        "WalletCaseStreamCheckpoint",
+        back_populates="case",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
     catalog_events = relationship(
         "WalletCaseCatalogEvent",
         back_populates="case",
@@ -484,6 +490,12 @@ class CaseSync(Base):
         single_parent=True,
         uselist=False,
     )
+    stream_checkpoints = relationship(
+        "WalletCaseStreamCheckpoint",
+        back_populates="source_sync",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class WalletCaseSyncManifest(Base):
@@ -539,6 +551,97 @@ class WalletCaseSyncManifest(Base):
         "CaseSync",
         back_populates="acquisition_manifest",
     )
+
+
+class WalletCaseStreamCheckpoint(Base):
+    """Immutable, content-addressed continuation state for one provider stream."""
+
+    __tablename__ = "wallet_case_stream_checkpoints"
+    __table_args__ = (
+        CheckConstraint(
+            "contract_version = 'wallet_case_stream_checkpoint_v1'",
+            name="ck_wallet_case_stream_checkpoints_contract",
+        ),
+        CheckConstraint(
+            "length(checkpoint_hash_sha256) = 64 AND "
+            "public_id = 'scp_' || checkpoint_hash_sha256",
+            name="ck_wallet_case_stream_checkpoints_identity",
+        ),
+        CheckConstraint(
+            "resume_state IN ('ready', 'complete', 'blocked')",
+            name="ck_wallet_case_stream_checkpoints_resume_state",
+        ),
+        CheckConstraint(
+            "page_count >= 0 AND pages_succeeded >= 0 AND "
+            "pages_succeeded <= page_count",
+            name="ck_wallet_case_stream_checkpoints_pages",
+        ),
+        CheckConstraint(
+            "(resume_state = 'ready' AND continuation_cursor IS NOT NULL AND "
+            "continuation_page_index IS NOT NULL AND continuation_page_index >= 1) "
+            "OR (resume_state IN ('complete', 'blocked') AND "
+            "continuation_cursor IS NULL AND continuation_page_index IS NULL)",
+            name="ck_wallet_case_stream_checkpoints_continuation",
+        ),
+        CheckConstraint(
+            "length(checkpoint_json) > 2",
+            name="ck_wallet_case_stream_checkpoints_payload",
+        ),
+        Index(
+            "uq_wallet_case_stream_checkpoints_public_id",
+            "public_id",
+            unique=True,
+        ),
+        Index(
+            "uq_wallet_case_stream_checkpoints_source_stream",
+            "source_sync_id",
+            "provider",
+            "stream_key",
+            unique=True,
+        ),
+        Index(
+            "ix_wallet_case_stream_checkpoints_case_stream",
+            "case_id",
+            "provider",
+            "stream_key",
+            "id",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    public_id = Column(String(68), nullable=False)
+    case_id = Column(
+        Integer,
+        ForeignKey("wallet_cases.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_sync_id = Column(
+        Integer,
+        ForeignKey("wallet_case_syncs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    contract_version = Column(
+        String(40),
+        nullable=False,
+        default="wallet_case_stream_checkpoint_v1",
+        server_default="wallet_case_stream_checkpoint_v1",
+    )
+    provider = Column(String(64), nullable=False)
+    stream_key = Column(String(40), nullable=False)
+    provider_contract_version = Column(String(48), nullable=False)
+    resume_state = Column(String(16), nullable=False)
+    continuation_cursor = Column(String(128), nullable=True)
+    continuation_page_index = Column(Integer, nullable=True)
+    page_count = Column(Integer, nullable=False)
+    pages_succeeded = Column(Integer, nullable=False)
+    checkpoint_hash_sha256 = Column(String(64), nullable=False)
+    checkpoint_json = Column(Text, nullable=False)
+    created_at = Column(
+        DateTime, default=lambda: datetime.now(timezone.utc), nullable=False
+    )
+
+    case = relationship("WalletCase", back_populates="stream_checkpoints")
+    source_sync = relationship("CaseSync", back_populates="stream_checkpoints")
 
 
 class CaseEvidenceVerification(Base):

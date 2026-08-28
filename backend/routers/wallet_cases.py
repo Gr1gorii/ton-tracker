@@ -17,6 +17,7 @@ from services.wallet_cases import (
     WalletCaseIncrementalSyncUnavailable,
     WalletCaseRuntimeConflict,
     WalletCaseService,
+    WalletCaseStreamCheckpointCorrupt,
     WalletCaseSyncAlreadyActive,
     WalletCaseSyncManifestCorrupt,
     WalletCaseSyncManifestNotFound,
@@ -30,6 +31,7 @@ from wallet_case_schemas import (
     WalletCaseResponse,
     WalletCaseSyncRequest,
     WalletCaseSyncManifestResponse,
+    WalletCaseStreamCheckpointCatalogResponse,
     WalletCaseSyncResponse,
     WalletCaseUpsertResponse,
 )
@@ -533,6 +535,44 @@ def read_wallet_case_sync(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case sync storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/stream-checkpoints",
+    response_model=WalletCaseStreamCheckpointCatalogResponse,
+)
+def list_wallet_case_stream_checkpoints(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read the newest verified continuation record for each provider stream."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).list_stream_checkpoints(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "stream_checkpoint_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case stream checkpoint storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

@@ -22,6 +22,10 @@ import {
   type WalletCaseSyncManifestResponse,
 } from "./walletCaseSyncManifest";
 import {
+  parseWalletCaseStreamCheckpointCatalog,
+  type WalletCaseStreamCheckpointCatalogResponse,
+} from "./walletCaseStreamCheckpoint";
+import {
   isWalletCaseAssetPublicId,
   isWalletCaseActivityPublicId,
   parseWalletCaseActivityDetailResponse,
@@ -546,6 +550,28 @@ export async function getWalletCaseSyncManifest(
     throw new Error("Wallet Case acquisition manifest does not match the requested sync");
   }
   return manifest;
+}
+
+export async function getWalletCaseStreamCheckpoints(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseStreamCheckpointCatalogResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/stream-checkpoints`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case stream checkpoint read failed",
+    );
+  }
+  const catalog = parseWalletCaseStreamCheckpointCatalog(await response.json());
+  if (catalog.case_public_id !== caseId) {
+    throw new Error("Wallet Case stream checkpoint catalog does not match the request");
+  }
+  return catalog;
 }
 
 export async function cancelWalletCaseSync(
