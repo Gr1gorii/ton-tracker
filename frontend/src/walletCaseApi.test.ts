@@ -14,6 +14,7 @@ import {
   getWalletCaseActivityDetail,
   getWalletCaseSync,
   getWalletCaseSyncManifest,
+  getWalletCaseStreamCheckpoints,
   listWalletCases,
   restoreWalletCase,
   updateWalletCaseMetadata,
@@ -35,6 +36,7 @@ import {
   activityResponseFixture,
 } from "./test/walletCaseActivityFixtures";
 import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
+import { streamCheckpointCatalogFixture } from "./test/walletCaseStreamCheckpointFixtures";
 
 const OTHER_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
 const OTHER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440099";
@@ -474,6 +476,33 @@ describe("Wallet Case API", () => {
     }));
     await expect(getWalletCaseSyncManifest(CASE_ID, SYNC_ID)).rejects.toThrow(
       /requested sync/,
+    );
+  });
+
+  it("reads a verified latest checkpoint catalog bound to its case", async () => {
+    const payload = streamCheckpointCatalogFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(payload));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(
+      getWalletCaseStreamCheckpoints(CASE_ID, controller.signal),
+    ).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/stream-checkpoints`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...payload,
+      case_public_id: OTHER_CASE_ID,
+      checkpoints: payload.checkpoints.map((item) => ({
+        ...item,
+        document: { ...item.document, case_public_id: OTHER_CASE_ID },
+      })),
+    }));
+    await expect(getWalletCaseStreamCheckpoints(CASE_ID)).rejects.toThrow(
+      /does not match/,
     );
   });
 

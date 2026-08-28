@@ -14,6 +14,7 @@ import {
   zeroSummaryFixture,
 } from "../test/walletCaseFixtures";
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
+import { streamCheckpointCatalogFixture } from "../test/walletCaseStreamCheckpointFixtures";
 import { API_BASE } from "../apiBase";
 
 const mocks = vi.hoisted(() => ({ useWalletCaseSyncJob: vi.fn() }));
@@ -175,10 +176,16 @@ describe("GramCaseSummary", () => {
 
   it("shows and explicitly loads the content-addressed acquisition manifest", async () => {
     const payload = manifestResponseFixture();
-    const fetchMock = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify(payload),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ));
+    const checkpoints = streamCheckpointCatalogFixture();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(payload),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(checkpoints),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderSummary(walletCaseFixture());
@@ -189,8 +196,15 @@ describe("GramCaseSummary", () => {
 
     expect(await screen.findByText("Verified by the server integrity gate")).toBeTruthy();
     expect(screen.getByText(/0 streams · 0 pages · 0 response digests/)).toBeTruthy();
+    expect(screen.getByText("Durable stream checkpoints")).toBeTruthy();
+    expect(screen.getByText(/1 ready · 0 complete · 0 blocked/)).toBeTruthy();
+    expect(screen.getByText(/automatic resume is not enabled yet/i)).toBeTruthy();
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/syncs/${payload.document.sync_public_id}/manifest`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints`,
       expect.objectContaining({ cache: "no-store" }),
     );
   });
