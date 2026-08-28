@@ -25,9 +25,11 @@ function stageLabel(sync: WalletCaseSync): string {
   const labels: Record<string, string> = {
     queued: "Queued safely",
     validating: "Validating case scope",
-    ingesting: sync.requested_scope.mode === "incremental"
-      ? "Acquiring forward overlap"
-      : "Acquiring bounded evidence",
+    ingesting: sync.requested_scope.mode === "resume"
+      ? "Continuing provider stream"
+      : sync.requested_scope.mode === "incremental"
+        ? "Acquiring forward overlap"
+        : "Acquiring bounded evidence",
     finalizing: "Publishing the snapshot",
     cancelling: "Cancellation requested",
     starting: "Preparing bounded sync",
@@ -49,6 +51,12 @@ function formatDate(value: string): string {
 
 function isTerminalFailure(sync: WalletCaseSync | null): boolean {
   return sync?.state === "failed" || sync?.state === "cancelled";
+}
+
+function modeLabel(mode: WalletCaseSync["requested_scope"]["mode"]): string {
+  if (mode === "resume") return "Checkpoint continuation";
+  if (mode === "incremental") return "Incremental refresh";
+  return "Bounded synchronization";
 }
 
 export default function CaseSyncPanel({
@@ -131,7 +139,7 @@ export default function CaseSyncPanel({
     <section className={`case-sync-panel is-${sync.state}`} aria-labelledby="case-sync-title">
       <div className="case-sync-panel-heading">
         <div>
-          <span className="eyebrow">{displayedMode === "incremental" ? "Incremental refresh" : "Bounded synchronization"}</span>
+          <span className="eyebrow">{modeLabel(displayedMode)}</span>
           <h2 id="case-sync-title">{stageLabel(sync)}</h2>
           <p>{sync.message}</p>
         </div>
@@ -208,7 +216,7 @@ export default function CaseSyncPanel({
             type="button"
             onClick={active
               ? controller.checkNow
-              : () => void controller.start(defaultRequest)}
+              : () => void controller.retryPending()}
           >
             {active ? "Check now" : "Try again"}
           </button>
@@ -283,6 +291,8 @@ export default function CaseSyncPanel({
               ? "Starting safely…"
               : sync.requested_scope.mode === "incremental"
                 ? "Retry refresh"
+                : sync.requested_scope.mode === "resume"
+                  ? "Retry continuation"
                 : "Retry same scope"}
           </button>
         )}

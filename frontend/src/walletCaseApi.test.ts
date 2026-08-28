@@ -17,11 +17,14 @@ import {
   getWalletCaseStreamCheckpoints,
   listWalletCases,
   restoreWalletCase,
+  resumeWalletCaseStreamCheckpoint,
   updateWalletCaseMetadata,
 } from "./walletCaseApi";
 import {
+  activeResumeSyncFixture,
   activeSyncFixture,
   CASE_ID,
+  CHECKPOINT_ID,
   emptyWalletCaseFixture,
   IDEMPOTENCY_KEY,
   incrementalSyncFixture,
@@ -504,6 +507,48 @@ describe("Wallet Case API", () => {
     await expect(getWalletCaseStreamCheckpoints(CASE_ID)).rejects.toThrow(
       /does not match/,
     );
+  });
+
+  it("resumes one canonical checkpoint with a bound idempotent POST", async () => {
+    const queued = activeResumeSyncFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(queued, 202));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(resumeWalletCaseStreamCheckpoint(
+      CASE_ID,
+      CHECKPOINT_ID,
+      IDEMPOTENCY_KEY,
+      controller.signal,
+    )).resolves.toEqual(queued);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/stream-checkpoints/${CHECKPOINT_ID}/resume`,
+      {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Idempotency-Key": IDEMPOTENCY_KEY },
+        signal: controller.signal,
+      },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(activeSyncFixture("queued"), 202));
+    await expect(resumeWalletCaseStreamCheckpoint(
+      CASE_ID,
+      CHECKPOINT_ID,
+      IDEMPOTENCY_KEY,
+    )).rejects.toThrow(/does not match/);
+  });
+
+  it("rejects malformed checkpoint resume identity before network I/O", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resumeWalletCaseStreamCheckpoint(
+      CASE_ID,
+      "scp_not-a-checkpoint",
+      IDEMPOTENCY_KEY,
+    )).rejects.toThrow(/checkpoint id is invalid/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("reads pinned Activity pages with exact repeatable server filters and no cache", async () => {

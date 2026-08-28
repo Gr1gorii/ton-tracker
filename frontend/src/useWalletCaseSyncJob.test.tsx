@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WalletCaseSync, WalletCaseSyncRequest } from "./walletCase";
 import {
+  activeResumeSyncFixture,
   activeSyncFixture,
   CASE_ID,
+  CHECKPOINT_ID,
   IDEMPOTENCY_KEY,
   incrementalSyncFixture,
+  resumeSyncFixture,
   succeededSyncFixture,
 } from "./test/walletCaseFixtures";
 
@@ -16,6 +19,7 @@ const apiMocks = vi.hoisted(() => ({
   cancelWalletCaseSync: vi.fn(),
   createWalletCaseSync: vi.fn(),
   getWalletCaseSync: vi.fn(),
+  resumeWalletCaseStreamCheckpoint: vi.fn(),
 }));
 
 vi.mock("./walletCaseApi", async (importOriginal) => {
@@ -143,6 +147,31 @@ describe("useWalletCaseSyncJob", () => {
     expect(result.current.sync?.state).toBe("queued");
   });
 
+  it("reuses one idempotency key while starting a checkpoint continuation", async () => {
+    apiMocks.resumeWalletCaseStreamCheckpoint
+      .mockRejectedValueOnce(new TypeError("Network connection reset"))
+      .mockResolvedValueOnce(activeResumeSyncFixture());
+    const initial = succeededSyncFixture();
+    const { result } = renderHook(() => useWalletCaseSyncJob({
+      caseId: CASE_ID,
+      initialSync: initial,
+      onTerminal: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.resume(CHECKPOINT_ID); });
+    expect(result.current.transportError).toContain("Network connection reset");
+    await act(async () => { await result.current.resume(CHECKPOINT_ID); });
+
+    expect(apiMocks.resumeWalletCaseStreamCheckpoint).toHaveBeenCalledTimes(2);
+    expect(apiMocks.resumeWalletCaseStreamCheckpoint.mock.calls[0][2]).toBe(
+      IDEMPOTENCY_KEY,
+    );
+    expect(apiMocks.resumeWalletCaseStreamCheckpoint.mock.calls[1][2]).toBe(
+      IDEMPOTENCY_KEY,
+    );
+    expect(result.current.sync?.requested_scope.mode).toBe("resume");
+  });
+
   it("retries an incremental failure as a fresh forward refresh", async () => {
     const failedRefresh = incrementalSyncFixture({
       state: "failed",
@@ -175,6 +204,39 @@ describe("useWalletCaseSyncJob", () => {
       IDEMPOTENCY_KEY,
       expect.any(AbortSignal),
     );
+  });
+
+  it("retries a failed continuation through its source checkpoint", async () => {
+    const failed = resumeSyncFixture({
+      state: "failed",
+      stage: "failed",
+      result: null,
+      acquisition_manifest: null,
+      error: {
+        code: "provider_unavailable",
+        message_safe: "Provider unavailable.",
+        retryable: true,
+      },
+      completed_at: "2026-08-09T12:02:00Z",
+    });
+    apiMocks.resumeWalletCaseStreamCheckpoint.mockResolvedValue(
+      activeResumeSyncFixture(),
+    );
+    const { result } = renderHook(() => useWalletCaseSyncJob({
+      caseId: CASE_ID,
+      initialSync: failed,
+      onTerminal: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.retry(); });
+
+    expect(apiMocks.resumeWalletCaseStreamCheckpoint).toHaveBeenCalledWith(
+      CASE_ID,
+      CHECKPOINT_ID,
+      IDEMPOTENCY_KEY,
+      expect.any(AbortSignal),
+    );
+    expect(apiMocks.createWalletCaseSync).not.toHaveBeenCalled();
   });
 
   it("uses Retry-After for reconnect backoff without converting transport loss into job failure", async () => {

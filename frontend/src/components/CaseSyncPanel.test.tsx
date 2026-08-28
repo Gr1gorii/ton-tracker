@@ -28,6 +28,8 @@ function controllerFixture(
     transportState: "idle",
     transportError: null,
     start: vi.fn().mockResolvedValue(undefined),
+    resume: vi.fn().mockResolvedValue(undefined),
+    retryPending: vi.fn().mockResolvedValue(undefined),
     retry: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined),
     checkNow: vi.fn(),
@@ -190,6 +192,6 @@ describe("CaseSyncPanel", () => {
 
     expect(screen.getByRole("alert").textContent).toContain("outcome is not known");
     await user.click(screen.getByRole("button", { name: "Try again" }));
-    expect(controller.start).toHaveBeenCalledTimes(1);
+    expect(controller.retryPending).toHaveBeenCalledTimes(1);
   });
 });

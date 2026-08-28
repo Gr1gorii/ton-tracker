@@ -13,6 +13,7 @@ import {
   emptyWalletCaseFixture,
   failedSyncFixture,
   incrementalSyncFixture,
+  resumeSyncFixture,
   retryWaitSyncFixture,
   succeededSyncFixture,
   walletCaseFixture,
@@ -180,6 +181,35 @@ describe("wallet case contracts", () => {
         ...incremental.result!,
         limitations: incremental.result!.limitations.filter(
           (item) => item.code !== "incremental_composite_not_full_history",
+        ),
+      },
+    })).toThrow(/composite-history limitation/);
+  });
+
+  it("accepts checkpoint resume lineage and requires its limitation", () => {
+    const resumed = resumeSyncFixture();
+    expect(parseWalletCaseSync(resumed).requested_scope).toMatchObject({
+      mode: "resume",
+      time_window: "custom",
+      overlap_seconds: 0,
+      source_checkpoint_public_id: resumed.requested_scope.source_checkpoint_public_id,
+    });
+    expect(() => parseWalletCaseSync({
+      ...resumed,
+      requested_scope: {
+        ...resumed.requested_scope,
+        source_checkpoint_public_id: null,
+      },
+    })).toThrow(/acquisition mode/);
+    expect(() => parseWalletCaseSync({
+      ...resumed,
+      limitations: resumed.limitations.filter(
+        (item) => item.code !== "checkpoint_resume_composite_not_full_history",
+      ),
+      result: {
+        ...resumed.result!,
+        limitations: resumed.result!.limitations.filter(
+          (item) => item.code !== "checkpoint_resume_composite_not_full_history",
         ),
       },
     })).toThrow(/composite-history limitation/);
