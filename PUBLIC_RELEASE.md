@@ -1,4 +1,4 @@
-# GRAM Scope - v0.86.0 Public Release
+# GRAM Scope - v0.87.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -28,6 +28,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   canonical JSON, with actual acquisition bounds, base lineage, sanitized
   stream/page checkpoints, and provider response digests. A case-scoped read
   endpoint revalidates payload hash and identity before returning the document.
+- Append-only provider-stream checkpoints derived from those manifests, with
+  content-address identity, source sync/manifest lineage, conservative
+  ready/complete/blocked continuation classification, and a case-scoped latest
+  catalog that revalidates every stored boundary before returning it.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -69,9 +73,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.86.0 ACQUISITION MANIFESTS`.
+- Product release label: `v0.87.0 STREAM CHECKPOINTS`.
 - Backend API `VERSION` remains `0.2.1`.
-- Alembic head is `20260827_0027`: 0019 adds durable Case Evidence jobs, 0020
+- Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
   persists the verifier policy plus exact per-network application checkpoint
   and binds them into proof and catalog digests. Revision 0022 activates the
@@ -83,7 +87,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   Revision 0026 adds the case-owned append-only Case catalog position and visibility
   journal, including a deterministic seed for existing active and archived
   Cases. Revision 0027 adds the one-to-one immutable sync acquisition manifest
-  store with content-address identity and CaseSync cascade.
+  store with content-address identity and CaseSync cascade. Revision 0028 adds
+  immutable stream checkpoint revisions with Case/source-sync cascades,
+  content-address identity, exact continuation-state constraints, and a latest
+  provider/stream lookup index.
 - Current verifier policy `ton_liteserver_checkpoint_strict_2026_08_v2` pins these
   masterchain checkpoint tuples as
   `(workchain, shard, seqno, root hash, file hash)`:
@@ -215,13 +222,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.86.0`, confirm:
+Before tagging `v0.87.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.86.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.87.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the

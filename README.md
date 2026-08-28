@@ -4,10 +4,29 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.86.0 — Acquisition Manifests**<br>
+Current product release: **v0.87.0 — Stream Checkpoints**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.86.0 adds
+## What v0.87.0 adds
+
+Every provider stream emitted by a newly published Wallet Case sync now gets
+its own immutable, content-addressed continuation record. Each checkpoint is
+bound to the source CaseSync and acquisition manifest, retains only sanitized
+page evidence, and classifies continuation as `ready`, `complete`, or `blocked`.
+A cursor is retained only when the last successful page proves the same cursor
+and the termination reason is safe to continue; protocol errors, preview-only
+reads, in-progress provider events, missing cursors, and legacy unbounded paths
+remain blocked.
+
+`GET /api/v1/cases/{case}/stream-checkpoints` returns the latest verified
+revision for every provider/stream pair and fails closed on canonical JSON,
+hash, Case, sync, manifest, or row-identity mismatch. Summary displays those
+states alongside acquisition provenance and explicitly says that automatic
+page-resume execution is not enabled yet. Revision `20260828_0028` adds the
+append-only checkpoint store. The ingestion run, terminal sync state, manifest,
+and all stream checkpoints publish in one lease-fenced transaction.
+
+## v0.86.0 acquisition manifests
 
 Every Wallet Case sync that publishes an ingestion run now atomically publishes
 an immutable, content-addressed acquisition manifest. The canonical manifest
@@ -24,8 +43,8 @@ load the document explicitly and shows page/digest counts. Legacy snapshots
 without a manifest remain readable with an explicit limitation. Revision
 `20260827_0027` adds the one-to-one manifest store; the worker writes the run,
 terminal sync state, and manifest under the same lease-fenced transaction.
-This release records resume-ready evidence but does not yet resume a provider
-crawl from those checkpoints.
+This release introduced the immutable source manifest consumed by v0.87.0
+stream checkpoints.
 
 ## v0.85.0 incremental refresh
 
@@ -117,7 +136,8 @@ profit, ownership proof, or complete wallet history.
 - v0.25.0 provider-free verified TEP-74 payload observations.
 - v0.26.0 multi-run jetton asset/fee evidence reconciliation with locked PnL.
 - v0.85.0 incremental Wallet Case refresh with durable acquisition lineage.
-- v0.86.0 immutable content-addressed acquisition manifests and checkpoints.
+- v0.86.0 immutable content-addressed acquisition manifests.
+- v0.87.0 append-only, manifest-bound provider stream checkpoints.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.
@@ -156,7 +176,7 @@ backend/
 Backend: FastAPI, SQLAlchemy, SQLite, Pydantic, Alembic.<br>
 Frontend: React, TypeScript, Vite, Vitest.
 
-The current schema head is `20260827_0027`. The application applies migrations
+The current schema head is `20260828_0028`. The application applies migrations
 on backend startup.
 
 ## Requirements

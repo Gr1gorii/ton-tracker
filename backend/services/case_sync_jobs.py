@@ -2,8 +2,9 @@
 
 The v0.72 execution contract intentionally reuses the existing monolithic
 ingestion builder. It persists the job before provider I/O and fences the one
-final result, but a crash during provider acquisition repeats the bounded
-crawl; per-page resume is a later hardening slice.
+final result. Published stream checkpoints preserve safe continuation evidence,
+but a crash during provider acquisition still repeats the bounded crawl until
+the execution path consumes those checkpoints.
 """
 
 from __future__ import annotations

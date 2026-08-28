@@ -1,3 +1,34 @@
+# GRAM Scope — v0.87.0 STREAM CHECKPOINTS
+
+v0.87.0 turns the sanitized stream/page evidence introduced in v0.86.0 into
+separate durable continuation records. Every provider stream in a published
+sync produces an immutable `scp_<sha256>` checkpoint bound to the Case, source
+sync, source manifest, provider contract, requested period, successful page
+count, last response digest, and conservative continuation decision.
+
+Continuation is `ready` only after at least one successful page when the last
+response cursor exactly matches the stream terminal cursor and acquisition
+ended at a page cap or transient provider error. Completed streams retain no
+cursor. Preview-only, legacy-unbounded, protocol-error, in-progress event,
+missing-cursor, and cursor-mismatch states are explicitly blocked. Raw provider
+payloads, queries, headers, credentials, database IDs, and error messages never
+enter checkpoint JSON.
+
+Revision `20260828_0028` adds the append-only checkpoint table with exact
+content-address, page-count, continuation-state, uniqueness, foreign-key, and
+index constraints. The worker inserts all checkpoints in the same lease-fenced
+transaction as the ingestion run, terminal CaseSync state, catalog event, and
+acquisition manifest; stale publication rolls everything back.
+
+`GET /api/v1/cases/{case}/stream-checkpoints` returns the latest verified
+revision for each provider/stream pair and revalidates canonical JSON, SHA-256,
+Case, source sync, source manifest, provider contract, page totals, and cursor
+state. Summary shows ready/complete/blocked totals and stream-level boundaries.
+This release persists resume-ready state but does not yet execute a resumed
+provider crawl or claim full-history backfill.
+
+---
+
 # GRAM Scope — v0.86.0 ACQUISITION MANIFESTS
 
 v0.86.0 gives every newly published Wallet Case ingestion run an immutable,
