@@ -1,3 +1,38 @@
+# GRAM Scope — v0.89.0 CHECKPOINT HISTORY
+
+v0.89.0 makes every immutable provider-stream checkpoint revision auditable,
+instead of exposing only the latest revision for each provider/stream pair.
+`GET /api/v1/cases/{case}/stream-checkpoints/history` returns a bounded,
+newest-first catalog frozen at the first page's revision cutoff. Continuations
+use a canonical, process-local HMAC-authenticated cursor bound to the Case,
+cutoff, and keyset position; malformed, changed, foreign, unavailable, and
+noncanonical cursors fail closed.
+
+Each history item revalidates its checkpoint canonical JSON, SHA-256 content
+address, database identity, Case and source sync, source manifest, provider
+contract, acquisition period, page totals, and continuation state. Resume
+lineage is then followed recursively to a bounded or incremental root. Every
+parent must be older, case-local, content-valid, and identical in provider,
+stream, and contract, while each resume base snapshot must be the direct
+parent's source sync. Missing, circular, future, cross-stream, or contradictory
+lineage returns an integrity error for the whole read.
+
+`GET /api/v1/cases/{case}/stream-checkpoints/{checkpoint}` exposes one exact
+verified document with its base snapshot, direct parent, and chain depth.
+Summary loads the revision journal only with acquisition inspection, supports
+frozen `Load older revisions` traversal, and can inspect the exact source sync,
+source manifest, parent, depth, and continuation state. Client controllers
+reject cutoff drift and repeated revisions across pages.
+
+The release also closes the v0.88.0 resume-evidence compatibility gap: public
+manifest and checkpoint schemas plus the strict frontend parsers now accept and
+validate `acquisition_mode=resume`. No database migration is added; Alembic
+remains at `20260828_0028` and backend API version remains `0.2.1`. Checkpoint
+history is an explicit revision journal, not automatic backfill and not proof
+of complete wallet history.
+
+---
+
 # GRAM Scope — v0.88.0 CHECKPOINT RESUME
 
 v0.88.0 turns the conservative `ready` checkpoint state from v0.87.0 into one

@@ -4,10 +4,31 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.88.0 — Checkpoint Resume**<br>
+Current product release: **v0.89.0 — Checkpoint History**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.88.0 adds
+## What v0.89.0 adds
+
+Every published provider-stream checkpoint revision is now available through a
+case-scoped, newest-first history contract. The first page freezes its revision
+cutoff; later pages use a process-local HMAC-authenticated cursor bound to the
+Case, cutoff, and keyset position. New checkpoints cannot drift into an active
+traversal, and changed, foreign, malformed, or replayed scope fails closed.
+
+`GET /api/v1/cases/{case}/stream-checkpoints/history` returns compact verified
+revision summaries, while
+`GET /api/v1/cases/{case}/stream-checkpoints/{checkpoint}` returns one exact
+content-addressed document and its recursively verified resume lineage. Parent
+revisions must precede their child and retain the same provider, stream, and
+provider contract; the resume base must equal the parent source sync. Summary
+can inspect this lineage and load older frozen pages without treating the
+journal as proof of complete wallet history.
+
+Resume-produced manifests and checkpoints now validate `acquisition_mode=resume`
+at both server and client boundaries. No migration is added; Alembic remains at
+`20260828_0028`.
+
+## v0.88.0 checkpoint resume
 
 A resume-ready provider-stream checkpoint can now start one explicit durable
 continuation job through
@@ -160,6 +181,7 @@ profit, ownership proof, or complete wallet history.
 - v0.86.0 immutable content-addressed acquisition manifests.
 - v0.87.0 append-only, manifest-bound provider stream checkpoints.
 - v0.88.0 explicit, idempotent execution from verified ready checkpoints.
+- v0.89.0 signed, frozen checkpoint revision history with exact lineage reads.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

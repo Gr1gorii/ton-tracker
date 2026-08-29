@@ -1,4 +1,4 @@
-# GRAM Scope - v0.88.0 Public Release
+# GRAM Scope - v0.89.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -36,6 +36,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   transaction or account-event checkpoint, with durable source/cursor/page
   lineage, worker-time revalidation before provider I/O, and the existing
   polling, retry, cancellation, and snapshot-preservation workflow.
+- A case-scoped immutable checkpoint revision journal with frozen newest-first
+  keyset pagination, process-local signed cursors, exact revision reads, and
+  recursively verified resume parent/base lineage. Summary can inspect exact
+  revision provenance and load older pages without claiming full history.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -77,7 +81,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.88.0 CHECKPOINT RESUME`.
+- Product release label: `v0.89.0 CHECKPOINT HISTORY`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -130,6 +134,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   IDs, internal run IDs, or provider error text. Only the latest verified
   `ready` checkpoint for a supported stream can start an explicit continuation;
   no automatic or full-history backfill is claimed.
+- Checkpoint history reads freeze their cutoff on page one. Cursor signatures
+  bind the Case, cutoff, and keyset position and expire after local API process
+  restart. Every returned revision and ancestor is revalidated; parent/base,
+  provider, stream, contract, order, or source-evidence drift fails closed.
 - Wallet Cases are direct-loopback only in this pre-authentication slice.
   Hosted production access remains disabled until authentication derives the
   owner scope.
@@ -228,13 +236,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.88.0`, confirm:
+Before tagging `v0.89.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.88.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.89.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
