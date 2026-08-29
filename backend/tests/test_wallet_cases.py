@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from threading import Barrier, Event, Thread
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -175,6 +176,8 @@ def _attach_transaction_stream(
     cursor: str = "10",
     completion_state: str = "incomplete",
     termination_reason: str = "page_cap_reached",
+    page_index: int = 1,
+    request_cursor: str | None = None,
 ) -> None:
     stream = WalletAcquisitionStream(
         provider="tonapi",
@@ -197,7 +200,7 @@ def _attach_transaction_stream(
         raw_item_count=2,
         normalized_item_count=2,
         duplicate_item_count=0,
-        first_cursor=None,
+        first_cursor=request_cursor,
         terminal_cursor=cursor,
         bounds_verified=False,
         error_code=None,
@@ -207,8 +210,8 @@ def _attach_transaction_stream(
     )
     stream.pages.append(
         WalletAcquisitionPage(
-            page_index=1,
-            request_cursor=None,
+            page_index=page_index,
+            request_cursor=request_cursor,
             response_cursor=cursor,
             request_offset=None,
             requested_limit=100,
@@ -229,6 +232,21 @@ def _attach_transaction_stream(
         )
     )
     run.acquisition_streams.append(stream)
+
+
+def _resumed_transaction_run(payload, settings, **kwargs):
+    run = build_wallet_ingestion_run(payload, settings, **kwargs)
+    _attach_transaction_stream(
+        run,
+        SimpleNamespace(
+            requested_start=_parse_utc(payload.custom_start),
+            requested_end=_parse_utc(payload.custom_end),
+        ),
+        cursor=str(int(kwargs["resume_cursor"]) + 10),
+        page_index=kwargs["resume_page_index"],
+        request_cursor=kwargs["resume_cursor"],
+    )
+    return run
 
 
 def _publish_transaction_checkpoint(
@@ -278,6 +296,36 @@ def _publish_transaction_checkpoint(
         last_error_retryable=False,
     ) is True
     return case_id, queued, claimed
+
+
+def _resume_transaction_checkpoint(
+    client: TestClient,
+    *,
+    case_id: str,
+    checkpoint_id: str,
+) -> tuple[dict, str]:
+    response = client.post(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{checkpoint_id}/resume",
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert response.status_code == 202, response.text
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    completed = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{response.json()['public_id']}"
+    )
+    assert completed.status_code == 200, completed.text
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint)
+            .where(WalletCaseStreamCheckpoint.case.has(public_id=case_id))
+            .order_by(WalletCaseStreamCheckpoint.id.desc())
+        )
+        assert checkpoint is not None
+        return completed.json(), checkpoint.public_id
 
 
 def _configure_guarded_live_runtime(monkeypatch) -> None:
@@ -1611,7 +1659,7 @@ def test_ready_stream_checkpoint_queues_and_executes_one_resume(client):
 
     def recording_builder(payload, settings, **kwargs):
         seen.append((payload, kwargs))
-        return build_wallet_ingestion_run(payload, settings, **kwargs)
+        return _resumed_transaction_run(payload, settings, **kwargs)
 
     worker = CaseSyncWorker(
         app.state.wallet_case_test_session,
@@ -1638,6 +1686,17 @@ def test_ready_stream_checkpoint_queues_and_executes_one_resume(client):
     }
     assert _database_counts() == (1, 2, 2)
 
+    manifest = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{body['public_id']}/manifest"
+    )
+    assert manifest.status_code == 200, manifest.text
+    assert manifest.json()["document"]["acquisition_mode"] == "resume"
+    catalog = client.get(f"/api/v1/cases/{case_id}/stream-checkpoints")
+    assert catalog.status_code == 200, catalog.text
+    assert catalog.json()["checkpoints"][0]["document"][
+        "acquisition_mode"
+    ] == "resume"
+
     with app.state.wallet_case_test_session() as session:
         resumed = session.scalar(
             select(CaseSync).where(CaseSync.public_id == body["public_id"])
@@ -1656,6 +1715,184 @@ def test_ready_stream_checkpoint_queues_and_executes_one_resume(client):
             "resume_cursor": "10",
             "resume_page_index": 2,
         }
+
+
+def test_checkpoint_history_reads_exact_lineage_and_freezes_pagination(client):
+    case_id, source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        root = session.scalar(select(WalletCaseStreamCheckpoint))
+        assert root is not None
+        root_id = root.public_id
+
+    _completed, resumed_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=root_id,
+    )
+    first = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/history?limit=1"
+    )
+
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert first.headers["cache-control"] == "no-store"
+    assert first_body["contract_version"] == (
+        "wallet_case_stream_checkpoint_history_v1"
+    )
+    assert first_body["revision_cutoff_public_id"] == resumed_id
+    assert first_body["aggregate"] == {
+        "total_revisions": 2,
+        "returned_count": 1,
+    }
+    assert first_body["items"][0]["checkpoint"]["public_id"] == resumed_id
+    assert first_body["items"][0]["lineage"] == {
+        "acquisition_mode": "resume",
+        "base_snapshot_public_id": source_sync["public_id"],
+        "parent_checkpoint_public_id": root_id,
+        "chain_depth": 1,
+    }
+    assert first_body["page"]["has_more"] is True
+    cursor = first_body["page"]["next_cursor"]
+    assert isinstance(cursor, str)
+
+    exact = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{resumed_id}"
+    )
+    assert exact.status_code == 200, exact.text
+    assert exact.json()["document"]["acquisition_mode"] == "resume"
+    assert exact.json()["lineage"] == first_body["items"][0]["lineage"]
+
+    _completed, newest_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=resumed_id,
+    )
+    second = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/history",
+        params={"limit": "1", "cursor": cursor},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["revision_cutoff_public_id"] == resumed_id
+    assert second.json()["aggregate"]["total_revisions"] == 2
+    assert [
+        item["checkpoint"]["public_id"] for item in second.json()["items"]
+    ] == [root_id]
+    assert second.json()["page"] == {
+        "limit": 1,
+        "has_more": False,
+        "next_cursor": None,
+    }
+
+    fresh = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/history?limit=1"
+    )
+    assert fresh.status_code == 200, fresh.text
+    assert fresh.json()["revision_cutoff_public_id"] == newest_id
+    assert fresh.json()["aggregate"]["total_revisions"] == 3
+    assert fresh.json()["items"][0]["lineage"]["chain_depth"] == 2
+
+    foreign_case_id = _create_case(
+        client,
+        address=f"0:{'1' * 64}",
+    )["case"]["public_id"]
+    foreign = client.get(
+        f"/api/v1/cases/{foreign_case_id}/stream-checkpoints/history",
+        params={"cursor": cursor},
+    )
+    assert foreign.status_code == 422
+    assert foreign.json()["detail"]["code"] == (
+        "invalid_checkpoint_history_cursor"
+    )
+    replacement = "0" if cursor[-1] != "0" else "1"
+    tampered = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/history",
+        params={"cursor": f"{cursor[:-1]}{replacement}"},
+    )
+    assert tampered.status_code == 422
+    assert tampered.json()["detail"]["code"] == (
+        "invalid_checkpoint_history_cursor"
+    )
+
+
+def test_checkpoint_history_fails_closed_on_broken_resume_lineage(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        root = session.scalar(select(WalletCaseStreamCheckpoint))
+        assert root is not None
+        root_id = root.public_id
+    _completed, resumed_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=root_id,
+    )
+    with app.state.wallet_case_test_session() as session:
+        resumed = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.public_id == resumed_id
+            )
+        )
+        assert resumed is not None
+        stored = json.loads(resumed.source_sync.coverage_summary_json)
+        stored["_acquisition"]["base_snapshot_public_id"] = str(uuid4())
+        resumed.source_sync.coverage_summary_json = json.dumps(
+            stored,
+            sort_keys=True,
+        )
+        session.commit()
+
+    exact = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{resumed_id}"
+    )
+    history = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/history"
+    )
+    for response in (exact, history):
+        assert response.status_code == 503
+        assert response.headers["cache-control"] == "no-store"
+        assert response.json()["detail"] == {
+            "code": "stream_checkpoint_integrity_error",
+            "message_safe": (
+                "Stored Wallet Case stream checkpoint parent is invalid."
+            ),
+            "retryable": False,
+        }
+
+
+def test_checkpoint_history_empty_and_exact_read_are_case_scoped(client):
+    first_case_id = _create_case(client)["case"]["public_id"]
+    empty = client.get(
+        f"/api/v1/cases/{first_case_id}/stream-checkpoints/history"
+    )
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["revision_cutoff_public_id"] is None
+    assert empty.json()["items"] == []
+    assert empty.json()["aggregate"] == {
+        "total_revisions": 0,
+        "returned_count": 0,
+    }
+
+    second_case_id, _sync, _claimed = _publish_transaction_checkpoint(
+        client,
+        case_id=_create_case(client, address=f"0:{'2' * 64}")["case"][
+            "public_id"
+        ],
+    )
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case.has(public_id=second_case_id)
+            )
+        )
+        assert checkpoint is not None
+        checkpoint_id = checkpoint.public_id
+    missing = client.get(
+        f"/api/v1/cases/{first_case_id}/stream-checkpoints/{checkpoint_id}"
+    )
+    assert missing.status_code == 404
+    unsupported = client.get(
+        f"/api/v1/cases/{first_case_id}/stream-checkpoints/history?offset=1"
+    )
+    assert unsupported.status_code == 422
 
 
 def test_stream_checkpoint_resume_rejects_blocked_and_stale_records(client):
