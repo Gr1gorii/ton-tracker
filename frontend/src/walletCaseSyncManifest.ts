@@ -232,7 +232,9 @@ function parseDocument(value: unknown): WalletCaseSyncManifestDocument {
   const state = text(item.sync_state, "acquisition manifest sync state") as WalletCaseSyncState;
   if (!SYNC_STATES.has(state)) fail("acquisition manifest sync state is invalid");
   const mode = text(item.acquisition_mode, "acquisition manifest mode") as WalletCaseSyncMode;
-  if (mode !== "bounded" && mode !== "incremental") fail("acquisition manifest mode is invalid");
+  if (mode !== "bounded" && mode !== "incremental" && mode !== "resume") {
+    fail("acquisition manifest mode is invalid");
+  }
   const snapshotPeriod = parsePeriod(item.snapshot_period, "acquisition manifest snapshot period");
   const acquisitionPeriod = parsePeriod(item.acquisition_period, "acquisition manifest acquisition period");
   if (!snapshotPeriod.start_at || !acquisitionPeriod.start_at) fail("acquisition manifest periods are required");
@@ -246,7 +248,8 @@ function parseDocument(value: unknown): WalletCaseSyncManifestDocument {
       overlapSeconds !== 0 || baseId !== null ||
       JSON.stringify(snapshotPeriod) !== JSON.stringify(acquisitionPeriod)
     )) ||
-    (mode === "incremental" && baseId === null)
+    (mode === "incremental" && baseId === null) ||
+    (mode === "resume" && (overlapSeconds !== 0 || baseId === null))
   ) fail("acquisition manifest lineage is invalid");
   if (!Array.isArray(item.requested_surfaces)) fail("acquisition manifest surfaces are invalid");
   const surfaces = item.requested_surfaces.map((surface) => text(surface, "acquisition manifest surface") as WalletIngestionSurface);

@@ -324,11 +324,26 @@ class WalletCaseSyncManifestDocument(_StrictModel):
     sync_state: CaseSyncState
     snapshot_period: WalletCaseSyncManifestPeriod
     acquisition_period: WalletCaseSyncManifestPeriod
-    acquisition_mode: Literal["bounded", "incremental"]
+    acquisition_mode: Literal["bounded", "incremental", "resume"]
     overlap_seconds: int = Field(ge=0, le=86400)
     base_snapshot_public_id: CanonicalPublicId | None = None
     requested_surfaces: list[WalletIngestionSurface]
     streams: list[WalletCaseSyncManifestStream]
+
+    @model_validator(mode="after")
+    def _validate_acquisition_lineage(self):
+        if self.acquisition_mode == "bounded":
+            if (
+                self.overlap_seconds != 0
+                or self.base_snapshot_public_id is not None
+                or self.snapshot_period != self.acquisition_period
+            ):
+                raise ValueError("bounded acquisition manifest lineage is invalid")
+        elif self.base_snapshot_public_id is None:
+            raise ValueError("continued acquisition manifests require a base snapshot")
+        elif self.acquisition_mode == "resume" and self.overlap_seconds != 0:
+            raise ValueError("resume acquisition manifests cannot overlap")
+        return self
 
 
 class WalletCaseSyncManifestResponse(_StrictModel):
@@ -356,7 +371,7 @@ class WalletCaseStreamCheckpointDocument(_StrictModel):
     provider: str = Field(min_length=1, max_length=64)
     stream_key: str = Field(min_length=1, max_length=40)
     provider_contract_version: str = Field(min_length=1, max_length=48)
-    acquisition_mode: Literal["bounded", "incremental"]
+    acquisition_mode: Literal["bounded", "incremental", "resume"]
     requested_period: WalletCaseSyncManifestPeriod
     sort_order: str | None = Field(default=None, max_length=32)
     page_size: int = Field(ge=0)

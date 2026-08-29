@@ -12,6 +12,13 @@ from services.wallet_case_sync_manifests import (
     build_wallet_case_sync_manifest,
     verify_wallet_case_sync_manifest,
 )
+from services.wallet_case_stream_checkpoints import (
+    build_wallet_case_stream_checkpoints,
+)
+from wallet_case_schemas import (
+    WalletCaseStreamCheckpointResponse,
+    WalletCaseSyncManifestResponse,
+)
 
 
 START = datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc)
@@ -174,3 +181,60 @@ def test_manifest_verification_rejects_noncanonical_or_tampered_payload():
             manifest.canonical_json,
             "0" * 64,
         )
+
+
+def test_resume_manifest_and_derived_checkpoint_match_public_schemas():
+    manifest = _manifest(
+        acquisition_plan={
+            "version": 2,
+            "mode": "resume",
+            "start_at": "2026-08-26T12:00:00Z",
+            "end_at": "2026-08-27T12:00:00Z",
+            "overlap_seconds": 0,
+            "base_snapshot_public_id": (
+                "00000000-0000-4000-8000-000000000003"
+            ),
+            "source_checkpoint_public_id": f"scp_{'1' * 64}",
+            "resume_stream_key": "account_transactions",
+            "resume_cursor": "cursor-1",
+            "resume_page_index": 2,
+        }
+    )
+    manifest_response = {
+        "manifest": {
+            "public_id": manifest.public_id,
+            "contract_version": MANIFEST_CONTRACT_VERSION,
+            "content_hash_sha256": manifest.content_hash_sha256,
+            "stream_count": manifest.stream_count,
+            "page_count": manifest.page_count,
+            "response_digest_count": manifest.response_digest_count,
+            "created_at": "2026-08-27T12:00:03Z",
+        },
+        "document": manifest.document,
+    }
+
+    validated_manifest = WalletCaseSyncManifestResponse.model_validate(
+        manifest_response
+    )
+    assert validated_manifest.document.acquisition_mode == "resume"
+
+    checkpoint = build_wallet_case_stream_checkpoints(manifest)[0]
+    validated_checkpoint = WalletCaseStreamCheckpointResponse.model_validate(
+        {
+            "checkpoint": {
+                "public_id": checkpoint.public_id,
+                "contract_version": checkpoint.document["contract_version"],
+                "checkpoint_hash_sha256": checkpoint.checkpoint_hash_sha256,
+                "provider": checkpoint.provider,
+                "stream_key": checkpoint.stream_key,
+                "provider_contract_version": (
+                    checkpoint.provider_contract_version
+                ),
+                "source_sync_public_id": manifest.document["sync_public_id"],
+                "resume_state": checkpoint.resume_state,
+                "created_at": "2026-08-27T12:00:03Z",
+            },
+            "document": checkpoint.document,
+        }
+    )
+    assert validated_checkpoint.document.acquisition_mode == "resume"
