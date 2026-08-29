@@ -282,6 +282,60 @@ class WalletCaseRepository:
             )
         )
 
+    def latest_stream_checkpoint(
+        self,
+        *,
+        case_id: int,
+    ) -> WalletCaseStreamCheckpoint | None:
+        return self.session.scalar(
+            select(WalletCaseStreamCheckpoint)
+            .where(WalletCaseStreamCheckpoint.case_id == case_id)
+            .order_by(WalletCaseStreamCheckpoint.id.desc())
+            .limit(1)
+        )
+
+    def stream_checkpoint_history(
+        self,
+        *,
+        case_id: int,
+        cutoff_id: int,
+        after_id: int | None,
+        limit: int,
+    ) -> list[WalletCaseStreamCheckpoint]:
+        statement = select(WalletCaseStreamCheckpoint).where(
+            WalletCaseStreamCheckpoint.case_id == case_id,
+            WalletCaseStreamCheckpoint.id <= cutoff_id,
+        )
+        if after_id is not None:
+            statement = statement.where(
+                WalletCaseStreamCheckpoint.id < after_id
+            )
+        return list(
+            self.session.scalars(
+                statement.order_by(
+                    WalletCaseStreamCheckpoint.id.desc()
+                ).limit(limit)
+            ).unique()
+        )
+
+    def count_stream_checkpoint_history(
+        self,
+        *,
+        case_id: int,
+        cutoff_id: int,
+    ) -> int:
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(WalletCaseStreamCheckpoint)
+                .where(
+                    WalletCaseStreamCheckpoint.case_id == case_id,
+                    WalletCaseStreamCheckpoint.id <= cutoff_id,
+                )
+            )
+            or 0
+        )
+
     def add_case(self, wallet_case: WalletCase) -> None:
         self.session.add(wallet_case)
 
