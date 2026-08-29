@@ -202,6 +202,22 @@
 .case-checkpoint-catalog li.is-blocked code { color: var(--warning); }
 .case-checkpoint-actions { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .case-checkpoint-actions button { display: inline-flex; flex: 0 0 auto; padding: 7px 10px; align-items: center; gap: 5px; font-size: 0.72rem; }
+.case-checkpoint-history { display: grid; margin-top: 8px; padding-top: 14px; gap: 9px; border-top: 1px solid var(--border); }
+.case-checkpoint-history > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.case-checkpoint-history > header > span { display: inline-flex; align-items: center; gap: 7px; color: var(--text); }
+.case-checkpoint-history > header small { color: var(--text-muted); }
+.case-checkpoint-history ol { overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-solid); list-style: none; }
+.case-checkpoint-history li > span code { max-width: min(430px, 55vw); }
+.case-checkpoint-history li > button,
+.case-checkpoint-load-more { display: inline-flex; flex: 0 0 auto; padding: 7px 10px; align-items: center; justify-content: center; gap: 6px; font-size: 0.72rem; }
+.case-checkpoint-load-more { justify-self: start; }
+.case-checkpoint-history-loading { display: inline-flex; align-items: center; gap: 7px; color: var(--text-muted); }
+.case-checkpoint-revision-detail { display: grid; margin: 2px 0 0; padding: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--accent) 5%, var(--surface-solid)); }
+.case-checkpoint-revision-detail div { display: grid; min-width: 0; gap: 2px; }
+.case-checkpoint-revision-detail dt { color: var(--text-muted); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.case-checkpoint-revision-detail dd { min-width: 0; margin: 0; color: var(--text); font-size: 0.76rem; }
+.case-checkpoint-revision-detail code { display: block; overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
+.case-checkpoint-history-boundary { color: var(--text-muted); line-height: 1.45; }
 
 .case-limitations { padding: 24px; }
 .case-limitations > header { display: flex; align-items: flex-start; gap: 12px; color: var(--warning); }
@@ -701,6 +717,10 @@
   .case-checkpoint-catalog li { align-items: stretch; flex-direction: column; }
   .case-checkpoint-actions { align-items: stretch; flex-direction: column; }
   .case-checkpoint-actions button { width: 100%; justify-content: center; }
+  .case-checkpoint-history > header { align-items: flex-start; flex-direction: column; }
+  .case-checkpoint-history li > button,
+  .case-checkpoint-load-more { width: 100%; }
+  .case-checkpoint-revision-detail { grid-template-columns: 1fr; }
   .case-limitations li { grid-template-columns: 1fr; gap: 5px; }
   .case-cancel-confirm { align-items: stretch; flex-direction: column; }
   .case-cancel-confirm p { margin: 0 0 5px; }

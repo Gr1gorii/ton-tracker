@@ -1,8 +1,8 @@
-# GRAM Scope — v0.88.0 Promotion Checklist
+# GRAM Scope — v0.89.0 Promotion Checklist
 
-Current promotion gates for Wallet Case checkpoint resume execution:
+Current promotion gates for Wallet Case checkpoint revision history:
 
-- Product label is `v0.88.0 CHECKPOINT RESUME`; backend API version stays
+- Product label is `v0.89.0 CHECKPOINT HISTORY`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -67,6 +67,15 @@ Current promotion gates for Wallet Case checkpoint resume execution:
 - Resume UI actions appear only for `ready` checkpoints and use the durable
   sync polling/reconnect/cancel path. Resume snapshots expose base and source
   checkpoint lineage and retain the explicit not-full-history limitation.
+- Checkpoint history must freeze its newest revision cutoff on the first page,
+  authenticate every continuation against Case/cutoff/keyset position, reject
+  duplicate or unsupported query parameters, and expire cursors after process
+  restart rather than accepting an unauthenticated continuation.
+- Exact and history reads must recursively revalidate content address, source
+  manifest, acquisition plan, parent ordering, base snapshot, provider/stream
+  identity, and provider contract. Summary must preserve a frozen loaded set,
+  reject cutoff drift or duplicate revisions, and state that the journal does
+  not prove complete wallet history.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -190,7 +199,7 @@ Current promotion gates for Wallet Case checkpoint resume execution:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.88.0 must not be promoted as a hosted Wallet Case release.
+  v0.89.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

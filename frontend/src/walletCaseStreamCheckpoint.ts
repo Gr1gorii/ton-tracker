@@ -1,4 +1,4 @@
-import type { WalletCaseSyncMode } from "./walletCase";
+import type { WalletCaseLimitation, WalletCaseSyncMode } from "./walletCase";
 import type { WalletCaseSyncManifestPeriod } from "./walletCaseSyncManifest";
 
 export type WalletCaseStreamResumeState = "ready" | "complete" | "blocked";
@@ -63,6 +63,35 @@ export interface WalletCaseStreamCheckpointCatalogResponse {
   complete_count: number;
   blocked_count: number;
   checkpoints: WalletCaseStreamCheckpointResponse[];
+}
+
+export interface WalletCaseStreamCheckpointLineage {
+  acquisition_mode: WalletCaseSyncMode;
+  base_snapshot_public_id: string | null;
+  parent_checkpoint_public_id: string | null;
+  chain_depth: number;
+}
+
+export interface WalletCaseStreamCheckpointDetailResponse extends WalletCaseStreamCheckpointResponse {
+  lineage: WalletCaseStreamCheckpointLineage;
+}
+
+export interface WalletCaseStreamCheckpointHistoryItem {
+  checkpoint: WalletCaseStreamCheckpointDescriptor;
+  lineage: WalletCaseStreamCheckpointLineage;
+  continuation_page_index: number | null;
+  page_count: number;
+  pages_succeeded: number;
+}
+
+export interface WalletCaseStreamCheckpointHistoryResponse {
+  contract_version: "wallet_case_stream_checkpoint_history_v1";
+  case_public_id: string;
+  revision_cutoff_public_id: string | null;
+  items: WalletCaseStreamCheckpointHistoryItem[];
+  aggregate: { total_revisions: number; returned_count: number };
+  page: { limit: number; has_more: boolean; next_cursor: string | null };
+  limitations: WalletCaseLimitation[];
 }
 
 const PUBLIC_ID =
@@ -142,6 +171,12 @@ function digest(value: unknown, label: string): string {
 function resumeState(value: unknown, label: string): WalletCaseStreamResumeState {
   const result = text(value, label, 16) as WalletCaseStreamResumeState;
   if (!RESUME_STATES.has(result)) fail(`${label} is invalid`);
+  return result;
+}
+
+function checkpointId(value: unknown, label: string): string {
+  const result = text(value, label, 68);
+  if (!CHECKPOINT_ID.test(result)) fail(`${label} is invalid`);
   return result;
 }
 
@@ -275,9 +310,8 @@ function parseDocument(value: unknown): WalletCaseStreamCheckpointDocument {
   };
 }
 
-function parseCheckpoint(value: unknown): WalletCaseStreamCheckpointResponse {
-  const envelope = record(value, ["checkpoint", "document"], "stream checkpoint");
-  const descriptor = record(envelope.checkpoint, [
+function parseDescriptor(value: unknown): WalletCaseStreamCheckpointDescriptor {
+  const descriptor = record(value, [
     "public_id", "contract_version", "checkpoint_hash_sha256", "provider",
     "stream_key", "provider_contract_version", "source_sync_public_id",
     "resume_state", "created_at",
@@ -293,7 +327,7 @@ function parseCheckpoint(value: unknown): WalletCaseStreamCheckpointResponse {
   if (CHECKPOINT_ID.exec(id)?.[1] !== hash) {
     fail("stream checkpoint identity is invalid");
   }
-  const parsedDescriptor: WalletCaseStreamCheckpointDescriptor = {
+  return {
     public_id: id,
     contract_version: "wallet_case_stream_checkpoint_v1",
     checkpoint_hash_sha256: hash,
@@ -314,6 +348,11 @@ function parseCheckpoint(value: unknown): WalletCaseStreamCheckpointResponse {
     ),
     created_at: timestamp(descriptor.created_at, "stream checkpoint creation time"),
   };
+}
+
+function parseCheckpoint(value: unknown): WalletCaseStreamCheckpointResponse {
+  const envelope = record(value, ["checkpoint", "document"], "stream checkpoint");
+  const parsedDescriptor = parseDescriptor(envelope.checkpoint);
   const document = parseDocument(envelope.document);
   if (
     parsedDescriptor.provider !== document.provider ||
@@ -323,6 +362,170 @@ function parseCheckpoint(value: unknown): WalletCaseStreamCheckpointResponse {
     parsedDescriptor.resume_state !== document.resume_state
   ) fail("stream checkpoint descriptor does not match its document");
   return { checkpoint: parsedDescriptor, document };
+}
+
+function parseLineage(value: unknown): WalletCaseStreamCheckpointLineage {
+  const item = record(value, [
+    "acquisition_mode", "base_snapshot_public_id",
+    "parent_checkpoint_public_id", "chain_depth",
+  ], "stream checkpoint lineage");
+  const mode = text(item.acquisition_mode, "stream checkpoint lineage mode", 16);
+  if (mode !== "bounded" && mode !== "incremental" && mode !== "resume") {
+    fail("stream checkpoint lineage mode is invalid");
+  }
+  const baseId = item.base_snapshot_public_id === null
+    ? null : publicId(item.base_snapshot_public_id, "stream checkpoint base snapshot id");
+  const parentId = item.parent_checkpoint_public_id === null
+    ? null : checkpointId(
+      item.parent_checkpoint_public_id,
+      "stream checkpoint parent id",
+    );
+  const chainDepth = integer(item.chain_depth, "stream checkpoint lineage depth");
+  if (
+    (mode === "bounded" && (baseId !== null || parentId !== null || chainDepth !== 0)) ||
+    (mode === "incremental" && (baseId === null || parentId !== null || chainDepth !== 0)) ||
+    (mode === "resume" && (baseId === null || parentId === null || chainDepth < 1))
+  ) fail("stream checkpoint lineage is inconsistent");
+  return {
+    acquisition_mode: mode,
+    base_snapshot_public_id: baseId,
+    parent_checkpoint_public_id: parentId,
+    chain_depth: chainDepth,
+  };
+}
+
+export function parseWalletCaseStreamCheckpointDetail(
+  value: unknown,
+): WalletCaseStreamCheckpointDetailResponse {
+  const item = record(
+    value,
+    ["checkpoint", "document", "lineage"],
+    "stream checkpoint detail",
+  );
+  const checkpoint = parseCheckpoint({
+    checkpoint: item.checkpoint,
+    document: item.document,
+  });
+  const lineage = parseLineage(item.lineage);
+  if (lineage.acquisition_mode !== checkpoint.document.acquisition_mode) {
+    fail("stream checkpoint detail lineage does not match its document");
+  }
+  return { ...checkpoint, lineage };
+}
+
+export function parseWalletCaseStreamCheckpointHistory(
+  value: unknown,
+): WalletCaseStreamCheckpointHistoryResponse {
+  const item = record(value, [
+    "contract_version", "case_public_id", "revision_cutoff_public_id", "items",
+    "aggregate", "page", "limitations",
+  ], "stream checkpoint history");
+  if (item.contract_version !== "wallet_case_stream_checkpoint_history_v1") {
+    fail("stream checkpoint history contract is unsupported");
+  }
+  const caseId = publicId(item.case_public_id, "stream checkpoint history case id");
+  const cutoffId = item.revision_cutoff_public_id === null
+    ? null : checkpointId(
+      item.revision_cutoff_public_id,
+      "stream checkpoint history cutoff id",
+    );
+  if (!Array.isArray(item.items) || item.items.length > 50) {
+    fail("stream checkpoint history items are invalid");
+  }
+  const items = item.items.map((value, index) => {
+    const entry = record(value, [
+      "checkpoint", "lineage", "continuation_page_index", "page_count",
+      "pages_succeeded",
+    ], `stream checkpoint history item ${index}`);
+    const checkpoint = parseDescriptor(entry.checkpoint);
+    const lineage = parseLineage(entry.lineage);
+    const continuationPage = entry.continuation_page_index === null
+      ? null : integer(
+        entry.continuation_page_index,
+        `stream checkpoint history item ${index} continuation page`,
+      );
+    const pageCount = integer(
+      entry.page_count,
+      `stream checkpoint history item ${index} page count`,
+    );
+    const pagesSucceeded = integer(
+      entry.pages_succeeded,
+      `stream checkpoint history item ${index} pages succeeded`,
+    );
+    if (
+      pagesSucceeded > pageCount ||
+      (checkpoint.resume_state === "ready") !== (continuationPage !== null) ||
+      (continuationPage !== null && continuationPage < 1)
+    ) fail(`stream checkpoint history item ${index} is inconsistent`);
+    return {
+      checkpoint,
+      lineage,
+      continuation_page_index: continuationPage,
+      page_count: pageCount,
+      pages_succeeded: pagesSucceeded,
+    };
+  });
+  const aggregate = record(
+    item.aggregate,
+    ["total_revisions", "returned_count"],
+    "stream checkpoint history aggregate",
+  );
+  const totalRevisions = integer(
+    aggregate.total_revisions,
+    "stream checkpoint history total revisions",
+  );
+  const returnedCount = integer(
+    aggregate.returned_count,
+    "stream checkpoint history returned count",
+  );
+  const page = record(
+    item.page,
+    ["limit", "has_more", "next_cursor"],
+    "stream checkpoint history page",
+  );
+  const limit = integer(page.limit, "stream checkpoint history limit");
+  const hasMore = page.has_more;
+  if (typeof hasMore !== "boolean") fail("stream checkpoint history has-more flag is invalid");
+  const nextCursor = nullableText(
+    page.next_cursor,
+    "stream checkpoint history cursor",
+    1024,
+  );
+  if (!Array.isArray(item.limitations)) {
+    fail("stream checkpoint history limitations are invalid");
+  }
+  const limitations = item.limitations.map((value, index) => {
+    const limitation = record(
+      value,
+      ["code", "message"],
+      `stream checkpoint history limitation ${index}`,
+    );
+    return {
+      code: text(limitation.code, "stream checkpoint history limitation code", 64),
+      message: text(
+        limitation.message,
+        "stream checkpoint history limitation message",
+        500,
+      ),
+    };
+  });
+  if (
+    limit < 1 || limit > 50 || items.length > limit ||
+    returnedCount !== items.length || returnedCount > totalRevisions ||
+    (hasMore && returnedCount >= totalRevisions) ||
+    (cutoffId === null) !== (totalRevisions === 0) ||
+    hasMore !== (nextCursor !== null) ||
+    new Set(items.map(({ checkpoint }) => checkpoint.public_id)).size !== items.length
+  ) fail("stream checkpoint history is inconsistent");
+  return {
+    contract_version: "wallet_case_stream_checkpoint_history_v1",
+    case_public_id: caseId,
+    revision_cutoff_public_id: cutoffId,
+    items,
+    aggregate: { total_revisions: totalRevisions, returned_count: returnedCount },
+    page: { limit, has_more: hasMore, next_cursor: nextCursor },
+    limitations,
+  };
 }
 
 export function parseWalletCaseStreamCheckpointCatalog(

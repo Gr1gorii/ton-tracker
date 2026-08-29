@@ -16,6 +16,24 @@ describe("Wallet Case acquisition manifest contracts", () => {
     );
   });
 
+  it("accepts a manifest produced by a checkpoint resume", () => {
+    const fixture = manifestResponseFixture();
+    const resumed = {
+      ...fixture,
+      document: {
+        ...fixture.document,
+        acquisition_mode: "resume" as const,
+        base_snapshot_public_id: "00000000-0000-4000-8000-000000000003",
+      },
+    };
+
+    expect(parseWalletCaseSyncManifestResponse(resumed)).toEqual(resumed);
+    expect(() => parseWalletCaseSyncManifestResponse({
+      ...resumed,
+      document: { ...resumed.document, base_snapshot_public_id: null },
+    })).toThrow(/lineage/);
+  });
+
   it("rejects identity, count, lineage, and shape contradictions", () => {
     const fixture = manifestResponseFixture();
     expect(() => parseWalletCaseSyncManifestResponse({

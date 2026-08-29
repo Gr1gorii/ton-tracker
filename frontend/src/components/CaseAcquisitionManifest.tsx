@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowClockwise,
+  ClockCounterClockwise,
   Fingerprint,
+  MagnifyingGlass,
   ShieldCheck,
   SpinnerGap,
   WarningCircle,
@@ -14,6 +16,12 @@ import {
 } from "../walletCaseApi";
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
 import type { WalletCaseStreamCheckpointCatalogResponse } from "../walletCaseStreamCheckpoint";
+import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
+
+function formatTimestamp(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
 
 export default function CaseAcquisitionManifest({
   caseId,
@@ -32,6 +40,7 @@ export default function CaseAcquisitionManifest({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
 
   useEffect(() => {
     requestRef.current?.abort();
@@ -58,6 +67,7 @@ export default function CaseAcquisitionManifest({
           controller.signal,
         ),
         getWalletCaseStreamCheckpoints(caseId, controller.signal),
+        checkpointHistory.load(),
       ]);
       if (manifestResponse.manifest.public_id !== descriptor.public_id) {
         throw new Error("The loaded manifest does not match this snapshot descriptor.");
@@ -178,6 +188,99 @@ export default function CaseAcquisitionManifest({
                       ))}
                     </ul>
                   )}
+                  <section className="case-checkpoint-history">
+                    <header>
+                      <span>
+                        <ClockCounterClockwise size={17} />
+                        <strong>Checkpoint revision history</strong>
+                      </span>
+                      {checkpointHistory.history && (
+                        <small>
+                          {checkpointHistory.history.items.length} of
+                          {" "}{checkpointHistory.history.totalRevisions} loaded
+                        </small>
+                      )}
+                    </header>
+                    {checkpointHistory.historyState === "loading" && (
+                      <span className="case-checkpoint-history-loading">
+                        <SpinnerGap className="spin" size={16} /> Verifying revisions…
+                      </span>
+                    )}
+                    {checkpointHistory.history?.items.length === 0 && (
+                      <span>No checkpoint revisions have been published.</span>
+                    )}
+                    {checkpointHistory.history && checkpointHistory.history.items.length > 0 && (
+                      <ol>
+                        {checkpointHistory.history.items.map((item) => (
+                          <li key={item.checkpoint.public_id}>
+                            <span>
+                              <b>{item.checkpoint.provider} / {item.checkpoint.stream_key}</b>
+                              <small>
+                                {item.lineage.acquisition_mode === "resume"
+                                  ? `Resume lineage depth ${item.lineage.chain_depth}`
+                                  : item.lineage.acquisition_mode === "incremental"
+                                    ? "Incremental root revision"
+                                    : "Bounded root revision"}
+                                {" · "}{item.pages_succeeded}/{item.page_count} pages
+                                {" · "}{formatTimestamp(item.checkpoint.created_at)}
+                              </small>
+                              <code>{item.checkpoint.public_id}</code>
+                            </span>
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              disabled={checkpointHistory.selectionLoading}
+                              aria-label={`Inspect checkpoint revision ${item.checkpoint.public_id}`}
+                              onClick={() => void checkpointHistory.inspect(
+                                item.checkpoint.public_id,
+                              )}
+                            >
+                              {checkpointHistory.selectionLoading
+                                ? <SpinnerGap className="spin" size={14} />
+                                : <MagnifyingGlass size={14} />}
+                              Inspect
+                            </button>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                    {checkpointHistory.selected && (
+                      <dl className="case-checkpoint-revision-detail" role="status">
+                        <div><dt>Verified revision</dt><dd><code>{checkpointHistory.selected.checkpoint.public_id}</code></dd></div>
+                        <div><dt>Source sync</dt><dd><code>{checkpointHistory.selected.document.source_sync_public_id}</code></dd></div>
+                        <div><dt>Source manifest</dt><dd><code>{checkpointHistory.selected.document.source_manifest_public_id}</code></dd></div>
+                        <div><dt>Parent revision</dt><dd><code>{checkpointHistory.selected.lineage.parent_checkpoint_public_id ?? "Root revision"}</code></dd></div>
+                        <div><dt>Chain depth</dt><dd>{checkpointHistory.selected.lineage.chain_depth}</dd></div>
+                        <div><dt>Resume state</dt><dd>{checkpointHistory.selected.document.resume_state}</dd></div>
+                      </dl>
+                    )}
+                    {(checkpointHistory.historyError || checkpointHistory.selectionError) && (
+                      <div className="case-sync-message is-error" role="alert">
+                        <WarningCircle size={16} weight="fill" />
+                        <span>{checkpointHistory.historyError ?? checkpointHistory.selectionError}</span>
+                      </div>
+                    )}
+                    {checkpointHistory.history?.hasMore && (
+                      <button
+                        className="button-secondary case-checkpoint-load-more"
+                        type="button"
+                        disabled={checkpointHistory.historyState !== "idle"}
+                        onClick={() => void checkpointHistory.loadMore()}
+                      >
+                        {checkpointHistory.historyState === "loading-more"
+                          ? <SpinnerGap className="spin" size={15} />
+                          : <ClockCounterClockwise size={15} />}
+                        {checkpointHistory.historyState === "loading-more"
+                          ? "Loading older…"
+                          : "Load older revisions"}
+                      </button>
+                    )}
+                    {checkpointHistory.history?.limitations[0] && (
+                      <small className="case-checkpoint-history-boundary">
+                        {checkpointHistory.history.limitations[0].message}
+                      </small>
+                    )}
+                  </section>
                 </section>
               )}
             </div>

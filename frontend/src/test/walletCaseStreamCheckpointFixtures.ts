@@ -1,4 +1,8 @@
-import type { WalletCaseStreamCheckpointCatalogResponse } from "../walletCaseStreamCheckpoint";
+import type {
+  WalletCaseStreamCheckpointCatalogResponse,
+  WalletCaseStreamCheckpointDetailResponse,
+  WalletCaseStreamCheckpointHistoryResponse,
+} from "../walletCaseStreamCheckpoint";
 import {
   CASE_ID,
   CHECKPOINT_ID,
@@ -66,5 +70,51 @@ export function streamCheckpointCatalogFixture(): WalletCaseStreamCheckpointCata
         },
       },
     ],
+  };
+}
+
+export function streamCheckpointDetailFixture(): WalletCaseStreamCheckpointDetailResponse {
+  const checkpoint = streamCheckpointCatalogFixture().checkpoints[0];
+  return {
+    ...checkpoint,
+    lineage: {
+      acquisition_mode: "bounded",
+      base_snapshot_public_id: null,
+      parent_checkpoint_public_id: null,
+      chain_depth: 0,
+    },
+  };
+}
+
+export function streamCheckpointHistoryFixture(
+  { hasMore = true }: { hasMore?: boolean } = {},
+): WalletCaseStreamCheckpointHistoryResponse {
+  const { checkpoint, document } = streamCheckpointCatalogFixture().checkpoints[0];
+  return {
+    contract_version: "wallet_case_stream_checkpoint_history_v1",
+    case_public_id: CASE_ID,
+    revision_cutoff_public_id: checkpoint.public_id,
+    items: [{
+      checkpoint,
+      lineage: {
+        acquisition_mode: "bounded",
+        base_snapshot_public_id: null,
+        parent_checkpoint_public_id: null,
+        chain_depth: 0,
+      },
+      continuation_page_index: document.continuation_page_index,
+      page_count: document.page_count,
+      pages_succeeded: document.pages_succeeded,
+    }],
+    aggregate: { total_revisions: hasMore ? 2 : 1, returned_count: 1 },
+    page: {
+      limit: 1,
+      has_more: hasMore,
+      next_cursor: hasMore ? "opaque-signed.cursor" : null,
+    },
+    limitations: [{
+      code: "checkpoint_history_is_explicit_revisions",
+      message: "Checkpoint revisions do not prove complete wallet history.",
+    }],
   };
 }

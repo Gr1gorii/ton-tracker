@@ -10,6 +10,7 @@ from database import get_session
 from services.wallet_cases import (
     WalletCaseArchiveConflict,
     WalletCaseCatalogInvalidCursor,
+    WalletCaseCheckpointHistoryInvalidCursor,
     WalletCaseCheckpointResumeUnavailable,
     WalletCaseDeletionConflict,
     WalletCaseMetadataConflict,
@@ -33,6 +34,8 @@ from wallet_case_schemas import (
     WalletCaseSyncRequest,
     WalletCaseSyncManifestResponse,
     WalletCaseStreamCheckpointCatalogResponse,
+    WalletCaseStreamCheckpointDetailResponse,
+    WalletCaseStreamCheckpointHistoryResponse,
     WalletCaseSyncResponse,
     WalletCaseUpsertResponse,
 )
@@ -554,6 +557,135 @@ def list_wallet_case_stream_checkpoints(
     response.headers["Cache-Control"] = "no-store"
     try:
         return WalletCaseService(session).list_stream_checkpoints(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "stream_checkpoint_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case stream checkpoint storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/stream-checkpoints/history",
+    response_model=WalletCaseStreamCheckpointHistoryResponse,
+)
+def list_wallet_case_stream_checkpoint_history(
+    request: Request,
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    limit: str = Query(
+        "20",
+        pattern=r"^[1-9][0-9]*$",
+        max_length=2,
+        description="Canonical checkpoint revision page size from 1 through 50.",
+    ),
+    cursor: str | None = Query(
+        None,
+        min_length=1,
+        max_length=1024,
+        description="Authenticated continuation from the preceding history page.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read a frozen, newest-first page of verified checkpoint revisions."""
+    query_pairs = request.query_params.multi_items()
+    if any(name not in {"limit", "cursor"} for name, _value in query_pairs):
+        raise HTTPException(
+            status_code=422,
+            detail="Checkpoint history contains an unsupported query parameter",
+        )
+    for name in ("limit", "cursor"):
+        if len(request.query_params.getlist(name)) > 1:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Checkpoint history {name} must be provided at most once",
+            )
+    canonical_limit = int(limit, 10)
+    if canonical_limit > 50:
+        raise HTTPException(
+            status_code=422,
+            detail="limit must be no greater than 50",
+        )
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).list_stream_checkpoint_history(
+            public_id,
+            limit=canonical_limit,
+            cursor=cursor,
+        )
+    except WalletCaseCheckpointHistoryInvalidCursor as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "stream_checkpoint_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case checkpoint history storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/stream-checkpoints/{checkpoint_public_id}",
+    response_model=WalletCaseStreamCheckpointDetailResponse,
+)
+def read_wallet_case_stream_checkpoint(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    checkpoint_public_id: str = Path(
+        ...,
+        pattern=_CHECKPOINT_ID_PATTERN,
+        max_length=68,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read one exact, verified checkpoint revision and its lineage."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_stream_checkpoint_detail(
+            public_id,
+            checkpoint_public_id,
+        )
     except WalletCaseNotFound as exc:
         raise HTTPException(
             status_code=404,

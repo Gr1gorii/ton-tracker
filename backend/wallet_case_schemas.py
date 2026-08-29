@@ -324,11 +324,26 @@ class WalletCaseSyncManifestDocument(_StrictModel):
     sync_state: CaseSyncState
     snapshot_period: WalletCaseSyncManifestPeriod
     acquisition_period: WalletCaseSyncManifestPeriod
-    acquisition_mode: Literal["bounded", "incremental"]
+    acquisition_mode: Literal["bounded", "incremental", "resume"]
     overlap_seconds: int = Field(ge=0, le=86400)
     base_snapshot_public_id: CanonicalPublicId | None = None
     requested_surfaces: list[WalletIngestionSurface]
     streams: list[WalletCaseSyncManifestStream]
+
+    @model_validator(mode="after")
+    def _validate_acquisition_lineage(self):
+        if self.acquisition_mode == "bounded":
+            if (
+                self.overlap_seconds != 0
+                or self.base_snapshot_public_id is not None
+                or self.snapshot_period != self.acquisition_period
+            ):
+                raise ValueError("bounded acquisition manifest lineage is invalid")
+        elif self.base_snapshot_public_id is None:
+            raise ValueError("continued acquisition manifests require a base snapshot")
+        elif self.acquisition_mode == "resume" and self.overlap_seconds != 0:
+            raise ValueError("resume acquisition manifests cannot overlap")
+        return self
 
 
 class WalletCaseSyncManifestResponse(_StrictModel):
@@ -356,7 +371,7 @@ class WalletCaseStreamCheckpointDocument(_StrictModel):
     provider: str = Field(min_length=1, max_length=64)
     stream_key: str = Field(min_length=1, max_length=40)
     provider_contract_version: str = Field(min_length=1, max_length=48)
-    acquisition_mode: Literal["bounded", "incremental"]
+    acquisition_mode: Literal["bounded", "incremental", "resume"]
     requested_period: WalletCaseSyncManifestPeriod
     sort_order: str | None = Field(default=None, max_length=32)
     page_size: int = Field(ge=0)
@@ -419,6 +434,102 @@ class WalletCaseStreamCheckpointCatalogResponse(_StrictModel):
             self.ready_count + self.complete_count + self.blocked_count
         ):
             raise ValueError("stream checkpoint state counts are inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointLineage(_StrictModel):
+    acquisition_mode: Literal["bounded", "incremental", "resume"]
+    base_snapshot_public_id: CanonicalPublicId | None = None
+    parent_checkpoint_public_id: CheckpointPublicId | None = None
+    chain_depth: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _validate_lineage(self):
+        if self.acquisition_mode == "bounded":
+            if (
+                self.base_snapshot_public_id is not None
+                or self.parent_checkpoint_public_id is not None
+                or self.chain_depth != 0
+            ):
+                raise ValueError("bounded checkpoint lineage is inconsistent")
+        elif self.acquisition_mode == "incremental":
+            if (
+                self.base_snapshot_public_id is None
+                or self.parent_checkpoint_public_id is not None
+                or self.chain_depth != 0
+            ):
+                raise ValueError("incremental checkpoint lineage is inconsistent")
+        elif (
+            self.base_snapshot_public_id is None
+            or self.parent_checkpoint_public_id is None
+            or self.chain_depth < 1
+        ):
+            raise ValueError("resume checkpoint lineage is inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointDetailResponse(_StrictModel):
+    checkpoint: WalletCaseStreamCheckpointDescriptor
+    document: WalletCaseStreamCheckpointDocument
+    lineage: WalletCaseStreamCheckpointLineage
+
+
+class WalletCaseStreamCheckpointHistoryItem(_StrictModel):
+    checkpoint: WalletCaseStreamCheckpointDescriptor
+    lineage: WalletCaseStreamCheckpointLineage
+    continuation_page_index: int | None = Field(default=None, ge=1)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _validate_page_counts(self):
+        if self.pages_succeeded > self.page_count:
+            raise ValueError("checkpoint history page counts are inconsistent")
+        if (self.checkpoint.resume_state == "ready") != (
+            self.continuation_page_index is not None
+        ):
+            raise ValueError("checkpoint history continuation is inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointHistoryAggregate(_StrictModel):
+    total_revisions: int = Field(ge=0)
+    returned_count: int = Field(ge=0, le=50)
+
+
+class WalletCaseStreamCheckpointHistoryPage(_StrictModel):
+    limit: int = Field(ge=1, le=50)
+    has_more: bool
+    next_cursor: str | None = Field(default=None, max_length=1024)
+
+    @model_validator(mode="after")
+    def _validate_cursor(self):
+        if self.has_more != (self.next_cursor is not None):
+            raise ValueError("checkpoint history cursor is inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointHistoryResponse(_StrictModel):
+    contract_version: Literal["wallet_case_stream_checkpoint_history_v1"]
+    case_public_id: CanonicalPublicId
+    revision_cutoff_public_id: CheckpointPublicId | None = None
+    items: list[WalletCaseStreamCheckpointHistoryItem] = Field(max_length=50)
+    aggregate: WalletCaseStreamCheckpointHistoryAggregate
+    page: WalletCaseStreamCheckpointHistoryPage
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_catalog(self):
+        if self.aggregate.returned_count != len(self.items):
+            raise ValueError("checkpoint history returned count is inconsistent")
+        if self.aggregate.returned_count > self.aggregate.total_revisions:
+            raise ValueError("checkpoint history returned count exceeds total")
+        if len(self.items) > self.page.limit:
+            raise ValueError("checkpoint history page exceeds its limit")
+        if (self.revision_cutoff_public_id is None) != (
+            self.aggregate.total_revisions == 0
+        ):
+            raise ValueError("checkpoint history cutoff is inconsistent")
         return self
 
 

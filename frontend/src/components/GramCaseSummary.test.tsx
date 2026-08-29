@@ -14,7 +14,11 @@ import {
   zeroSummaryFixture,
 } from "../test/walletCaseFixtures";
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
-import { streamCheckpointCatalogFixture } from "../test/walletCaseStreamCheckpointFixtures";
+import {
+  streamCheckpointCatalogFixture,
+  streamCheckpointDetailFixture,
+  streamCheckpointHistoryFixture,
+} from "../test/walletCaseStreamCheckpointFixtures";
 import { API_BASE } from "../apiBase";
 
 const mocks = vi.hoisted(() => ({ useWalletCaseSyncJob: vi.fn() }));
@@ -179,6 +183,12 @@ describe("GramCaseSummary", () => {
   it("shows and explicitly loads the content-addressed acquisition manifest", async () => {
     const payload = manifestResponseFixture();
     const checkpoints = streamCheckpointCatalogFixture();
+    const historyFixture = streamCheckpointHistoryFixture();
+    const history = {
+      ...historyFixture,
+      page: { ...historyFixture.page, limit: 10 },
+    };
+    const checkpointDetail = streamCheckpointDetailFixture();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(
         JSON.stringify(payload),
@@ -186,6 +196,14 @@ describe("GramCaseSummary", () => {
       ))
       .mockResolvedValueOnce(new Response(
         JSON.stringify(checkpoints),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(history),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(checkpointDetail),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ));
     vi.stubGlobal("fetch", fetchMock);
@@ -203,6 +221,16 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText("Durable stream checkpoints")).toBeTruthy();
     expect(screen.getByText(/1 ready · 0 complete · 0 blocked/)).toBeTruthy();
     expect(screen.getByText(/continuation verified; the next request starts at page 2/i)).toBeTruthy();
+    expect(screen.getByText("Checkpoint revision history")).toBeTruthy();
+    expect(screen.getByText((_content, element) => (
+      element?.textContent === "1 of 2 loaded"
+    ))).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Load older revisions" })).toBeTruthy();
+    await user.click(screen.getByRole("button", {
+      name: `Inspect checkpoint revision ${checkpoints.checkpoints[0].checkpoint.public_id}`,
+    }));
+    expect(await screen.findByText("Verified revision")).toBeTruthy();
+    expect(screen.getByText("Root revision")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Resume transactions stream" }));
     expect(controller.resume).toHaveBeenCalledWith(
       checkpoints.checkpoints[0].checkpoint.public_id,
@@ -213,6 +241,14 @@ describe("GramCaseSummary", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/history?limit=10`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/${checkpoints.checkpoints[0].checkpoint.public_id}`,
       expect.objectContaining({ cache: "no-store" }),
     );
   });
@@ -245,9 +281,14 @@ describe("GramCaseSummary", () => {
           },
         }],
       };
+      const history = streamCheckpointHistoryFixture({ hasMore: false });
       vi.stubGlobal("fetch", vi.fn()
         .mockResolvedValueOnce(new Response(JSON.stringify(payload), { status: 200 }))
-        .mockResolvedValueOnce(new Response(JSON.stringify(catalog), { status: 200 })));
+        .mockResolvedValueOnce(new Response(JSON.stringify(catalog), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          ...history,
+          page: { ...history.page, limit: 10 },
+        }), { status: 200 })));
       const user = userEvent.setup();
       renderSummary(walletCaseFixture());
 

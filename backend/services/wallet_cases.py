@@ -115,6 +115,12 @@ class WalletCaseCatalogInvalidCursor(ValueError):
     code = "invalid_case_catalog_cursor"
 
 
+class WalletCaseCheckpointHistoryInvalidCursor(ValueError):
+    """Raised when checkpoint history continuation cannot be authenticated."""
+
+    code = "invalid_checkpoint_history_cursor"
+
+
 class WalletCaseIncrementalSyncUnavailable(RuntimeError):
     """Raised when a Case has no safe forward-refresh baseline."""
 
@@ -139,6 +145,8 @@ _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
 _CASE_CATALOG_CURSOR_VERSION = 3
+_CHECKPOINT_HISTORY_CURSOR_KEY = secrets.token_bytes(32)
+_CHECKPOINT_HISTORY_CURSOR_VERSION = 1
 _INCREMENTAL_OVERLAP = timedelta(minutes=15)
 _ACQUISITION_PLAN_KEY = "_acquisition"
 _UNSET = object()
@@ -1115,6 +1123,250 @@ class WalletCaseService:
             "checkpoints": checkpoints,
         }
 
+    def get_stream_checkpoint_detail(
+        self,
+        case_public_id: str,
+        checkpoint_public_id: str,
+    ) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        checkpoint = self.repository.get_stream_checkpoint(
+            case_id=wallet_case.id,
+            public_id=checkpoint_public_id,
+        )
+        if checkpoint is None:
+            raise WalletCaseNotFound("Wallet Case stream checkpoint not found")
+        response = _stream_checkpoint_response(
+            checkpoint,
+            case_public_id=wallet_case.public_id,
+        )
+        return {
+            **response,
+            "lineage": self._stream_checkpoint_lineage(
+                checkpoint,
+                case_id=wallet_case.id,
+                case_public_id=wallet_case.public_id,
+            ),
+        }
+
+    def list_stream_checkpoint_history(
+        self,
+        case_public_id: str,
+        *,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        if limit < 1 or limit > 50:
+            raise WalletCaseCheckpointHistoryInvalidCursor(
+                "Checkpoint history limit must be between 1 and 50."
+            )
+        wallet_case = self._required_case(case_public_id)
+        cursor_document = (
+            _decode_checkpoint_history_cursor(cursor)
+            if cursor is not None
+            else None
+        )
+        if (
+            cursor_document is not None
+            and cursor_document["case"] != wallet_case.public_id
+        ):
+            raise WalletCaseCheckpointHistoryInvalidCursor(
+                "Checkpoint history cursor belongs to another Wallet Case."
+            )
+        cutoff = (
+            self.repository.latest_stream_checkpoint(case_id=wallet_case.id)
+            if cursor_document is None
+            else self.repository.get_stream_checkpoint(
+                case_id=wallet_case.id,
+                public_id=cursor_document["cutoff"],
+            )
+        )
+        limitations = [
+            _limitation(
+                "checkpoint_history_is_explicit_revisions",
+                (
+                    "Checkpoint history contains published provider continuation "
+                    "revisions and does not prove complete wallet history."
+                ),
+            )
+        ]
+        if cutoff is None:
+            if cursor_document is not None:
+                raise WalletCaseCheckpointHistoryInvalidCursor(
+                    "Checkpoint history cursor cutoff is unavailable."
+                )
+            return {
+                "contract_version": "wallet_case_stream_checkpoint_history_v1",
+                "case_public_id": wallet_case.public_id,
+                "revision_cutoff_public_id": None,
+                "items": [],
+                "aggregate": {"total_revisions": 0, "returned_count": 0},
+                "page": {
+                    "limit": limit,
+                    "has_more": False,
+                    "next_cursor": None,
+                },
+                "limitations": limitations,
+            }
+        after_id = None
+        if cursor_document is not None:
+            after = self.repository.get_stream_checkpoint(
+                case_id=wallet_case.id,
+                public_id=cursor_document["after"],
+            )
+            if after is None or after.id > cutoff.id:
+                raise WalletCaseCheckpointHistoryInvalidCursor(
+                    "Checkpoint history cursor position is unavailable."
+                )
+            after_id = after.id
+        rows = self.repository.stream_checkpoint_history(
+            case_id=wallet_case.id,
+            cutoff_id=cutoff.id,
+            after_id=after_id,
+            limit=limit + 1,
+        )
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        items = []
+        for checkpoint in visible:
+            response = _stream_checkpoint_response(
+                checkpoint,
+                case_public_id=wallet_case.public_id,
+            )
+            document = response["document"]
+            items.append(
+                {
+                    "checkpoint": response["checkpoint"],
+                    "lineage": self._stream_checkpoint_lineage(
+                        checkpoint,
+                        case_id=wallet_case.id,
+                        case_public_id=wallet_case.public_id,
+                    ),
+                    "continuation_page_index": document[
+                        "continuation_page_index"
+                    ],
+                    "page_count": document["page_count"],
+                    "pages_succeeded": document["pages_succeeded"],
+                }
+            )
+        next_cursor = None
+        if has_more:
+            next_cursor = _encode_checkpoint_history_cursor(
+                {
+                    "v": _CHECKPOINT_HISTORY_CURSOR_VERSION,
+                    "case": wallet_case.public_id,
+                    "cutoff": cutoff.public_id,
+                    "after": visible[-1].public_id,
+                }
+            )
+            limitations.append(
+                _limitation(
+                    "checkpoint_history_cursor_local_process_scope",
+                    (
+                        "Pagination cursors are authenticated for this local API "
+                        "process and expire after restart."
+                    ),
+                )
+            )
+        total = self.repository.count_stream_checkpoint_history(
+            case_id=wallet_case.id,
+            cutoff_id=cutoff.id,
+        )
+        return {
+            "contract_version": "wallet_case_stream_checkpoint_history_v1",
+            "case_public_id": wallet_case.public_id,
+            "revision_cutoff_public_id": cutoff.public_id,
+            "items": items,
+            "aggregate": {
+                "total_revisions": total,
+                "returned_count": len(items),
+            },
+            "page": {
+                "limit": limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "limitations": limitations,
+        }
+
+    def _stream_checkpoint_lineage(
+        self,
+        checkpoint: WalletCaseStreamCheckpoint,
+        *,
+        case_id: int,
+        case_public_id: str,
+    ) -> dict[str, Any]:
+        current = checkpoint
+        seen: set[str] = set()
+        chain_depth = 0
+        initial_mode: str | None = None
+        initial_base: str | None = None
+        initial_parent: str | None = None
+        while True:
+            if current.public_id in seen:
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case stream checkpoint lineage contains a cycle."
+                )
+            seen.add(current.public_id)
+            _stream_checkpoint_response(
+                current,
+                case_public_id=case_public_id,
+            )
+            try:
+                plan = _sync_acquisition_plan(current.source_sync)
+            except ValueError as exc:
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case stream checkpoint lineage is invalid."
+                ) from exc
+            mode = plan["mode"]
+            base_public_id = plan["base_snapshot_public_id"]
+            parent_public_id = plan.get("source_checkpoint_public_id")
+            if initial_mode is None:
+                initial_mode = mode
+                initial_base = base_public_id
+                initial_parent = parent_public_id
+            if mode != "resume":
+                if parent_public_id is not None:
+                    raise WalletCaseStreamCheckpointCorrupt(
+                        "Stored Wallet Case stream checkpoint lineage is invalid."
+                    )
+                if mode == "incremental":
+                    base_sync = self.repository.get_sync(
+                        case_id=case_id,
+                        public_id=base_public_id,
+                    )
+                    if (
+                        base_sync is None
+                        or base_sync.id >= current.source_sync.id
+                    ):
+                        raise WalletCaseStreamCheckpointCorrupt(
+                            "Stored Wallet Case stream checkpoint base snapshot is invalid."
+                        )
+                break
+            parent = self.repository.get_stream_checkpoint(
+                case_id=case_id,
+                public_id=parent_public_id,
+            )
+            if (
+                parent is None
+                or parent.id >= current.id
+                or base_public_id != parent.source_sync.public_id
+                or parent.provider != current.provider
+                or parent.stream_key != current.stream_key
+                or parent.provider_contract_version
+                != current.provider_contract_version
+            ):
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case stream checkpoint parent is invalid."
+                )
+            chain_depth += 1
+            current = parent
+        return {
+            "acquisition_mode": initial_mode,
+            "base_snapshot_public_id": initial_base,
+            "parent_checkpoint_public_id": initial_parent,
+            "chain_depth": chain_depth,
+        }
+
     def get_job(self, sync_public_id: str) -> dict[str, Any]:
         case_sync = self.repository.get_sync_by_public_id_for_owner(
             owner_scope_id=self.owner_scope_id,
@@ -2059,6 +2311,16 @@ def _stream_checkpoint_response(
             "Stored Wallet Case stream checkpoint failed integrity validation."
         ) from exc
     source_sync = checkpoint.source_sync
+    if source_sync.case_id != checkpoint.case_id:
+        raise WalletCaseStreamCheckpointCorrupt(
+            "Stored Wallet Case stream checkpoint source sync is foreign."
+        )
+    try:
+        acquisition_plan = _sync_acquisition_plan(source_sync)
+    except ValueError as exc:
+        raise WalletCaseStreamCheckpointCorrupt(
+            "Stored Wallet Case stream checkpoint acquisition plan is invalid."
+        ) from exc
     source_manifest = source_sync.acquisition_manifest
     if source_manifest is None:
         raise WalletCaseStreamCheckpointCorrupt(
@@ -2086,6 +2348,17 @@ def _stream_checkpoint_response(
         or document.get("stream_key") != checkpoint.stream_key
         or document.get("provider_contract_version")
         != checkpoint.provider_contract_version
+        or document.get("acquisition_mode") != acquisition_plan["mode"]
+        or document.get("requested_period")
+        != {
+            "start_at": acquisition_plan["start_at"],
+            "end_at": acquisition_plan["end_at"],
+        }
+        or (
+            acquisition_plan["mode"] == "resume"
+            and acquisition_plan.get("resume_stream_key")
+            != checkpoint.stream_key
+        )
         or document.get("resume_state") != checkpoint.resume_state
         or document.get("continuation_cursor")
         != checkpoint.continuation_cursor
@@ -2307,6 +2580,81 @@ def _case_catalog_cursor_json(value: dict[str, Any]) -> bytes:
         separators=(",", ":"),
         ensure_ascii=True,
     ).encode("utf-8")
+
+
+def _encode_checkpoint_history_cursor(document: dict[str, Any]) -> str:
+    payload = _case_catalog_cursor_json(document)
+    encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        _CHECKPOINT_HISTORY_CURSOR_KEY,
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _decode_checkpoint_history_cursor(value: str) -> dict[str, Any]:
+    error = "Checkpoint history cursor is invalid."
+    if not value or len(value) > 1024 or value.count(".") != 1:
+        raise WalletCaseCheckpointHistoryInvalidCursor(error)
+    encoded, signature = value.split(".", 1)
+    if (
+        not encoded
+        or len(signature) != 64
+        or any(char not in "0123456789abcdef" for char in signature)
+        or any(
+            char
+            not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for char in encoded
+        )
+    ):
+        raise WalletCaseCheckpointHistoryInvalidCursor(error)
+    try:
+        padding = "=" * ((4 - len(encoded) % 4) % 4)
+        raw = base64.urlsafe_b64decode((encoded + padding).encode("ascii"))
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise WalletCaseCheckpointHistoryInvalidCursor(error) from exc
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"v", "case", "cutoff", "after"}
+        or document.get("v") != _CHECKPOINT_HISTORY_CURSOR_VERSION
+    ):
+        raise WalletCaseCheckpointHistoryInvalidCursor(
+            "Checkpoint history cursor shape is invalid."
+        )
+    expected = hmac.new(
+        _CHECKPOINT_HISTORY_CURSOR_KEY,
+        raw,
+        hashlib.sha256,
+    ).hexdigest()
+    if (
+        not hmac.compare_digest(signature, expected)
+        or _encode_checkpoint_history_cursor(document) != value
+    ):
+        raise WalletCaseCheckpointHistoryInvalidCursor(
+            "Checkpoint history cursor signature is invalid."
+        )
+    case_public_id = document.get("case")
+    identifiers = (document.get("cutoff"), document.get("after"))
+    if (
+        not isinstance(case_public_id, str)
+        or len(case_public_id) != 36
+        or any(
+            not isinstance(identifier, str)
+            or len(identifier) != 68
+            or not identifier.startswith("scp_")
+            or any(
+                char not in "0123456789abcdef"
+                for char in identifier[4:]
+            )
+            for identifier in identifiers
+        )
+    ):
+        raise WalletCaseCheckpointHistoryInvalidCursor(
+            "Checkpoint history cursor identifiers are invalid."
+        )
+    return document
 
 
 def _encode_case_catalog_cursor(document: dict[str, Any]) -> str:
