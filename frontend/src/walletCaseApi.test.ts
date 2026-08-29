@@ -14,6 +14,8 @@ import {
   getWalletCaseActivityDetail,
   getWalletCaseSync,
   getWalletCaseSyncManifest,
+  getWalletCaseStreamCheckpoint,
+  getWalletCaseStreamCheckpointHistory,
   getWalletCaseStreamCheckpoints,
   listWalletCases,
   restoreWalletCase,
@@ -39,7 +41,11 @@ import {
   activityResponseFixture,
 } from "./test/walletCaseActivityFixtures";
 import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
-import { streamCheckpointCatalogFixture } from "./test/walletCaseStreamCheckpointFixtures";
+import {
+  streamCheckpointCatalogFixture,
+  streamCheckpointDetailFixture,
+  streamCheckpointHistoryFixture,
+} from "./test/walletCaseStreamCheckpointFixtures";
 
 const OTHER_CASE_ID = "550e8400-e29b-41d4-a716-446655440099";
 const OTHER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440099";
@@ -507,6 +513,61 @@ describe("Wallet Case API", () => {
     await expect(getWalletCaseStreamCheckpoints(CASE_ID)).rejects.toThrow(
       /does not match/,
     );
+  });
+
+  it("reads exact checkpoint detail and opaque frozen history pages", async () => {
+    const detail = streamCheckpointDetailFixture();
+    const history = streamCheckpointHistoryFixture();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(jsonResponse(history));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseStreamCheckpoint(
+      CASE_ID,
+      CHECKPOINT_ID,
+      controller.signal,
+    )).resolves.toEqual(detail);
+    await expect(getWalletCaseStreamCheckpointHistory({
+      caseId: CASE_ID,
+      limit: 1,
+      cursor: "opaque-signed.cursor",
+      signal: controller.signal,
+    })).resolves.toEqual(history);
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        `${API_BASE}/api/v1/cases/${CASE_ID}/stream-checkpoints/${CHECKPOINT_ID}`,
+        { cache: "no-store", signal: controller.signal },
+      ],
+      [
+        `${API_BASE}/api/v1/cases/${CASE_ID}/stream-checkpoints/history?limit=1&cursor=opaque-signed.cursor`,
+        { cache: "no-store", signal: controller.signal },
+      ],
+    ]);
+  });
+
+  it("rejects unsafe checkpoint history inputs and response scope", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getWalletCaseStreamCheckpointHistory({
+      caseId: CASE_ID,
+      limit: 51,
+    })).rejects.toThrow(/1 through 50/);
+    await expect(getWalletCaseStreamCheckpointHistory({
+      caseId: CASE_ID,
+      cursor: "",
+    })).rejects.toThrow(/cursor is invalid/);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...streamCheckpointHistoryFixture(),
+      case_public_id: OTHER_CASE_ID,
+    }));
+    await expect(getWalletCaseStreamCheckpointHistory({
+      caseId: CASE_ID,
+      limit: 1,
+    })).rejects.toThrow(/does not match/);
   });
 
   it("resumes one canonical checkpoint with a bound idempotent POST", async () => {

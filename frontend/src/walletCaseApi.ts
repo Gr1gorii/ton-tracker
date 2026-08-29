@@ -23,7 +23,11 @@ import {
 } from "./walletCaseSyncManifest";
 import {
   parseWalletCaseStreamCheckpointCatalog,
+  parseWalletCaseStreamCheckpointDetail,
+  parseWalletCaseStreamCheckpointHistory,
   type WalletCaseStreamCheckpointCatalogResponse,
+  type WalletCaseStreamCheckpointDetailResponse,
+  type WalletCaseStreamCheckpointHistoryResponse,
 } from "./walletCaseStreamCheckpoint";
 import {
   isWalletCaseAssetPublicId,
@@ -573,6 +577,73 @@ export async function getWalletCaseStreamCheckpoints(
     throw new Error("Wallet Case stream checkpoint catalog does not match the request");
   }
   return catalog;
+}
+
+export async function getWalletCaseStreamCheckpoint(
+  caseId: string,
+  checkpointId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseStreamCheckpointDetailResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  assertCheckpointId(checkpointId);
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/stream-checkpoints/${encodeURIComponent(checkpointId)}`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case stream checkpoint detail read failed",
+    );
+  }
+  const detail = parseWalletCaseStreamCheckpointDetail(await response.json());
+  if (
+    detail.document.case_public_id !== caseId ||
+    detail.checkpoint.public_id !== checkpointId
+  ) {
+    throw new Error("Wallet Case stream checkpoint detail does not match the request");
+  }
+  return detail;
+}
+
+export async function getWalletCaseStreamCheckpointHistory({
+  caseId,
+  limit = 20,
+  cursor,
+  signal,
+}: {
+  caseId: string;
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
+}): Promise<WalletCaseStreamCheckpointHistoryResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new Error("Wallet Case checkpoint history limit must be from 1 through 50");
+  }
+  if (cursor !== undefined && (!cursor || cursor.length > 1024)) {
+    throw new Error("Wallet Case checkpoint history cursor is invalid");
+  }
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor !== undefined) query.set("cursor", cursor);
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/stream-checkpoints/history?${query}`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case checkpoint history read failed",
+    );
+  }
+  const history = parseWalletCaseStreamCheckpointHistory(await response.json());
+  if (
+    history.case_public_id !== caseId ||
+    history.page.limit !== limit
+  ) {
+    throw new Error("Wallet Case checkpoint history does not match the request");
+  }
+  return history;
 }
 
 export async function resumeWalletCaseStreamCheckpoint(
