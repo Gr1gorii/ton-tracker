@@ -9,12 +9,14 @@ import type { WalletCaseSyncJobController } from "../useWalletCaseSyncJob";
 import {
   activeSyncFixture,
   emptyWalletCaseFixture,
+  resumeSyncFixture,
   succeededSyncFixture,
   walletCaseFixture,
   zeroSummaryFixture,
 } from "../test/walletCaseFixtures";
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
 import {
+  checkpointContinuationReceiptFixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -306,6 +308,60 @@ describe("GramCaseSummary", () => {
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/${checkpoints.checkpoints[0].checkpoint.public_id}/chain`,
       expect.objectContaining({ cache: "no-store" }),
     );
+  });
+
+  it("verifies and exports the immutable result of a plan-bound resume", async () => {
+    const receipt = checkpointContinuationReceiptFixture();
+    const base = resumeSyncFixture();
+    const snapshot = resumeSyncFixture({
+      requested_scope: {
+        ...base.requested_scope,
+        source_checkpoint_public_id: receipt.receipt.input_checkpoint_public_id,
+        continuation_plan_public_id: receipt.receipt.input_plan_public_id,
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(receipt),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderSummary(walletCaseFixture({
+      latestAttempt: snapshot,
+      currentSnapshot: snapshot,
+    }));
+
+    await user.click(screen.getByRole("button", {
+      name: "Verify continuation receipt",
+    }));
+
+    expect(await screen.findByText("Verified checkpoint transition")).toBeTruthy();
+    expect(screen.getByText(receipt.receipt.public_id)).toBeTruthy();
+    expect(screen.getByText((_content, element) => (
+      element?.textContent === `ready · next page ${receipt.document.output.next_page_index}`
+    ))).toBeTruthy();
+    expect(screen.getByText("Provider pages").closest("div")?.textContent).toContain(
+      `+${receipt.receipt.page_count_delta}`,
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/syncs/${snapshot.public_id}/continuation-receipt`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+
+    const createObjectUrl = vi.fn().mockReturnValue("blob:continuation-receipt");
+    const revokeObjectUrl = vi.fn();
+    vi.stubGlobal("URL", {
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    await user.click(screen.getByRole("button", {
+      name: "Export verified continuation receipt JSON",
+    }));
+    expect(createObjectUrl).toHaveBeenCalledOnce();
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:continuation-receipt");
+    anchorClick.mockRestore();
   });
 
   it.each(["blocked", "complete"] as const)(

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowClockwise,
+  ArrowRight,
   ClockCounterClockwise,
   DownloadSimple,
   Fingerprint,
@@ -13,14 +14,17 @@ import {
 
 import type { WalletCaseSync } from "../walletCase";
 import {
+  getWalletCaseCheckpointContinuationReceipt,
   getWalletCaseCheckpointContinuationPlan,
   getWalletCaseStreamCheckpoints,
   getWalletCaseSyncManifest,
 } from "../walletCaseApi";
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
 import {
+  serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
+  type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
   type WalletCaseStreamCheckpointChainResponse,
@@ -60,6 +64,20 @@ function downloadContinuationPlan(
   URL.revokeObjectURL(url);
 }
 
+function downloadContinuationReceipt(
+  receipt: WalletCaseCheckpointContinuationReceiptResponse,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseCheckpointContinuationReceipt(receipt)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `checkpoint-continuation-receipt-${receipt.receipt.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function CaseAcquisitionManifest({
   caseId,
   snapshot,
@@ -80,27 +98,42 @@ export default function CaseAcquisitionManifest({
   const [continuationPlan, setContinuationPlan] = useState<WalletCaseCheckpointContinuationPlanResponse | null>(null);
   const [continuationPlanLoading, setContinuationPlanLoading] = useState(false);
   const [continuationPlanError, setContinuationPlanError] = useState<string | null>(null);
+  const [continuationReceipt, setContinuationReceipt] = useState<WalletCaseCheckpointContinuationReceiptResponse | null>(null);
+  const [continuationReceiptLoading, setContinuationReceiptLoading] = useState(false);
+  const [continuationReceiptError, setContinuationReceiptError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const continuationPlanRequestRef = useRef<AbortController | null>(null);
+  const continuationReceiptRequestRef = useRef<AbortController | null>(null);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
+  const canVerifyContinuationReceipt = (
+    snapshot.requested_scope.mode === "resume" &&
+    snapshot.requested_scope.continuation_plan_public_id !== null &&
+    (snapshot.state === "partial" || snapshot.state === "succeeded")
+  );
 
   useEffect(() => {
     requestRef.current?.abort();
     continuationPlanRequestRef.current?.abort();
+    continuationReceiptRequestRef.current?.abort();
     requestRef.current = null;
     continuationPlanRequestRef.current = null;
+    continuationReceiptRequestRef.current = null;
     setDetail(null);
     setCheckpoints(null);
     setContinuationPlan(null);
     setContinuationPlanLoading(false);
     setContinuationPlanError(null);
+    setContinuationReceipt(null);
+    setContinuationReceiptLoading(false);
+    setContinuationReceiptError(null);
     setLoading(false);
     setError(null);
     return () => {
       requestRef.current?.abort();
       continuationPlanRequestRef.current?.abort();
+      continuationReceiptRequestRef.current?.abort();
     };
   }, [caseId, snapshot.public_id, descriptor?.public_id]);
 
@@ -164,6 +197,34 @@ export default function CaseAcquisitionManifest({
     }
   };
 
+  const loadContinuationReceipt = async () => {
+    if (!canVerifyContinuationReceipt || continuationReceiptLoading) return;
+    continuationReceiptRequestRef.current?.abort();
+    const controller = new AbortController();
+    continuationReceiptRequestRef.current = controller;
+    setContinuationReceiptLoading(true);
+    setContinuationReceiptError(null);
+    try {
+      setContinuationReceipt(await getWalletCaseCheckpointContinuationReceipt(
+        caseId,
+        snapshot.public_id,
+        controller.signal,
+      ));
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      setContinuationReceiptError(
+        cause instanceof Error
+          ? cause.message
+          : "Checkpoint continuation receipt read failed.",
+      );
+    } finally {
+      if (continuationReceiptRequestRef.current === controller) {
+        continuationReceiptRequestRef.current = null;
+        setContinuationReceiptLoading(false);
+      }
+    }
+  };
+
   return (
     <article className="case-detail-card case-manifest-card">
       <header>
@@ -202,6 +263,92 @@ export default function CaseAcquisitionManifest({
               <WarningCircle size={18} weight="fill" />
               <span>{error}</span>
             </div>
+          )}
+          {canVerifyContinuationReceipt && (
+            <section className="case-continuation-receipt-shell">
+              <header>
+                <div>
+                  <span className="eyebrow">Resume result</span>
+                  <strong>Continuation receipt</strong>
+                </div>
+                <button
+                  className="button-secondary"
+                  type="button"
+                  disabled={continuationReceiptLoading}
+                  onClick={() => void loadContinuationReceipt()}
+                >
+                  {continuationReceiptLoading
+                    ? <SpinnerGap className="spin" size={16} />
+                    : <ShieldCheck size={16} />}
+                  {continuationReceiptLoading
+                    ? "Verifying receipt…"
+                    : continuationReceipt
+                      ? "Verify receipt again"
+                      : "Verify continuation receipt"}
+                </button>
+              </header>
+              <p>
+                Reconstruct the exact checkpoint and plan transition published by
+                this plan-bound resume, independently of later continuations.
+              </p>
+              {continuationReceiptError && (
+                <div className="case-sync-message is-error" role="alert">
+                  <WarningCircle size={16} weight="fill" />
+                  <span>{continuationReceiptError}</span>
+                </div>
+              )}
+              {continuationReceipt && (
+                <section
+                  className="case-checkpoint-chain case-continuation-receipt"
+                  aria-label="Verified continuation receipt"
+                  role="status"
+                >
+                  <header>
+                    <span>
+                      <ShieldCheck size={18} />
+                      <strong>Verified checkpoint transition</strong>
+                    </span>
+                    <code>{continuationReceipt.receipt.public_id}</code>
+                  </header>
+                  <div className="case-continuation-transition">
+                    <article>
+                      <small>Accepted input</small>
+                      <b>Page {continuationReceipt.document.input.next_page_index}</b>
+                      <code>{continuationReceipt.receipt.input_plan_public_id}</code>
+                      <code>{continuationReceipt.receipt.input_checkpoint_public_id}</code>
+                    </article>
+                    <ArrowRight size={22} aria-hidden="true" />
+                    <article>
+                      <small>Published output</small>
+                      <b>
+                        {continuationReceipt.document.output.resume_state}
+                        {continuationReceipt.document.output.next_page_index !== null
+                          ? ` · next page ${continuationReceipt.document.output.next_page_index}`
+                          : ""}
+                      </b>
+                      <code>{continuationReceipt.receipt.output_checkpoint_public_id}</code>
+                      <code>{continuationReceipt.receipt.after_plan_public_id}</code>
+                    </article>
+                  </div>
+                  <dl>
+                    <div><dt>New revisions</dt><dd>+{continuationReceipt.receipt.revision_delta}</dd></div>
+                    <div><dt>Provider pages</dt><dd>+{continuationReceipt.receipt.page_count_delta}</dd></div>
+                    <div><dt>Successful pages</dt><dd>+{continuationReceipt.receipt.pages_succeeded_delta}</dd></div>
+                    <div><dt>After-plan streams</dt><dd>{continuationReceipt.document.after_plan.plan.stream_count}</dd></div>
+                  </dl>
+                  <button
+                    className="button-secondary case-checkpoint-chain-export"
+                    type="button"
+                    onClick={() => downloadContinuationReceipt(continuationReceipt)}
+                  >
+                    <DownloadSimple size={15} /> Export verified continuation receipt JSON
+                  </button>
+                  <small className="case-checkpoint-history-boundary">
+                    {continuationReceipt.document.limitations[0]?.message}
+                  </small>
+                </section>
+              )}
+            </section>
           )}
           {detail && (
             <div className="case-manifest-detail" role="status">

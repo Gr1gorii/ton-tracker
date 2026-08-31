@@ -189,6 +189,18 @@
 .case-manifest-actions { display: flex; margin-top: 16px; align-items: center; justify-content: space-between; gap: 20px; }
 .case-manifest-actions p { max-width: 720px; margin: 0; color: var(--text-muted); font-size: 0.8125rem; line-height: 1.55; }
 .case-manifest-actions button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.case-continuation-receipt-shell { display: grid; margin-top: 14px; padding: 14px 16px; gap: 9px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 13px; background: color-mix(in srgb, var(--accent) 4%, var(--surface-solid)); }
+.case-continuation-receipt-shell > header { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.case-continuation-receipt-shell > header > div { display: grid; gap: 2px; }
+.case-continuation-receipt-shell > header strong { color: var(--text); }
+.case-continuation-receipt-shell > header button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; }
+.case-continuation-receipt-shell > p { max-width: 780px; margin: 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.5; }
+.case-continuation-receipt { border-color: color-mix(in srgb, var(--success) 42%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); }
+.case-continuation-transition { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 10px; color: var(--accent); }
+.case-continuation-transition article { display: grid; min-width: 0; padding: 11px; gap: 4px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); }
+.case-continuation-transition small { color: var(--text-muted); font-size: 0.66rem; font-weight: 720; letter-spacing: 0.04em; text-transform: uppercase; }
+.case-continuation-transition b { color: var(--text); font-size: 0.78rem; }
+.case-continuation-transition code { display: block; overflow: hidden; max-width: 100%; color: var(--accent); font-size: 0.62rem; text-overflow: ellipsis; white-space: nowrap; }
 .case-manifest-detail { display: grid; margin-top: 14px; padding: 14px 16px; gap: 5px; border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border)); border-radius: 13px; color: var(--text-muted); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); font-size: 0.8125rem; line-height: 1.5; }
 .case-manifest-detail strong { color: var(--case-success-text); }
 .case-checkpoint-catalog { display: grid; margin-top: 9px; padding-top: 12px; gap: 6px; border-top: 1px solid color-mix(in srgb, var(--success) 22%, var(--border)); }
@@ -728,6 +740,10 @@
   .case-definition-list dd { text-align: left; }
   .case-manifest-actions { align-items: stretch; flex-direction: column; }
   .case-manifest-actions button { width: 100%; justify-content: center; }
+  .case-continuation-receipt-shell > header { align-items: stretch; flex-direction: column; }
+  .case-continuation-receipt-shell > header button { width: 100%; justify-content: center; }
+  .case-continuation-transition { grid-template-columns: 1fr; }
+  .case-continuation-transition > svg { margin: -2px auto; transform: rotate(90deg); }
   .case-checkpoint-catalog li { align-items: stretch; flex-direction: column; }
   .case-checkpoint-actions { align-items: stretch; flex-direction: column; }
   .case-checkpoint-actions button { width: 100%; justify-content: center; }
