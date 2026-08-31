@@ -147,6 +147,7 @@ _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
 _CASE_CATALOG_CURSOR_VERSION = 3
 _CHECKPOINT_HISTORY_CURSOR_KEY = secrets.token_bytes(32)
 _CHECKPOINT_HISTORY_CURSOR_VERSION = 1
+_MAX_CHECKPOINT_CHAIN_REVISIONS = 100
 _INCREMENTAL_OVERLAP = timedelta(minutes=15)
 _ACQUISITION_PLAN_KEY = "_acquisition"
 _UNSET = object()
@@ -1135,17 +1136,15 @@ class WalletCaseService:
         )
         if checkpoint is None:
             raise WalletCaseNotFound("Wallet Case stream checkpoint not found")
-        response = _stream_checkpoint_response(
+        chain = self._verified_stream_checkpoint_chain(
             checkpoint,
+            case_id=wallet_case.id,
             case_public_id=wallet_case.public_id,
         )
+        tip = chain[-1]
         return {
-            **response,
-            "lineage": self._stream_checkpoint_lineage(
-                checkpoint,
-                case_id=wallet_case.id,
-                case_public_id=wallet_case.public_id,
-            ),
+            **tip["response"],
+            "lineage": self._stream_checkpoint_lineage(chain),
         }
 
     def list_stream_checkpoint_history(
@@ -1228,19 +1227,17 @@ class WalletCaseService:
         visible = rows[:limit]
         items = []
         for checkpoint in visible:
-            response = _stream_checkpoint_response(
+            chain = self._verified_stream_checkpoint_chain(
                 checkpoint,
+                case_id=wallet_case.id,
                 case_public_id=wallet_case.public_id,
             )
+            response = chain[-1]["response"]
             document = response["document"]
             items.append(
                 {
                     "checkpoint": response["checkpoint"],
-                    "lineage": self._stream_checkpoint_lineage(
-                        checkpoint,
-                        case_id=wallet_case.id,
-                        case_public_id=wallet_case.public_id,
-                    ),
+                    "lineage": self._stream_checkpoint_lineage(chain),
                     "continuation_page_index": document[
                         "continuation_page_index"
                     ],
@@ -1288,26 +1285,27 @@ class WalletCaseService:
             "limitations": limitations,
         }
 
-    def _stream_checkpoint_lineage(
+    def _verified_stream_checkpoint_chain(
         self,
         checkpoint: WalletCaseStreamCheckpoint,
         *,
         case_id: int,
         case_public_id: str,
-    ) -> dict[str, Any]:
+    ) -> list[dict[str, Any]]:
         current = checkpoint
         seen: set[str] = set()
-        chain_depth = 0
-        initial_mode: str | None = None
-        initial_base: str | None = None
-        initial_parent: str | None = None
+        descending: list[dict[str, Any]] = []
         while True:
+            if len(descending) >= _MAX_CHECKPOINT_CHAIN_REVISIONS:
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case stream checkpoint lineage is too deep."
+                )
             if current.public_id in seen:
                 raise WalletCaseStreamCheckpointCorrupt(
                     "Stored Wallet Case stream checkpoint lineage contains a cycle."
                 )
             seen.add(current.public_id)
-            _stream_checkpoint_response(
+            response = _stream_checkpoint_response(
                 current,
                 case_public_id=case_public_id,
             )
@@ -1320,10 +1318,9 @@ class WalletCaseService:
             mode = plan["mode"]
             base_public_id = plan["base_snapshot_public_id"]
             parent_public_id = plan.get("source_checkpoint_public_id")
-            if initial_mode is None:
-                initial_mode = mode
-                initial_base = base_public_id
-                initial_parent = parent_public_id
+            descending.append(
+                {"row": current, "response": response, "plan": plan}
+            )
             if mode != "resume":
                 if parent_public_id is not None:
                     raise WalletCaseStreamCheckpointCorrupt(
@@ -1358,13 +1355,23 @@ class WalletCaseService:
                 raise WalletCaseStreamCheckpointCorrupt(
                     "Stored Wallet Case stream checkpoint parent is invalid."
                 )
-            chain_depth += 1
             current = parent
+        descending.reverse()
+        return descending
+
+    @staticmethod
+    def _stream_checkpoint_lineage(
+        chain: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        tip = chain[-1]
+        plan = tip["plan"]
         return {
-            "acquisition_mode": initial_mode,
-            "base_snapshot_public_id": initial_base,
-            "parent_checkpoint_public_id": initial_parent,
-            "chain_depth": chain_depth,
+            "acquisition_mode": plan["mode"],
+            "base_snapshot_public_id": plan["base_snapshot_public_id"],
+            "parent_checkpoint_public_id": plan.get(
+                "source_checkpoint_public_id"
+            ),
+            "chain_depth": len(chain) - 1,
         }
 
     def get_job(self, sync_public_id: str) -> dict[str, Any]:
