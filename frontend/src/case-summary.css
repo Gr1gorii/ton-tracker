@@ -230,6 +230,7 @@
 .case-checkpoint-chain > dl dd { margin: 0; color: var(--text); font-weight: 750; }
 .case-checkpoint-chain > ol { overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); list-style: none; }
 .case-continuation-plan { margin-top: 8px; border-color: color-mix(in srgb, var(--success) 35%, var(--border)); background: color-mix(in srgb, var(--success) 6%, var(--surface-solid)); }
+.case-continuation-plan li > button { display: inline-flex; flex: 0 0 auto; padding: 7px 10px; align-items: center; justify-content: center; gap: 6px; font-size: 0.72rem; }
 .case-checkpoint-chain-export { display: inline-flex; justify-self: start; padding: 7px 10px; align-items: center; gap: 6px; font-size: 0.72rem; }
 
 .case-limitations { padding: 24px; }
@@ -740,6 +741,7 @@
   .case-checkpoint-chain > header { align-items: flex-start; flex-direction: column; }
   .case-checkpoint-chain > header code { max-width: 100%; }
   .case-checkpoint-chain > dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .case-continuation-plan li > button { width: 100%; }
   .case-limitations li { grid-template-columns: 1fr; gap: 5px; }
   .case-cancel-confirm { align-items: stretch; flex-direction: column; }
   .case-cancel-confirm p { margin: 0 0 5px; }
