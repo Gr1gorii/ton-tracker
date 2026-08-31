@@ -51,6 +51,7 @@ from services.wallet_cases import (
 )
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
+    WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseStreamCheckpointChainResponse,
     WalletCaseSyncRequest,
@@ -2138,6 +2139,203 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         "current_plan_public_id": advanced_plan_id,
     }
     assert _database_counts() == (1, 2, 2)
+
+
+def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume(
+    client,
+):
+    case_id, _source_sync, _claimed = _publish_multi_stream_checkpoints(client)
+    initial_plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    ready_stream = next(
+        stream
+        for stream in initial_plan["document"]["streams"]
+        if stream["resume_state"] == "ready"
+    )
+    input_checkpoint_id = ready_stream["tip_checkpoint"]["public_id"]
+    first_queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+            f"{initial_plan['plan']['public_id']}/{input_checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert first_queued.status_code == 202, first_queued.text
+    first_sync_id = first_queued.json()["public_id"]
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+
+    receipt_response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{first_sync_id}/continuation-receipt"
+    )
+
+    assert receipt_response.status_code == 200, receipt_response.text
+    assert receipt_response.headers["cache-control"] == "no-store"
+    receipt = receipt_response.json()
+    validated = WalletCaseCheckpointContinuationReceiptResponse.model_validate(
+        receipt
+    )
+    assert validated.receipt.public_id == (
+        f"ctr_{validated.receipt.content_hash_sha256}"
+    )
+    assert receipt["receipt"]["sync_public_id"] == first_sync_id
+    assert receipt["receipt"]["input_plan_public_id"] == initial_plan["plan"][
+        "public_id"
+    ]
+    assert receipt["receipt"]["input_checkpoint_public_id"] == (
+        input_checkpoint_id
+    )
+    output_checkpoint_id = receipt["receipt"]["output_checkpoint_public_id"]
+    assert output_checkpoint_id != input_checkpoint_id
+    assert receipt["document"]["input"]["next_page_index"] == 2
+    assert receipt["document"]["output"]["next_page_index"] == 3
+    assert receipt["document"]["transition"] == {
+        "checkpoint_changed": True,
+        "plan_changed": True,
+        "revision_delta": 1,
+        "page_count_delta": 1,
+        "pages_succeeded_delta": 1,
+    }
+    after_plan = receipt["document"]["after_plan"]
+    assert receipt["receipt"]["after_plan_public_id"] == after_plan["plan"][
+        "public_id"
+    ]
+    assert after_plan["plan"]["checkpoint_cutoff_public_id"] == (
+        output_checkpoint_id
+    )
+    assert after_plan["plan"]["stream_count"] == 2
+    assert after_plan["plan"]["revision_count"] == 3
+    assert client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json() == after_plan
+
+    tampered = json.loads(json.dumps(receipt))
+    tampered["document"]["transition"]["page_count_delta"] = 0
+    with pytest.raises(ValueError, match="transition is inconsistent"):
+        WalletCaseCheckpointContinuationReceiptResponse.model_validate(
+            tampered
+        )
+
+    second_queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+            f"{after_plan['plan']['public_id']}/{output_checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert second_queued.status_code == 202, second_queued.text
+    assert worker.run_once() is True
+    current_plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    assert current_plan["plan"]["public_id"] != after_plan["plan"]["public_id"]
+
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{first_sync_id}/continuation-receipt"
+    )
+    assert repeated.status_code == 200
+    assert repeated.json() == receipt
+
+
+def test_continuation_receipt_is_plan_bound_terminal_and_case_scoped(client):
+    first_case_id, bounded_sync, _claimed = _publish_transaction_checkpoint(
+        client
+    )
+    bounded = client.get(
+        f"/api/v1/cases/{first_case_id}/syncs/"
+        f"{bounded_sync['public_id']}/continuation-receipt"
+    )
+    assert bounded.status_code == 404
+    assert bounded.json()["detail"]["code"] == (
+        "continuation_receipt_not_available"
+    )
+
+    plan = client.get(
+        f"/api/v1/cases/{first_case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    checkpoint_id = plan["document"]["streams"][0]["tip_checkpoint"][
+        "public_id"
+    ]
+    queued = client.post(
+        (
+            f"/api/v1/cases/{first_case_id}/stream-checkpoints/"
+            f"continuation-plan/{plan['plan']['public_id']}/"
+            f"{checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert queued.status_code == 202, queued.text
+    queued_sync_id = queued.json()["public_id"]
+    pending = client.get(
+        f"/api/v1/cases/{first_case_id}/syncs/"
+        f"{queued_sync_id}/continuation-receipt"
+    )
+    assert pending.status_code == 404
+    assert pending.json()["detail"]["message_safe"] == (
+        "This plan-bound continuation has not published a result."
+    )
+
+    second_case_id = _create_case(client, address=f"0:{'4' * 64}")["case"][
+        "public_id"
+    ]
+    foreign = client.get(
+        f"/api/v1/cases/{second_case_id}/syncs/"
+        f"{queued_sync_id}/continuation-receipt"
+    )
+    assert foreign.status_code == 404
+    assert foreign.json()["detail"] == "Wallet Case sync not found"
+
+
+def test_continuation_receipt_fails_closed_on_broken_output_lineage(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    checkpoint_id = plan["document"]["streams"][0]["tip_checkpoint"][
+        "public_id"
+    ]
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+            f"{plan['plan']['public_id']}/{checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert queued.status_code == 202, queued.text
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    sync_id = queued.json()["public_id"]
+
+    with app.state.wallet_case_test_session() as session:
+        persisted = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == sync_id)
+        )
+        assert persisted is not None
+        stored = json.loads(persisted.coverage_summary_json)
+        stored["_acquisition"]["source_checkpoint_public_id"] = (
+            f"scp_{'0' * 64}"
+        )
+        persisted.coverage_summary_json = json.dumps(stored, sort_keys=True)
+        session.commit()
+
+    corrupt = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/continuation-receipt"
+    )
+    assert corrupt.status_code == 503
+    assert corrupt.json()["detail"] == {
+        "code": "continuation_receipt_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case continuation receipt checkpoints are invalid."
+        ),
+        "retryable": False,
+    }
 
 
 def test_plan_bound_resume_is_case_scoped_and_requires_a_planned_tip(client):
