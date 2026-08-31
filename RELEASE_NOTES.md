@@ -1,3 +1,30 @@
+# GRAM Scope — v0.92.0 PLAN-BOUND RESUME
+
+v0.92.0 turns an explicitly verified Continuation Plan into one stale-safe
+resume authorization. The new
+`POST /api/v1/cases/{case}/stream-checkpoints/continuation-plan/{plan}/{checkpoint}/resume`
+endpoint recomputes the current `cpl_<sha256>` document, requires the selected
+`scp_<sha256>` to be its current resume-ready stream tip, and rejects a changed
+plan with a structured `409 continuation_plan_stale` response containing the
+new plan identity.
+
+The plan and checkpoint IDs are bound into one versioned idempotency
+fingerprint. A transport retry with the same key returns the original operation
+even after successful publication advances the plan, while reuse for an
+unbound or different scope fails closed. Accepted plan provenance is retained
+in acquisition-plan version 3 and exposed in the sync requested scope.
+
+Summary no longer offers an unbound resume button from the latest-checkpoint
+catalog. It displays the action only inside an explicitly verified plan and
+sends the exact plan/tip pair through the strict client parser and durable sync
+controller. Legacy resume records remain readable and retry-compatible. The
+operation is still sequential, bounded provider acquisition—not a scheduler,
+automatic backfill, or proof of complete wallet history. No database migration
+is added; Alembic remains at `20260828_0028` and backend API version remains
+`0.2.1`.
+
+---
+
 # GRAM Scope — v0.91.0 CONTINUATION PLAN
 
 v0.91.0 assembles the latest verified revision of every provider stream into

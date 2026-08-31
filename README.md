@@ -4,10 +4,29 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.91.0 — Continuation Plan**<br>
+Current product release: **v0.92.0 — Plan-Bound Resume**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.91.0 adds
+## What v0.92.0 adds
+
+A verified Continuation Plan can now authorize one explicit provider-stream
+continuation through
+`POST /api/v1/cases/{case}/stream-checkpoints/continuation-plan/{plan}/{checkpoint}/resume`.
+The server recomputes the current case-level plan before enqueue, requires the
+submitted `cpl_<sha256>` and `scp_<sha256>` tip to match it exactly, and returns
+`409 continuation_plan_stale` with the current plan identity instead of acting
+on a superseded operator view.
+
+The plan and checkpoint identities share one versioned idempotency fingerprint
+and the accepted `cpl_` is retained in acquisition-plan provenance. An
+ambiguous retry returns its original operation even after a new checkpoint has
+advanced the plan. Summary removes the unbound catalog action and offers
+`Resume planned stream` only inside an explicitly verified plan. This remains
+one sequential, bounded provider continuation—not automatic backfill or proof
+of complete wallet history. No migration is added; Alembic remains at
+`20260828_0028`.
+
+## v0.91.0 continuation plan
 
 The latest verified revision of every provider stream can now be assembled into
 one bounded, content-addressed Continuation Plan through
@@ -221,6 +240,8 @@ profit, ownership proof, or complete wallet history.
   aggregation and verified JSON export.
 - v0.91.0 content-addressed, case-level Continuation Plans across every latest
   verified provider stream.
+- v0.92.0 stale-safe, idempotent stream continuation bound to an explicitly
+  verified `cpl_` plan and its exact `scp_` tip.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.
