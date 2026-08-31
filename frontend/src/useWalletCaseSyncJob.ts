@@ -5,6 +5,7 @@ import {
   cancelWalletCaseSync,
   createWalletCaseSync,
   getWalletCaseSync,
+  resumeWalletCaseContinuationPlan,
   resumeWalletCaseStreamCheckpoint,
 } from "./walletCaseApi";
 import type { WalletCaseSync, WalletCaseSyncRequest } from "./walletCase";
@@ -22,6 +23,10 @@ export interface WalletCaseSyncJobController {
   transportError: string | null;
   start: (request: WalletCaseSyncRequest) => Promise<void>;
   resume: (checkpointPublicId: string) => Promise<void>;
+  resumePlanned: (
+    continuationPlanPublicId: string,
+    checkpointPublicId: string,
+  ) => Promise<void>;
   retryPending: () => Promise<void>;
   retry: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -38,12 +43,20 @@ type PendingStart = {
   idempotencyKey: string;
 } & (
   | { kind: "sync"; request: WalletCaseSyncRequest }
-  | { kind: "resume"; checkpointPublicId: string }
+  | {
+      kind: "resume";
+      continuationPlanPublicId: string | null;
+      checkpointPublicId: string;
+    }
 );
 
 type RequestedStart =
   | { kind: "sync"; request: WalletCaseSyncRequest }
-  | { kind: "resume"; checkpointPublicId: string };
+  | {
+      kind: "resume";
+      continuationPlanPublicId: string | null;
+      checkpointPublicId: string;
+    };
 
 const TERMINAL_STATES = new Set(["partial", "succeeded", "failed", "cancelled"]);
 const MIN_POLL_MS = 500;
@@ -256,6 +269,7 @@ export function useWalletCaseSyncJob({
         (existing.kind === "sync" && requested.kind === "sync" &&
           JSON.stringify(existing.request) === JSON.stringify(requested.request)) ||
         (existing.kind === "resume" && requested.kind === "resume" &&
+          existing.continuationPlanPublicId === requested.continuationPlanPublicId &&
           existing.checkpointPublicId === requested.checkpointPublicId)
       )
     );
@@ -282,12 +296,20 @@ export function useWalletCaseSyncJob({
             pending.idempotencyKey,
             controller.signal,
           )
-        : await resumeWalletCaseStreamCheckpoint(
-            caseId,
-            pending.checkpointPublicId,
-            pending.idempotencyKey,
-            controller.signal,
-          );
+        : pending.continuationPlanPublicId === null
+          ? await resumeWalletCaseStreamCheckpoint(
+              caseId,
+              pending.checkpointPublicId,
+              pending.idempotencyKey,
+              controller.signal,
+            )
+          : await resumeWalletCaseContinuationPlan(
+              caseId,
+              pending.continuationPlanPublicId,
+              pending.checkpointPublicId,
+              pending.idempotencyKey,
+              controller.signal,
+            );
       pendingStartRef.current = null;
       acceptSync(next);
       if (isActiveWalletCaseSync(next)) setTransportState("polling");
@@ -325,7 +347,22 @@ export function useWalletCaseSyncJob({
   }, [begin]);
 
   const resume = useCallback(async (checkpointPublicId: string) => {
-    await begin({ kind: "resume", checkpointPublicId });
+    await begin({
+      kind: "resume",
+      continuationPlanPublicId: null,
+      checkpointPublicId,
+    });
+  }, [begin]);
+
+  const resumePlanned = useCallback(async (
+    continuationPlanPublicId: string,
+    checkpointPublicId: string,
+  ) => {
+    await begin({
+      kind: "resume",
+      continuationPlanPublicId,
+      checkpointPublicId,
+    });
   }, [begin]);
 
   const retryPending = useCallback(async () => {
@@ -336,6 +373,7 @@ export function useWalletCaseSyncJob({
     } else {
       await begin({
         kind: "resume",
+        continuationPlanPublicId: pending.continuationPlanPublicId,
         checkpointPublicId: pending.checkpointPublicId,
       });
     }
@@ -349,7 +387,11 @@ export function useWalletCaseSyncJob({
       current.requested_scope.mode === "resume" &&
       current.requested_scope.source_checkpoint_public_id
     ) {
-      await resume(current.requested_scope.source_checkpoint_public_id);
+      await begin({
+        kind: "resume",
+        continuationPlanPublicId: current.requested_scope.continuation_plan_public_id,
+        checkpointPublicId: current.requested_scope.source_checkpoint_public_id,
+      });
       return;
     }
     const incremental = current.requested_scope.mode === "incremental";
@@ -364,7 +406,7 @@ export function useWalletCaseSyncJob({
         : {}),
       surfaces: [...current.requested_scope.surfaces],
     });
-  }, [resume, start]);
+  }, [begin, start]);
 
   const cancel = useCallback(async () => {
     const current = syncRef.current;
@@ -406,6 +448,7 @@ export function useWalletCaseSyncJob({
     transportError,
     start,
     resume,
+    resumePlanned,
     retryPending,
     retry,
     cancel,

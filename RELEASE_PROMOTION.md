@@ -1,8 +1,8 @@
-# GRAM Scope — v0.91.0 Promotion Checklist
+# GRAM Scope — v0.92.0 Promotion Checklist
 
-Current promotion gates for case-level checkpoint Continuation Plans:
+Current promotion gates for plan-bound checkpoint continuation:
 
-- Product label is `v0.91.0 CONTINUATION PLAN`; backend API version stays
+- Product label is `v0.92.0 PLAN-BOUND RESUME`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -64,9 +64,10 @@ Current promotion gates for case-level checkpoint Continuation Plans:
   contract, original bounds, requested surfaces, cursor, and next page index.
   Stale, corrupt, blocked, complete, foreign, or incompatible state fails
   closed without provider access.
-- Resume UI actions appear only for `ready` checkpoints and use the durable
-  sync polling/reconnect/cancel path. Resume snapshots expose base and source
-  checkpoint lineage and retain the explicit not-full-history limitation.
+- Resume UI actions appear only for `ready` tips inside an explicitly verified
+  Continuation Plan and use the durable sync polling/reconnect/cancel path.
+  Resume snapshots expose plan, base, and source-checkpoint provenance and
+  retain the explicit not-full-history limitation.
 - Checkpoint history must freeze its newest revision cutoff on the first page,
   authenticate every continuation against Case/cutoff/keyset position, reject
   duplicate or unsupported query parameters, and expire cursors after process
@@ -97,6 +98,11 @@ Current promotion gates for case-level checkpoint Continuation Plans:
 - Summary loads and exports the strictly parsed plan only on explicit actions.
   It must state that one Case sync executes at a time and that the plan neither
   schedules provider requests nor proves complete wallet history.
+- Plan-bound resume must recompute the current plan before enqueue, require the
+  exact `cpl_` and selected current `scp_` tip, return the new plan identity on
+  stale rejection, and bind both identities into the idempotency fingerprint.
+  Replay with the same key must recover the original operation even after a
+  successful continuation advances the plan.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -220,7 +226,7 @@ Current promotion gates for case-level checkpoint Continuation Plans:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.91.0 must not be promoted as a hosted Wallet Case release.
+  v0.92.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

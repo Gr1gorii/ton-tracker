@@ -14,6 +14,7 @@ export const OLDER_SYNC_ID = "550e8400-e29b-41d4-b716-446655440002";
 export const IDEMPOTENCY_KEY = "550e8400-e29b-41d4-a716-446655440003";
 export const MANIFEST_HASH = "ab".repeat(32);
 export const CHECKPOINT_ID = `scp_${"cd".repeat(32)}`;
+export const CONTINUATION_PLAN_ID = `cpl_${"78".repeat(32)}`;
 export const ALL_SURFACES = [
   "transfers",
   "transactions",
@@ -111,6 +112,7 @@ export function succeededSyncFixture(
       overlap_seconds: 0,
       base_snapshot_public_id: null,
       source_checkpoint_public_id: null,
+      continuation_plan_public_id: null,
     },
     coverage: result.coverage,
     summary: result.summary,
@@ -152,6 +154,7 @@ export function incrementalSyncFixture(
       overlap_seconds: 900,
       base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
       source_checkpoint_public_id: null,
+      continuation_plan_public_id: null,
     },
     limitations,
     result: {
@@ -186,6 +189,7 @@ export function resumeSyncFixture(
       overlap_seconds: 0,
       base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
       source_checkpoint_public_id: CHECKPOINT_ID,
+      continuation_plan_public_id: null,
     },
     coverage: {
       ...bounded.coverage,

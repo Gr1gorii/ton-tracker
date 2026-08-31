@@ -39,6 +39,7 @@ function controllerFixture(overrides: Partial<WalletCaseSyncJobController> = {})
     transportError: null,
     start: vi.fn().mockResolvedValue(undefined),
     resume: vi.fn().mockResolvedValue(undefined),
+    resumePlanned: vi.fn().mockResolvedValue(undefined),
     retryPending: vi.fn().mockResolvedValue(undefined),
     retry: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined),
@@ -233,6 +234,8 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText("Durable stream checkpoints")).toBeTruthy();
     expect(screen.getByText(/1 ready · 0 complete · 0 blocked/)).toBeTruthy();
     expect(screen.getByText(/continuation verified; the next request starts at page 2/i)).toBeTruthy();
+    expect(screen.getByText(/Verify the current plan before resuming/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Resume planned .* stream/ })).toBeNull();
     expect(screen.getByText("Checkpoint revision history")).toBeTruthy();
     expect(screen.getByText((_content, element) => (
       element?.textContent === "1 of 2 loaded"
@@ -242,6 +245,14 @@ describe("GramCaseSummary", () => {
     expect(await screen.findByText("Verified continuation plan")).toBeTruthy();
     expect(screen.getByText(continuationPlan.plan.public_id)).toBeTruthy();
     expect(screen.getByText(/2 revisions · 2\/2 pages · ready · next page 3/)).toBeTruthy();
+    await user.click(screen.getByRole("button", {
+      name: "Resume planned transactions stream",
+    }));
+    expect(controller.resumePlanned).toHaveBeenCalledWith(
+      continuationPlan.plan.public_id,
+      continuationPlan.document.streams[0].tip_checkpoint.public_id,
+    );
+    expect(controller.resume).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", {
       name: `Inspect checkpoint revision ${checkpoints.checkpoints[0].checkpoint.public_id}`,
     }));
@@ -271,10 +282,6 @@ describe("GramCaseSummary", () => {
       ["blob:checkpoint-chain"],
     ]);
     anchorClick.mockRestore();
-    await user.click(screen.getByRole("button", { name: "Resume transactions stream" }));
-    expect(controller.resume).toHaveBeenCalledWith(
-      checkpoints.checkpoints[0].checkpoint.public_id,
-    );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/syncs/${payload.document.sync_public_id}/manifest`,
       expect.objectContaining({ cache: "no-store" }),

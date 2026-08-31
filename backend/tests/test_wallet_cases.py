@@ -46,6 +46,7 @@ from services.wallet_cases import (
     WalletCaseCatalogInvalidCursor,
     WalletCaseNotFound,
     WalletCaseService,
+    _checkpoint_resume_fingerprint,
     _compact_coverage_streams,
 )
 from schemas import WalletIngestionPreviewRequest
@@ -1690,6 +1691,7 @@ def test_ready_stream_checkpoint_queues_and_executes_one_resume(client):
         "overlap_seconds": 0,
         "base_snapshot_public_id": source_sync["public_id"],
         "source_checkpoint_public_id": checkpoint_id,
+        "continuation_plan_public_id": None,
     }
 
     replay = client.post(
@@ -2034,6 +2036,160 @@ def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):
     tampered["plan"]["public_id"] = f"cpl_{'0' * 64}"
     with pytest.raises(ValueError, match="content address"):
         WalletCaseCheckpointContinuationPlanResponse.model_validate(tampered)
+
+
+def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
+    client,
+):
+    case_id, source_sync, _claimed = _publish_transaction_checkpoint(client)
+    initial_plan_response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    )
+    assert initial_plan_response.status_code == 200
+    initial_plan = initial_plan_response.json()
+    plan_id = initial_plan["plan"]["public_id"]
+    checkpoint_id = initial_plan["document"]["streams"][0][
+        "tip_checkpoint"
+    ]["public_id"]
+    idempotency_key = str(uuid4())
+    resume_url = (
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+        f"{plan_id}/{checkpoint_id}/resume"
+    )
+
+    queued_response = client.post(
+        resume_url,
+        headers={"Idempotency-Key": idempotency_key},
+    )
+
+    assert queued_response.status_code == 202, queued_response.text
+    assert queued_response.headers["cache-control"] == "no-store"
+    assert queued_response.headers["retry-after"] == "1"
+    queued = queued_response.json()
+    assert queued_response.headers["location"].endswith(
+        f"/syncs/{queued['public_id']}"
+    )
+    assert queued["requested_scope"] == {
+        "mode": "resume",
+        "time_window": "custom",
+        "start_at": source_sync["requested_scope"]["start_at"],
+        "end_at": source_sync["requested_scope"]["end_at"],
+        "surfaces": ["transactions"],
+        "acquisition_start_at": source_sync["requested_scope"]["start_at"],
+        "acquisition_end_at": source_sync["requested_scope"]["end_at"],
+        "overlap_seconds": 0,
+        "base_snapshot_public_id": source_sync["public_id"],
+        "source_checkpoint_public_id": checkpoint_id,
+        "continuation_plan_public_id": plan_id,
+    }
+    with app.state.wallet_case_test_session() as session:
+        persisted = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == queued["public_id"])
+        )
+        assert persisted is not None
+        assert persisted.request_fingerprint == _checkpoint_resume_fingerprint(
+            checkpoint_id,
+            continuation_plan_public_id=plan_id,
+        )
+        acquisition_plan = json.loads(persisted.coverage_summary_json)[
+            "_acquisition"
+        ]
+        assert acquisition_plan["version"] == 3
+        assert acquisition_plan["continuation_plan_public_id"] == plan_id
+    unbound_reuse = client.post(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{checkpoint_id}/resume",
+        headers={"Idempotency-Key": idempotency_key},
+    )
+    assert unbound_reuse.status_code == 409
+    assert unbound_reuse.json()["detail"]["code"] == "idempotency_conflict"
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    advanced_plan_response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    )
+    assert advanced_plan_response.status_code == 200
+    advanced_plan_id = advanced_plan_response.json()["plan"]["public_id"]
+    assert advanced_plan_id != plan_id
+
+    replay = client.post(
+        resume_url,
+        headers={"Idempotency-Key": idempotency_key},
+    )
+    assert replay.status_code == 202, replay.text
+    assert replay.json()["public_id"] == queued["public_id"]
+    assert replay.json()["state"] == "succeeded"
+    assert replay.json()["requested_scope"] == queued["requested_scope"]
+
+    stale = client.post(
+        resume_url,
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == {
+        "code": "continuation_plan_stale",
+        "message_safe": (
+            "Continuation Plan changed; verify the current plan before resuming."
+        ),
+        "retryable": False,
+        "current_plan_public_id": advanced_plan_id,
+    }
+    assert _database_counts() == (1, 2, 2)
+
+
+def test_plan_bound_resume_is_case_scoped_and_requires_a_planned_tip(client):
+    first_case_id, _sync, _claimed = _publish_transaction_checkpoint(client)
+    second_case_id = _create_case(client, address=f"0:{'1' * 64}")["case"][
+        "public_id"
+    ]
+    _publish_transaction_checkpoint(client, case_id=second_case_id)
+    first_plan = client.get(
+        f"/api/v1/cases/{first_case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    second_plan = client.get(
+        f"/api/v1/cases/{second_case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    first_plan_id = first_plan["plan"]["public_id"]
+    first_checkpoint_id = first_plan["document"]["streams"][0][
+        "tip_checkpoint"
+    ]["public_id"]
+    second_plan_id = second_plan["plan"]["public_id"]
+    second_checkpoint_id = second_plan["document"]["streams"][0][
+        "tip_checkpoint"
+    ]["public_id"]
+
+    foreign_plan = client.post(
+        (
+            f"/api/v1/cases/{first_case_id}/stream-checkpoints/"
+            f"continuation-plan/{second_plan_id}/{first_checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert foreign_plan.status_code == 409
+    assert foreign_plan.json()["detail"] == {
+        "code": "continuation_plan_stale",
+        "message_safe": (
+            "Continuation Plan changed; verify the current plan before resuming."
+        ),
+        "retryable": False,
+        "current_plan_public_id": first_plan_id,
+    }
+
+    foreign_tip = client.post(
+        (
+            f"/api/v1/cases/{first_case_id}/stream-checkpoints/"
+            f"continuation-plan/{first_plan_id}/{second_checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert foreign_tip.status_code == 409
+    assert foreign_tip.json()["detail"]["code"] == (
+        "checkpoint_resume_unavailable"
+    )
+    assert _database_counts() == (2, 2, 2)
 
 
 def test_checkpoint_continuation_plan_is_empty_scoped_and_bounded(

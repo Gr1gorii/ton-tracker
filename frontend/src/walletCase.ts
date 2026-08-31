@@ -106,6 +106,7 @@ export interface WalletCaseSync {
     overlap_seconds: number;
     base_snapshot_public_id: string | null;
     source_checkpoint_public_id: string | null;
+    continuation_plan_public_id: string | null;
   };
   coverage: WalletCaseCoverage;
   summary: WalletCaseSummary;
@@ -196,6 +197,7 @@ export interface WalletCaseSyncRequest {
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CHECKPOINT_ID = /^scp_[0-9a-f]{64}$/;
+const CONTINUATION_PLAN_ID = /^cpl_[0-9a-f]{64}$/;
 const NETWORKS = new Set<WalletCaseNetwork>(["ton-mainnet", "ton-testnet"]);
 const ENVIRONMENTS = new Set<WalletCaseDataEnvironment>(["demo", "live"]);
 const SYNC_STATES = new Set<WalletCaseSyncState>([
@@ -472,6 +474,18 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   ) {
     throw new Error("case sync source checkpoint id is invalid");
   }
+  const continuationPlanPublicId = requestedScope.continuation_plan_public_id === null
+    ? null
+    : string(
+        requestedScope.continuation_plan_public_id,
+        "case sync continuation plan id",
+      );
+  if (
+    continuationPlanPublicId !== null &&
+    !CONTINUATION_PLAN_ID.test(continuationPlanPublicId)
+  ) {
+    throw new Error("case sync continuation plan id is invalid");
+  }
   const surfaces = surfaceArray(requestedScope.surfaces, "case sync surfaces");
   const startTime = Date.parse(startAt);
   const endTime = Date.parse(endAt);
@@ -499,12 +513,14 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
       acquisitionEndAt !== endAt ||
       overlapSeconds !== 0 ||
       baseSnapshotPublicId !== null ||
-      sourceCheckpointPublicId !== null
+      sourceCheckpointPublicId !== null ||
+      continuationPlanPublicId !== null
     )) ||
     (mode === "incremental" && (
       timeWindow !== "custom" ||
       baseSnapshotPublicId === null ||
-      sourceCheckpointPublicId !== null
+      sourceCheckpointPublicId !== null ||
+      continuationPlanPublicId !== null
     )) ||
     (mode === "resume" && (
       timeWindow !== "custom" ||
@@ -676,6 +692,7 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
       overlap_seconds: overlapSeconds,
       base_snapshot_public_id: baseSnapshotPublicId,
       source_checkpoint_public_id: sourceCheckpointPublicId,
+      continuation_plan_public_id: continuationPlanPublicId,
     },
     coverage,
     summary,

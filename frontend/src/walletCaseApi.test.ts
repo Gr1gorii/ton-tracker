@@ -21,6 +21,7 @@ import {
   getWalletCaseStreamCheckpoints,
   listWalletCases,
   restoreWalletCase,
+  resumeWalletCaseContinuationPlan,
   resumeWalletCaseStreamCheckpoint,
   updateWalletCaseMetadata,
 } from "./walletCaseApi";
@@ -29,6 +30,7 @@ import {
   activeSyncFixture,
   CASE_ID,
   CHECKPOINT_ID,
+  CONTINUATION_PLAN_ID,
   emptyWalletCaseFixture,
   IDEMPOTENCY_KEY,
   incrementalSyncFixture,
@@ -654,6 +656,48 @@ describe("Wallet Case API", () => {
     )).rejects.toThrow(/does not match/);
   });
 
+  it("resumes an exact continuation plan and rejects mismatched provenance", async () => {
+    const queued = activeResumeSyncFixture();
+    const planBound = {
+      ...queued,
+      requested_scope: {
+        ...queued.requested_scope,
+        continuation_plan_public_id: CONTINUATION_PLAN_ID,
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(planBound, 202));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(resumeWalletCaseContinuationPlan(
+      CASE_ID,
+      CONTINUATION_PLAN_ID,
+      CHECKPOINT_ID,
+      IDEMPOTENCY_KEY,
+      controller.signal,
+    )).resolves.toEqual(planBound);
+    expect(fetchMock).toHaveBeenCalledWith(
+      (
+        `${API_BASE}/api/v1/cases/${CASE_ID}/stream-checkpoints/` +
+        `continuation-plan/${CONTINUATION_PLAN_ID}/${CHECKPOINT_ID}/resume`
+      ),
+      {
+        method: "POST",
+        cache: "no-store",
+        headers: { "Idempotency-Key": IDEMPOTENCY_KEY },
+        signal: controller.signal,
+      },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(queued, 202));
+    await expect(resumeWalletCaseContinuationPlan(
+      CASE_ID,
+      CONTINUATION_PLAN_ID,
+      CHECKPOINT_ID,
+      IDEMPOTENCY_KEY,
+    )).rejects.toThrow(/does not match/);
+  });
+
   it("rejects malformed checkpoint resume identity before network I/O", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -663,6 +707,19 @@ describe("Wallet Case API", () => {
       "scp_not-a-checkpoint",
       IDEMPOTENCY_KEY,
     )).rejects.toThrow(/checkpoint id is invalid/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed continuation plan identity before network I/O", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resumeWalletCaseContinuationPlan(
+      CASE_ID,
+      "cpl_not-a-plan",
+      CHECKPOINT_ID,
+      IDEMPOTENCY_KEY,
+    )).rejects.toThrow(/continuation plan id is invalid/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

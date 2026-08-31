@@ -158,6 +158,9 @@ export default function GramCaseSummary({
                 <>
                   <div><dt>Base snapshot</dt><dd><code>{snapshot.requested_scope.base_snapshot_public_id}</code></dd></div>
                   <div><dt>Source checkpoint</dt><dd><code>{snapshot.requested_scope.source_checkpoint_public_id}</code></dd></div>
+                  {snapshot.requested_scope.continuation_plan_public_id && (
+                    <div><dt>Continuation plan</dt><dd><code>{snapshot.requested_scope.continuation_plan_public_id}</code></dd></div>
+                  )}
                 </>
               )}
               <div><dt>Surfaces</dt><dd>{snapshot.requested_scope.surfaces.join(", ")}</dd></div>
@@ -189,7 +192,7 @@ export default function GramCaseSummary({
               isActiveWalletCaseSync(syncController.sync) ||
               syncController.transportState !== "idle"
             }
-            onResume={syncController.resume}
+            onResume={syncController.resumePlanned}
           />
         )}
       </div>

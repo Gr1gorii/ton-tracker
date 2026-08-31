@@ -141,6 +141,16 @@ class WalletCaseCheckpointResumeUnavailable(RuntimeError):
     """Raised when a checkpoint cannot safely start a continuation job."""
 
 
+class WalletCaseContinuationPlanStale(RuntimeError):
+    """Raised when a resume request is bound to a superseded plan."""
+
+    def __init__(self, current_plan_public_id: str) -> None:
+        super().__init__(
+            "Continuation Plan changed; verify the current plan before resuming."
+        )
+        self.current_plan_public_id = current_plan_public_id
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
@@ -867,6 +877,7 @@ class WalletCaseService:
         checkpoint_public_id: str,
         idempotency_key: str,
         *,
+        continuation_plan_public_id: str | None = None,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -970,7 +981,10 @@ class WalletCaseService:
                 "Stored Wallet Case stream checkpoint continuation is invalid."
             )
 
-        fingerprint = _checkpoint_resume_fingerprint(checkpoint.public_id)
+        fingerprint = _checkpoint_resume_fingerprint(
+            checkpoint.public_id,
+            continuation_plan_public_id=continuation_plan_public_id,
+        )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
             idempotency_key=idempotency_key,
@@ -994,7 +1008,7 @@ class WalletCaseService:
             settings or get_settings(),
         )
         acquisition_plan = {
-            "version": 2,
+            "version": 3 if continuation_plan_public_id is not None else 2,
             "mode": "resume",
             "start_at": acquisition_start_text,
             "end_at": acquisition_end_text,
@@ -1005,6 +1019,10 @@ class WalletCaseService:
             "resume_cursor": cursor,
             "resume_page_index": page_index,
         }
+        if continuation_plan_public_id is not None:
+            acquisition_plan["continuation_plan_public_id"] = (
+                continuation_plan_public_id
+            )
         expected_data_mode = _ENVIRONMENT_DATA_MODE[
             wallet_case.data_environment
         ]
@@ -1078,6 +1096,66 @@ class WalletCaseService:
         self.session.rollback()
         return response, False
 
+    def enqueue_checkpoint_plan_resume(
+        self,
+        case_public_id: str,
+        continuation_plan_public_id: str,
+        checkpoint_public_id: str,
+        idempotency_key: str,
+        *,
+        settings=None,
+        now: datetime | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue a continuation only when its verified plan is still current."""
+        wallet_case = self._required_case(case_public_id)
+        fingerprint = _checkpoint_resume_fingerprint(
+            checkpoint_public_id,
+            continuation_plan_public_id=continuation_plan_public_id,
+        )
+        replay = self.repository.get_by_idempotency_key(
+            case_id=wallet_case.id,
+            idempotency_key=idempotency_key,
+        )
+        if replay is not None:
+            if replay.request_fingerprint != fingerprint:
+                raise WalletCaseIdempotencyConflict(
+                    "Idempotency-Key was already used for another sync scope."
+                )
+            return self._sync_response(
+                replay,
+                case_public_id=wallet_case.public_id,
+            ), True
+
+        current_plan = self._checkpoint_continuation_plan_response(wallet_case)
+        current_plan_public_id = current_plan["plan"]["public_id"]
+        if current_plan_public_id != continuation_plan_public_id:
+            raise WalletCaseContinuationPlanStale(current_plan_public_id)
+        planned_stream = next(
+            (
+                stream
+                for stream in current_plan["document"]["streams"]
+                if stream["tip_checkpoint"]["public_id"]
+                == checkpoint_public_id
+            ),
+            None,
+        )
+        if planned_stream is None:
+            raise WalletCaseCheckpointResumeUnavailable(
+                "This checkpoint is not a current Continuation Plan stream tip."
+            )
+        if planned_stream["resume_state"] != "ready":
+            raise WalletCaseCheckpointResumeUnavailable(
+                "This Continuation Plan stream is not ready to resume."
+            )
+        return self.enqueue_checkpoint_resume(
+            wallet_case.public_id,
+            checkpoint_public_id,
+            idempotency_key,
+            continuation_plan_public_id=continuation_plan_public_id,
+            settings=settings,
+            now=now,
+        )
+
     def get_sync_manifest(
         self,
         case_public_id: str,
@@ -1130,6 +1208,13 @@ class WalletCaseService:
         case_public_id: str,
     ) -> dict[str, Any]:
         wallet_case = self._required_case(case_public_id)
+        return self._checkpoint_continuation_plan_response(wallet_case)
+
+    def _checkpoint_continuation_plan_response(
+        self,
+        wallet_case: WalletCase,
+    ) -> dict[str, Any]:
+        """Build the current content-addressed continuation plan for one case."""
         checkpoints = self.repository.latest_stream_checkpoints(
             case_id=wallet_case.id
         )
@@ -2032,6 +2117,9 @@ class WalletCaseService:
                 "source_checkpoint_public_id": acquisition_plan.get(
                     "source_checkpoint_public_id"
                 ),
+                "continuation_plan_public_id": acquisition_plan.get(
+                    "continuation_plan_public_id"
+                ),
             },
             "coverage": coverage,
             "summary": summary,
@@ -2089,12 +2177,23 @@ def _sync_request_fingerprint(payload: WalletCaseSyncRequest) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _checkpoint_resume_fingerprint(checkpoint_public_id: str) -> str:
-    canonical = json.dumps(
-        {
-            "contract": "wallet_case_checkpoint_resume_request_v1",
+def _checkpoint_resume_fingerprint(
+    checkpoint_public_id: str,
+    *,
+    continuation_plan_public_id: str | None = None,
+) -> str:
+    document = {
+        "contract": "wallet_case_checkpoint_resume_request_v1",
+        "checkpoint_public_id": checkpoint_public_id,
+    }
+    if continuation_plan_public_id is not None:
+        document = {
+            "contract": "wallet_case_checkpoint_plan_resume_request_v1",
+            "continuation_plan_public_id": continuation_plan_public_id,
             "checkpoint_public_id": checkpoint_public_id,
-        },
+        }
+    canonical = json.dumps(
+        document,
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
@@ -2297,9 +2396,13 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         "resume_cursor",
         "resume_page_index",
     }
+    version_three_keys = version_two_keys | {
+        "continuation_plan_public_id",
+    }
     if not isinstance(stored, dict) or frozenset(stored) not in {
         frozenset(version_one_keys),
         frozenset(version_two_keys),
+        frozenset(version_three_keys),
     }:
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     mode = stored.get("mode")
@@ -2311,8 +2414,9 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     resume_stream_key = stored.get("resume_stream_key")
     resume_cursor = stored.get("resume_cursor")
     resume_page_index = stored.get("resume_page_index")
+    continuation_plan_public_id = stored.get("continuation_plan_public_id")
     if (
-        stored.get("version") not in {1, 2}
+        stored.get("version") not in {1, 2, 3}
         or mode not in {"bounded", "incremental", "resume"}
         or not isinstance(start_at, str)
         or not isinstance(end_at, str)
@@ -2352,7 +2456,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         ):
             raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     elif (
-        stored.get("version") != 2
+        stored.get("version") not in {2, 3}
         or not isinstance(base_public_id, str)
         or len(base_public_id) != 36
         or not isinstance(source_checkpoint_public_id, str)
@@ -2367,6 +2471,18 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         or type(resume_page_index) is not int
         or resume_page_index < 1
         or overlap_seconds != 0
+        or (
+            stored.get("version") == 3
+            and (
+                not isinstance(continuation_plan_public_id, str)
+                or len(continuation_plan_public_id) != 68
+                or not continuation_plan_public_id.startswith("cpl_")
+                or any(
+                    char not in "0123456789abcdef"
+                    for char in continuation_plan_public_id[4:]
+                )
+            )
+        )
     ):
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     return stored

@@ -69,7 +69,10 @@ export default function CaseAcquisitionManifest({
   caseId: string;
   snapshot: WalletCaseSync;
   resumeDisabled: boolean;
-  onResume: (checkpointPublicId: string) => Promise<void>;
+  onResume: (
+    continuationPlanPublicId: string,
+    checkpointPublicId: string,
+  ) => Promise<void>;
 }) {
   const descriptor = snapshot.acquisition_manifest;
   const [detail, setDetail] = useState<WalletCaseSyncManifestResponse | null>(null);
@@ -264,15 +267,7 @@ export default function CaseAcquisitionManifest({
                           <div className="case-checkpoint-actions">
                             <code>{checkpoint.public_id}</code>
                             {document.resume_state === "ready" && (
-                              <button
-                                className="button-secondary"
-                                type="button"
-                                disabled={resumeDisabled}
-                                aria-label={`Resume ${document.stream_key} stream`}
-                                onClick={() => void onResume(checkpoint.public_id)}
-                              >
-                                <ArrowClockwise size={15} /> Resume stream
-                              </button>
+                              <small>Verify the current plan before resuming.</small>
                             )}
                           </div>
                         </li>
@@ -317,6 +312,20 @@ export default function CaseAcquisitionManifest({
                                 </small>
                                 <code>{stream.chain_public_id}</code>
                               </span>
+                              {stream.resume_state === "ready" && (
+                                <button
+                                  className="button-secondary"
+                                  type="button"
+                                  disabled={resumeDisabled}
+                                  aria-label={`Resume planned ${stream.stream_key} stream`}
+                                  onClick={() => void onResume(
+                                    continuationPlan.plan.public_id,
+                                    stream.tip_checkpoint.public_id,
+                                  )}
+                                >
+                                  <ArrowClockwise size={15} /> Resume planned stream
+                                </button>
+                              )}
                             </li>
                           ))}
                         </ol>
