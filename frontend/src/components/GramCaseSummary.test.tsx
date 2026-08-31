@@ -15,6 +15,7 @@ import {
 } from "../test/walletCaseFixtures";
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
 import {
+  checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
@@ -191,6 +192,7 @@ describe("GramCaseSummary", () => {
     };
     const checkpointDetail = streamCheckpointDetailFixture();
     const checkpointChain = streamCheckpointChainFixture();
+    const continuationPlan = checkpointContinuationPlanFixture();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(
         JSON.stringify(payload),
@@ -202,6 +204,10 @@ describe("GramCaseSummary", () => {
       ))
       .mockResolvedValueOnce(new Response(
         JSON.stringify(history),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(continuationPlan),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ))
       .mockResolvedValueOnce(new Response(
@@ -232,6 +238,10 @@ describe("GramCaseSummary", () => {
       element?.textContent === "1 of 2 loaded"
     ))).toBeTruthy();
     expect(screen.getByRole("button", { name: "Load older revisions" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Verify continuation plan" }));
+    expect(await screen.findByText("Verified continuation plan")).toBeTruthy();
+    expect(screen.getByText(continuationPlan.plan.public_id)).toBeTruthy();
+    expect(screen.getByText(/2 revisions · 2\/2 pages · ready · next page 3/)).toBeTruthy();
     await user.click(screen.getByRole("button", {
       name: `Inspect checkpoint revision ${checkpoints.checkpoints[0].checkpoint.public_id}`,
     }));
@@ -239,10 +249,12 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText("Root revision")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Verify checkpoint chain" }));
     expect(await screen.findByText("Content-addressed chain")).toBeTruthy();
-    expect(screen.getByText(checkpointChain.chain.public_id)).toBeTruthy();
+    expect(screen.getAllByText(checkpointChain.chain.public_id)).toHaveLength(2);
     expect(screen.getByText("#1 · bounded")).toBeTruthy();
     expect(screen.getByText("#2 · resume")).toBeTruthy();
-    const createObjectUrl = vi.fn(() => "blob:checkpoint-chain");
+    const createObjectUrl = vi.fn()
+      .mockReturnValueOnce("blob:continuation-plan")
+      .mockReturnValueOnce("blob:checkpoint-chain");
     const revokeObjectUrl = vi.fn();
     vi.stubGlobal("URL", {
       createObjectURL: createObjectUrl,
@@ -250,10 +262,14 @@ describe("GramCaseSummary", () => {
     });
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => undefined);
+    await user.click(screen.getByRole("button", { name: "Export verified continuation plan JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified chain JSON" }));
-    expect(createObjectUrl).toHaveBeenCalledOnce();
-    expect(anchorClick).toHaveBeenCalledOnce();
-    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:checkpoint-chain");
+    expect(createObjectUrl).toHaveBeenCalledTimes(2);
+    expect(anchorClick).toHaveBeenCalledTimes(2);
+    expect(revokeObjectUrl.mock.calls).toEqual([
+      ["blob:continuation-plan"],
+      ["blob:checkpoint-chain"],
+    ]);
     anchorClick.mockRestore();
     await user.click(screen.getByRole("button", { name: "Resume transactions stream" }));
     expect(controller.resume).toHaveBeenCalledWith(
@@ -269,6 +285,10 @@ describe("GramCaseSummary", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/history?limit=10`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/continuation-plan`,
       expect.objectContaining({ cache: "no-store" }),
     );
     expect(fetchMock).toHaveBeenCalledWith(

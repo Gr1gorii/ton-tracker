@@ -13,12 +13,15 @@ import {
 
 import type { WalletCaseSync } from "../walletCase";
 import {
+  getWalletCaseCheckpointContinuationPlan,
   getWalletCaseStreamCheckpoints,
   getWalletCaseSyncManifest,
 } from "../walletCaseApi";
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
 import {
+  serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
+  type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
   type WalletCaseStreamCheckpointChainResponse,
 } from "../walletCaseStreamCheckpoint";
@@ -43,6 +46,20 @@ function downloadCheckpointChain(
   URL.revokeObjectURL(url);
 }
 
+function downloadContinuationPlan(
+  plan: WalletCaseCheckpointContinuationPlanResponse,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseCheckpointContinuationPlan(plan)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `checkpoint-continuation-plan-${plan.plan.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function CaseAcquisitionManifest({
   caseId,
   snapshot,
@@ -57,20 +74,32 @@ export default function CaseAcquisitionManifest({
   const descriptor = snapshot.acquisition_manifest;
   const [detail, setDetail] = useState<WalletCaseSyncManifestResponse | null>(null);
   const [checkpoints, setCheckpoints] = useState<WalletCaseStreamCheckpointCatalogResponse | null>(null);
+  const [continuationPlan, setContinuationPlan] = useState<WalletCaseCheckpointContinuationPlanResponse | null>(null);
+  const [continuationPlanLoading, setContinuationPlanLoading] = useState(false);
+  const [continuationPlanError, setContinuationPlanError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const continuationPlanRequestRef = useRef<AbortController | null>(null);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
 
   useEffect(() => {
     requestRef.current?.abort();
+    continuationPlanRequestRef.current?.abort();
     requestRef.current = null;
+    continuationPlanRequestRef.current = null;
     setDetail(null);
     setCheckpoints(null);
+    setContinuationPlan(null);
+    setContinuationPlanLoading(false);
+    setContinuationPlanError(null);
     setLoading(false);
     setError(null);
-    return () => requestRef.current?.abort();
-  }, [snapshot.public_id, descriptor?.public_id]);
+    return () => {
+      requestRef.current?.abort();
+      continuationPlanRequestRef.current?.abort();
+    };
+  }, [caseId, snapshot.public_id, descriptor?.public_id]);
 
   const load = async () => {
     if (!descriptor || loading) return;
@@ -101,6 +130,33 @@ export default function CaseAcquisitionManifest({
       if (requestRef.current === controller) {
         requestRef.current = null;
         setLoading(false);
+      }
+    }
+  };
+
+  const loadContinuationPlan = async () => {
+    if (continuationPlanLoading) return;
+    continuationPlanRequestRef.current?.abort();
+    const controller = new AbortController();
+    continuationPlanRequestRef.current = controller;
+    setContinuationPlanLoading(true);
+    setContinuationPlanError(null);
+    try {
+      setContinuationPlan(await getWalletCaseCheckpointContinuationPlan(
+        caseId,
+        controller.signal,
+      ));
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      setContinuationPlanError(
+        cause instanceof Error
+          ? cause.message
+          : "Checkpoint continuation plan read failed.",
+      );
+    } finally {
+      if (continuationPlanRequestRef.current === controller) {
+        continuationPlanRequestRef.current = null;
+        setContinuationPlanLoading(false);
       }
     }
   };
@@ -171,6 +227,21 @@ export default function CaseAcquisitionManifest({
                     {" · "}{checkpoints.complete_count} complete
                     {" · "}{checkpoints.blocked_count} blocked
                   </span>
+                  <button
+                    className="button-secondary case-checkpoint-plan-button"
+                    type="button"
+                    disabled={continuationPlanLoading}
+                    onClick={() => void loadContinuationPlan()}
+                  >
+                    {continuationPlanLoading
+                      ? <SpinnerGap className="spin" size={15} />
+                      : <TreeStructure size={15} />}
+                    {continuationPlanLoading
+                      ? "Verifying plan…"
+                      : continuationPlan
+                        ? "Verify plan again"
+                        : "Verify continuation plan"}
+                  </button>
                   {checkpoints.checkpoints.length === 0 ? (
                     <span>No provider stream emitted a continuation checkpoint.</span>
                   ) : (
@@ -206,7 +277,69 @@ export default function CaseAcquisitionManifest({
                           </div>
                         </li>
                       ))}
-                    </ul>
+                      </ul>
+                  )}
+                  {continuationPlan && (
+                    <section
+                      className="case-checkpoint-chain case-continuation-plan"
+                      aria-label="Verified continuation plan"
+                    >
+                      <header>
+                        <span>
+                          <TreeStructure size={18} />
+                          <strong>Verified continuation plan</strong>
+                        </span>
+                        <code>{continuationPlan.plan.public_id}</code>
+                      </header>
+                      <dl>
+                        <div><dt>Streams</dt><dd>{continuationPlan.plan.stream_count}</dd></div>
+                        <div><dt>Ready</dt><dd>{continuationPlan.plan.ready_count}</dd></div>
+                        <div><dt>Revisions</dt><dd>{continuationPlan.plan.revision_count}</dd></div>
+                        <div><dt>Provider pages</dt><dd>{continuationPlan.plan.pages_succeeded}/{continuationPlan.plan.page_count}</dd></div>
+                      </dl>
+                      {continuationPlan.document.streams.length === 0 ? (
+                        <span>No current provider stream checkpoints are available.</span>
+                      ) : (
+                        <ol>
+                          {continuationPlan.document.streams.map((stream) => (
+                            <li key={`${stream.provider}:${stream.stream_key}`}>
+                              <span>
+                                <b>{stream.provider} / {stream.stream_key}</b>
+                                <small>
+                                  {stream.revision_count} revisions
+                                  {" · "}{stream.pages_succeeded}/{stream.page_count} pages
+                                  {" · "}{stream.resume_state}
+                                  {stream.next_page_index !== null
+                                    ? ` · next page ${stream.next_page_index}`
+                                    : stream.resume_blocker !== null
+                                      ? ` · ${stream.resume_blocker}`
+                                      : ""}
+                                </small>
+                                <code>{stream.chain_public_id}</code>
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <button
+                        className="button-secondary case-checkpoint-chain-export"
+                        type="button"
+                        onClick={() => downloadContinuationPlan(continuationPlan)}
+                      >
+                        <DownloadSimple size={15} /> Export verified continuation plan JSON
+                      </button>
+                      <small className="case-checkpoint-history-boundary">
+                        {continuationPlan.document.limitations[
+                          continuationPlan.document.limitations.length - 1
+                        ]?.message}
+                      </small>
+                    </section>
+                  )}
+                  {continuationPlanError && (
+                    <div className="case-sync-message is-error" role="alert">
+                      <WarningCircle size={16} weight="fill" />
+                      <span>{continuationPlanError}</span>
+                    </div>
                   )}
                   <section className="case-checkpoint-history">
                     <header>
