@@ -1,5 +1,6 @@
 import type {
   WalletCaseStreamCheckpointCatalogResponse,
+  WalletCaseStreamCheckpointChainResponse,
   WalletCaseStreamCheckpointDetailResponse,
   WalletCaseStreamCheckpointHistoryResponse,
 } from "../walletCaseStreamCheckpoint";
@@ -7,6 +8,7 @@ import {
   CASE_ID,
   CHECKPOINT_ID,
   MANIFEST_HASH,
+  OLDER_SYNC_ID,
   SYNC_ID,
 } from "./walletCaseFixtures";
 
@@ -116,5 +118,77 @@ export function streamCheckpointHistoryFixture(
       code: "checkpoint_history_is_explicit_revisions",
       message: "Checkpoint revisions do not prove complete wallet history.",
     }],
+  };
+}
+
+export function streamCheckpointChainFixture(): WalletCaseStreamCheckpointChainResponse {
+  const tip = streamCheckpointCatalogFixture().checkpoints[0];
+  const rootHash = "ef".repeat(32);
+  const rootId = `scp_${rootHash}`;
+  const rootManifestHash = "12".repeat(32);
+  const chainHash = "34".repeat(32);
+  const requestedPeriod = { ...tip.document.requested_period };
+  return {
+    chain: {
+      public_id: `cch_${chainHash}`,
+      contract_version: "wallet_case_stream_checkpoint_chain_v1",
+      content_hash_sha256: chainHash,
+      revision_count: 2,
+      page_count: 2,
+      pages_succeeded: 2,
+    },
+    document: {
+      contract_version: "wallet_case_stream_checkpoint_chain_v1",
+      case_public_id: CASE_ID,
+      tip_checkpoint_public_id: tip.checkpoint.public_id,
+      provider: tip.checkpoint.provider,
+      stream_key: tip.checkpoint.stream_key,
+      provider_contract_version: tip.checkpoint.provider_contract_version,
+      root_acquisition_mode: "bounded",
+      root_base_snapshot_public_id: null,
+      current_resume_state: "ready",
+      next_page_index: 3,
+      aggregate: { revision_count: 2, page_count: 2, pages_succeeded: 2 },
+      revisions: [
+        {
+          ordinal: 0,
+          checkpoint: {
+            ...tip.checkpoint,
+            public_id: rootId,
+            checkpoint_hash_sha256: rootHash,
+            source_sync_public_id: OLDER_SYNC_ID,
+            created_at: "2026-08-28T11:00:03Z",
+          },
+          acquisition_mode: "bounded",
+          base_snapshot_public_id: null,
+          parent_checkpoint_public_id: null,
+          source_manifest_public_id: `smf_${rootManifestHash}`,
+          source_manifest_hash_sha256: rootManifestHash,
+          requested_period: requestedPeriod,
+          continuation_page_index: 2,
+          page_count: 1,
+          pages_succeeded: 1,
+          last_response_digest_sha256: "56".repeat(32),
+        },
+        {
+          ordinal: 1,
+          checkpoint: tip.checkpoint,
+          acquisition_mode: "resume",
+          base_snapshot_public_id: OLDER_SYNC_ID,
+          parent_checkpoint_public_id: rootId,
+          source_manifest_public_id: `smf_${MANIFEST_HASH}`,
+          source_manifest_hash_sha256: MANIFEST_HASH,
+          requested_period: requestedPeriod,
+          continuation_page_index: 3,
+          page_count: 1,
+          pages_succeeded: 1,
+          last_response_digest_sha256: "ab".repeat(32),
+        },
+      ],
+      limitations: [{
+        code: "checkpoint_chain_is_acquisition_progress",
+        message: "Checkpoint pages do not prove complete wallet history.",
+      }],
+    },
   };
 }

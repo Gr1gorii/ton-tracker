@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowClockwise,
   ClockCounterClockwise,
+  DownloadSimple,
   Fingerprint,
   MagnifyingGlass,
+  TreeStructure,
   ShieldCheck,
   SpinnerGap,
   WarningCircle,
@@ -15,12 +17,30 @@ import {
   getWalletCaseSyncManifest,
 } from "../walletCaseApi";
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
-import type { WalletCaseStreamCheckpointCatalogResponse } from "../walletCaseStreamCheckpoint";
+import {
+  serializeWalletCaseStreamCheckpointChain,
+  type WalletCaseStreamCheckpointCatalogResponse,
+  type WalletCaseStreamCheckpointChainResponse,
+} from "../walletCaseStreamCheckpoint";
 import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
 
 function formatTimestamp(value: string): string {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+function downloadCheckpointChain(
+  chain: WalletCaseStreamCheckpointChainResponse,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseStreamCheckpointChain(chain)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `checkpoint-chain-${chain.chain.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function CaseAcquisitionManifest({
@@ -245,19 +265,77 @@ export default function CaseAcquisitionManifest({
                       </ol>
                     )}
                     {checkpointHistory.selected && (
-                      <dl className="case-checkpoint-revision-detail" role="status">
-                        <div><dt>Verified revision</dt><dd><code>{checkpointHistory.selected.checkpoint.public_id}</code></dd></div>
-                        <div><dt>Source sync</dt><dd><code>{checkpointHistory.selected.document.source_sync_public_id}</code></dd></div>
-                        <div><dt>Source manifest</dt><dd><code>{checkpointHistory.selected.document.source_manifest_public_id}</code></dd></div>
-                        <div><dt>Parent revision</dt><dd><code>{checkpointHistory.selected.lineage.parent_checkpoint_public_id ?? "Root revision"}</code></dd></div>
-                        <div><dt>Chain depth</dt><dd>{checkpointHistory.selected.lineage.chain_depth}</dd></div>
-                        <div><dt>Resume state</dt><dd>{checkpointHistory.selected.document.resume_state}</dd></div>
-                      </dl>
+                      <>
+                        <dl className="case-checkpoint-revision-detail" role="status">
+                          <div><dt>Verified revision</dt><dd><code>{checkpointHistory.selected.checkpoint.public_id}</code></dd></div>
+                          <div><dt>Source sync</dt><dd><code>{checkpointHistory.selected.document.source_sync_public_id}</code></dd></div>
+                          <div><dt>Source manifest</dt><dd><code>{checkpointHistory.selected.document.source_manifest_public_id}</code></dd></div>
+                          <div><dt>Parent revision</dt><dd><code>{checkpointHistory.selected.lineage.parent_checkpoint_public_id ?? "Root revision"}</code></dd></div>
+                          <div><dt>Chain depth</dt><dd>{checkpointHistory.selected.lineage.chain_depth}</dd></div>
+                          <div><dt>Resume state</dt><dd>{checkpointHistory.selected.document.resume_state}</dd></div>
+                        </dl>
+                        <button
+                          className="button-secondary case-checkpoint-chain-button"
+                          type="button"
+                          disabled={checkpointHistory.chainLoading}
+                          onClick={() => void checkpointHistory.loadChain(
+                            checkpointHistory.selected!.checkpoint.public_id,
+                          )}
+                        >
+                          {checkpointHistory.chainLoading
+                            ? <SpinnerGap className="spin" size={15} />
+                            : <TreeStructure size={15} />}
+                          {checkpointHistory.chainLoading
+                            ? "Verifying chain…"
+                            : "Verify checkpoint chain"}
+                        </button>
+                      </>
                     )}
-                    {(checkpointHistory.historyError || checkpointHistory.selectionError) && (
+                    {checkpointHistory.chain && (
+                      <section className="case-checkpoint-chain" aria-label="Verified checkpoint chain">
+                        <header>
+                          <span>
+                            <TreeStructure size={18} />
+                            <strong>Content-addressed chain</strong>
+                          </span>
+                          <code>{checkpointHistory.chain.chain.public_id}</code>
+                        </header>
+                        <dl>
+                          <div><dt>Revisions</dt><dd>{checkpointHistory.chain.chain.revision_count}</dd></div>
+                          <div><dt>Provider pages</dt><dd>{checkpointHistory.chain.chain.pages_succeeded}/{checkpointHistory.chain.chain.page_count}</dd></div>
+                          <div><dt>Current state</dt><dd>{checkpointHistory.chain.document.current_resume_state}</dd></div>
+                          <div><dt>Next page</dt><dd>{checkpointHistory.chain.document.next_page_index ?? "None"}</dd></div>
+                        </dl>
+                        <ol>
+                          {checkpointHistory.chain.document.revisions.map((revision) => (
+                            <li key={revision.checkpoint.public_id}>
+                              <span>
+                                <b>#{revision.ordinal + 1} · {revision.acquisition_mode}</b>
+                                <small>
+                                  {revision.pages_succeeded}/{revision.page_count} pages
+                                  {" · "}{revision.checkpoint.resume_state}
+                                </small>
+                                <code>{revision.checkpoint.public_id}</code>
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                        <button
+                          className="button-secondary case-checkpoint-chain-export"
+                          type="button"
+                          onClick={() => downloadCheckpointChain(checkpointHistory.chain!)}
+                        >
+                          <DownloadSimple size={15} /> Export verified chain JSON
+                        </button>
+                        <small className="case-checkpoint-history-boundary">
+                          {checkpointHistory.chain.document.limitations[0]?.message}
+                        </small>
+                      </section>
+                    )}
+                    {(checkpointHistory.historyError || checkpointHistory.selectionError || checkpointHistory.chainError) && (
                       <div className="case-sync-message is-error" role="alert">
                         <WarningCircle size={16} weight="fill" />
-                        <span>{checkpointHistory.historyError ?? checkpointHistory.selectionError}</span>
+                        <span>{checkpointHistory.historyError ?? checkpointHistory.selectionError ?? checkpointHistory.chainError}</span>
                       </div>
                     )}
                     {checkpointHistory.history?.hasMore && (

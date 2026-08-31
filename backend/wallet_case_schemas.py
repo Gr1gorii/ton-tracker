@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -36,6 +38,10 @@ ManifestPublicId = Annotated[
 CheckpointPublicId = Annotated[
     str,
     Field(pattern=r"^scp_[0-9a-f]{64}$", max_length=68),
+]
+CheckpointChainPublicId = Annotated[
+    str,
+    Field(pattern=r"^cch_[0-9a-f]{64}$", max_length=68),
 ]
 Sha256Digest = Annotated[
     str,
@@ -530,6 +536,148 @@ class WalletCaseStreamCheckpointHistoryResponse(_StrictModel):
             self.aggregate.total_revisions == 0
         ):
             raise ValueError("checkpoint history cutoff is inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointChainRevision(_StrictModel):
+    ordinal: int = Field(ge=0, le=99)
+    checkpoint: WalletCaseStreamCheckpointDescriptor
+    acquisition_mode: Literal["bounded", "incremental", "resume"]
+    base_snapshot_public_id: CanonicalPublicId | None = None
+    parent_checkpoint_public_id: CheckpointPublicId | None = None
+    source_manifest_public_id: ManifestPublicId
+    source_manifest_hash_sha256: Sha256Digest
+    requested_period: WalletCaseSyncManifestPeriod
+    continuation_page_index: int | None = Field(default=None, ge=1)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    last_response_digest_sha256: Sha256Digest | None = None
+
+    @model_validator(mode="after")
+    def _validate_revision(self):
+        if self.pages_succeeded > self.page_count:
+            raise ValueError("checkpoint chain page counts are inconsistent")
+        if (self.checkpoint.resume_state == "ready") != (
+            self.continuation_page_index is not None
+        ):
+            raise ValueError("checkpoint chain continuation is inconsistent")
+        if self.source_manifest_public_id != (
+            f"smf_{self.source_manifest_hash_sha256}"
+        ):
+            raise ValueError("checkpoint chain manifest identity is inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointChainAggregate(_StrictModel):
+    revision_count: int = Field(ge=1, le=100)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+
+
+class WalletCaseStreamCheckpointChainDocument(_StrictModel):
+    contract_version: Literal["wallet_case_stream_checkpoint_chain_v1"]
+    case_public_id: CanonicalPublicId
+    tip_checkpoint_public_id: CheckpointPublicId
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    provider_contract_version: str = Field(min_length=1, max_length=48)
+    root_acquisition_mode: Literal["bounded", "incremental"]
+    root_base_snapshot_public_id: CanonicalPublicId | None = None
+    current_resume_state: Literal["ready", "complete", "blocked"]
+    next_page_index: int | None = Field(default=None, ge=1)
+    aggregate: WalletCaseStreamCheckpointChainAggregate
+    revisions: list[WalletCaseStreamCheckpointChainRevision] = Field(
+        min_length=1,
+        max_length=100,
+    )
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_chain(self):
+        if self.aggregate.revision_count != len(self.revisions):
+            raise ValueError("checkpoint chain revision count is inconsistent")
+        if self.aggregate.page_count != sum(
+            item.page_count for item in self.revisions
+        ):
+            raise ValueError("checkpoint chain page count is inconsistent")
+        if self.aggregate.pages_succeeded != sum(
+            item.pages_succeeded for item in self.revisions
+        ):
+            raise ValueError("checkpoint chain success count is inconsistent")
+        if self.aggregate.pages_succeeded > self.aggregate.page_count:
+            raise ValueError("checkpoint chain aggregate is inconsistent")
+        root = self.revisions[0]
+        tip = self.revisions[-1]
+        if (
+            root.ordinal != 0
+            or root.acquisition_mode != self.root_acquisition_mode
+            or root.base_snapshot_public_id
+            != self.root_base_snapshot_public_id
+            or root.parent_checkpoint_public_id is not None
+            or (root.acquisition_mode == "bounded")
+            != (root.base_snapshot_public_id is None)
+            or tip.checkpoint.public_id != self.tip_checkpoint_public_id
+            or tip.checkpoint.resume_state != self.current_resume_state
+            or tip.continuation_page_index != self.next_page_index
+        ):
+            raise ValueError("checkpoint chain endpoints are inconsistent")
+        for index, revision in enumerate(self.revisions):
+            if (
+                revision.ordinal != index
+                or revision.checkpoint.provider != self.provider
+                or revision.checkpoint.stream_key != self.stream_key
+                or revision.checkpoint.provider_contract_version
+                != self.provider_contract_version
+            ):
+                raise ValueError("checkpoint chain revision identity is inconsistent")
+            if index == 0:
+                continue
+            parent = self.revisions[index - 1]
+            if (
+                revision.acquisition_mode != "resume"
+                or revision.parent_checkpoint_public_id
+                != parent.checkpoint.public_id
+                or revision.base_snapshot_public_id
+                != parent.checkpoint.source_sync_public_id
+            ):
+                raise ValueError("checkpoint chain parent lineage is inconsistent")
+        return self
+
+
+class WalletCaseStreamCheckpointChainDescriptor(_StrictModel):
+    public_id: CheckpointChainPublicId
+    contract_version: Literal["wallet_case_stream_checkpoint_chain_v1"]
+    content_hash_sha256: Sha256Digest
+    revision_count: int = Field(ge=1, le=100)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+
+
+class WalletCaseStreamCheckpointChainResponse(_StrictModel):
+    chain: WalletCaseStreamCheckpointChainDescriptor
+    document: WalletCaseStreamCheckpointChainDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        if (
+            self.chain.public_id != f"cch_{digest}"
+            or self.chain.content_hash_sha256 != digest
+            or self.chain.contract_version != self.document.contract_version
+            or self.chain.revision_count
+            != self.document.aggregate.revision_count
+            or self.chain.page_count != self.document.aggregate.page_count
+            or self.chain.pages_succeeded
+            != self.document.aggregate.pages_succeeded
+        ):
+            raise ValueError("checkpoint chain content address is inconsistent")
         return self
 
 

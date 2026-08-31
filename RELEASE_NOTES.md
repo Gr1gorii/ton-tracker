@@ -1,3 +1,29 @@
+# GRAM Scope — v0.90.0 CHECKPOINT CHAIN
+
+v0.90.0 turns one exact provider-stream checkpoint revision into a
+content-addressed, root-to-tip chain document. The new case-scoped
+`GET /api/v1/cases/{case}/stream-checkpoints/{checkpoint}/chain` endpoint
+revalidates every checkpoint, source manifest, acquisition plan, parent edge,
+provider/stream identity, and provider contract before returning any result.
+The canonical document is identified by `cch_<sha256>` and binds the selected
+tip, ordered revisions, aggregate page counts, current continuation state, and
+next page index.
+
+Lineage traversal now has one shared fail-closed implementation and a hard
+100-revision limit. Missing, circular, future, cross-case, cross-stream,
+cross-contract, or contradictory edges reject exact detail, history, and chain
+reads consistently. Aggregate counts describe only the successful provider
+pages captured by the verified chain; they do not imply automatic backfill or
+complete wallet history.
+
+Summary can verify a chain after selecting an exact revision, displays its
+content address, root-to-tip acquisition modes, represented pages, current
+state, and continuation point, and exports the strictly parsed document as
+JSON. No database migration is added; Alembic remains at `20260828_0028` and
+backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.89.0 CHECKPOINT HISTORY
 
 v0.89.0 makes every immutable provider-stream checkpoint revision auditable,

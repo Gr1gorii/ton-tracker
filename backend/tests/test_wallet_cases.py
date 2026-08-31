@@ -49,7 +49,10 @@ from services.wallet_cases import (
     _compact_coverage_streams,
 )
 from schemas import WalletIngestionPreviewRequest
-from wallet_case_schemas import WalletCaseSyncRequest
+from wallet_case_schemas import (
+    WalletCaseStreamCheckpointChainResponse,
+    WalletCaseSyncRequest,
+)
 
 
 ACCOUNT_ID = "ca6e321c7cce9ecedf0a8ca2492ec8592494aa5fb5ce0387dff96ef6af982a3e"
@@ -1814,6 +1817,118 @@ def test_checkpoint_history_reads_exact_lineage_and_freezes_pagination(client):
     )
 
 
+def test_checkpoint_chain_aggregates_verified_root_to_tip_progress(client):
+    case_id, source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        root = session.scalar(select(WalletCaseStreamCheckpoint))
+        assert root is not None
+        root_id = root.public_id
+    _completed, resumed_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=root_id,
+    )
+    _completed, tip_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=resumed_id,
+    )
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{tip_id}/chain"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["chain"]["public_id"] == (
+        f"cch_{body['chain']['content_hash_sha256']}"
+    )
+    assert body["chain"]["contract_version"] == (
+        "wallet_case_stream_checkpoint_chain_v1"
+    )
+    assert body["chain"]["revision_count"] == 3
+    assert body["chain"]["page_count"] == 3
+    assert body["chain"]["pages_succeeded"] == 3
+    document = body["document"]
+    assert document["tip_checkpoint_public_id"] == tip_id
+    assert document["root_acquisition_mode"] == "bounded"
+    assert document["root_base_snapshot_public_id"] is None
+    assert document["current_resume_state"] == "ready"
+    assert document["next_page_index"] == 4
+    assert document["aggregate"] == {
+        "revision_count": 3,
+        "page_count": 3,
+        "pages_succeeded": 3,
+    }
+    revisions = document["revisions"]
+    assert [item["ordinal"] for item in revisions] == [0, 1, 2]
+    assert [item["checkpoint"]["public_id"] for item in revisions] == [
+        root_id,
+        resumed_id,
+        tip_id,
+    ]
+    assert [item["acquisition_mode"] for item in revisions] == [
+        "bounded",
+        "resume",
+        "resume",
+    ]
+    assert revisions[0]["parent_checkpoint_public_id"] is None
+    assert revisions[1]["parent_checkpoint_public_id"] == root_id
+    assert revisions[2]["parent_checkpoint_public_id"] == resumed_id
+    assert revisions[1]["base_snapshot_public_id"] == source_sync["public_id"]
+    assert revisions[2]["base_snapshot_public_id"] == revisions[1][
+        "checkpoint"
+    ]["source_sync_public_id"]
+    assert all(
+        item["last_response_digest_sha256"] == "ab" * 32
+        for item in revisions
+    )
+    assert document["limitations"][0]["code"] == (
+        "checkpoint_chain_is_acquisition_progress"
+    )
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{tip_id}/chain"
+    )
+    assert repeated.status_code == 200
+    assert repeated.json() == body
+    tampered = json.loads(json.dumps(body))
+    tampered["chain"]["public_id"] = f"cch_{'0' * 64}"
+    tampered["chain"]["content_hash_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseStreamCheckpointChainResponse.model_validate(tampered)
+
+
+def test_checkpoint_chain_bounds_recursive_verification(client, monkeypatch):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        root = session.scalar(select(WalletCaseStreamCheckpoint))
+        assert root is not None
+        root_id = root.public_id
+    _completed, resumed_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=root_id,
+    )
+    monkeypatch.setattr(
+        "services.wallet_cases._MAX_CHECKPOINT_CHAIN_REVISIONS",
+        1,
+    )
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{resumed_id}/chain"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "stream_checkpoint_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint lineage is too deep."
+        ),
+        "retryable": False,
+    }
+
+
 def test_checkpoint_history_fails_closed_on_broken_resume_lineage(client):
     case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
     with app.state.wallet_case_test_session() as session:
@@ -1846,7 +1961,10 @@ def test_checkpoint_history_fails_closed_on_broken_resume_lineage(client):
     history = client.get(
         f"/api/v1/cases/{case_id}/stream-checkpoints/history"
     )
-    for response in (exact, history):
+    chain = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/{resumed_id}/chain"
+    )
+    for response in (exact, history, chain):
         assert response.status_code == 503
         assert response.headers["cache-control"] == "no-store"
         assert response.json()["detail"] == {
@@ -1889,6 +2007,10 @@ def test_checkpoint_history_empty_and_exact_read_are_case_scoped(client):
         f"/api/v1/cases/{first_case_id}/stream-checkpoints/{checkpoint_id}"
     )
     assert missing.status_code == 404
+    missing_chain = client.get(
+        f"/api/v1/cases/{first_case_id}/stream-checkpoints/{checkpoint_id}/chain"
+    )
+    assert missing_chain.status_code == 404
     unsupported = client.get(
         f"/api/v1/cases/{first_case_id}/stream-checkpoints/history?offset=1"
     )

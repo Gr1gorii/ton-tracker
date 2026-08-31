@@ -147,6 +147,7 @@ _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
 _CASE_CATALOG_CURSOR_VERSION = 3
 _CHECKPOINT_HISTORY_CURSOR_KEY = secrets.token_bytes(32)
 _CHECKPOINT_HISTORY_CURSOR_VERSION = 1
+_MAX_CHECKPOINT_CHAIN_REVISIONS = 100
 _INCREMENTAL_OVERLAP = timedelta(minutes=15)
 _ACQUISITION_PLAN_KEY = "_acquisition"
 _UNSET = object()
@@ -1135,17 +1136,141 @@ class WalletCaseService:
         )
         if checkpoint is None:
             raise WalletCaseNotFound("Wallet Case stream checkpoint not found")
-        response = _stream_checkpoint_response(
+        chain = self._verified_stream_checkpoint_chain(
             checkpoint,
+            case_id=wallet_case.id,
             case_public_id=wallet_case.public_id,
         )
+        tip = chain[-1]
         return {
-            **response,
-            "lineage": self._stream_checkpoint_lineage(
-                checkpoint,
-                case_id=wallet_case.id,
-                case_public_id=wallet_case.public_id,
+            **tip["response"],
+            "lineage": self._stream_checkpoint_lineage(chain),
+        }
+
+    def get_stream_checkpoint_chain(
+        self,
+        case_public_id: str,
+        checkpoint_public_id: str,
+    ) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        checkpoint = self.repository.get_stream_checkpoint(
+            case_id=wallet_case.id,
+            public_id=checkpoint_public_id,
+        )
+        if checkpoint is None:
+            raise WalletCaseNotFound("Wallet Case stream checkpoint not found")
+        chain = self._verified_stream_checkpoint_chain(
+            checkpoint,
+            case_id=wallet_case.id,
+            case_public_id=wallet_case.public_id,
+        )
+        revisions = []
+        for ordinal, item in enumerate(chain):
+            response = item["response"]
+            descriptor = response["checkpoint"]
+            checkpoint_document = response["document"]
+            plan = item["plan"]
+            last_page = checkpoint_document["last_successful_page"]
+            revisions.append(
+                {
+                    "ordinal": ordinal,
+                    "checkpoint": descriptor,
+                    "acquisition_mode": plan["mode"],
+                    "base_snapshot_public_id": plan[
+                        "base_snapshot_public_id"
+                    ],
+                    "parent_checkpoint_public_id": plan.get(
+                        "source_checkpoint_public_id"
+                    ),
+                    "source_manifest_public_id": checkpoint_document[
+                        "source_manifest_public_id"
+                    ],
+                    "source_manifest_hash_sha256": checkpoint_document[
+                        "source_manifest_hash_sha256"
+                    ],
+                    "requested_period": checkpoint_document[
+                        "requested_period"
+                    ],
+                    "continuation_page_index": checkpoint_document[
+                        "continuation_page_index"
+                    ],
+                    "page_count": checkpoint_document["page_count"],
+                    "pages_succeeded": checkpoint_document[
+                        "pages_succeeded"
+                    ],
+                    "last_response_digest_sha256": (
+                        last_page["response_digest_sha256"]
+                        if last_page is not None
+                        else None
+                    ),
+                }
+            )
+        root = chain[0]
+        tip = chain[-1]
+        root_plan = root["plan"]
+        tip_document = tip["response"]["document"]
+        aggregate = {
+            "revision_count": len(revisions),
+            "page_count": sum(item["page_count"] for item in revisions),
+            "pages_succeeded": sum(
+                item["pages_succeeded"] for item in revisions
             ),
+        }
+        limitations = [
+            _limitation(
+                "checkpoint_chain_is_acquisition_progress",
+                (
+                    "Checkpoint Chain totals verified provider page acquisitions; "
+                    "it does not deduplicate wallet activity or prove complete "
+                    "wallet history."
+                ),
+            )
+        ]
+        if root_plan["mode"] == "incremental":
+            limitations.append(
+                _limitation(
+                    "checkpoint_chain_starts_after_external_snapshot",
+                    (
+                        "This checkpoint chain starts from an incremental sync; "
+                        "its base snapshot is outside the provider checkpoint chain."
+                    ),
+                )
+            )
+        document = {
+            "contract_version": "wallet_case_stream_checkpoint_chain_v1",
+            "case_public_id": wallet_case.public_id,
+            "tip_checkpoint_public_id": tip["row"].public_id,
+            "provider": tip["row"].provider,
+            "stream_key": tip["row"].stream_key,
+            "provider_contract_version": tip[
+                "row"
+            ].provider_contract_version,
+            "root_acquisition_mode": root_plan["mode"],
+            "root_base_snapshot_public_id": root_plan[
+                "base_snapshot_public_id"
+            ],
+            "current_resume_state": tip_document["resume_state"],
+            "next_page_index": tip_document["continuation_page_index"],
+            "aggregate": aggregate,
+            "revisions": revisions,
+            "limitations": limitations,
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "chain": {
+                "public_id": f"cch_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                **aggregate,
+            },
+            "document": document,
         }
 
     def list_stream_checkpoint_history(
@@ -1228,19 +1353,17 @@ class WalletCaseService:
         visible = rows[:limit]
         items = []
         for checkpoint in visible:
-            response = _stream_checkpoint_response(
+            chain = self._verified_stream_checkpoint_chain(
                 checkpoint,
+                case_id=wallet_case.id,
                 case_public_id=wallet_case.public_id,
             )
+            response = chain[-1]["response"]
             document = response["document"]
             items.append(
                 {
                     "checkpoint": response["checkpoint"],
-                    "lineage": self._stream_checkpoint_lineage(
-                        checkpoint,
-                        case_id=wallet_case.id,
-                        case_public_id=wallet_case.public_id,
-                    ),
+                    "lineage": self._stream_checkpoint_lineage(chain),
                     "continuation_page_index": document[
                         "continuation_page_index"
                     ],
@@ -1288,26 +1411,27 @@ class WalletCaseService:
             "limitations": limitations,
         }
 
-    def _stream_checkpoint_lineage(
+    def _verified_stream_checkpoint_chain(
         self,
         checkpoint: WalletCaseStreamCheckpoint,
         *,
         case_id: int,
         case_public_id: str,
-    ) -> dict[str, Any]:
+    ) -> list[dict[str, Any]]:
         current = checkpoint
         seen: set[str] = set()
-        chain_depth = 0
-        initial_mode: str | None = None
-        initial_base: str | None = None
-        initial_parent: str | None = None
+        descending: list[dict[str, Any]] = []
         while True:
+            if len(descending) >= _MAX_CHECKPOINT_CHAIN_REVISIONS:
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case stream checkpoint lineage is too deep."
+                )
             if current.public_id in seen:
                 raise WalletCaseStreamCheckpointCorrupt(
                     "Stored Wallet Case stream checkpoint lineage contains a cycle."
                 )
             seen.add(current.public_id)
-            _stream_checkpoint_response(
+            response = _stream_checkpoint_response(
                 current,
                 case_public_id=case_public_id,
             )
@@ -1320,10 +1444,9 @@ class WalletCaseService:
             mode = plan["mode"]
             base_public_id = plan["base_snapshot_public_id"]
             parent_public_id = plan.get("source_checkpoint_public_id")
-            if initial_mode is None:
-                initial_mode = mode
-                initial_base = base_public_id
-                initial_parent = parent_public_id
+            descending.append(
+                {"row": current, "response": response, "plan": plan}
+            )
             if mode != "resume":
                 if parent_public_id is not None:
                     raise WalletCaseStreamCheckpointCorrupt(
@@ -1358,13 +1481,23 @@ class WalletCaseService:
                 raise WalletCaseStreamCheckpointCorrupt(
                     "Stored Wallet Case stream checkpoint parent is invalid."
                 )
-            chain_depth += 1
             current = parent
+        descending.reverse()
+        return descending
+
+    @staticmethod
+    def _stream_checkpoint_lineage(
+        chain: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        tip = chain[-1]
+        plan = tip["plan"]
         return {
-            "acquisition_mode": initial_mode,
-            "base_snapshot_public_id": initial_base,
-            "parent_checkpoint_public_id": initial_parent,
-            "chain_depth": chain_depth,
+            "acquisition_mode": plan["mode"],
+            "base_snapshot_public_id": plan["base_snapshot_public_id"],
+            "parent_checkpoint_public_id": plan.get(
+                "source_checkpoint_public_id"
+            ),
+            "chain_depth": len(chain) - 1,
         }
 
     def get_job(self, sync_public_id: str) -> dict[str, Any]:
