@@ -193,6 +193,7 @@ describe("wallet case contracts", () => {
       time_window: "custom",
       overlap_seconds: 0,
       source_checkpoint_public_id: resumed.requested_scope.source_checkpoint_public_id,
+      continuation_plan_public_id: null,
     });
     expect(() => parseWalletCaseSync({
       ...resumed,

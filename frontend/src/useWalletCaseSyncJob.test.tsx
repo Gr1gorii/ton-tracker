@@ -9,6 +9,7 @@ import {
   activeSyncFixture,
   CASE_ID,
   CHECKPOINT_ID,
+  CONTINUATION_PLAN_ID,
   IDEMPOTENCY_KEY,
   incrementalSyncFixture,
   resumeSyncFixture,
@@ -19,6 +20,7 @@ const apiMocks = vi.hoisted(() => ({
   cancelWalletCaseSync: vi.fn(),
   createWalletCaseSync: vi.fn(),
   getWalletCaseSync: vi.fn(),
+  resumeWalletCaseContinuationPlan: vi.fn(),
   resumeWalletCaseStreamCheckpoint: vi.fn(),
 }));
 
@@ -147,10 +149,16 @@ describe("useWalletCaseSyncJob", () => {
     expect(result.current.sync?.state).toBe("queued");
   });
 
-  it("reuses one idempotency key while starting a checkpoint continuation", async () => {
-    apiMocks.resumeWalletCaseStreamCheckpoint
+  it("reuses one idempotency key while starting a plan-bound continuation", async () => {
+    apiMocks.resumeWalletCaseContinuationPlan
       .mockRejectedValueOnce(new TypeError("Network connection reset"))
-      .mockResolvedValueOnce(activeResumeSyncFixture());
+      .mockResolvedValueOnce({
+        ...activeResumeSyncFixture(),
+        requested_scope: {
+          ...activeResumeSyncFixture().requested_scope,
+          continuation_plan_public_id: CONTINUATION_PLAN_ID,
+        },
+      });
     const initial = succeededSyncFixture();
     const { result } = renderHook(() => useWalletCaseSyncJob({
       caseId: CASE_ID,
@@ -158,15 +166,19 @@ describe("useWalletCaseSyncJob", () => {
       onTerminal: vi.fn(),
     }));
 
-    await act(async () => { await result.current.resume(CHECKPOINT_ID); });
+    await act(async () => {
+      await result.current.resumePlanned(CONTINUATION_PLAN_ID, CHECKPOINT_ID);
+    });
     expect(result.current.transportError).toContain("Network connection reset");
-    await act(async () => { await result.current.resume(CHECKPOINT_ID); });
+    await act(async () => {
+      await result.current.resumePlanned(CONTINUATION_PLAN_ID, CHECKPOINT_ID);
+    });
 
-    expect(apiMocks.resumeWalletCaseStreamCheckpoint).toHaveBeenCalledTimes(2);
-    expect(apiMocks.resumeWalletCaseStreamCheckpoint.mock.calls[0][2]).toBe(
+    expect(apiMocks.resumeWalletCaseContinuationPlan).toHaveBeenCalledTimes(2);
+    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[0][3]).toBe(
       IDEMPOTENCY_KEY,
     );
-    expect(apiMocks.resumeWalletCaseStreamCheckpoint.mock.calls[1][2]).toBe(
+    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[1][3]).toBe(
       IDEMPOTENCY_KEY,
     );
     expect(result.current.sync?.requested_scope.mode).toBe("resume");
