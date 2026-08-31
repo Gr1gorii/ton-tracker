@@ -43,6 +43,10 @@ CheckpointChainPublicId = Annotated[
     str,
     Field(pattern=r"^cch_[0-9a-f]{64}$", max_length=68),
 ]
+CheckpointContinuationPlanPublicId = Annotated[
+    str,
+    Field(pattern=r"^cpl_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -678,6 +682,142 @@ class WalletCaseStreamCheckpointChainResponse(_StrictModel):
             != self.document.aggregate.pages_succeeded
         ):
             raise ValueError("checkpoint chain content address is inconsistent")
+        return self
+
+
+class WalletCaseCheckpointContinuationPlanStream(_StrictModel):
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    provider_contract_version: str = Field(min_length=1, max_length=48)
+    tip_checkpoint: WalletCaseStreamCheckpointDescriptor
+    chain_public_id: CheckpointChainPublicId
+    chain_content_hash_sha256: Sha256Digest
+    revision_count: int = Field(ge=1, le=100)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    resume_state: Literal["ready", "complete", "blocked"]
+    next_page_index: int | None = Field(default=None, ge=1)
+    resume_blocker: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def _validate_stream(self):
+        if (
+            self.tip_checkpoint.provider != self.provider
+            or self.tip_checkpoint.stream_key != self.stream_key
+            or self.tip_checkpoint.provider_contract_version
+            != self.provider_contract_version
+            or self.tip_checkpoint.resume_state != self.resume_state
+            or self.chain_public_id
+            != f"cch_{self.chain_content_hash_sha256}"
+            or self.pages_succeeded > self.page_count
+            or (self.resume_state == "ready")
+            != (self.next_page_index is not None)
+            or (self.resume_state == "blocked")
+            != (self.resume_blocker is not None)
+        ):
+            raise ValueError("checkpoint continuation plan stream is inconsistent")
+        return self
+
+
+class WalletCaseCheckpointContinuationPlanAggregate(_StrictModel):
+    stream_count: int = Field(ge=0, le=32)
+    ready_count: int = Field(ge=0, le=32)
+    complete_count: int = Field(ge=0, le=32)
+    blocked_count: int = Field(ge=0, le=32)
+    revision_count: int = Field(ge=0, le=3200)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+
+
+class WalletCaseCheckpointContinuationPlanDocument(_StrictModel):
+    contract_version: Literal["wallet_case_checkpoint_continuation_plan_v1"]
+    case_public_id: CanonicalPublicId
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    aggregate: WalletCaseCheckpointContinuationPlanAggregate
+    streams: list[WalletCaseCheckpointContinuationPlanStream] = Field(
+        max_length=32,
+    )
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_plan(self):
+        states = [item.resume_state for item in self.streams]
+        keys = [f"{item.provider}\0{item.stream_key}" for item in self.streams]
+        if (
+            self.aggregate.stream_count != len(self.streams)
+            or self.aggregate.ready_count != states.count("ready")
+            or self.aggregate.complete_count != states.count("complete")
+            or self.aggregate.blocked_count != states.count("blocked")
+            or self.aggregate.stream_count
+            != self.aggregate.ready_count
+            + self.aggregate.complete_count
+            + self.aggregate.blocked_count
+            or self.aggregate.revision_count
+            != sum(item.revision_count for item in self.streams)
+            or self.aggregate.page_count
+            != sum(item.page_count for item in self.streams)
+            or self.aggregate.pages_succeeded
+            != sum(item.pages_succeeded for item in self.streams)
+            or self.aggregate.pages_succeeded > self.aggregate.page_count
+            or len(set(keys)) != len(keys)
+            or keys != sorted(keys)
+            or (self.checkpoint_cutoff_public_id is None) != (not self.streams)
+            or (
+                self.checkpoint_cutoff_public_id is not None
+                and self.checkpoint_cutoff_public_id
+                not in {item.tip_checkpoint.public_id for item in self.streams}
+            )
+        ):
+            raise ValueError("checkpoint continuation plan is inconsistent")
+        return self
+
+
+class WalletCaseCheckpointContinuationPlanDescriptor(_StrictModel):
+    public_id: CheckpointContinuationPlanPublicId
+    contract_version: Literal["wallet_case_checkpoint_continuation_plan_v1"]
+    content_hash_sha256: Sha256Digest
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    stream_count: int = Field(ge=0, le=32)
+    ready_count: int = Field(ge=0, le=32)
+    complete_count: int = Field(ge=0, le=32)
+    blocked_count: int = Field(ge=0, le=32)
+    revision_count: int = Field(ge=0, le=3200)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+
+
+class WalletCaseCheckpointContinuationPlanResponse(_StrictModel):
+    plan: WalletCaseCheckpointContinuationPlanDescriptor
+    document: WalletCaseCheckpointContinuationPlanDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        aggregate = self.document.aggregate
+        if (
+            self.plan.public_id != f"cpl_{digest}"
+            or self.plan.content_hash_sha256 != digest
+            or self.plan.contract_version != self.document.contract_version
+            or self.plan.checkpoint_cutoff_public_id
+            != self.document.checkpoint_cutoff_public_id
+            or self.plan.stream_count != aggregate.stream_count
+            or self.plan.ready_count != aggregate.ready_count
+            or self.plan.complete_count != aggregate.complete_count
+            or self.plan.blocked_count != aggregate.blocked_count
+            or self.plan.revision_count != aggregate.revision_count
+            or self.plan.page_count != aggregate.page_count
+            or self.plan.pages_succeeded != aggregate.pages_succeeded
+        ):
+            raise ValueError(
+                "checkpoint continuation plan content address is inconsistent"
+            )
         return self
 
 

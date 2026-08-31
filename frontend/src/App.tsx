@@ -42,7 +42,7 @@ import GramCaseWorkspace, { type WalletCaseView } from "./components/GramCaseWor
 import GramOwnershipProofCard from "./components/GramOwnershipProofCard";
 import atmosphere from "./assets/gram-scope-atmosphere.jpg";
 
-const RELEASE_LABEL = "v0.90.0";
+const RELEASE_LABEL = "v0.91.0";
 const CHART_COLORS = ["#4f6df5", "#ff7769", "#55c8be", "#9b7de4", "#f2a65a"];
 const GramRunCharts = lazy(() => import("./components/GramRunCharts"));
 const GramCaseLibrary = lazy(() => import("./components/GramCaseLibrary"));

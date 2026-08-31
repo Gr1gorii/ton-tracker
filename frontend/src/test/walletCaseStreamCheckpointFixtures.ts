@@ -1,4 +1,5 @@
 import type {
+  WalletCaseCheckpointContinuationPlanResponse,
   WalletCaseStreamCheckpointCatalogResponse,
   WalletCaseStreamCheckpointChainResponse,
   WalletCaseStreamCheckpointDetailResponse,
@@ -188,6 +189,54 @@ export function streamCheckpointChainFixture(): WalletCaseStreamCheckpointChainR
       limitations: [{
         code: "checkpoint_chain_is_acquisition_progress",
         message: "Checkpoint pages do not prove complete wallet history.",
+      }],
+    },
+  };
+}
+
+export function checkpointContinuationPlanFixture(): WalletCaseCheckpointContinuationPlanResponse {
+  const chain = streamCheckpointChainFixture();
+  const tip = chain.document.revisions[chain.document.revisions.length - 1].checkpoint;
+  const planHash = "78".repeat(32);
+  const aggregate = {
+    stream_count: 1,
+    ready_count: 1,
+    complete_count: 0,
+    blocked_count: 0,
+    revision_count: chain.chain.revision_count,
+    page_count: chain.chain.page_count,
+    pages_succeeded: chain.chain.pages_succeeded,
+  };
+  return {
+    plan: {
+      public_id: `cpl_${planHash}`,
+      contract_version: "wallet_case_checkpoint_continuation_plan_v1",
+      content_hash_sha256: planHash,
+      checkpoint_cutoff_public_id: tip.public_id,
+      ...aggregate,
+    },
+    document: {
+      contract_version: "wallet_case_checkpoint_continuation_plan_v1",
+      case_public_id: CASE_ID,
+      checkpoint_cutoff_public_id: tip.public_id,
+      aggregate,
+      streams: [{
+        provider: tip.provider,
+        stream_key: tip.stream_key,
+        provider_contract_version: tip.provider_contract_version,
+        tip_checkpoint: tip,
+        chain_public_id: chain.chain.public_id,
+        chain_content_hash_sha256: chain.chain.content_hash_sha256,
+        revision_count: chain.chain.revision_count,
+        page_count: chain.chain.page_count,
+        pages_succeeded: chain.chain.pages_succeeded,
+        resume_state: "ready",
+        next_page_index: chain.document.next_page_index,
+        resume_blocker: null,
+      }],
+      limitations: [{
+        code: "continuation_plan_is_not_automatic_backfill",
+        message: "The plan does not schedule provider requests or prove complete history.",
       }],
     },
   };

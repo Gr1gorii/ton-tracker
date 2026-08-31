@@ -4,10 +4,28 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.90.0 — Checkpoint Chain**<br>
+Current product release: **v0.91.0 — Continuation Plan**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.90.0 adds
+## What v0.91.0 adds
+
+The latest verified revision of every provider stream can now be assembled into
+one bounded, content-addressed Continuation Plan through
+`GET /api/v1/cases/{case}/stream-checkpoints/continuation-plan`. Its
+`cpl_<sha256>` identity binds the checkpoint cutoff, stable provider/stream
+ordering, each root-to-tip chain identity, current `ready`, `complete`, or
+`blocked` state, accumulated real provider pages, and the exact next page when
+a continuation exists.
+
+Plan generation reuses the same fail-closed manifest and lineage verification
+as exact chain reads and accepts at most 32 current streams. Summary loads the
+plan only on an explicit action, displays the current per-stream workflow, and
+exports the strictly parsed JSON. Execution remains sequential and explicit:
+the plan does not schedule provider work, automatically backfill history, or
+prove complete wallet history. No migration is added; Alembic remains at
+`20260828_0028`.
+
+## v0.90.0 checkpoint chain
 
 An exact checkpoint revision can now be expanded into one content-addressed,
 root-to-tip chain document through
@@ -201,6 +219,8 @@ profit, ownership proof, or complete wallet history.
 - v0.89.0 signed, frozen checkpoint revision history with exact lineage reads.
 - v0.90.0 content-addressed root-to-tip checkpoint chains with bounded page
   aggregation and verified JSON export.
+- v0.91.0 content-addressed, case-level Continuation Plans across every latest
+  verified provider stream.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

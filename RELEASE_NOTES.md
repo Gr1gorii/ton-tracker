@@ -1,3 +1,28 @@
+# GRAM Scope — v0.91.0 CONTINUATION PLAN
+
+v0.91.0 assembles the latest verified revision of every provider stream into
+one case-level, content-addressed Continuation Plan. The new
+`GET /api/v1/cases/{case}/stream-checkpoints/continuation-plan` endpoint binds a
+stable checkpoint cutoff, provider/stream ordering, every root-to-tip chain
+identity, aggregate revision and provider-page totals, current continuation
+state, and exact next page into a canonical `cpl_<sha256>` document.
+
+Every stream is revalidated through the existing checkpoint, source manifest,
+acquisition plan, parent edge, provider contract, and 100-revision chain gates.
+The plan itself is bounded to 32 latest streams and fails closed if any member
+chain is corrupt or contradictory. Empty and mixed-state plans remain
+content-addressed and case-scoped.
+
+Summary verifies the plan only on an explicit action, shows ready, complete,
+and blocked streams with their chain IDs and represented page totals, and
+exports the strictly parsed JSON. Only one Case synchronization may run at a
+time, so a ready stream is resumed explicitly and the plan must be verified
+again after publication. The plan is not a scheduler, automatic backfill, or
+proof of complete wallet history. No database migration is added; Alembic
+remains at `20260828_0028` and backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.90.0 CHECKPOINT CHAIN
 
 v0.90.0 turns one exact provider-stream checkpoint revision into a
