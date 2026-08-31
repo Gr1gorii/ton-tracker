@@ -211,6 +211,7 @@ class WalletActivityAdapterRequest:
     resume_stream_key: Literal["transactions", "account_events"] | None = None
     resume_cursor: str | None = None
     resume_page_index: int | None = None
+    resume_page_budget: int | None = None
 
 
 @dataclass(frozen=True)
@@ -778,7 +779,10 @@ class TonapiWalletActivityLiveAdapter:
         page_cap = (
             1
             if mode == "preview" or not bounded
-            else configured_page_cap
+            else _effective_resume_page_cap(
+                request,
+                configured_page_cap,
+            )
         )
         pages: list[WalletActivityAcquisitionPageEvidence] = []
         accepted_rows: list[dict[str, Any]] = []
@@ -1125,7 +1129,11 @@ class TonapiWalletActivityLiveAdapter:
             )
 
         bounded = bounds is not None
-        page_cap = 1 if mode == "preview" or not bounded else configured_cap
+        page_cap = (
+            1
+            if mode == "preview" or not bounded
+            else _effective_resume_page_cap(request, configured_cap)
+        )
         query_start, query_end = _event_query_dates(bounds)
         pages: list[WalletActivityAcquisitionPageEvidence] = []
         accepted_events: list[dict[str, Any]] = []
@@ -1879,9 +1887,13 @@ def _resume_position(
 ) -> tuple[str | None, int]:
     """Validate one fail-closed provider continuation position."""
     if request.resume_stream_key is None:
-        if request.resume_cursor is not None or request.resume_page_index is not None:
+        if (
+            request.resume_cursor is not None
+            or request.resume_page_index is not None
+            or request.resume_page_budget is not None
+        ):
             raise ValueError(
-                "resume cursor and page index require a resume stream key."
+                "resume cursor, page index, and page budget require a resume stream key."
             )
         return None, 1
     if request.resume_stream_key != stream_key:
@@ -1894,7 +1906,22 @@ def _resume_position(
         raise ValueError("resume cursor must be a canonical logical time.")
     if type(page_index) is not int or page_index < 1:
         raise ValueError("resume page index must be a positive integer.")
+    page_budget = request.resume_page_budget
+    if page_budget is not None and (
+        type(page_budget) is not int or not 1 <= page_budget <= 10
+    ):
+        raise ValueError("resume page budget must be from 1 through 10.")
     return cursor, page_index
+
+
+def _effective_resume_page_cap(
+    request: WalletActivityAdapterRequest,
+    configured_page_cap: int,
+) -> int:
+    page_budget = request.resume_page_budget
+    if request.resume_stream_key is None or page_budget is None:
+        return configured_page_cap
+    return min(configured_page_cap, page_budget)
 
 
 def _event_query_dates(

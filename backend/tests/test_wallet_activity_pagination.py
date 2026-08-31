@@ -258,6 +258,72 @@ def test_resume_starts_from_verified_cursor_and_continues_page_indexes(monkeypat
     assert stream.termination_reason == "page_cap_reached"
 
 
+@pytest.mark.parametrize(
+    ("configured_cap", "page_budget"),
+    [(5, 2), (2, 10)],
+)
+def test_resume_uses_the_lower_operator_or_configured_page_cap(
+    monkeypatch,
+    configured_cap,
+    page_budget,
+):
+    adapter = TonapiWalletActivityLiveAdapter(
+        _settings(page_size=1, page_cap=configured_cap)
+    )
+    calls = _install_pages(
+        monkeypatch,
+        adapter,
+        [
+            _page(
+                [_row("400", datetime(2026, 7, 10, 11, 0, tzinfo=timezone.utc), "B")],
+                request_cursor="500",
+                limit=1,
+            ),
+            _page(
+                [_row("300", datetime(2026, 7, 10, 10, 30, tzinfo=timezone.utc), "C")],
+                request_cursor="400",
+                limit=1,
+            ),
+        ],
+    )
+
+    result = adapter.ingest(
+        replace(
+            _request(),
+            resume_stream_key="transactions",
+            resume_cursor="500",
+            resume_page_index=2,
+            resume_page_budget=page_budget,
+        )
+    )
+
+    stream = _stream(result)
+    assert [call[2] for call in calls] == ["500", "400"]
+    assert stream.page_cap == 2
+    assert [page.page_index for page in stream.pages] == [2, 3]
+    assert stream.termination_reason == "page_cap_reached"
+
+
+def test_resume_rejects_invalid_page_budget_before_provider_io(monkeypatch):
+    adapter = TonapiWalletActivityLiveAdapter(_settings())
+    calls = _install_pages(monkeypatch, adapter, [])
+
+    result = adapter.ingest(
+        replace(
+            _request(),
+            resume_stream_key="transactions",
+            resume_cursor="500",
+            resume_page_index=2,
+            resume_page_budget=11,
+        )
+    )
+
+    stream = _stream(result)
+    assert calls == []
+    assert result.status == "error"
+    assert stream.termination_reason == "protocol_error"
+
+
 def test_resume_rejects_a_stream_mismatch_before_provider_io(monkeypatch):
     adapter = TonapiWalletActivityLiveAdapter(_settings())
     calls = _install_pages(monkeypatch, adapter, [])

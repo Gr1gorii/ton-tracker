@@ -2118,11 +2118,19 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     assert unbound_reuse.status_code == 409
     assert unbound_reuse.json()["detail"]["code"] == "idempotency_conflict"
 
+    seen_build_kwargs = []
+
+    def recording_builder(payload, settings, **kwargs):
+        seen_build_kwargs.append(kwargs)
+        return _resumed_transaction_run(payload, settings, **kwargs)
+
     worker = CaseSyncWorker(
         app.state.wallet_case_test_session,
-        builder=_resumed_transaction_run,
+        builder=recording_builder,
     )
     assert worker.run_once() is True
+    assert len(seen_build_kwargs) == 1
+    assert seen_build_kwargs[0]["resume_page_budget"] == 3
     advanced_plan_response = client.get(
         f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
     )
