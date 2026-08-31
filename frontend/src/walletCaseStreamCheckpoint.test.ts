@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import {
   streamCheckpointCatalogFixture,
+  streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
   parseWalletCaseStreamCheckpointCatalog,
+  parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
+  serializeWalletCaseStreamCheckpointChain,
 } from "./walletCaseStreamCheckpoint";
 
 describe("Wallet Case stream checkpoint contracts", () => {
@@ -97,5 +100,38 @@ describe("Wallet Case stream checkpoint contracts", () => {
       ...history,
       page: { ...history.page, next_cursor: null },
     })).toThrow(/inconsistent/);
+  });
+
+  it("accepts and exports a strictly linked checkpoint chain", () => {
+    const chain = streamCheckpointChainFixture();
+
+    expect(parseWalletCaseStreamCheckpointChain(chain)).toEqual(chain);
+    expect(JSON.parse(serializeWalletCaseStreamCheckpointChain(chain))).toEqual(chain);
+  });
+
+  it("rejects checkpoint chain identity, aggregates, and parent drift", () => {
+    const chain = streamCheckpointChainFixture();
+    expect(() => parseWalletCaseStreamCheckpointChain({
+      ...chain,
+      chain: { ...chain.chain, public_id: `cch_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseStreamCheckpointChain({
+      ...chain,
+      document: {
+        ...chain.document,
+        aggregate: { ...chain.document.aggregate, page_count: 3 },
+      },
+    })).toThrow(/aggregate/);
+    expect(() => parseWalletCaseStreamCheckpointChain({
+      ...chain,
+      document: {
+        ...chain.document,
+        revisions: chain.document.revisions.map((revision, index) => (
+          index === 1
+            ? { ...revision, parent_checkpoint_public_id: revision.checkpoint.public_id }
+            : revision
+        )),
+      },
+    })).toThrow(/parent lineage/);
   });
 });

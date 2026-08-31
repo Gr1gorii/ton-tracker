@@ -94,10 +94,56 @@ export interface WalletCaseStreamCheckpointHistoryResponse {
   limitations: WalletCaseLimitation[];
 }
 
+export interface WalletCaseStreamCheckpointChainRevision {
+  ordinal: number;
+  checkpoint: WalletCaseStreamCheckpointDescriptor;
+  acquisition_mode: WalletCaseSyncMode;
+  base_snapshot_public_id: string | null;
+  parent_checkpoint_public_id: string | null;
+  source_manifest_public_id: string;
+  source_manifest_hash_sha256: string;
+  requested_period: WalletCaseSyncManifestPeriod;
+  continuation_page_index: number | null;
+  page_count: number;
+  pages_succeeded: number;
+  last_response_digest_sha256: string | null;
+}
+
+export interface WalletCaseStreamCheckpointChainResponse {
+  chain: {
+    public_id: string;
+    contract_version: "wallet_case_stream_checkpoint_chain_v1";
+    content_hash_sha256: string;
+    revision_count: number;
+    page_count: number;
+    pages_succeeded: number;
+  };
+  document: {
+    contract_version: "wallet_case_stream_checkpoint_chain_v1";
+    case_public_id: string;
+    tip_checkpoint_public_id: string;
+    provider: string;
+    stream_key: string;
+    provider_contract_version: string;
+    root_acquisition_mode: "bounded" | "incremental";
+    root_base_snapshot_public_id: string | null;
+    current_resume_state: WalletCaseStreamResumeState;
+    next_page_index: number | null;
+    aggregate: {
+      revision_count: number;
+      page_count: number;
+      pages_succeeded: number;
+    };
+    revisions: WalletCaseStreamCheckpointChainRevision[];
+    limitations: WalletCaseLimitation[];
+  };
+}
+
 const PUBLIC_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CHECKPOINT_ID = /^scp_([0-9a-f]{64})$/;
+const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
 const MANIFEST_ID = /^smf_([0-9a-f]{64})$/;
 const RESUME_STATES = new Set<WalletCaseStreamResumeState>([
   "ready", "complete", "blocked",
@@ -178,6 +224,17 @@ function checkpointId(value: unknown, label: string): string {
   const result = text(value, label, 68);
   if (!CHECKPOINT_ID.test(result)) fail(`${label} is invalid`);
   return result;
+}
+
+function limitations(value: unknown, label: string): WalletCaseLimitation[] {
+  if (!Array.isArray(value)) fail(`${label} are invalid`);
+  return value.map((entry, index) => {
+    const item = record(entry, ["code", "message"], `${label} ${index}`);
+    return {
+      code: text(item.code, `${label} ${index} code`, 64),
+      message: text(item.message, `${label} ${index} message`, 500),
+    };
+  });
 }
 
 function period(value: unknown): WalletCaseSyncManifestPeriod {
@@ -491,24 +548,10 @@ export function parseWalletCaseStreamCheckpointHistory(
     "stream checkpoint history cursor",
     1024,
   );
-  if (!Array.isArray(item.limitations)) {
-    fail("stream checkpoint history limitations are invalid");
-  }
-  const limitations = item.limitations.map((value, index) => {
-    const limitation = record(
-      value,
-      ["code", "message"],
-      `stream checkpoint history limitation ${index}`,
-    );
-    return {
-      code: text(limitation.code, "stream checkpoint history limitation code", 64),
-      message: text(
-        limitation.message,
-        "stream checkpoint history limitation message",
-        500,
-      ),
-    };
-  });
+  const parsedLimitations = limitations(
+    item.limitations,
+    "stream checkpoint history limitations",
+  );
   if (
     limit < 1 || limit > 50 || items.length > limit ||
     returnedCount !== items.length || returnedCount > totalRevisions ||
@@ -524,8 +567,233 @@ export function parseWalletCaseStreamCheckpointHistory(
     items,
     aggregate: { total_revisions: totalRevisions, returned_count: returnedCount },
     page: { limit, has_more: hasMore, next_cursor: nextCursor },
-    limitations,
+    limitations: parsedLimitations,
   };
+}
+
+export function parseWalletCaseStreamCheckpointChain(
+  value: unknown,
+): WalletCaseStreamCheckpointChainResponse {
+  const envelope = record(value, ["chain", "document"], "checkpoint chain response");
+  const chain = record(envelope.chain, [
+    "public_id", "contract_version", "content_hash_sha256", "revision_count",
+    "page_count", "pages_succeeded",
+  ], "checkpoint chain descriptor");
+  if (chain.contract_version !== "wallet_case_stream_checkpoint_chain_v1") {
+    fail("checkpoint chain descriptor contract is unsupported");
+  }
+  const contentHash = digest(chain.content_hash_sha256, "checkpoint chain hash");
+  const chainId = text(chain.public_id, "checkpoint chain id", 68);
+  if (CHECKPOINT_CHAIN_ID.exec(chainId)?.[1] !== contentHash) {
+    fail("checkpoint chain identity is invalid");
+  }
+  const revisionCount = integer(chain.revision_count, "checkpoint chain revision count");
+  const pageCount = integer(chain.page_count, "checkpoint chain page count");
+  const pagesSucceeded = integer(
+    chain.pages_succeeded,
+    "checkpoint chain pages succeeded",
+  );
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "tip_checkpoint_public_id", "provider",
+    "stream_key", "provider_contract_version", "root_acquisition_mode",
+    "root_base_snapshot_public_id", "current_resume_state", "next_page_index",
+    "aggregate", "revisions", "limitations",
+  ], "checkpoint chain document");
+  if (document.contract_version !== "wallet_case_stream_checkpoint_chain_v1") {
+    fail("checkpoint chain document contract is unsupported");
+  }
+  const caseId = publicId(document.case_public_id, "checkpoint chain case id");
+  const tipId = checkpointId(
+    document.tip_checkpoint_public_id,
+    "checkpoint chain tip id",
+  );
+  const provider = text(document.provider, "checkpoint chain provider", 64);
+  const streamKey = text(document.stream_key, "checkpoint chain stream key", 40);
+  const providerContract = text(
+    document.provider_contract_version,
+    "checkpoint chain provider contract",
+    48,
+  );
+  const rootMode = text(
+    document.root_acquisition_mode,
+    "checkpoint chain root mode",
+    16,
+  );
+  if (rootMode !== "bounded" && rootMode !== "incremental") {
+    fail("checkpoint chain root mode is invalid");
+  }
+  const rootBase = document.root_base_snapshot_public_id === null
+    ? null : publicId(
+      document.root_base_snapshot_public_id,
+      "checkpoint chain root base id",
+    );
+  const currentState = resumeState(
+    document.current_resume_state,
+    "checkpoint chain current resume state",
+  );
+  const nextPage = document.next_page_index === null
+    ? null : integer(document.next_page_index, "checkpoint chain next page");
+  const aggregate = record(document.aggregate, [
+    "revision_count", "page_count", "pages_succeeded",
+  ], "checkpoint chain aggregate");
+  const aggregateRevisionCount = integer(
+    aggregate.revision_count,
+    "checkpoint chain aggregate revision count",
+  );
+  const aggregatePageCount = integer(
+    aggregate.page_count,
+    "checkpoint chain aggregate page count",
+  );
+  const aggregatePagesSucceeded = integer(
+    aggregate.pages_succeeded,
+    "checkpoint chain aggregate pages succeeded",
+  );
+  if (!Array.isArray(document.revisions) || document.revisions.length < 1 || document.revisions.length > 100) {
+    fail("checkpoint chain revisions are invalid");
+  }
+  const revisions = document.revisions.map((value, index) => {
+    const item = record(value, [
+      "ordinal", "checkpoint", "acquisition_mode", "base_snapshot_public_id",
+      "parent_checkpoint_public_id", "source_manifest_public_id",
+      "source_manifest_hash_sha256", "requested_period",
+      "continuation_page_index", "page_count", "pages_succeeded",
+      "last_response_digest_sha256",
+    ], `checkpoint chain revision ${index}`);
+    const checkpoint = parseDescriptor(item.checkpoint);
+    const mode = text(
+      item.acquisition_mode,
+      `checkpoint chain revision ${index} mode`,
+      16,
+    ) as WalletCaseSyncMode;
+    if (mode !== "bounded" && mode !== "incremental" && mode !== "resume") {
+      fail(`checkpoint chain revision ${index} mode is invalid`);
+    }
+    const baseId = item.base_snapshot_public_id === null
+      ? null : publicId(
+        item.base_snapshot_public_id,
+        `checkpoint chain revision ${index} base id`,
+      );
+    const parentId = item.parent_checkpoint_public_id === null
+      ? null : checkpointId(
+        item.parent_checkpoint_public_id,
+        `checkpoint chain revision ${index} parent id`,
+      );
+    const manifestHash = digest(
+      item.source_manifest_hash_sha256,
+      `checkpoint chain revision ${index} manifest hash`,
+    );
+    const manifestId = text(
+      item.source_manifest_public_id,
+      `checkpoint chain revision ${index} manifest id`,
+      68,
+    );
+    if (MANIFEST_ID.exec(manifestId)?.[1] !== manifestHash) {
+      fail(`checkpoint chain revision ${index} manifest identity is invalid`);
+    }
+    const continuationPage = item.continuation_page_index === null
+      ? null : integer(
+        item.continuation_page_index,
+        `checkpoint chain revision ${index} continuation page`,
+      );
+    const revisionPageCount = integer(
+      item.page_count,
+      `checkpoint chain revision ${index} page count`,
+    );
+    const revisionPagesSucceeded = integer(
+      item.pages_succeeded,
+      `checkpoint chain revision ${index} pages succeeded`,
+    );
+    if (
+      revisionPagesSucceeded > revisionPageCount ||
+      (checkpoint.resume_state === "ready") !== (continuationPage !== null) ||
+      (continuationPage !== null && continuationPage < 1)
+    ) fail(`checkpoint chain revision ${index} continuation is inconsistent`);
+    return {
+      ordinal: integer(item.ordinal, `checkpoint chain revision ${index} ordinal`),
+      checkpoint,
+      acquisition_mode: mode,
+      base_snapshot_public_id: baseId,
+      parent_checkpoint_public_id: parentId,
+      source_manifest_public_id: manifestId,
+      source_manifest_hash_sha256: manifestHash,
+      requested_period: period(item.requested_period),
+      continuation_page_index: continuationPage,
+      page_count: revisionPageCount,
+      pages_succeeded: revisionPagesSucceeded,
+      last_response_digest_sha256: item.last_response_digest_sha256 === null
+        ? null : digest(
+          item.last_response_digest_sha256,
+          `checkpoint chain revision ${index} response digest`,
+        ),
+    };
+  });
+  const root = revisions[0];
+  const tip = revisions[revisions.length - 1];
+  if (
+    revisionCount < 1 || revisionCount > 100 ||
+    revisionCount !== revisions.length ||
+    revisionCount !== aggregateRevisionCount ||
+    pageCount !== aggregatePageCount || pagesSucceeded !== aggregatePagesSucceeded ||
+    pageCount !== revisions.reduce((sum, item) => sum + item.page_count, 0) ||
+    pagesSucceeded !== revisions.reduce((sum, item) => sum + item.pages_succeeded, 0) ||
+    pagesSucceeded > pageCount ||
+    root.ordinal !== 0 || root.acquisition_mode !== rootMode ||
+    root.base_snapshot_public_id !== rootBase || root.parent_checkpoint_public_id !== null ||
+    (rootMode === "bounded") !== (rootBase === null) ||
+    tip.checkpoint.public_id !== tipId || tip.checkpoint.resume_state !== currentState ||
+    tip.continuation_page_index !== nextPage ||
+    (currentState === "ready") !== (nextPage !== null)
+  ) fail("checkpoint chain endpoints or aggregate are inconsistent");
+  for (let index = 0; index < revisions.length; index += 1) {
+    const revision = revisions[index];
+    if (
+      revision.ordinal !== index ||
+      revision.checkpoint.provider !== provider ||
+      revision.checkpoint.stream_key !== streamKey ||
+      revision.checkpoint.provider_contract_version !== providerContract
+    ) fail("checkpoint chain revision identity is inconsistent");
+    if (index > 0) {
+      const parent = revisions[index - 1];
+      if (
+        revision.acquisition_mode !== "resume" ||
+        revision.parent_checkpoint_public_id !== parent.checkpoint.public_id ||
+        revision.base_snapshot_public_id !== parent.checkpoint.source_sync_public_id
+      ) fail("checkpoint chain parent lineage is inconsistent");
+    }
+  }
+  return {
+    chain: {
+      public_id: chainId,
+      contract_version: "wallet_case_stream_checkpoint_chain_v1",
+      content_hash_sha256: contentHash,
+      revision_count: revisionCount,
+      page_count: pageCount,
+      pages_succeeded: pagesSucceeded,
+    },
+    document: {
+      contract_version: "wallet_case_stream_checkpoint_chain_v1",
+      case_public_id: caseId,
+      tip_checkpoint_public_id: tipId,
+      provider,
+      stream_key: streamKey,
+      provider_contract_version: providerContract,
+      root_acquisition_mode: rootMode,
+      root_base_snapshot_public_id: rootBase,
+      current_resume_state: currentState,
+      next_page_index: nextPage,
+      aggregate: {
+        revision_count: aggregateRevisionCount,
+        page_count: aggregatePageCount,
+        pages_succeeded: aggregatePagesSucceeded,
+      },
+      revisions,
+      limitations: limitations(document.limitations, "checkpoint chain limitations"),
+    },
+  };
+}
+
+export function serializeWalletCaseStreamCheckpointChain(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseStreamCheckpointChain(value), null, 2)}\n`;
 }
 
 export function parseWalletCaseStreamCheckpointCatalog(

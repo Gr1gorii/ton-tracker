@@ -15,6 +15,7 @@ import {
   getWalletCaseSync,
   getWalletCaseSyncManifest,
   getWalletCaseStreamCheckpoint,
+  getWalletCaseStreamCheckpointChain,
   getWalletCaseStreamCheckpointHistory,
   getWalletCaseStreamCheckpoints,
   listWalletCases,
@@ -43,6 +44,7 @@ import {
 import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
 import {
   streamCheckpointCatalogFixture,
+  streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
@@ -545,6 +547,32 @@ describe("Wallet Case API", () => {
         { cache: "no-store", signal: controller.signal },
       ],
     ]);
+  });
+
+  it("reads a no-store content-addressed checkpoint chain bound to its tip", async () => {
+    const chain = streamCheckpointChainFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(chain));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseStreamCheckpointChain(
+      CASE_ID,
+      CHECKPOINT_ID,
+      controller.signal,
+    )).resolves.toEqual(chain);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/stream-checkpoints/${CHECKPOINT_ID}/chain`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...chain,
+      document: { ...chain.document, case_public_id: OTHER_CASE_ID },
+    }));
+    await expect(getWalletCaseStreamCheckpointChain(
+      CASE_ID,
+      CHECKPOINT_ID,
+    )).rejects.toThrow(/does not match/);
   });
 
   it("rejects unsafe checkpoint history inputs and response scope", async () => {

@@ -23,9 +23,11 @@ import {
 } from "./walletCaseSyncManifest";
 import {
   parseWalletCaseStreamCheckpointCatalog,
+  parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
   type WalletCaseStreamCheckpointCatalogResponse,
+  type WalletCaseStreamCheckpointChainResponse,
   type WalletCaseStreamCheckpointDetailResponse,
   type WalletCaseStreamCheckpointHistoryResponse,
 } from "./walletCaseStreamCheckpoint";
@@ -604,6 +606,33 @@ export async function getWalletCaseStreamCheckpoint(
     throw new Error("Wallet Case stream checkpoint detail does not match the request");
   }
   return detail;
+}
+
+export async function getWalletCaseStreamCheckpointChain(
+  caseId: string,
+  checkpointId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseStreamCheckpointChainResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  assertCheckpointId(checkpointId);
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/stream-checkpoints/${encodeURIComponent(checkpointId)}/chain`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case checkpoint chain read failed",
+    );
+  }
+  const chain = parseWalletCaseStreamCheckpointChain(await response.json());
+  if (
+    chain.document.case_public_id !== caseId ||
+    chain.document.tip_checkpoint_public_id !== checkpointId
+  ) {
+    throw new Error("Wallet Case checkpoint chain does not match the request");
+  }
+  return chain;
 }
 
 export async function getWalletCaseStreamCheckpointHistory({
