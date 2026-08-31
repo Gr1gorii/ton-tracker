@@ -1223,7 +1223,7 @@ class WalletCaseService:
             ) from exc
         if (
             acquisition_plan.get("mode") != "resume"
-            or acquisition_plan.get("version") != 3
+            or acquisition_plan.get("version") not in {3, 4}
         ):
             raise WalletCaseContinuationReceiptNotFound(
                 "This sync was not accepted from a verified Continuation Plan."
@@ -1331,9 +1331,32 @@ class WalletCaseService:
             raise WalletCaseStreamCheckpointCorrupt(
                 "Stored Wallet Case continuation receipt transition is invalid."
             )
+        page_budget = acquisition_plan.get("resume_page_budget")
+        budgeted = acquisition_plan["version"] == 4
+        if budgeted:
+            if (
+                type(page_budget) is not int
+                or not 1 <= page_budget <= 10
+                or transition["page_count_delta"] > page_budget
+                or transition["pages_succeeded_delta"]
+                > transition["page_count_delta"]
+            ):
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case continuation receipt budget is invalid."
+                )
+            transition.update(
+                {
+                    "page_budget_consumed": transition["page_count_delta"],
+                    "page_budget_remaining": (
+                        page_budget - transition["page_count_delta"]
+                    ),
+                }
+            )
         document = {
             "contract_version": (
-                "wallet_case_checkpoint_continuation_receipt_v1"
+                "wallet_case_checkpoint_continuation_receipt_v2"
+                if budgeted
+                else "wallet_case_checkpoint_continuation_receipt_v1"
             ),
             "case_public_id": wallet_case.public_id,
             "sync_public_id": case_sync.public_id,
@@ -1350,6 +1373,7 @@ class WalletCaseService:
                 "next_page_index": source_document[
                     "continuation_page_index"
                 ],
+                **({"page_budget": page_budget} if budgeted else {}),
             },
             "output": {
                 "checkpoint": output_response["checkpoint"],
@@ -1392,24 +1416,37 @@ class WalletCaseService:
             separators=(",", ":"),
         ).encode("utf-8")
         digest = hashlib.sha256(canonical).hexdigest()
+        receipt = {
+            "public_id": f"ctr_{digest}",
+            "contract_version": document["contract_version"],
+            "content_hash_sha256": digest,
+            "sync_public_id": case_sync.public_id,
+            "input_plan_public_id": acquisition_plan[
+                "continuation_plan_public_id"
+            ],
+            "input_checkpoint_public_id": source.public_id,
+            "output_checkpoint_public_id": output.public_id,
+            "after_plan_public_id": after_plan["plan"]["public_id"],
+            "revision_delta": transition["revision_delta"],
+            "page_count_delta": transition["page_count_delta"],
+            "pages_succeeded_delta": transition[
+                "pages_succeeded_delta"
+            ],
+        }
+        if budgeted:
+            receipt.update(
+                {
+                    "page_budget": page_budget,
+                    "page_budget_consumed": transition[
+                        "page_budget_consumed"
+                    ],
+                    "page_budget_remaining": transition[
+                        "page_budget_remaining"
+                    ],
+                }
+            )
         return {
-            "receipt": {
-                "public_id": f"ctr_{digest}",
-                "contract_version": document["contract_version"],
-                "content_hash_sha256": digest,
-                "sync_public_id": case_sync.public_id,
-                "input_plan_public_id": acquisition_plan[
-                    "continuation_plan_public_id"
-                ],
-                "input_checkpoint_public_id": source.public_id,
-                "output_checkpoint_public_id": output.public_id,
-                "after_plan_public_id": after_plan["plan"]["public_id"],
-                "revision_delta": transition["revision_delta"],
-                "page_count_delta": transition["page_count_delta"],
-                "pages_succeeded_delta": transition[
-                    "pages_succeeded_delta"
-                ],
-            },
+            "receipt": receipt,
             "document": document,
         }
 

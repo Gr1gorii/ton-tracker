@@ -52,6 +52,7 @@ from services.wallet_cases import (
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
     WalletCaseCheckpointContinuationReceiptResponse,
+    WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseStreamCheckpointChainResponse,
     WalletCaseSyncRequest,
@@ -2215,6 +2216,7 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
             f"{initial_plan['plan']['public_id']}/{input_checkpoint_id}/resume"
         ),
         headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
     )
     assert first_queued.status_code == 202, first_queued.text
     first_sync_id = first_queued.json()["public_id"]
@@ -2231,8 +2233,10 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
     assert receipt_response.status_code == 200, receipt_response.text
     assert receipt_response.headers["cache-control"] == "no-store"
     receipt = receipt_response.json()
-    validated = WalletCaseCheckpointContinuationReceiptResponse.model_validate(
-        receipt
+    validated = (
+        WalletCaseCheckpointContinuationReceiptV2Response.model_validate(
+            receipt
+        )
     )
     assert validated.receipt.public_id == (
         f"ctr_{validated.receipt.content_hash_sha256}"
@@ -2247,6 +2251,7 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
     output_checkpoint_id = receipt["receipt"]["output_checkpoint_public_id"]
     assert output_checkpoint_id != input_checkpoint_id
     assert receipt["document"]["input"]["next_page_index"] == 2
+    assert receipt["document"]["input"]["page_budget"] == 3
     assert receipt["document"]["output"]["next_page_index"] == 3
     assert receipt["document"]["transition"] == {
         "checkpoint_changed": True,
@@ -2254,7 +2259,12 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
         "revision_delta": 1,
         "page_count_delta": 1,
         "pages_succeeded_delta": 1,
+        "page_budget_consumed": 1,
+        "page_budget_remaining": 2,
     }
+    assert receipt["receipt"]["page_budget"] == 3
+    assert receipt["receipt"]["page_budget_consumed"] == 1
+    assert receipt["receipt"]["page_budget_remaining"] == 2
     after_plan = receipt["document"]["after_plan"]
     assert receipt["receipt"]["after_plan_public_id"] == after_plan["plan"][
         "public_id"
@@ -2270,8 +2280,8 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
 
     tampered = json.loads(json.dumps(receipt))
     tampered["document"]["transition"]["page_count_delta"] = 0
-    with pytest.raises(ValueError, match="transition is inconsistent"):
-        WalletCaseCheckpointContinuationReceiptResponse.model_validate(
+    with pytest.raises(ValueError, match="inconsistent"):
+        WalletCaseCheckpointContinuationReceiptV2Response.model_validate(
             tampered
         )
 
@@ -2294,6 +2304,62 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
     )
     assert repeated.status_code == 200
     assert repeated.json() == receipt
+
+
+def test_legacy_plan_resume_keeps_the_v1_continuation_receipt(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    plan_id = plan["plan"]["public_id"]
+    checkpoint_id = plan["document"]["streams"][0]["tip_checkpoint"][
+        "public_id"
+    ]
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+            f"{plan_id}/{checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert queued.status_code == 202, queued.text
+    sync_id = queued.json()["public_id"]
+
+    with app.state.wallet_case_test_session() as session:
+        persisted = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == sync_id)
+        )
+        assert persisted is not None
+        coverage = json.loads(persisted.coverage_summary_json)
+        coverage["_acquisition"]["version"] = 3
+        coverage["_acquisition"].pop("resume_page_budget")
+        persisted.coverage_summary_json = json.dumps(
+            coverage,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        persisted.request_fingerprint = _checkpoint_resume_fingerprint(
+            checkpoint_id,
+            continuation_plan_public_id=plan_id,
+        )
+        session.commit()
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/continuation-receipt"
+    )
+    assert response.status_code == 200, response.text
+    receipt = response.json()
+    WalletCaseCheckpointContinuationReceiptResponse.model_validate(receipt)
+    assert receipt["receipt"]["contract_version"] == (
+        "wallet_case_checkpoint_continuation_receipt_v1"
+    )
+    assert "page_budget" not in receipt["receipt"]
+    assert "page_budget" not in receipt["document"]["input"]
 
 
 def test_continuation_receipt_is_plan_bound_terminal_and_case_scoped(client):

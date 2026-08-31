@@ -36,6 +36,7 @@ from wallet_case_schemas import (
     WalletCaseSyncRequest,
     WalletCaseSyncManifestResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
+    WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseCheckpointPlanResumeRequest,
     WalletCaseStreamCheckpointCatalogResponse,
@@ -553,7 +554,10 @@ def read_wallet_case_sync(
 
 @router.get(
     "/{public_id}/syncs/{sync_public_id}/continuation-receipt",
-    response_model=WalletCaseCheckpointContinuationReceiptResponse,
+    response_model=(
+        WalletCaseCheckpointContinuationReceiptResponse
+        | WalletCaseCheckpointContinuationReceiptV2Response
+    ),
 )
 def read_wallet_case_checkpoint_continuation_receipt(
     response: Response,

@@ -1012,6 +1012,84 @@ class WalletCaseCheckpointContinuationReceiptResponse(_StrictModel):
         return self
 
 
+class WalletCaseCheckpointContinuationReceiptV2Input(
+    WalletCaseCheckpointContinuationReceiptInput
+):
+    page_budget: int = Field(strict=True, ge=1, le=10)
+
+
+class WalletCaseCheckpointContinuationReceiptV2Transition(
+    WalletCaseCheckpointContinuationReceiptTransition
+):
+    page_budget_consumed: int = Field(strict=True, ge=0, le=10)
+    page_budget_remaining: int = Field(strict=True, ge=0, le=10)
+
+    @model_validator(mode="after")
+    def _validate_budget_consumption(self):
+        if (
+            self.page_budget_consumed != self.page_count_delta
+            or self.pages_succeeded_delta > self.page_budget_consumed
+        ):
+            raise ValueError(
+                "continuation receipt budget consumption is inconsistent"
+            )
+        return self
+
+
+class WalletCaseCheckpointContinuationReceiptV2Document(
+    WalletCaseCheckpointContinuationReceiptDocument
+):
+    contract_version: Literal[
+        "wallet_case_checkpoint_continuation_receipt_v2"
+    ]
+    input: WalletCaseCheckpointContinuationReceiptV2Input
+    transition: WalletCaseCheckpointContinuationReceiptV2Transition
+
+    @model_validator(mode="after")
+    def _validate_budget_accounting(self):
+        if (
+            self.transition.page_budget_consumed
+            + self.transition.page_budget_remaining
+            != self.input.page_budget
+        ):
+            raise ValueError(
+                "continuation receipt budget accounting is inconsistent"
+            )
+        return self
+
+
+class WalletCaseCheckpointContinuationReceiptV2Descriptor(
+    WalletCaseCheckpointContinuationReceiptDescriptor
+):
+    contract_version: Literal[
+        "wallet_case_checkpoint_continuation_receipt_v2"
+    ]
+    page_budget: int = Field(strict=True, ge=1, le=10)
+    page_budget_consumed: int = Field(strict=True, ge=0, le=10)
+    page_budget_remaining: int = Field(strict=True, ge=0, le=10)
+
+
+class WalletCaseCheckpointContinuationReceiptV2Response(
+    WalletCaseCheckpointContinuationReceiptResponse
+):
+    receipt: WalletCaseCheckpointContinuationReceiptV2Descriptor
+    document: WalletCaseCheckpointContinuationReceiptV2Document
+
+    @model_validator(mode="after")
+    def _validate_budget_descriptor(self):
+        if (
+            self.receipt.page_budget != self.document.input.page_budget
+            or self.receipt.page_budget_consumed
+            != self.document.transition.page_budget_consumed
+            or self.receipt.page_budget_remaining
+            != self.document.transition.page_budget_remaining
+        ):
+            raise ValueError(
+                "continuation receipt budget descriptor is inconsistent"
+            )
+        return self
+
+
 class WalletCaseSyncResponse(_StrictModel):
     case_public_id: CanonicalPublicId
     public_id: CanonicalPublicId
