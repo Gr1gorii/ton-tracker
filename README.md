@@ -4,10 +4,27 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.89.0 — Checkpoint History**<br>
+Current product release: **v0.90.0 — Checkpoint Chain**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.89.0 adds
+## What v0.90.0 adds
+
+An exact checkpoint revision can now be expanded into one content-addressed,
+root-to-tip chain document through
+`GET /api/v1/cases/{case}/stream-checkpoints/{checkpoint}/chain`. The contract
+revalidates every checkpoint, source manifest, acquisition plan, parent edge,
+provider/stream identity, and provider contract before aggregating the real
+provider pages represented by the chain. Its `cch_<sha256>` identity covers the
+canonical document, including the current continuation state and next page.
+
+Traversal is fail-closed and limited to 100 revisions. Summary exposes the
+verified chain only after an exact revision is selected, displays its aggregate
+page scope, and exports the same strictly parsed JSON document. The aggregate
+is evidence for those bounded provider pages only: it is not automatic
+backfill, complete wallet history, or an instruction to resume automatically.
+No migration is added; Alembic remains at `20260828_0028`.
+
+## v0.89.0 checkpoint history
 
 Every published provider-stream checkpoint revision is now available through a
 case-scoped, newest-first history contract. The first page freezes its revision
@@ -182,6 +199,8 @@ profit, ownership proof, or complete wallet history.
 - v0.87.0 append-only, manifest-bound provider stream checkpoints.
 - v0.88.0 explicit, idempotent execution from verified ready checkpoints.
 - v0.89.0 signed, frozen checkpoint revision history with exact lineage reads.
+- v0.90.0 content-addressed root-to-tip checkpoint chains with bounded page
+  aggregation and verified JSON export.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

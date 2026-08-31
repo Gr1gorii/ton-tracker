@@ -1,4 +1,4 @@
-# GRAM Scope - v0.89.0 Public Release
+# GRAM Scope - v0.90.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -40,6 +40,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   keyset pagination, process-local signed cursors, exact revision reads, and
   recursively verified resume parent/base lineage. Summary can inspect exact
   revision provenance and load older pages without claiming full history.
+- A content-addressed root-to-tip checkpoint chain for any exact revision,
+  with a 100-revision traversal limit, revalidated source manifests and parent
+  edges, aggregate captured provider pages, an explicit continuation point,
+  Summary inspection, and verified JSON export.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -81,7 +85,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.89.0 CHECKPOINT HISTORY`.
+- Product release label: `v0.90.0 CHECKPOINT CHAIN`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -236,13 +240,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.89.0`, confirm:
+Before tagging `v0.90.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.89.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.90.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
