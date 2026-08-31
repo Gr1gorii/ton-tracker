@@ -10,6 +10,7 @@ import {
   createWalletCaseSync,
   deleteWalletCase,
   getWalletCase,
+  getWalletCaseCheckpointContinuationReceipt,
   getWalletCaseCheckpointContinuationPlan,
   getWalletCaseActivity,
   getWalletCaseActivityDetail,
@@ -46,6 +47,7 @@ import {
 } from "./test/walletCaseActivityFixtures";
 import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
 import {
+  checkpointContinuationReceiptFixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -601,6 +603,29 @@ describe("Wallet Case API", () => {
     await expect(getWalletCaseCheckpointContinuationPlan(CASE_ID)).rejects.toThrow(
       /does not match/,
     );
+  });
+
+  it("reads a no-store continuation receipt bound to its Case and sync", async () => {
+    const receipt = checkpointContinuationReceiptFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(receipt));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseCheckpointContinuationReceipt(
+      CASE_ID,
+      SYNC_ID,
+      controller.signal,
+    )).resolves.toEqual(receipt);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/syncs/${SYNC_ID}/continuation-receipt`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(receipt));
+    await expect(getWalletCaseCheckpointContinuationReceipt(
+      CASE_ID,
+      OTHER_SYNC_ID,
+    )).rejects.toThrow(/does not match/);
   });
 
   it("rejects unsafe checkpoint history inputs and response scope", async () => {

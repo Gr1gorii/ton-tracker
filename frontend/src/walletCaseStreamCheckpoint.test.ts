@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  checkpointContinuationReceiptFixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -8,11 +9,13 @@ import {
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
+  parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
+  serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
 } from "./walletCaseStreamCheckpoint";
@@ -178,5 +181,45 @@ describe("Wallet Case stream checkpoint contracts", () => {
         })),
       },
     })).toThrow(/stream 0 is inconsistent/);
+  });
+
+  it("accepts and exports a strictly linked continuation receipt", () => {
+    const receipt = checkpointContinuationReceiptFixture();
+
+    expect(parseWalletCaseCheckpointContinuationReceipt(receipt)).toEqual(receipt);
+    expect(JSON.parse(
+      serializeWalletCaseCheckpointContinuationReceipt(receipt),
+    )).toEqual(receipt);
+  });
+
+  it("rejects continuation receipt identity, deltas, and plan drift", () => {
+    const receipt = checkpointContinuationReceiptFixture();
+    expect(() => parseWalletCaseCheckpointContinuationReceipt({
+      ...receipt,
+      receipt: { ...receipt.receipt, public_id: `ctr_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseCheckpointContinuationReceipt({
+      ...receipt,
+      document: {
+        ...receipt.document,
+        transition: { ...receipt.document.transition, page_count_delta: 0 },
+      },
+    })).toThrow(/transition is inconsistent/);
+    expect(() => parseWalletCaseCheckpointContinuationReceipt({
+      ...receipt,
+      document: {
+        ...receipt.document,
+        after_plan: {
+          ...receipt.document.after_plan,
+          document: {
+            ...receipt.document.after_plan.document,
+            streams: receipt.document.after_plan.document.streams.map((stream) => ({
+              ...stream,
+              tip_checkpoint: receipt.document.input.checkpoint,
+            })),
+          },
+        },
+      },
+    })).toThrow(/continuation plan is inconsistent/);
   });
 });
