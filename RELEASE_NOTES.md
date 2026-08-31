@@ -1,3 +1,30 @@
+# GRAM Scope — v0.93.0 CONTINUATION RECEIPT
+
+v0.93.0 makes the result of a plan-bound provider continuation independently
+verifiable. The new
+`GET /api/v1/cases/{case}/syncs/{sync}/continuation-receipt` endpoint returns a
+canonical `ctr_<sha256>` document that binds the accepted Continuation Plan and
+input checkpoint, the newly published output checkpoint and verified chain,
+the exact after-plan, and the revision, page, and successful-page deltas.
+
+The after-plan is rebuilt from the immutable provider-stream tips at the output
+checkpoint's history cutoff. The first receipt therefore remains byte-for-byte
+stable even after a later resume advances the live plan. Only terminal
+acquisition-plan-v3 resumes are eligible; bounded, legacy-unbound, unfinished,
+foreign, missing-output, and broken-lineage reads remain unavailable or fail
+closed with structured errors.
+
+The browser client strictly validates every receipt identity, scope, stream,
+chain, plan, state, and delta relationship before rendering it. Summary exposes
+an explicit verification action on eligible snapshots, visualizes the accepted
+`cpl_/scp_` to published `scp_/cpl_` transition, and exports the verified JSON.
+The receipt proves one bounded provider acquisition step, not deduplicated
+semantic activity, complete wallet history, or automatic scheduling. No
+database migration is added; Alembic remains at `20260828_0028` and backend API
+version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.92.0 PLAN-BOUND RESUME
 
 v0.92.0 turns an explicitly verified Continuation Plan into one stale-safe
