@@ -1130,6 +1130,13 @@ class WalletCaseService:
         case_public_id: str,
     ) -> dict[str, Any]:
         wallet_case = self._required_case(case_public_id)
+        return self._checkpoint_continuation_plan_response(wallet_case)
+
+    def _checkpoint_continuation_plan_response(
+        self,
+        wallet_case: WalletCase,
+    ) -> dict[str, Any]:
+        """Build the current content-addressed continuation plan for one case."""
         checkpoints = self.repository.latest_stream_checkpoints(
             case_id=wallet_case.id
         )
