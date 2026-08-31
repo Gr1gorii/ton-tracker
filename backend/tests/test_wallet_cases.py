@@ -1693,6 +1693,7 @@ def test_ready_stream_checkpoint_queues_and_executes_one_resume(client):
         "base_snapshot_public_id": source_sync["public_id"],
         "source_checkpoint_public_id": checkpoint_id,
         "continuation_plan_public_id": None,
+        "resume_page_budget": None,
     }
 
     replay = client.post(
@@ -2061,6 +2062,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     queued_response = client.post(
         resume_url,
         headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 3},
     )
 
     assert queued_response.status_code == 202, queued_response.text
@@ -2082,6 +2084,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         "base_snapshot_public_id": source_sync["public_id"],
         "source_checkpoint_public_id": checkpoint_id,
         "continuation_plan_public_id": plan_id,
+        "resume_page_budget": 3,
     }
     with app.state.wallet_case_test_session() as session:
         persisted = session.scalar(
@@ -2091,12 +2094,23 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         assert persisted.request_fingerprint == _checkpoint_resume_fingerprint(
             checkpoint_id,
             continuation_plan_public_id=plan_id,
+            page_budget=3,
         )
         acquisition_plan = json.loads(persisted.coverage_summary_json)[
             "_acquisition"
         ]
-        assert acquisition_plan["version"] == 3
+        assert acquisition_plan["version"] == 4
         assert acquisition_plan["continuation_plan_public_id"] == plan_id
+        assert acquisition_plan["resume_page_budget"] == 3
+    changed_budget_reuse = client.post(
+        resume_url,
+        headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 2},
+    )
+    assert changed_budget_reuse.status_code == 409
+    assert changed_budget_reuse.json()["detail"]["code"] == (
+        "idempotency_conflict"
+    )
     unbound_reuse = client.post(
         f"/api/v1/cases/{case_id}/stream-checkpoints/{checkpoint_id}/resume",
         headers={"Idempotency-Key": idempotency_key},
@@ -2119,6 +2133,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     replay = client.post(
         resume_url,
         headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 3},
     )
     assert replay.status_code == 202, replay.text
     assert replay.json()["public_id"] == queued["public_id"]
@@ -2128,6 +2143,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     stale = client.post(
         resume_url,
         headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
     )
     assert stale.status_code == 409
     assert stale.json()["detail"] == {
@@ -2139,6 +2155,37 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         "current_plan_public_id": advanced_plan_id,
     }
     assert _database_counts() == (1, 2, 2)
+
+
+def test_plan_bound_resume_rejects_noncanonical_page_budgets(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    plan_id = plan["plan"]["public_id"]
+    checkpoint_id = plan["document"]["streams"][0]["tip_checkpoint"][
+        "public_id"
+    ]
+    resume_url = (
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+        f"{plan_id}/{checkpoint_id}/resume"
+    )
+
+    for payload in (
+        {"page_budget": 0},
+        {"page_budget": 11},
+        {"page_budget": "3"},
+        {"page_budget": True},
+        {"page_budget": 1, "unexpected": "field"},
+    ):
+        response = client.post(
+            resume_url,
+            headers={"Idempotency-Key": str(uuid4())},
+            json=payload,
+        )
+        assert response.status_code == 422, response.text
+
+    assert _database_counts() == (1, 1, 1)
 
 
 def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume(

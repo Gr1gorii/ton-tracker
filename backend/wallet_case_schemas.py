@@ -134,6 +134,10 @@ class WalletCaseSyncRequest(_StrictModel):
         return self
 
 
+class WalletCaseCheckpointPlanResumeRequest(_StrictModel):
+    page_budget: int = Field(default=1, strict=True, ge=1, le=10)
+
+
 class WalletCaseMetadataUpdateRequest(_StrictModel):
     expected_metadata_version: int = Field(ge=1)
     label: str | None = Field(default=None, max_length=120)
@@ -202,6 +206,12 @@ class WalletCaseRequestedScope(_StrictModel):
     base_snapshot_public_id: CanonicalPublicId | None = None
     source_checkpoint_public_id: CheckpointPublicId | None = None
     continuation_plan_public_id: CheckpointContinuationPlanPublicId | None = None
+    resume_page_budget: int | None = Field(
+        default=None,
+        strict=True,
+        ge=1,
+        le=10,
+    )
 
     @model_validator(mode="after")
     def _validate_acquisition_scope(self):
@@ -213,6 +223,7 @@ class WalletCaseRequestedScope(_StrictModel):
                 or self.base_snapshot_public_id is not None
                 or self.source_checkpoint_public_id is not None
                 or self.continuation_plan_public_id is not None
+                or self.resume_page_budget is not None
             ):
                 raise ValueError("bounded sync acquisition must equal its requested scope")
         elif self.mode == "incremental":
@@ -220,6 +231,7 @@ class WalletCaseRequestedScope(_StrictModel):
                 self.base_snapshot_public_id is None
                 or self.source_checkpoint_public_id is not None
                 or self.continuation_plan_public_id is not None
+                or self.resume_page_budget is not None
             ):
                 raise ValueError("incremental sync requires only a base snapshot")
         elif (
@@ -230,6 +242,13 @@ class WalletCaseRequestedScope(_StrictModel):
         ):
             raise ValueError(
                 "resume sync requires a custom scope, base snapshot, and source checkpoint"
+            )
+        if (
+            self.resume_page_budget is not None
+            and self.continuation_plan_public_id is None
+        ):
+            raise ValueError(
+                "budgeted resume requires a verified continuation plan"
             )
         return self
 
