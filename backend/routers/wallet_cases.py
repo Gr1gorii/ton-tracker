@@ -34,6 +34,7 @@ from wallet_case_schemas import (
     WalletCaseSyncRequest,
     WalletCaseSyncManifestResponse,
     WalletCaseStreamCheckpointCatalogResponse,
+    WalletCaseStreamCheckpointChainResponse,
     WalletCaseStreamCheckpointDetailResponse,
     WalletCaseStreamCheckpointHistoryResponse,
     WalletCaseSyncResponse,
@@ -707,6 +708,52 @@ def read_wallet_case_stream_checkpoint(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case stream checkpoint storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/stream-checkpoints/{checkpoint_public_id}/chain",
+    response_model=WalletCaseStreamCheckpointChainResponse,
+)
+def read_wallet_case_stream_checkpoint_chain(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    checkpoint_public_id: str = Path(
+        ...,
+        pattern=_CHECKPOINT_ID_PATTERN,
+        max_length=68,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Build one content-addressed, recursively verified checkpoint chain."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_stream_checkpoint_chain(
+            public_id,
+            checkpoint_public_id,
+        )
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "stream_checkpoint_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case checkpoint chain storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

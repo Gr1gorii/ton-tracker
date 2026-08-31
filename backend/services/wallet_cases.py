@@ -1147,6 +1147,132 @@ class WalletCaseService:
             "lineage": self._stream_checkpoint_lineage(chain),
         }
 
+    def get_stream_checkpoint_chain(
+        self,
+        case_public_id: str,
+        checkpoint_public_id: str,
+    ) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        checkpoint = self.repository.get_stream_checkpoint(
+            case_id=wallet_case.id,
+            public_id=checkpoint_public_id,
+        )
+        if checkpoint is None:
+            raise WalletCaseNotFound("Wallet Case stream checkpoint not found")
+        chain = self._verified_stream_checkpoint_chain(
+            checkpoint,
+            case_id=wallet_case.id,
+            case_public_id=wallet_case.public_id,
+        )
+        revisions = []
+        for ordinal, item in enumerate(chain):
+            response = item["response"]
+            descriptor = response["checkpoint"]
+            checkpoint_document = response["document"]
+            plan = item["plan"]
+            last_page = checkpoint_document["last_successful_page"]
+            revisions.append(
+                {
+                    "ordinal": ordinal,
+                    "checkpoint": descriptor,
+                    "acquisition_mode": plan["mode"],
+                    "base_snapshot_public_id": plan[
+                        "base_snapshot_public_id"
+                    ],
+                    "parent_checkpoint_public_id": plan.get(
+                        "source_checkpoint_public_id"
+                    ),
+                    "source_manifest_public_id": checkpoint_document[
+                        "source_manifest_public_id"
+                    ],
+                    "source_manifest_hash_sha256": checkpoint_document[
+                        "source_manifest_hash_sha256"
+                    ],
+                    "requested_period": checkpoint_document[
+                        "requested_period"
+                    ],
+                    "continuation_page_index": checkpoint_document[
+                        "continuation_page_index"
+                    ],
+                    "page_count": checkpoint_document["page_count"],
+                    "pages_succeeded": checkpoint_document[
+                        "pages_succeeded"
+                    ],
+                    "last_response_digest_sha256": (
+                        last_page["response_digest_sha256"]
+                        if last_page is not None
+                        else None
+                    ),
+                }
+            )
+        root = chain[0]
+        tip = chain[-1]
+        root_plan = root["plan"]
+        tip_document = tip["response"]["document"]
+        aggregate = {
+            "revision_count": len(revisions),
+            "page_count": sum(item["page_count"] for item in revisions),
+            "pages_succeeded": sum(
+                item["pages_succeeded"] for item in revisions
+            ),
+        }
+        limitations = [
+            _limitation(
+                "checkpoint_chain_is_acquisition_progress",
+                (
+                    "Checkpoint Chain totals verified provider page acquisitions; "
+                    "it does not deduplicate wallet activity or prove complete "
+                    "wallet history."
+                ),
+            )
+        ]
+        if root_plan["mode"] == "incremental":
+            limitations.append(
+                _limitation(
+                    "checkpoint_chain_starts_after_external_snapshot",
+                    (
+                        "This checkpoint chain starts from an incremental sync; "
+                        "its base snapshot is outside the provider checkpoint chain."
+                    ),
+                )
+            )
+        document = {
+            "contract_version": "wallet_case_stream_checkpoint_chain_v1",
+            "case_public_id": wallet_case.public_id,
+            "tip_checkpoint_public_id": tip["row"].public_id,
+            "provider": tip["row"].provider,
+            "stream_key": tip["row"].stream_key,
+            "provider_contract_version": tip[
+                "row"
+            ].provider_contract_version,
+            "root_acquisition_mode": root_plan["mode"],
+            "root_base_snapshot_public_id": root_plan[
+                "base_snapshot_public_id"
+            ],
+            "current_resume_state": tip_document["resume_state"],
+            "next_page_index": tip_document["continuation_page_index"],
+            "aggregate": aggregate,
+            "revisions": revisions,
+            "limitations": limitations,
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "chain": {
+                "public_id": f"cch_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                **aggregate,
+            },
+            "document": document,
+        }
+
     def list_stream_checkpoint_history(
         self,
         case_public_id: str,
