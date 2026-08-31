@@ -10,6 +10,7 @@ import {
 import {
   activeSyncFixture,
   CASE_ID,
+  CONTINUATION_PLAN_ID,
   emptyWalletCaseFixture,
   failedSyncFixture,
   incrementalSyncFixture,
@@ -194,7 +195,31 @@ describe("wallet case contracts", () => {
       overlap_seconds: 0,
       source_checkpoint_public_id: resumed.requested_scope.source_checkpoint_public_id,
       continuation_plan_public_id: null,
+      resume_page_budget: null,
     });
+    const budgeted = {
+      ...resumed,
+      requested_scope: {
+        ...resumed.requested_scope,
+        continuation_plan_public_id: CONTINUATION_PLAN_ID,
+        resume_page_budget: 3,
+      },
+    };
+    expect(parseWalletCaseSync(budgeted).requested_scope.resume_page_budget).toBe(3);
+    expect(() => parseWalletCaseSync({
+      ...budgeted,
+      requested_scope: {
+        ...budgeted.requested_scope,
+        resume_page_budget: 11,
+      },
+    })).toThrow(/outside the supported range/);
+    expect(() => parseWalletCaseSync({
+      ...resumed,
+      requested_scope: {
+        ...resumed.requested_scope,
+        resume_page_budget: 1,
+      },
+    })).toThrow(/acquisition mode/);
     expect(() => parseWalletCaseSync({
       ...resumed,
       requested_scope: {

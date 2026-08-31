@@ -113,6 +113,7 @@ export function succeededSyncFixture(
       base_snapshot_public_id: null,
       source_checkpoint_public_id: null,
       continuation_plan_public_id: null,
+      resume_page_budget: null,
     },
     coverage: result.coverage,
     summary: result.summary,
@@ -155,6 +156,7 @@ export function incrementalSyncFixture(
       base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
       source_checkpoint_public_id: null,
       continuation_plan_public_id: null,
+      resume_page_budget: null,
     },
     limitations,
     result: {
@@ -190,6 +192,7 @@ export function resumeSyncFixture(
       base_snapshot_public_id: "550e8400-e29b-41d4-b716-446655440003",
       source_checkpoint_public_id: CHECKPOINT_ID,
       continuation_plan_public_id: null,
+      resume_page_budget: null,
     },
     coverage: {
       ...bounded.coverage,

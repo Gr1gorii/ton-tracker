@@ -688,6 +688,7 @@ describe("Wallet Case API", () => {
       requested_scope: {
         ...queued.requested_scope,
         continuation_plan_public_id: CONTINUATION_PLAN_ID,
+        resume_page_budget: 3,
       },
     };
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(planBound, 202));
@@ -698,6 +699,7 @@ describe("Wallet Case API", () => {
       CASE_ID,
       CONTINUATION_PLAN_ID,
       CHECKPOINT_ID,
+      3,
       IDEMPOTENCY_KEY,
       controller.signal,
     )).resolves.toEqual(planBound);
@@ -709,7 +711,11 @@ describe("Wallet Case API", () => {
       {
         method: "POST",
         cache: "no-store",
-        headers: { "Idempotency-Key": IDEMPOTENCY_KEY },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": IDEMPOTENCY_KEY,
+        },
+        body: JSON.stringify({ page_budget: 3 }),
         signal: controller.signal,
       },
     );
@@ -719,6 +725,7 @@ describe("Wallet Case API", () => {
       CASE_ID,
       CONTINUATION_PLAN_ID,
       CHECKPOINT_ID,
+      3,
       IDEMPOTENCY_KEY,
     )).rejects.toThrow(/does not match/);
   });
@@ -743,8 +750,23 @@ describe("Wallet Case API", () => {
       CASE_ID,
       "cpl_not-a-plan",
       CHECKPOINT_ID,
+      3,
       IDEMPOTENCY_KEY,
     )).rejects.toThrow(/continuation plan id is invalid/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a noncanonical continuation page budget before network I/O", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resumeWalletCaseContinuationPlan(
+      CASE_ID,
+      CONTINUATION_PLAN_ID,
+      CHECKPOINT_ID,
+      0,
+      IDEMPOTENCY_KEY,
+    )).rejects.toThrow(/page budget must be from 1 through 10/);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
