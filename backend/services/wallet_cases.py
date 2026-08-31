@@ -1164,6 +1164,13 @@ class WalletCaseService:
             case_id=wallet_case.id,
             case_public_id=wallet_case.public_id,
         )
+        return self._stream_checkpoint_chain_response(wallet_case, chain)
+
+    @staticmethod
+    def _stream_checkpoint_chain_response(
+        wallet_case: WalletCase,
+        chain: list[dict[str, Any]],
+    ) -> dict[str, Any]:
         revisions = []
         for ordinal, item in enumerate(chain):
             response = item["response"]
