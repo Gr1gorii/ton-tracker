@@ -1213,11 +1213,14 @@ class WalletCaseService:
     def _checkpoint_continuation_plan_response(
         self,
         wallet_case: WalletCase,
+        *,
+        checkpoints: list[WalletCaseStreamCheckpoint] | None = None,
     ) -> dict[str, Any]:
-        """Build the current content-addressed continuation plan for one case."""
-        checkpoints = self.repository.latest_stream_checkpoints(
-            case_id=wallet_case.id
-        )
+        """Build a content-addressed plan from current or bounded stream tips."""
+        if checkpoints is None:
+            checkpoints = self.repository.latest_stream_checkpoints(
+                case_id=wallet_case.id
+            )
         if len(checkpoints) > _MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS:
             raise WalletCaseStreamCheckpointCorrupt(
                 "Wallet Case continuation plan contains too many provider streams."

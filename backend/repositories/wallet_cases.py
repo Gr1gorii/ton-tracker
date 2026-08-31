@@ -251,9 +251,27 @@ class WalletCaseRepository:
         case_id: int,
     ) -> list[WalletCaseStreamCheckpoint]:
         """Load the newest immutable revision for each provider stream."""
+        return self.latest_stream_checkpoints_at_cutoff(
+            case_id=case_id,
+            cutoff_id=None,
+        )
+
+    def latest_stream_checkpoints_at_cutoff(
+        self,
+        *,
+        case_id: int,
+        cutoff_id: int | None,
+    ) -> list[WalletCaseStreamCheckpoint]:
+        """Load each provider stream tip from one immutable history boundary."""
+        latest_revision = select(
+            func.max(WalletCaseStreamCheckpoint.id)
+        ).where(WalletCaseStreamCheckpoint.case_id == case_id)
+        if cutoff_id is not None:
+            latest_revision = latest_revision.where(
+                WalletCaseStreamCheckpoint.id <= cutoff_id
+            )
         latest_ids = (
-            select(func.max(WalletCaseStreamCheckpoint.id))
-            .where(WalletCaseStreamCheckpoint.case_id == case_id)
+            latest_revision
             .group_by(
                 WalletCaseStreamCheckpoint.provider,
                 WalletCaseStreamCheckpoint.stream_key,
