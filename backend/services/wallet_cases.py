@@ -148,6 +148,7 @@ _CASE_CATALOG_CURSOR_VERSION = 3
 _CHECKPOINT_HISTORY_CURSOR_KEY = secrets.token_bytes(32)
 _CHECKPOINT_HISTORY_CURSOR_VERSION = 1
 _MAX_CHECKPOINT_CHAIN_REVISIONS = 100
+_MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS = 32
 _INCREMENTAL_OVERLAP = timedelta(minutes=15)
 _ACQUISITION_PLAN_KEY = "_acquisition"
 _UNSET = object()
@@ -1122,6 +1123,119 @@ class WalletCaseService:
             "complete_count": counts["complete"],
             "blocked_count": counts["blocked"],
             "checkpoints": checkpoints,
+        }
+
+    def get_checkpoint_continuation_plan(
+        self,
+        case_public_id: str,
+    ) -> dict[str, Any]:
+        wallet_case = self._required_case(case_public_id)
+        checkpoints = self.repository.latest_stream_checkpoints(
+            case_id=wallet_case.id
+        )
+        if len(checkpoints) > _MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Wallet Case continuation plan contains too many provider streams."
+            )
+        streams = []
+        for checkpoint in checkpoints:
+            chain = self._verified_stream_checkpoint_chain(
+                checkpoint,
+                case_id=wallet_case.id,
+                case_public_id=wallet_case.public_id,
+            )
+            chain_response = self._stream_checkpoint_chain_response(
+                wallet_case,
+                chain,
+            )
+            tip_response = chain[-1]["response"]
+            tip_descriptor = tip_response["checkpoint"]
+            tip_document = tip_response["document"]
+            chain_descriptor = chain_response["chain"]
+            streams.append(
+                {
+                    "provider": tip_descriptor["provider"],
+                    "stream_key": tip_descriptor["stream_key"],
+                    "provider_contract_version": tip_descriptor[
+                        "provider_contract_version"
+                    ],
+                    "tip_checkpoint": tip_descriptor,
+                    "chain_public_id": chain_descriptor["public_id"],
+                    "chain_content_hash_sha256": chain_descriptor[
+                        "content_hash_sha256"
+                    ],
+                    "revision_count": chain_descriptor["revision_count"],
+                    "page_count": chain_descriptor["page_count"],
+                    "pages_succeeded": chain_descriptor[
+                        "pages_succeeded"
+                    ],
+                    "resume_state": tip_document["resume_state"],
+                    "next_page_index": tip_document[
+                        "continuation_page_index"
+                    ],
+                    "resume_blocker": tip_document["resume_blocker"],
+                }
+            )
+        states = [item["resume_state"] for item in streams]
+        aggregate = {
+            "stream_count": len(streams),
+            "ready_count": states.count("ready"),
+            "complete_count": states.count("complete"),
+            "blocked_count": states.count("blocked"),
+            "revision_count": sum(
+                item["revision_count"] for item in streams
+            ),
+            "page_count": sum(item["page_count"] for item in streams),
+            "pages_succeeded": sum(
+                item["pages_succeeded"] for item in streams
+            ),
+        }
+        cutoff = max(checkpoints, key=lambda item: item.id) if checkpoints else None
+        document = {
+            "contract_version": "wallet_case_checkpoint_continuation_plan_v1",
+            "case_public_id": wallet_case.public_id,
+            "checkpoint_cutoff_public_id": (
+                cutoff.public_id if cutoff is not None else None
+            ),
+            "aggregate": aggregate,
+            "streams": streams,
+            "limitations": [
+                _limitation(
+                    "continuation_plan_requires_sequential_resume",
+                    (
+                        "Only one Wallet Case synchronization can run at a time; "
+                        "resume one ready stream and verify a new plan after it publishes."
+                    ),
+                ),
+                _limitation(
+                    "continuation_plan_is_not_automatic_backfill",
+                    (
+                        "Continuation Plan describes current verified checkpoints; "
+                        "it does not schedule provider requests or prove complete "
+                        "wallet history."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "plan": {
+                "public_id": f"cpl_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "checkpoint_cutoff_public_id": document[
+                    "checkpoint_cutoff_public_id"
+                ],
+                **aggregate,
+            },
+            "document": document,
         }
 
     def get_stream_checkpoint_detail(
