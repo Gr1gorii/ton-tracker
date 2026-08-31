@@ -47,6 +47,10 @@ CheckpointContinuationPlanPublicId = Annotated[
     str,
     Field(pattern=r"^cpl_[0-9a-f]{64}$", max_length=68),
 ]
+CheckpointContinuationReceiptPublicId = Annotated[
+    str,
+    Field(pattern=r"^ctr_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -820,6 +824,171 @@ class WalletCaseCheckpointContinuationPlanResponse(_StrictModel):
         ):
             raise ValueError(
                 "checkpoint continuation plan content address is inconsistent"
+            )
+        return self
+
+
+class WalletCaseCheckpointContinuationReceiptInput(_StrictModel):
+    continuation_plan_public_id: CheckpointContinuationPlanPublicId
+    checkpoint: WalletCaseStreamCheckpointDescriptor
+    chain_public_id: CheckpointChainPublicId
+    chain_content_hash_sha256: Sha256Digest
+    revision_count: int = Field(ge=1, le=99)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    next_page_index: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def _validate_input(self):
+        if (
+            self.checkpoint.resume_state != "ready"
+            or self.chain_public_id != f"cch_{self.chain_content_hash_sha256}"
+            or self.pages_succeeded > self.page_count
+        ):
+            raise ValueError("continuation receipt input is inconsistent")
+        return self
+
+
+class WalletCaseCheckpointContinuationReceiptOutput(_StrictModel):
+    checkpoint: WalletCaseStreamCheckpointDescriptor
+    chain_public_id: CheckpointChainPublicId
+    chain_content_hash_sha256: Sha256Digest
+    revision_count: int = Field(ge=2, le=100)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    resume_state: Literal["ready", "complete", "blocked"]
+    next_page_index: int | None = Field(default=None, ge=1)
+    resume_blocker: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def _validate_output(self):
+        if (
+            self.checkpoint.resume_state != self.resume_state
+            or self.chain_public_id != f"cch_{self.chain_content_hash_sha256}"
+            or self.pages_succeeded > self.page_count
+            or (self.resume_state == "ready")
+            != (self.next_page_index is not None)
+            or (self.resume_state == "blocked")
+            != (self.resume_blocker is not None)
+        ):
+            raise ValueError("continuation receipt output is inconsistent")
+        return self
+
+
+class WalletCaseCheckpointContinuationReceiptTransition(_StrictModel):
+    checkpoint_changed: Literal[True]
+    plan_changed: Literal[True]
+    revision_delta: Literal[1]
+    page_count_delta: int = Field(ge=0)
+    pages_succeeded_delta: int = Field(ge=0)
+
+
+class WalletCaseCheckpointContinuationReceiptDocument(_StrictModel):
+    contract_version: Literal["wallet_case_checkpoint_continuation_receipt_v1"]
+    case_public_id: CanonicalPublicId
+    sync_public_id: CanonicalPublicId
+    input: WalletCaseCheckpointContinuationReceiptInput
+    output: WalletCaseCheckpointContinuationReceiptOutput
+    after_plan: WalletCaseCheckpointContinuationPlanResponse
+    transition: WalletCaseCheckpointContinuationReceiptTransition
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_receipt(self):
+        source = self.input
+        output = self.output
+        transition = self.transition
+        matching_streams = [
+            stream
+            for stream in self.after_plan.document.streams
+            if stream.provider == output.checkpoint.provider
+            and stream.stream_key == output.checkpoint.stream_key
+        ]
+        if len(matching_streams) != 1:
+            raise ValueError("continuation receipt output stream is missing")
+        stream = matching_streams[0]
+        if (
+            self.after_plan.document.case_public_id != self.case_public_id
+            or source.checkpoint.provider != output.checkpoint.provider
+            or source.checkpoint.stream_key != output.checkpoint.stream_key
+            or source.checkpoint.provider_contract_version
+            != output.checkpoint.provider_contract_version
+            or output.checkpoint.source_sync_public_id != self.sync_public_id
+            or source.checkpoint.public_id == output.checkpoint.public_id
+            or source.continuation_plan_public_id
+            == self.after_plan.plan.public_id
+            or transition.page_count_delta
+            != output.page_count - source.page_count
+            or transition.pages_succeeded_delta
+            != output.pages_succeeded - source.pages_succeeded
+            or output.revision_count != source.revision_count + 1
+            or stream.tip_checkpoint.public_id
+            != output.checkpoint.public_id
+            or stream.chain_public_id != output.chain_public_id
+            or stream.chain_content_hash_sha256
+            != output.chain_content_hash_sha256
+            or stream.revision_count != output.revision_count
+            or stream.page_count != output.page_count
+            or stream.pages_succeeded != output.pages_succeeded
+            or stream.resume_state != output.resume_state
+            or stream.next_page_index != output.next_page_index
+            or stream.resume_blocker != output.resume_blocker
+        ):
+            raise ValueError("continuation receipt transition is inconsistent")
+        return self
+
+
+class WalletCaseCheckpointContinuationReceiptDescriptor(_StrictModel):
+    public_id: CheckpointContinuationReceiptPublicId
+    contract_version: Literal["wallet_case_checkpoint_continuation_receipt_v1"]
+    content_hash_sha256: Sha256Digest
+    sync_public_id: CanonicalPublicId
+    input_plan_public_id: CheckpointContinuationPlanPublicId
+    input_checkpoint_public_id: CheckpointPublicId
+    output_checkpoint_public_id: CheckpointPublicId
+    after_plan_public_id: CheckpointContinuationPlanPublicId
+    revision_delta: Literal[1]
+    page_count_delta: int = Field(ge=0)
+    pages_succeeded_delta: int = Field(ge=0)
+
+
+class WalletCaseCheckpointContinuationReceiptResponse(_StrictModel):
+    receipt: WalletCaseCheckpointContinuationReceiptDescriptor
+    document: WalletCaseCheckpointContinuationReceiptDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        source = self.document.input
+        output = self.document.output
+        transition = self.document.transition
+        if (
+            self.receipt.public_id != f"ctr_{digest}"
+            or self.receipt.content_hash_sha256 != digest
+            or self.receipt.contract_version != self.document.contract_version
+            or self.receipt.sync_public_id != self.document.sync_public_id
+            or self.receipt.input_plan_public_id
+            != source.continuation_plan_public_id
+            or self.receipt.input_checkpoint_public_id
+            != source.checkpoint.public_id
+            or self.receipt.output_checkpoint_public_id
+            != output.checkpoint.public_id
+            or self.receipt.after_plan_public_id
+            != self.document.after_plan.plan.public_id
+            or self.receipt.revision_delta != transition.revision_delta
+            or self.receipt.page_count_delta != transition.page_count_delta
+            or self.receipt.pages_succeeded_delta
+            != transition.pages_succeeded_delta
+        ):
+            raise ValueError(
+                "checkpoint continuation receipt content address is inconsistent"
             )
         return self
 

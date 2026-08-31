@@ -300,6 +300,28 @@ class WalletCaseRepository:
             )
         )
 
+    def stream_checkpoints_for_sync(
+        self,
+        *,
+        case_id: int,
+        source_sync_id: int,
+    ) -> list[WalletCaseStreamCheckpoint]:
+        """Load immutable provider-stream outputs published by one sync."""
+        return list(
+            self.session.scalars(
+                select(WalletCaseStreamCheckpoint)
+                .where(
+                    WalletCaseStreamCheckpoint.case_id == case_id,
+                    WalletCaseStreamCheckpoint.source_sync_id
+                    == source_sync_id,
+                )
+                .order_by(
+                    WalletCaseStreamCheckpoint.provider,
+                    WalletCaseStreamCheckpoint.stream_key,
+                )
+            ).unique()
+        )
+
     def latest_stream_checkpoint(
         self,
         *,
