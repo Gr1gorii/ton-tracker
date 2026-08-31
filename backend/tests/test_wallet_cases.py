@@ -50,6 +50,7 @@ from services.wallet_cases import (
 )
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
+    WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseStreamCheckpointChainResponse,
     WalletCaseSyncRequest,
 )
@@ -176,16 +177,18 @@ def _attach_transaction_stream(
     run,
     claimed,
     *,
-    cursor: str = "10",
+    cursor: str | None = "10",
     completion_state: str = "incomplete",
     termination_reason: str = "page_cap_reached",
     page_index: int = 1,
     request_cursor: str | None = None,
+    stream_key: str = "transactions",
+    contract_version: str = "tonapi_account_transactions_v1",
 ) -> None:
     stream = WalletAcquisitionStream(
         provider="tonapi",
-        stream_key="transactions",
-        contract_version="tonapi_account_transactions_v1",
+        stream_key=stream_key,
+        contract_version=contract_version,
         scope_kind="bounded_time",
         resolved_start_at=claimed.requested_start,
         resolved_end_at=claimed.requested_end,
@@ -289,6 +292,51 @@ def _publish_transaction_checkpoint(
         cursor=cursor,
         completion_state=completion_state,
         termination_reason=termination_reason,
+    )
+    run_response = wallet_ingestion_run_to_response(run)
+    assert worker._publish_final_run(
+        claimed,
+        run,
+        run_response,
+        settings,
+        last_error_retryable=False,
+    ) is True
+    return case_id, queued, claimed
+
+
+def _publish_multi_stream_checkpoints(client):
+    case_id = _create_case(client)["case"]["public_id"]
+    with app.state.wallet_case_test_session() as session:
+        queued, _ = WalletCaseService(session).enqueue_sync(
+            case_id,
+            WalletCaseSyncRequest(
+                time_window="24h",
+                surfaces=["transactions", "transfers"],
+            ),
+            str(uuid4()),
+        )
+    worker = CaseSyncWorker(app.state.wallet_case_test_session)
+    claimed = worker.claim_next()
+    assert claimed is not None
+    settings = worker._validated_settings(claimed)
+    run = build_wallet_ingestion_run(
+        WalletIngestionPreviewRequest(
+            wallet_address=claimed.display_address,
+            time_window=claimed.time_window,
+            surfaces=list(claimed.requested_surfaces),
+        ),
+        settings,
+        now=claimed.requested_end,
+    )
+    _attach_transaction_stream(run, claimed)
+    _attach_transaction_stream(
+        run,
+        claimed,
+        cursor=None,
+        completion_state="complete",
+        termination_reason="end_reached",
+        stream_key="account_events",
+        contract_version="tonapi_account_events_display_v1",
     )
     run_response = wallet_ingestion_run_to_response(run)
     assert worker._publish_final_run(
@@ -1899,6 +1947,148 @@ def test_checkpoint_chain_aggregates_verified_root_to_tip_progress(client):
         WalletCaseStreamCheckpointChainResponse.model_validate(tampered)
 
 
+def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):
+    case_id, _source_sync, _claimed = _publish_multi_stream_checkpoints(client)
+    with app.state.wallet_case_test_session() as session:
+        roots = list(
+            session.scalars(
+                select(WalletCaseStreamCheckpoint)
+                .where(WalletCaseStreamCheckpoint.case.has(public_id=case_id))
+                .order_by(WalletCaseStreamCheckpoint.stream_key)
+            )
+        )
+        assert [item.stream_key for item in roots] == [
+            "account_events",
+            "transactions",
+        ]
+        transaction_root_id = roots[1].public_id
+    _completed, transaction_tip_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=transaction_root_id,
+    )
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["plan"]["public_id"] == (
+        f"cpl_{body['plan']['content_hash_sha256']}"
+    )
+    assert body["plan"]["contract_version"] == (
+        "wallet_case_checkpoint_continuation_plan_v1"
+    )
+    assert body["plan"]["checkpoint_cutoff_public_id"] == transaction_tip_id
+    assert body["plan"]["stream_count"] == 2
+    assert body["plan"]["ready_count"] == 1
+    assert body["plan"]["complete_count"] == 1
+    assert body["plan"]["blocked_count"] == 0
+    assert body["plan"]["revision_count"] == 3
+    assert body["plan"]["page_count"] == 3
+    assert body["plan"]["pages_succeeded"] == 3
+    document = body["document"]
+    assert document["aggregate"] == {
+        key: body["plan"][key]
+        for key in (
+            "stream_count",
+            "ready_count",
+            "complete_count",
+            "blocked_count",
+            "revision_count",
+            "page_count",
+            "pages_succeeded",
+        )
+    }
+    assert [item["stream_key"] for item in document["streams"]] == [
+        "account_events",
+        "transactions",
+    ]
+    completed_stream, ready_stream = document["streams"]
+    assert completed_stream["resume_state"] == "complete"
+    assert completed_stream["revision_count"] == 1
+    assert completed_stream["next_page_index"] is None
+    assert completed_stream["resume_blocker"] is None
+    assert ready_stream["tip_checkpoint"]["public_id"] == transaction_tip_id
+    assert ready_stream["resume_state"] == "ready"
+    assert ready_stream["revision_count"] == 2
+    assert ready_stream["next_page_index"] == 3
+    assert ready_stream["resume_blocker"] is None
+    chain = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/"
+        f"{transaction_tip_id}/chain"
+    )
+    assert chain.status_code == 200, chain.text
+    assert ready_stream["chain_public_id"] == chain.json()["chain"]["public_id"]
+    assert ready_stream["chain_content_hash_sha256"] == chain.json()["chain"][
+        "content_hash_sha256"
+    ]
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    )
+    assert repeated.status_code == 200
+    assert repeated.json() == body
+    tampered = json.loads(json.dumps(body))
+    tampered["plan"]["public_id"] = f"cpl_{'0' * 64}"
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseCheckpointContinuationPlanResponse.model_validate(tampered)
+
+
+def test_checkpoint_continuation_plan_is_empty_scoped_and_bounded(
+    client,
+    monkeypatch,
+):
+    empty_case_id = _create_case(client)["case"]["public_id"]
+    empty = client.get(
+        f"/api/v1/cases/{empty_case_id}/stream-checkpoints/continuation-plan"
+    )
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["plan"]["checkpoint_cutoff_public_id"] is None
+    assert empty.json()["document"]["streams"] == []
+    assert empty.json()["document"]["aggregate"] == {
+        "stream_count": 0,
+        "ready_count": 0,
+        "complete_count": 0,
+        "blocked_count": 0,
+        "revision_count": 0,
+        "page_count": 0,
+        "pages_succeeded": 0,
+    }
+    populated_case_id, _sync, _claimed = _publish_transaction_checkpoint(
+        client,
+        case_id=_create_case(client, address=f"0:{'3' * 64}")["case"][
+            "public_id"
+        ],
+    )
+    scoped = client.get(
+        f"/api/v1/cases/{empty_case_id}/stream-checkpoints/continuation-plan"
+    )
+    assert scoped.status_code == 200
+    assert scoped.json() == empty.json()
+    missing = client.get(
+        f"/api/v1/cases/{uuid4()}/stream-checkpoints/continuation-plan"
+    )
+    assert missing.status_code == 404
+
+    monkeypatch.setattr(
+        "services.wallet_cases._MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS",
+        0,
+    )
+    bounded = client.get(
+        f"/api/v1/cases/{populated_case_id}/stream-checkpoints/continuation-plan"
+    )
+    assert bounded.status_code == 503
+    assert bounded.json()["detail"] == {
+        "code": "stream_checkpoint_integrity_error",
+        "message_safe": (
+            "Wallet Case continuation plan contains too many provider streams."
+        ),
+        "retryable": False,
+    }
+
+
 def test_checkpoint_chain_bounds_recursive_verification(client, monkeypatch):
     case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
     with app.state.wallet_case_test_session() as session:
@@ -1964,7 +2154,10 @@ def test_checkpoint_history_fails_closed_on_broken_resume_lineage(client):
     chain = client.get(
         f"/api/v1/cases/{case_id}/stream-checkpoints/{resumed_id}/chain"
     )
-    for response in (exact, history, chain):
+    plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    )
+    for response in (exact, history, chain, plan):
         assert response.status_code == 503
         assert response.headers["cache-control"] == "no-store"
         assert response.json()["detail"] == {
