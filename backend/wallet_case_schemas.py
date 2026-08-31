@@ -197,6 +197,7 @@ class WalletCaseRequestedScope(_StrictModel):
     overlap_seconds: int = Field(ge=0, le=86400)
     base_snapshot_public_id: CanonicalPublicId | None = None
     source_checkpoint_public_id: CheckpointPublicId | None = None
+    continuation_plan_public_id: CheckpointContinuationPlanPublicId | None = None
 
     @model_validator(mode="after")
     def _validate_acquisition_scope(self):
@@ -207,12 +208,14 @@ class WalletCaseRequestedScope(_StrictModel):
                 or self.overlap_seconds != 0
                 or self.base_snapshot_public_id is not None
                 or self.source_checkpoint_public_id is not None
+                or self.continuation_plan_public_id is not None
             ):
                 raise ValueError("bounded sync acquisition must equal its requested scope")
         elif self.mode == "incremental":
             if (
                 self.base_snapshot_public_id is None
                 or self.source_checkpoint_public_id is not None
+                or self.continuation_plan_public_id is not None
             ):
                 raise ValueError("incremental sync requires only a base snapshot")
         elif (

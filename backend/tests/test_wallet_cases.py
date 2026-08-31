@@ -1691,6 +1691,7 @@ def test_ready_stream_checkpoint_queues_and_executes_one_resume(client):
         "overlap_seconds": 0,
         "base_snapshot_public_id": source_sync["public_id"],
         "source_checkpoint_public_id": checkpoint_id,
+        "continuation_plan_public_id": None,
     }
 
     replay = client.post(
@@ -2079,6 +2080,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         "overlap_seconds": 0,
         "base_snapshot_public_id": source_sync["public_id"],
         "source_checkpoint_public_id": checkpoint_id,
+        "continuation_plan_public_id": plan_id,
     }
     with app.state.wallet_case_test_session() as session:
         persisted = session.scalar(
@@ -2089,6 +2091,11 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
             checkpoint_id,
             continuation_plan_public_id=plan_id,
         )
+        acquisition_plan = json.loads(persisted.coverage_summary_json)[
+            "_acquisition"
+        ]
+        assert acquisition_plan["version"] == 3
+        assert acquisition_plan["continuation_plan_public_id"] == plan_id
     unbound_reuse = client.post(
         f"/api/v1/cases/{case_id}/stream-checkpoints/{checkpoint_id}/resume",
         headers={"Idempotency-Key": idempotency_key},

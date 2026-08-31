@@ -1008,7 +1008,7 @@ class WalletCaseService:
             settings or get_settings(),
         )
         acquisition_plan = {
-            "version": 2,
+            "version": 3 if continuation_plan_public_id is not None else 2,
             "mode": "resume",
             "start_at": acquisition_start_text,
             "end_at": acquisition_end_text,
@@ -1019,6 +1019,10 @@ class WalletCaseService:
             "resume_cursor": cursor,
             "resume_page_index": page_index,
         }
+        if continuation_plan_public_id is not None:
+            acquisition_plan["continuation_plan_public_id"] = (
+                continuation_plan_public_id
+            )
         expected_data_mode = _ENVIRONMENT_DATA_MODE[
             wallet_case.data_environment
         ]
@@ -2113,6 +2117,9 @@ class WalletCaseService:
                 "source_checkpoint_public_id": acquisition_plan.get(
                     "source_checkpoint_public_id"
                 ),
+                "continuation_plan_public_id": acquisition_plan.get(
+                    "continuation_plan_public_id"
+                ),
             },
             "coverage": coverage,
             "summary": summary,
@@ -2389,9 +2396,13 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         "resume_cursor",
         "resume_page_index",
     }
+    version_three_keys = version_two_keys | {
+        "continuation_plan_public_id",
+    }
     if not isinstance(stored, dict) or frozenset(stored) not in {
         frozenset(version_one_keys),
         frozenset(version_two_keys),
+        frozenset(version_three_keys),
     }:
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     mode = stored.get("mode")
@@ -2403,8 +2414,9 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     resume_stream_key = stored.get("resume_stream_key")
     resume_cursor = stored.get("resume_cursor")
     resume_page_index = stored.get("resume_page_index")
+    continuation_plan_public_id = stored.get("continuation_plan_public_id")
     if (
-        stored.get("version") not in {1, 2}
+        stored.get("version") not in {1, 2, 3}
         or mode not in {"bounded", "incremental", "resume"}
         or not isinstance(start_at, str)
         or not isinstance(end_at, str)
@@ -2444,7 +2456,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         ):
             raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     elif (
-        stored.get("version") != 2
+        stored.get("version") not in {2, 3}
         or not isinstance(base_public_id, str)
         or len(base_public_id) != 36
         or not isinstance(source_checkpoint_public_id, str)
@@ -2459,6 +2471,18 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         or type(resume_page_index) is not int
         or resume_page_index < 1
         or overlap_seconds != 0
+        or (
+            stored.get("version") == 3
+            and (
+                not isinstance(continuation_plan_public_id, str)
+                or len(continuation_plan_public_id) != 68
+                or not continuation_plan_public_id.startswith("cpl_")
+                or any(
+                    char not in "0123456789abcdef"
+                    for char in continuation_plan_public_id[4:]
+                )
+            )
+        )
     ):
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     return stored
