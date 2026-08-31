@@ -1,4 +1,4 @@
-# GRAM Scope - v0.90.0 Public Release
+# GRAM Scope - v0.91.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -44,6 +44,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   with a 100-revision traversal limit, revalidated source manifests and parent
   edges, aggregate captured provider pages, an explicit continuation point,
   Summary inspection, and verified JSON export.
+- A case-level `cpl_<sha256>` Continuation Plan over at most 32 latest provider
+  streams, binding each verified chain, state, page aggregate, checkpoint
+  cutoff, and exact continuation point. Summary verifies and exports the plan
+  explicitly without scheduling hidden provider work.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -85,7 +89,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.90.0 CHECKPOINT CHAIN`.
+- Product release label: `v0.91.0 CONTINUATION PLAN`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -240,13 +244,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.90.0`, confirm:
+Before tagging `v0.91.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.90.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.91.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the

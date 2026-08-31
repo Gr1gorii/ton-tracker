@@ -1,8 +1,8 @@
-# GRAM Scope — v0.90.0 Promotion Checklist
+# GRAM Scope — v0.91.0 Promotion Checklist
 
-Current promotion gates for content-addressed Wallet Case checkpoint chains:
+Current promotion gates for case-level checkpoint Continuation Plans:
 
-- Product label is `v0.90.0 CHECKPOINT CHAIN`; backend API version stays
+- Product label is `v0.91.0 CONTINUATION PLAN`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -86,6 +86,17 @@ Current promotion gates for content-addressed Wallet Case checkpoint chains:
   Summary loads the chain only on an explicit action and exports the strictly
   parsed document without describing it as automatic backfill or complete
   wallet history.
+- A Continuation Plan contains at most 32 latest provider/stream tips in stable
+  key order. Every member must pass the exact chain gate, bind its `cch_`
+  identity, state, blocker or next page, and contribute exactly to the plan's
+  revision and page totals.
+- The canonical plan recomputes to its `cpl_<sha256>` identity and binds its
+  current checkpoint cutoff. Empty, mixed-state, foreign, over-limit, and
+  corrupt cases remain deterministic or fail closed without leaking another
+  Case's streams.
+- Summary loads and exports the strictly parsed plan only on explicit actions.
+  It must state that one Case sync executes at a time and that the plan neither
+  schedules provider requests nor proves complete wallet history.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -209,7 +220,7 @@ Current promotion gates for content-addressed Wallet Case checkpoint chains:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.90.0 must not be promoted as a hosted Wallet Case release.
+  v0.91.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 
