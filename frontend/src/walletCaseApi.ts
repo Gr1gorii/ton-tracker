@@ -22,10 +22,12 @@ import {
   type WalletCaseSyncManifestResponse,
 } from "./walletCaseSyncManifest";
 import {
+  parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
+  type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
   type WalletCaseStreamCheckpointChainResponse,
   type WalletCaseStreamCheckpointDetailResponse,
@@ -633,6 +635,28 @@ export async function getWalletCaseStreamCheckpointChain(
     throw new Error("Wallet Case checkpoint chain does not match the request");
   }
   return chain;
+}
+
+export async function getWalletCaseCheckpointContinuationPlan(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseCheckpointContinuationPlanResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/stream-checkpoints/continuation-plan`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case checkpoint continuation plan read failed",
+    );
+  }
+  const plan = parseWalletCaseCheckpointContinuationPlan(await response.json());
+  if (plan.document.case_public_id !== caseId) {
+    throw new Error("Wallet Case checkpoint continuation plan does not match the request");
+  }
+  return plan;
 }
 
 export async function getWalletCaseStreamCheckpointHistory({

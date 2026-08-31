@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
+  parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
+  serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
 } from "./walletCaseStreamCheckpoint";
 
@@ -133,5 +136,47 @@ describe("Wallet Case stream checkpoint contracts", () => {
         )),
       },
     })).toThrow(/parent lineage/);
+  });
+
+  it("accepts and exports a strictly aggregated continuation plan", () => {
+    const plan = checkpointContinuationPlanFixture();
+
+    expect(parseWalletCaseCheckpointContinuationPlan(plan)).toEqual(plan);
+    expect(JSON.parse(serializeWalletCaseCheckpointContinuationPlan(plan))).toEqual(plan);
+  });
+
+  it("rejects continuation plan identity, totals, state, and chain drift", () => {
+    const plan = checkpointContinuationPlanFixture();
+    expect(() => parseWalletCaseCheckpointContinuationPlan({
+      ...plan,
+      plan: { ...plan.plan, public_id: `cpl_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseCheckpointContinuationPlan({
+      ...plan,
+      document: {
+        ...plan.document,
+        aggregate: { ...plan.document.aggregate, revision_count: 1 },
+      },
+    })).toThrow(/inconsistent/);
+    expect(() => parseWalletCaseCheckpointContinuationPlan({
+      ...plan,
+      document: {
+        ...plan.document,
+        streams: plan.document.streams.map((stream) => ({
+          ...stream,
+          next_page_index: null,
+        })),
+      },
+    })).toThrow(/stream 0 is inconsistent/);
+    expect(() => parseWalletCaseCheckpointContinuationPlan({
+      ...plan,
+      document: {
+        ...plan.document,
+        streams: plan.document.streams.map((stream) => ({
+          ...stream,
+          chain_public_id: `cch_${"0".repeat(64)}`,
+        })),
+      },
+    })).toThrow(/stream 0 is inconsistent/);
   });
 });

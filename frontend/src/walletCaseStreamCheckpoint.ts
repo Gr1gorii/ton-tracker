@@ -139,11 +139,54 @@ export interface WalletCaseStreamCheckpointChainResponse {
   };
 }
 
+export interface WalletCaseCheckpointContinuationPlanStream {
+  provider: string;
+  stream_key: string;
+  provider_contract_version: string;
+  tip_checkpoint: WalletCaseStreamCheckpointDescriptor;
+  chain_public_id: string;
+  chain_content_hash_sha256: string;
+  revision_count: number;
+  page_count: number;
+  pages_succeeded: number;
+  resume_state: WalletCaseStreamResumeState;
+  next_page_index: number | null;
+  resume_blocker: string | null;
+}
+
+export interface WalletCaseCheckpointContinuationPlanAggregate {
+  stream_count: number;
+  ready_count: number;
+  complete_count: number;
+  blocked_count: number;
+  revision_count: number;
+  page_count: number;
+  pages_succeeded: number;
+}
+
+export interface WalletCaseCheckpointContinuationPlanResponse {
+  plan: {
+    public_id: string;
+    contract_version: "wallet_case_checkpoint_continuation_plan_v1";
+    content_hash_sha256: string;
+    checkpoint_cutoff_public_id: string | null;
+  } & WalletCaseCheckpointContinuationPlanAggregate;
+  document: {
+    contract_version: "wallet_case_checkpoint_continuation_plan_v1";
+    case_public_id: string;
+    checkpoint_cutoff_public_id: string | null;
+    aggregate: WalletCaseCheckpointContinuationPlanAggregate;
+    streams: WalletCaseCheckpointContinuationPlanStream[];
+    limitations: WalletCaseLimitation[];
+  };
+}
+
 const PUBLIC_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const CHECKPOINT_ID = /^scp_([0-9a-f]{64})$/;
 const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
+const CHECKPOINT_CONTINUATION_PLAN_ID = /^cpl_([0-9a-f]{64})$/;
 const MANIFEST_ID = /^smf_([0-9a-f]{64})$/;
 const RESUME_STATES = new Set<WalletCaseStreamResumeState>([
   "ready", "complete", "blocked",
@@ -794,6 +837,217 @@ export function parseWalletCaseStreamCheckpointChain(
 
 export function serializeWalletCaseStreamCheckpointChain(value: unknown): string {
   return `${JSON.stringify(parseWalletCaseStreamCheckpointChain(value), null, 2)}\n`;
+}
+
+export function parseWalletCaseCheckpointContinuationPlan(
+  value: unknown,
+): WalletCaseCheckpointContinuationPlanResponse {
+  const envelope = record(value, ["plan", "document"], "checkpoint continuation plan response");
+  const plan = record(envelope.plan, [
+    "public_id", "contract_version", "content_hash_sha256",
+    "checkpoint_cutoff_public_id", "stream_count", "ready_count",
+    "complete_count", "blocked_count", "revision_count", "page_count",
+    "pages_succeeded",
+  ], "checkpoint continuation plan descriptor");
+  if (plan.contract_version !== "wallet_case_checkpoint_continuation_plan_v1") {
+    fail("checkpoint continuation plan descriptor contract is unsupported");
+  }
+  const contentHash = digest(
+    plan.content_hash_sha256,
+    "checkpoint continuation plan hash",
+  );
+  const planId = text(plan.public_id, "checkpoint continuation plan id", 68);
+  if (CHECKPOINT_CONTINUATION_PLAN_ID.exec(planId)?.[1] !== contentHash) {
+    fail("checkpoint continuation plan identity is invalid");
+  }
+  const descriptorCutoff = plan.checkpoint_cutoff_public_id === null
+    ? null : checkpointId(
+      plan.checkpoint_cutoff_public_id,
+      "checkpoint continuation plan descriptor cutoff",
+    );
+  const descriptorAggregate = parseContinuationPlanAggregate(
+    plan,
+    "checkpoint continuation plan descriptor",
+  );
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "checkpoint_cutoff_public_id",
+    "aggregate", "streams", "limitations",
+  ], "checkpoint continuation plan document");
+  if (document.contract_version !== "wallet_case_checkpoint_continuation_plan_v1") {
+    fail("checkpoint continuation plan document contract is unsupported");
+  }
+  const caseId = publicId(
+    document.case_public_id,
+    "checkpoint continuation plan case id",
+  );
+  const cutoff = document.checkpoint_cutoff_public_id === null
+    ? null : checkpointId(
+      document.checkpoint_cutoff_public_id,
+      "checkpoint continuation plan cutoff",
+    );
+  const aggregate = parseContinuationPlanAggregate(
+    record(document.aggregate, [
+      "stream_count", "ready_count", "complete_count", "blocked_count",
+      "revision_count", "page_count", "pages_succeeded",
+    ], "checkpoint continuation plan aggregate"),
+    "checkpoint continuation plan aggregate",
+  );
+  if (!Array.isArray(document.streams) || document.streams.length > 32) {
+    fail("checkpoint continuation plan streams are invalid");
+  }
+  const streams = document.streams.map((value, index) => {
+    const item = record(value, [
+      "provider", "stream_key", "provider_contract_version", "tip_checkpoint",
+      "chain_public_id", "chain_content_hash_sha256", "revision_count",
+      "page_count", "pages_succeeded", "resume_state", "next_page_index",
+      "resume_blocker",
+    ], `checkpoint continuation plan stream ${index}`);
+    const provider = text(
+      item.provider,
+      `checkpoint continuation plan stream ${index} provider`,
+      64,
+    );
+    const streamKey = text(
+      item.stream_key,
+      `checkpoint continuation plan stream ${index} key`,
+      40,
+    );
+    const providerContract = text(
+      item.provider_contract_version,
+      `checkpoint continuation plan stream ${index} provider contract`,
+      48,
+    );
+    const tip = parseDescriptor(item.tip_checkpoint);
+    const chainHash = digest(
+      item.chain_content_hash_sha256,
+      `checkpoint continuation plan stream ${index} chain hash`,
+    );
+    const chainId = text(
+      item.chain_public_id,
+      `checkpoint continuation plan stream ${index} chain id`,
+      68,
+    );
+    const revisionCount = integer(
+      item.revision_count,
+      `checkpoint continuation plan stream ${index} revision count`,
+    );
+    const pageCount = integer(
+      item.page_count,
+      `checkpoint continuation plan stream ${index} page count`,
+    );
+    const pagesSucceeded = integer(
+      item.pages_succeeded,
+      `checkpoint continuation plan stream ${index} pages succeeded`,
+    );
+    const state = resumeState(
+      item.resume_state,
+      `checkpoint continuation plan stream ${index} state`,
+    );
+    const nextPage = item.next_page_index === null
+      ? null : integer(
+        item.next_page_index,
+        `checkpoint continuation plan stream ${index} next page`,
+      );
+    const blocker = nullableText(
+      item.resume_blocker,
+      `checkpoint continuation plan stream ${index} blocker`,
+      64,
+    );
+    if (
+      tip.provider !== provider || tip.stream_key !== streamKey ||
+      tip.provider_contract_version !== providerContract ||
+      tip.resume_state !== state || CHECKPOINT_CHAIN_ID.exec(chainId)?.[1] !== chainHash ||
+      revisionCount < 1 || revisionCount > 100 || pagesSucceeded > pageCount ||
+      (state === "ready") !== (nextPage !== null) ||
+      (nextPage !== null && nextPage < 1) ||
+      (state === "blocked") !== (blocker !== null)
+    ) fail(`checkpoint continuation plan stream ${index} is inconsistent`);
+    return {
+      provider,
+      stream_key: streamKey,
+      provider_contract_version: providerContract,
+      tip_checkpoint: tip,
+      chain_public_id: chainId,
+      chain_content_hash_sha256: chainHash,
+      revision_count: revisionCount,
+      page_count: pageCount,
+      pages_succeeded: pagesSucceeded,
+      resume_state: state,
+      next_page_index: nextPage,
+      resume_blocker: blocker,
+    };
+  });
+  const keys = streams.map(({ provider, stream_key }) => `${provider}\0${stream_key}`);
+  const states = streams.map(({ resume_state }) => resume_state);
+  const expectedAggregate: WalletCaseCheckpointContinuationPlanAggregate = {
+    stream_count: streams.length,
+    ready_count: states.filter((state) => state === "ready").length,
+    complete_count: states.filter((state) => state === "complete").length,
+    blocked_count: states.filter((state) => state === "blocked").length,
+    revision_count: streams.reduce((total, item) => total + item.revision_count, 0),
+    page_count: streams.reduce((total, item) => total + item.page_count, 0),
+    pages_succeeded: streams.reduce((total, item) => total + item.pages_succeeded, 0),
+  };
+  const cutoffIds = new Set(streams.map(({ tip_checkpoint }) => tip_checkpoint.public_id));
+  if (
+    JSON.stringify(aggregate) !== JSON.stringify(expectedAggregate) ||
+    JSON.stringify(descriptorAggregate) !== JSON.stringify(aggregate) ||
+    descriptorCutoff !== cutoff || lenOrNullMismatch(cutoff, streams.length) ||
+    (cutoff !== null && !cutoffIds.has(cutoff)) ||
+    new Set(keys).size !== keys.length ||
+    JSON.stringify(keys) !== JSON.stringify([...keys].sort())
+  ) fail("checkpoint continuation plan is inconsistent");
+  return {
+    plan: {
+      public_id: planId,
+      contract_version: "wallet_case_checkpoint_continuation_plan_v1",
+      content_hash_sha256: contentHash,
+      checkpoint_cutoff_public_id: descriptorCutoff,
+      ...descriptorAggregate,
+    },
+    document: {
+      contract_version: "wallet_case_checkpoint_continuation_plan_v1",
+      case_public_id: caseId,
+      checkpoint_cutoff_public_id: cutoff,
+      aggregate,
+      streams,
+      limitations: limitations(
+        document.limitations,
+        "checkpoint continuation plan limitations",
+      ),
+    },
+  };
+}
+
+function parseContinuationPlanAggregate(
+  value: Record<string, unknown>,
+  label: string,
+): WalletCaseCheckpointContinuationPlanAggregate {
+  const aggregate = {
+    stream_count: integer(value.stream_count, `${label} stream count`),
+    ready_count: integer(value.ready_count, `${label} ready count`),
+    complete_count: integer(value.complete_count, `${label} complete count`),
+    blocked_count: integer(value.blocked_count, `${label} blocked count`),
+    revision_count: integer(value.revision_count, `${label} revision count`),
+    page_count: integer(value.page_count, `${label} page count`),
+    pages_succeeded: integer(value.pages_succeeded, `${label} pages succeeded`),
+  };
+  if (
+    aggregate.stream_count > 32 || aggregate.ready_count > 32 ||
+    aggregate.complete_count > 32 || aggregate.blocked_count > 32 ||
+    aggregate.revision_count > 3_200 ||
+    aggregate.pages_succeeded > aggregate.page_count ||
+    aggregate.stream_count !== aggregate.ready_count + aggregate.complete_count + aggregate.blocked_count
+  ) fail(`${label} is inconsistent`);
+  return aggregate;
+}
+
+function lenOrNullMismatch(value: string | null, length: number): boolean {
+  return (value === null) !== (length === 0);
+}
+
+export function serializeWalletCaseCheckpointContinuationPlan(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseCheckpointContinuationPlan(value), null, 2)}\n`;
 }
 
 export function parseWalletCaseStreamCheckpointCatalog(
