@@ -141,6 +141,16 @@ class WalletCaseCheckpointResumeUnavailable(RuntimeError):
     """Raised when a checkpoint cannot safely start a continuation job."""
 
 
+class WalletCaseContinuationPlanStale(RuntimeError):
+    """Raised when a resume request is bound to a superseded plan."""
+
+    def __init__(self, current_plan_public_id: str) -> None:
+        super().__init__(
+            "Continuation Plan changed; verify the current plan before resuming."
+        )
+        self.current_plan_public_id = current_plan_public_id
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
@@ -867,6 +877,7 @@ class WalletCaseService:
         checkpoint_public_id: str,
         idempotency_key: str,
         *,
+        continuation_plan_public_id: str | None = None,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -970,7 +981,10 @@ class WalletCaseService:
                 "Stored Wallet Case stream checkpoint continuation is invalid."
             )
 
-        fingerprint = _checkpoint_resume_fingerprint(checkpoint.public_id)
+        fingerprint = _checkpoint_resume_fingerprint(
+            checkpoint.public_id,
+            continuation_plan_public_id=continuation_plan_public_id,
+        )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
             idempotency_key=idempotency_key,
@@ -1077,6 +1091,66 @@ class WalletCaseService:
         )
         self.session.rollback()
         return response, False
+
+    def enqueue_checkpoint_plan_resume(
+        self,
+        case_public_id: str,
+        continuation_plan_public_id: str,
+        checkpoint_public_id: str,
+        idempotency_key: str,
+        *,
+        settings=None,
+        now: datetime | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue a continuation only when its verified plan is still current."""
+        wallet_case = self._required_case(case_public_id)
+        fingerprint = _checkpoint_resume_fingerprint(
+            checkpoint_public_id,
+            continuation_plan_public_id=continuation_plan_public_id,
+        )
+        replay = self.repository.get_by_idempotency_key(
+            case_id=wallet_case.id,
+            idempotency_key=idempotency_key,
+        )
+        if replay is not None:
+            if replay.request_fingerprint != fingerprint:
+                raise WalletCaseIdempotencyConflict(
+                    "Idempotency-Key was already used for another sync scope."
+                )
+            return self._sync_response(
+                replay,
+                case_public_id=wallet_case.public_id,
+            ), True
+
+        current_plan = self._checkpoint_continuation_plan_response(wallet_case)
+        current_plan_public_id = current_plan["plan"]["public_id"]
+        if current_plan_public_id != continuation_plan_public_id:
+            raise WalletCaseContinuationPlanStale(current_plan_public_id)
+        planned_stream = next(
+            (
+                stream
+                for stream in current_plan["document"]["streams"]
+                if stream["tip_checkpoint"]["public_id"]
+                == checkpoint_public_id
+            ),
+            None,
+        )
+        if planned_stream is None:
+            raise WalletCaseCheckpointResumeUnavailable(
+                "This checkpoint is not a current Continuation Plan stream tip."
+            )
+        if planned_stream["resume_state"] != "ready":
+            raise WalletCaseCheckpointResumeUnavailable(
+                "This Continuation Plan stream is not ready to resume."
+            )
+        return self.enqueue_checkpoint_resume(
+            wallet_case.public_id,
+            checkpoint_public_id,
+            idempotency_key,
+            continuation_plan_public_id=continuation_plan_public_id,
+            settings=settings,
+            now=now,
+        )
 
     def get_sync_manifest(
         self,
@@ -2096,12 +2170,23 @@ def _sync_request_fingerprint(payload: WalletCaseSyncRequest) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def _checkpoint_resume_fingerprint(checkpoint_public_id: str) -> str:
-    canonical = json.dumps(
-        {
-            "contract": "wallet_case_checkpoint_resume_request_v1",
+def _checkpoint_resume_fingerprint(
+    checkpoint_public_id: str,
+    *,
+    continuation_plan_public_id: str | None = None,
+) -> str:
+    document = {
+        "contract": "wallet_case_checkpoint_resume_request_v1",
+        "checkpoint_public_id": checkpoint_public_id,
+    }
+    if continuation_plan_public_id is not None:
+        document = {
+            "contract": "wallet_case_checkpoint_plan_resume_request_v1",
+            "continuation_plan_public_id": continuation_plan_public_id,
             "checkpoint_public_id": checkpoint_public_id,
-        },
+        }
+    canonical = json.dumps(
+        document,
         ensure_ascii=True,
         sort_keys=True,
         separators=(",", ":"),
