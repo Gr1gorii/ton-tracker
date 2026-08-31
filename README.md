@@ -4,10 +4,27 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.92.0 — Plan-Bound Resume**<br>
+Current product release: **v0.93.0 — Continuation Receipt**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.92.0 adds
+## What v0.93.0 adds
+
+Every completed plan-bound resume can now be verified through
+`GET /api/v1/cases/{case}/syncs/{sync}/continuation-receipt`. The response is a
+canonical `ctr_<sha256>` document that binds the accepted `cpl_` and input
+`scp_`, the published output checkpoint and chain, the exact post-publication
+plan, and the resulting revision and provider-page deltas.
+
+The server reconstructs the after-plan from the immutable checkpoint history
+cutoff created by that sync. A receipt therefore remains identical after later
+continuations advance the current plan. Legacy or unfinished resume jobs do not
+receive a receipt, foreign Case/sync scope fails closed, and corrupt output
+lineage returns an integrity error. Summary verifies the strict client contract,
+shows the input-to-output transition, and exports the same receipt JSON. This is
+proof of one bounded provider continuation—not complete wallet history or an
+automatic scheduler. No migration is added; Alembic remains at `20260828_0028`.
+
+## v0.92.0 plan-bound resume
 
 A verified Continuation Plan can now authorize one explicit provider-stream
 continuation through
@@ -242,6 +259,8 @@ profit, ownership proof, or complete wallet history.
   verified provider stream.
 - v0.92.0 stale-safe, idempotent stream continuation bound to an explicitly
   verified `cpl_` plan and its exact `scp_` tip.
+- v0.93.0 immutable `ctr_` receipts that reproduce the exact checkpoint and
+  plan transition published by a plan-bound resume.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

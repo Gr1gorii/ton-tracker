@@ -12,6 +12,7 @@ from services.wallet_cases import (
     WalletCaseCatalogInvalidCursor,
     WalletCaseCheckpointHistoryInvalidCursor,
     WalletCaseCheckpointResumeUnavailable,
+    WalletCaseContinuationReceiptNotFound,
     WalletCaseContinuationPlanStale,
     WalletCaseDeletionConflict,
     WalletCaseMetadataConflict,
@@ -34,6 +35,7 @@ from wallet_case_schemas import (
     WalletCaseResponse,
     WalletCaseSyncRequest,
     WalletCaseSyncManifestResponse,
+    WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseStreamCheckpointCatalogResponse,
     WalletCaseStreamCheckpointChainResponse,
@@ -544,6 +546,61 @@ def read_wallet_case_sync(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case sync storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/syncs/{sync_public_id}/continuation-receipt",
+    response_model=WalletCaseCheckpointContinuationReceiptResponse,
+)
+def read_wallet_case_checkpoint_continuation_receipt(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    sync_public_id: str = Path(
+        ...,
+        pattern=_PUBLIC_ID_PATTERN,
+        max_length=36,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Verify the immutable result of one plan-bound checkpoint resume."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(
+            session
+        ).get_checkpoint_continuation_receipt(public_id, sync_public_id)
+    except WalletCaseContinuationReceiptNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": exc.code,
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "continuation_receipt_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case continuation receipt storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

@@ -1,4 +1,5 @@
 import type {
+  WalletCaseCheckpointContinuationReceiptResponse,
   WalletCaseCheckpointContinuationPlanResponse,
   WalletCaseStreamCheckpointCatalogResponse,
   WalletCaseStreamCheckpointChainResponse,
@@ -237,6 +238,70 @@ export function checkpointContinuationPlanFixture(): WalletCaseCheckpointContinu
       limitations: [{
         code: "continuation_plan_is_not_automatic_backfill",
         message: "The plan does not schedule provider requests or prove complete history.",
+      }],
+    },
+  };
+}
+
+export function checkpointContinuationReceiptFixture(): WalletCaseCheckpointContinuationReceiptResponse {
+  const outputChain = streamCheckpointChainFixture();
+  const afterPlan = checkpointContinuationPlanFixture();
+  const inputCheckpoint = outputChain.document.revisions[0].checkpoint;
+  const outputCheckpoint = outputChain.document.revisions[1].checkpoint;
+  const inputPlanHash = "9a".repeat(32);
+  const inputChainHash = "bc".repeat(32);
+  const receiptHash = "de".repeat(32);
+  const transition = {
+    checkpoint_changed: true as const,
+    plan_changed: true as const,
+    revision_delta: 1 as const,
+    page_count_delta: 1,
+    pages_succeeded_delta: 1,
+  };
+  return {
+    receipt: {
+      public_id: `ctr_${receiptHash}`,
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v1",
+      content_hash_sha256: receiptHash,
+      sync_public_id: SYNC_ID,
+      input_plan_public_id: `cpl_${inputPlanHash}`,
+      input_checkpoint_public_id: inputCheckpoint.public_id,
+      output_checkpoint_public_id: outputCheckpoint.public_id,
+      after_plan_public_id: afterPlan.plan.public_id,
+      revision_delta: 1,
+      page_count_delta: 1,
+      pages_succeeded_delta: 1,
+    },
+    document: {
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v1",
+      case_public_id: CASE_ID,
+      sync_public_id: SYNC_ID,
+      input: {
+        continuation_plan_public_id: `cpl_${inputPlanHash}`,
+        checkpoint: inputCheckpoint,
+        chain_public_id: `cch_${inputChainHash}`,
+        chain_content_hash_sha256: inputChainHash,
+        revision_count: 1,
+        page_count: 1,
+        pages_succeeded: 1,
+        next_page_index: 2,
+      },
+      output: {
+        checkpoint: outputCheckpoint,
+        chain_public_id: outputChain.chain.public_id,
+        chain_content_hash_sha256: outputChain.chain.content_hash_sha256,
+        revision_count: outputChain.chain.revision_count,
+        page_count: outputChain.chain.page_count,
+        pages_succeeded: outputChain.chain.pages_succeeded,
+        resume_state: outputChain.document.current_resume_state,
+        next_page_index: outputChain.document.next_page_index,
+        resume_blocker: null,
+      },
+      after_plan: afterPlan,
+      transition,
+      limitations: [{
+        code: "continuation_receipt_is_provider_progress",
+        message: "The receipt proves one checkpoint transition, not complete history.",
       }],
     },
   };

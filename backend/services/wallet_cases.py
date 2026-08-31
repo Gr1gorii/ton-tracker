@@ -151,6 +151,12 @@ class WalletCaseContinuationPlanStale(RuntimeError):
         self.current_plan_public_id = current_plan_public_id
 
 
+class WalletCaseContinuationReceiptNotFound(LookupError):
+    """Raised when a sync did not publish a plan-bound continuation result."""
+
+    code = "continuation_receipt_not_available"
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
@@ -1180,6 +1186,217 @@ class WalletCaseService:
         )
         return {"manifest": descriptor, "document": document}
 
+    def get_checkpoint_continuation_receipt(
+        self,
+        case_public_id: str,
+        sync_public_id: str,
+    ) -> dict[str, Any]:
+        """Reconstruct one immutable plan-bound resume transition."""
+        wallet_case = self._required_case(case_public_id)
+        case_sync = self.repository.get_sync(
+            case_id=wallet_case.id,
+            public_id=sync_public_id,
+        )
+        if case_sync is None:
+            raise WalletCaseNotFound("Wallet Case sync not found")
+        try:
+            acquisition_plan = _sync_acquisition_plan(case_sync)
+        except ValueError as exc:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case continuation receipt lineage is invalid."
+            ) from exc
+        if (
+            acquisition_plan.get("mode") != "resume"
+            or acquisition_plan.get("version") != 3
+        ):
+            raise WalletCaseContinuationReceiptNotFound(
+                "This sync was not accepted from a verified Continuation Plan."
+            )
+        if case_sync.state not in {"partial", "succeeded"}:
+            raise WalletCaseContinuationReceiptNotFound(
+                "This plan-bound continuation has not published a result."
+            )
+
+        source_public_id = acquisition_plan["source_checkpoint_public_id"]
+        source = self.repository.get_stream_checkpoint(
+            case_id=wallet_case.id,
+            public_id=source_public_id,
+        )
+        outputs = self.repository.stream_checkpoints_for_sync(
+            case_id=wallet_case.id,
+            source_sync_id=case_sync.id,
+        )
+        if source is None or len(outputs) != 1:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case continuation receipt checkpoints are invalid."
+            )
+        output = outputs[0]
+        if (
+            output.provider != source.provider
+            or output.stream_key != source.stream_key
+            or output.provider_contract_version
+            != source.provider_contract_version
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case continuation receipt stream changed identity."
+            )
+
+        source_chain = self._verified_stream_checkpoint_chain(
+            source,
+            case_id=wallet_case.id,
+            case_public_id=wallet_case.public_id,
+        )
+        output_chain = self._verified_stream_checkpoint_chain(
+            output,
+            case_id=wallet_case.id,
+            case_public_id=wallet_case.public_id,
+        )
+        source_ids = [item["row"].public_id for item in source_chain]
+        output_ids = [item["row"].public_id for item in output_chain]
+        if output_ids[:-1] != source_ids or output_ids[-1] == source_ids[-1]:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case continuation receipt is not a direct revision."
+            )
+
+        source_chain_response = self._stream_checkpoint_chain_response(
+            wallet_case,
+            source_chain,
+        )
+        output_chain_response = self._stream_checkpoint_chain_response(
+            wallet_case,
+            output_chain,
+        )
+        source_response = source_chain[-1]["response"]
+        output_response = output_chain[-1]["response"]
+        source_document = source_response["document"]
+        output_document = output_response["document"]
+        source_aggregate = source_chain_response["document"]["aggregate"]
+        output_aggregate = output_chain_response["document"]["aggregate"]
+
+        bounded_tips = self.repository.latest_stream_checkpoints_at_cutoff(
+            case_id=wallet_case.id,
+            cutoff_id=output.id,
+        )
+        after_plan = self._checkpoint_continuation_plan_response(
+            wallet_case,
+            checkpoints=bounded_tips,
+        )
+        if (
+            after_plan["plan"]["checkpoint_cutoff_public_id"]
+            != output.public_id
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case continuation receipt cutoff is invalid."
+            )
+
+        transition = {
+            "checkpoint_changed": True,
+            "plan_changed": True,
+            "revision_delta": (
+                output_aggregate["revision_count"]
+                - source_aggregate["revision_count"]
+            ),
+            "page_count_delta": (
+                output_aggregate["page_count"]
+                - source_aggregate["page_count"]
+            ),
+            "pages_succeeded_delta": (
+                output_aggregate["pages_succeeded"]
+                - source_aggregate["pages_succeeded"]
+            ),
+        }
+        if (
+            transition["revision_delta"] != 1
+            or transition["page_count_delta"] < 0
+            or transition["pages_succeeded_delta"] < 0
+            or after_plan["plan"]["public_id"]
+            == acquisition_plan["continuation_plan_public_id"]
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case continuation receipt transition is invalid."
+            )
+        document = {
+            "contract_version": (
+                "wallet_case_checkpoint_continuation_receipt_v1"
+            ),
+            "case_public_id": wallet_case.public_id,
+            "sync_public_id": case_sync.public_id,
+            "input": {
+                "continuation_plan_public_id": acquisition_plan[
+                    "continuation_plan_public_id"
+                ],
+                "checkpoint": source_response["checkpoint"],
+                "chain_public_id": source_chain_response["chain"]["public_id"],
+                "chain_content_hash_sha256": source_chain_response["chain"][
+                    "content_hash_sha256"
+                ],
+                **source_aggregate,
+                "next_page_index": source_document[
+                    "continuation_page_index"
+                ],
+            },
+            "output": {
+                "checkpoint": output_response["checkpoint"],
+                "chain_public_id": output_chain_response["chain"]["public_id"],
+                "chain_content_hash_sha256": output_chain_response["chain"][
+                    "content_hash_sha256"
+                ],
+                **output_aggregate,
+                "resume_state": output_document["resume_state"],
+                "next_page_index": output_document[
+                    "continuation_page_index"
+                ],
+                "resume_blocker": output_document["resume_blocker"],
+            },
+            "after_plan": after_plan,
+            "transition": transition,
+            "limitations": [
+                _limitation(
+                    "continuation_receipt_is_provider_progress",
+                    (
+                        "This receipt proves one accepted checkpoint transition; "
+                        "it does not prove complete wallet history or semantic "
+                        "deduplication of wallet activity."
+                    ),
+                ),
+                _limitation(
+                    "continuation_receipt_does_not_schedule_next_page",
+                    (
+                        "The after-plan is reconstructed at publication time and "
+                        "does not automatically enqueue another provider request."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "receipt": {
+                "public_id": f"ctr_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "sync_public_id": case_sync.public_id,
+                "input_plan_public_id": acquisition_plan[
+                    "continuation_plan_public_id"
+                ],
+                "input_checkpoint_public_id": source.public_id,
+                "output_checkpoint_public_id": output.public_id,
+                "after_plan_public_id": after_plan["plan"]["public_id"],
+                "revision_delta": transition["revision_delta"],
+                "page_count_delta": transition["page_count_delta"],
+                "pages_succeeded_delta": transition[
+                    "pages_succeeded_delta"
+                ],
+            },
+            "document": document,
+        }
+
     def list_stream_checkpoints(self, case_public_id: str) -> dict[str, Any]:
         wallet_case = self._required_case(case_public_id)
         checkpoints = [
@@ -1213,11 +1430,14 @@ class WalletCaseService:
     def _checkpoint_continuation_plan_response(
         self,
         wallet_case: WalletCase,
+        *,
+        checkpoints: list[WalletCaseStreamCheckpoint] | None = None,
     ) -> dict[str, Any]:
-        """Build the current content-addressed continuation plan for one case."""
-        checkpoints = self.repository.latest_stream_checkpoints(
-            case_id=wallet_case.id
-        )
+        """Build a content-addressed plan from current or bounded stream tips."""
+        if checkpoints is None:
+            checkpoints = self.repository.latest_stream_checkpoints(
+                case_id=wallet_case.id
+            )
         if len(checkpoints) > _MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS:
             raise WalletCaseStreamCheckpointCorrupt(
                 "Wallet Case continuation plan contains too many provider streams."

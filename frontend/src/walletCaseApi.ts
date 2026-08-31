@@ -22,11 +22,13 @@ import {
   type WalletCaseSyncManifestResponse,
 } from "./walletCaseSyncManifest";
 import {
+  parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
+  type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
   type WalletCaseStreamCheckpointChainResponse,
@@ -658,6 +660,39 @@ export async function getWalletCaseCheckpointContinuationPlan(
     throw new Error("Wallet Case checkpoint continuation plan does not match the request");
   }
   return plan;
+}
+
+export async function getWalletCaseCheckpointContinuationReceipt(
+  caseId: string,
+  syncId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseCheckpointContinuationReceiptResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  assertPublicId(syncId, "Wallet Case sync id");
+  const response = await fetch(
+    (
+      `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/syncs/` +
+      `${encodeURIComponent(syncId)}/continuation-receipt`
+    ),
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case continuation receipt read failed",
+    );
+  }
+  const receipt = parseWalletCaseCheckpointContinuationReceipt(
+    await response.json(),
+  );
+  if (
+    receipt.document.case_public_id !== caseId ||
+    receipt.document.sync_public_id !== syncId ||
+    receipt.receipt.sync_public_id !== syncId
+  ) {
+    throw new Error("Wallet Case continuation receipt does not match the request");
+  }
+  return receipt;
 }
 
 export async function getWalletCaseStreamCheckpointHistory({
