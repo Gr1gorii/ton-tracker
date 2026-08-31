@@ -16,6 +16,7 @@ import {
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
 import {
   streamCheckpointCatalogFixture,
+  streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
   streamCheckpointHistoryFixture,
 } from "../test/walletCaseStreamCheckpointFixtures";
@@ -189,6 +190,7 @@ describe("GramCaseSummary", () => {
       page: { ...historyFixture.page, limit: 10 },
     };
     const checkpointDetail = streamCheckpointDetailFixture();
+    const checkpointChain = streamCheckpointChainFixture();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(
         JSON.stringify(payload),
@@ -204,6 +206,10 @@ describe("GramCaseSummary", () => {
       ))
       .mockResolvedValueOnce(new Response(
         JSON.stringify(checkpointDetail),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(checkpointChain),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ));
     vi.stubGlobal("fetch", fetchMock);
@@ -231,6 +237,24 @@ describe("GramCaseSummary", () => {
     }));
     expect(await screen.findByText("Verified revision")).toBeTruthy();
     expect(screen.getByText("Root revision")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Verify checkpoint chain" }));
+    expect(await screen.findByText("Content-addressed chain")).toBeTruthy();
+    expect(screen.getByText(checkpointChain.chain.public_id)).toBeTruthy();
+    expect(screen.getByText("#1 · bounded")).toBeTruthy();
+    expect(screen.getByText("#2 · resume")).toBeTruthy();
+    const createObjectUrl = vi.fn(() => "blob:checkpoint-chain");
+    const revokeObjectUrl = vi.fn();
+    vi.stubGlobal("URL", {
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    await user.click(screen.getByRole("button", { name: "Export verified chain JSON" }));
+    expect(createObjectUrl).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:checkpoint-chain");
+    anchorClick.mockRestore();
     await user.click(screen.getByRole("button", { name: "Resume transactions stream" }));
     expect(controller.resume).toHaveBeenCalledWith(
       checkpoints.checkpoints[0].checkpoint.public_id,
@@ -249,6 +273,10 @@ describe("GramCaseSummary", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/${checkpoints.checkpoints[0].checkpoint.public_id}`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/${checkpoints.checkpoints[0].checkpoint.public_id}/chain`,
       expect.objectContaining({ cache: "no-store" }),
     );
   });

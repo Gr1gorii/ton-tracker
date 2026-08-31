@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { WalletCaseLimitation } from "./walletCase";
 import {
   getWalletCaseStreamCheckpoint,
+  getWalletCaseStreamCheckpointChain,
   getWalletCaseStreamCheckpointHistory,
 } from "./walletCaseApi";
 import type {
   WalletCaseStreamCheckpointDetailResponse,
+  WalletCaseStreamCheckpointChainResponse,
   WalletCaseStreamCheckpointHistoryItem,
 } from "./walletCaseStreamCheckpoint";
 
@@ -28,9 +30,13 @@ export interface WalletCaseCheckpointHistoryController {
   selected: WalletCaseStreamCheckpointDetailResponse | null;
   selectionLoading: boolean;
   selectionError: string | null;
+  chain: WalletCaseStreamCheckpointChainResponse | null;
+  chainLoading: boolean;
+  chainError: string | null;
   load: () => Promise<void>;
   loadMore: () => Promise<void>;
   inspect: (checkpointPublicId: string) => Promise<void>;
+  loadChain: (checkpointPublicId: string) => Promise<void>;
 }
 
 function message(cause: unknown, fallback: string): string {
@@ -68,9 +74,13 @@ export function useWalletCaseCheckpointHistory(
   const [selected, setSelected] = useState<WalletCaseStreamCheckpointDetailResponse | null>(null);
   const [selectionLoading, setSelectionLoading] = useState(false);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const [chain, setChain] = useState<WalletCaseStreamCheckpointChainResponse | null>(null);
+  const [chainLoading, setChainLoading] = useState(false);
+  const [chainError, setChainError] = useState<string | null>(null);
   const historyRef = useRef<WalletCaseCheckpointHistoryView | null>(null);
   const historyRequestRef = useRef<AbortController | null>(null);
   const detailRequestRef = useRef<AbortController | null>(null);
+  const chainRequestRef = useRef<AbortController | null>(null);
 
   const publishHistory = useCallback((next: WalletCaseCheckpointHistoryView | null) => {
     historyRef.current = next;
@@ -80,28 +90,42 @@ export function useWalletCaseCheckpointHistory(
   useEffect(() => {
     historyRequestRef.current?.abort();
     detailRequestRef.current?.abort();
+    chainRequestRef.current?.abort();
     historyRequestRef.current = null;
     detailRequestRef.current = null;
+    chainRequestRef.current = null;
     publishHistory(null);
     setHistoryState("idle");
     setHistoryError(null);
     setSelected(null);
     setSelectionLoading(false);
     setSelectionError(null);
+    setChain(null);
+    setChainLoading(false);
+    setChainError(null);
     return () => {
       historyRequestRef.current?.abort();
       detailRequestRef.current?.abort();
+      chainRequestRef.current?.abort();
     };
   }, [caseId, publishHistory]);
 
   const load = useCallback(async () => {
     historyRequestRef.current?.abort();
+    detailRequestRef.current?.abort();
+    chainRequestRef.current?.abort();
+    detailRequestRef.current = null;
+    chainRequestRef.current = null;
     const controller = new AbortController();
     historyRequestRef.current = controller;
     setHistoryState("loading");
     setHistoryError(null);
     setSelected(null);
+    setSelectionLoading(false);
     setSelectionError(null);
+    setChain(null);
+    setChainLoading(false);
+    setChainError(null);
     try {
       const response = await getWalletCaseStreamCheckpointHistory({
         caseId,
@@ -170,10 +194,15 @@ export function useWalletCaseCheckpointHistory(
 
   const inspect = useCallback(async (checkpointPublicId: string) => {
     detailRequestRef.current?.abort();
+    chainRequestRef.current?.abort();
+    chainRequestRef.current = null;
     const controller = new AbortController();
     detailRequestRef.current = controller;
     setSelectionLoading(true);
     setSelectionError(null);
+    setChain(null);
+    setChainLoading(false);
+    setChainError(null);
     try {
       const response = await getWalletCaseStreamCheckpoint(
         caseId,
@@ -193,6 +222,31 @@ export function useWalletCaseCheckpointHistory(
     }
   }, [caseId]);
 
+  const loadChain = useCallback(async (checkpointPublicId: string) => {
+    chainRequestRef.current?.abort();
+    const controller = new AbortController();
+    chainRequestRef.current = controller;
+    setChainLoading(true);
+    setChainError(null);
+    try {
+      const response = await getWalletCaseStreamCheckpointChain(
+        caseId,
+        checkpointPublicId,
+        controller.signal,
+      );
+      if (!controller.signal.aborted) setChain(response);
+    } catch (cause) {
+      if (!controller.signal.aborted) {
+        setChainError(message(cause, "Checkpoint chain read failed."));
+      }
+    } finally {
+      if (chainRequestRef.current === controller) {
+        chainRequestRef.current = null;
+        setChainLoading(false);
+      }
+    }
+  }, [caseId]);
+
   return {
     history,
     historyState,
@@ -200,8 +254,12 @@ export function useWalletCaseCheckpointHistory(
     selected,
     selectionLoading,
     selectionError,
+    chain,
+    chainLoading,
+    chainError,
     load,
     loadMore,
     inspect,
+    loadChain,
   };
 }

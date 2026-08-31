@@ -6,11 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CASE_ID } from "./test/walletCaseFixtures";
 import {
   streamCheckpointDetailFixture,
+  streamCheckpointChainFixture,
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 
 const api = vi.hoisted(() => ({
   getWalletCaseStreamCheckpoint: vi.fn(),
+  getWalletCaseStreamCheckpointChain: vi.fn(),
   getWalletCaseStreamCheckpointHistory: vi.fn(),
 }));
 
@@ -50,6 +52,9 @@ describe("useWalletCaseCheckpointHistory", () => {
     api.getWalletCaseStreamCheckpoint.mockResolvedValue(
       streamCheckpointDetailFixture(),
     );
+    api.getWalletCaseStreamCheckpointChain.mockResolvedValue(
+      streamCheckpointChainFixture(),
+    );
     const { result } = renderHook(() => useWalletCaseCheckpointHistory(CASE_ID));
 
     await act(() => result.current.load());
@@ -72,6 +77,8 @@ describe("useWalletCaseCheckpointHistory", () => {
 
     await act(() => result.current.inspect(first.items[0].checkpoint.public_id));
     expect(result.current.selected).toEqual(streamCheckpointDetailFixture());
+    await act(() => result.current.loadChain(first.items[0].checkpoint.public_id));
+    expect(result.current.chain).toEqual(streamCheckpointChainFixture());
   });
 
   it("keeps loaded evidence when a continuation changes its cutoff", async () => {
