@@ -144,6 +144,7 @@ class ClaimedCaseSync:
     resume_stream_key: str | None
     resume_cursor: str | None
     resume_page_index: int | None
+    resume_page_budget: int | None
 
 
 class CaseSyncWorker:
@@ -449,6 +450,9 @@ class CaseSyncWorker:
                 resume_stream_key=acquisition_plan.get("resume_stream_key"),
                 resume_cursor=acquisition_plan.get("resume_cursor"),
                 resume_page_index=acquisition_plan.get("resume_page_index"),
+                resume_page_budget=acquisition_plan.get(
+                    "resume_page_budget"
+                ),
             )
 
     def _close_unavailable_claim(self, sync_id: int, lease_token: str) -> bool:
@@ -638,6 +642,7 @@ class CaseSyncWorker:
             claimed.resume_stream_key,
             claimed.resume_cursor,
             claimed.resume_page_index,
+            claimed.resume_page_budget,
         )
         if claimed.acquisition_mode != "resume":
             if any(value is not None for value in resume_values):
@@ -645,9 +650,22 @@ class CaseSyncWorker:
                     "Non-resume sync contains provider continuation state."
                 )
             return
-        if any(value is None for value in resume_values):
+        if any(value is None for value in resume_values[:4]):
             raise WalletCaseRuntimeConflict(
                 "Checkpoint continuation state is incomplete."
+            )
+        plan_version = claimed.acquisition_plan.get("version")
+        if (
+            plan_version == 4
+            and (
+                type(claimed.resume_page_budget) is not int
+                or not 1 <= claimed.resume_page_budget <= 10
+            )
+        ) or (
+            plan_version != 4 and claimed.resume_page_budget is not None
+        ):
+            raise WalletCaseRuntimeConflict(
+                "Checkpoint continuation page budget is invalid."
             )
         checkpoint = session.scalar(
             select(WalletCaseStreamCheckpoint).where(
@@ -794,6 +812,7 @@ class CaseSyncWorker:
                     resume_stream_key=claimed.resume_stream_key,
                     resume_cursor=claimed.resume_cursor,
                     resume_page_index=claimed.resume_page_index,
+                    resume_page_budget=claimed.resume_page_budget,
                 )
                 outcome.put((True, result))
             except Exception as exc:  # forwarded without logging provider detail

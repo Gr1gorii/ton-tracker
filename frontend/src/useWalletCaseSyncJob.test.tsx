@@ -157,6 +157,7 @@ describe("useWalletCaseSyncJob", () => {
         requested_scope: {
           ...activeResumeSyncFixture().requested_scope,
           continuation_plan_public_id: CONTINUATION_PLAN_ID,
+          resume_page_budget: 3,
         },
       });
     const initial = succeededSyncFixture();
@@ -167,18 +168,20 @@ describe("useWalletCaseSyncJob", () => {
     }));
 
     await act(async () => {
-      await result.current.resumePlanned(CONTINUATION_PLAN_ID, CHECKPOINT_ID);
+      await result.current.resumePlanned(CONTINUATION_PLAN_ID, CHECKPOINT_ID, 3);
     });
     expect(result.current.transportError).toContain("Network connection reset");
     await act(async () => {
-      await result.current.resumePlanned(CONTINUATION_PLAN_ID, CHECKPOINT_ID);
+      await result.current.resumePlanned(CONTINUATION_PLAN_ID, CHECKPOINT_ID, 3);
     });
 
     expect(apiMocks.resumeWalletCaseContinuationPlan).toHaveBeenCalledTimes(2);
-    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[0][3]).toBe(
+    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[0][3]).toBe(3);
+    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[1][3]).toBe(3);
+    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[0][4]).toBe(
       IDEMPOTENCY_KEY,
     );
-    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[1][3]).toBe(
+    expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[1][4]).toBe(
       IDEMPOTENCY_KEY,
     );
     expect(result.current.sync?.requested_scope.mode).toBe("resume");

@@ -26,6 +26,7 @@ export interface WalletCaseSyncJobController {
   resumePlanned: (
     continuationPlanPublicId: string,
     checkpointPublicId: string,
+    pageBudget?: number,
   ) => Promise<void>;
   retryPending: () => Promise<void>;
   retry: () => Promise<void>;
@@ -47,6 +48,7 @@ type PendingStart = {
       kind: "resume";
       continuationPlanPublicId: string | null;
       checkpointPublicId: string;
+      pageBudget: number | null;
     }
 );
 
@@ -56,6 +58,7 @@ type RequestedStart =
       kind: "resume";
       continuationPlanPublicId: string | null;
       checkpointPublicId: string;
+      pageBudget: number | null;
     };
 
 const TERMINAL_STATES = new Set(["partial", "succeeded", "failed", "cancelled"]);
@@ -270,7 +273,8 @@ export function useWalletCaseSyncJob({
           JSON.stringify(existing.request) === JSON.stringify(requested.request)) ||
         (existing.kind === "resume" && requested.kind === "resume" &&
           existing.continuationPlanPublicId === requested.continuationPlanPublicId &&
-          existing.checkpointPublicId === requested.checkpointPublicId)
+          existing.checkpointPublicId === requested.checkpointPublicId &&
+          existing.pageBudget === requested.pageBudget)
       )
     );
     if (!matchesPending) {
@@ -307,6 +311,7 @@ export function useWalletCaseSyncJob({
               caseId,
               pending.continuationPlanPublicId,
               pending.checkpointPublicId,
+              pending.pageBudget ?? 1,
               pending.idempotencyKey,
               controller.signal,
             );
@@ -351,17 +356,20 @@ export function useWalletCaseSyncJob({
       kind: "resume",
       continuationPlanPublicId: null,
       checkpointPublicId,
+      pageBudget: null,
     });
   }, [begin]);
 
   const resumePlanned = useCallback(async (
     continuationPlanPublicId: string,
     checkpointPublicId: string,
+    pageBudget = 1,
   ) => {
     await begin({
       kind: "resume",
       continuationPlanPublicId,
       checkpointPublicId,
+      pageBudget,
     });
   }, [begin]);
 
@@ -375,6 +383,7 @@ export function useWalletCaseSyncJob({
         kind: "resume",
         continuationPlanPublicId: pending.continuationPlanPublicId,
         checkpointPublicId: pending.checkpointPublicId,
+        pageBudget: pending.pageBudget,
       });
     }
   }, [begin]);
@@ -391,6 +400,9 @@ export function useWalletCaseSyncJob({
         kind: "resume",
         continuationPlanPublicId: current.requested_scope.continuation_plan_public_id,
         checkpointPublicId: current.requested_scope.source_checkpoint_public_id,
+        pageBudget: current.requested_scope.continuation_plan_public_id === null
+          ? null
+          : current.requested_scope.resume_page_budget ?? 1,
       });
       return;
     }

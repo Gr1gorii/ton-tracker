@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request, Response
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -36,7 +36,9 @@ from wallet_case_schemas import (
     WalletCaseSyncRequest,
     WalletCaseSyncManifestResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
+    WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationPlanResponse,
+    WalletCaseCheckpointPlanResumeRequest,
     WalletCaseStreamCheckpointCatalogResponse,
     WalletCaseStreamCheckpointChainResponse,
     WalletCaseStreamCheckpointDetailResponse,
@@ -552,7 +554,10 @@ def read_wallet_case_sync(
 
 @router.get(
     "/{public_id}/syncs/{sync_public_id}/continuation-receipt",
-    response_model=WalletCaseCheckpointContinuationReceiptResponse,
+    response_model=(
+        WalletCaseCheckpointContinuationReceiptResponse
+        | WalletCaseCheckpointContinuationReceiptV2Response
+    ),
 )
 def read_wallet_case_checkpoint_continuation_receipt(
     response: Response,
@@ -777,6 +782,9 @@ def read_wallet_case_checkpoint_continuation_plan(
 def enqueue_wallet_case_checkpoint_plan_resume(
     request: Request,
     response: Response,
+    payload: WalletCaseCheckpointPlanResumeRequest = Body(
+        default=WalletCaseCheckpointPlanResumeRequest()
+    ),
     public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
     continuation_plan_public_id: str = Path(
         ...,
@@ -828,6 +836,7 @@ def enqueue_wallet_case_checkpoint_plan_resume(
             continuation_plan_public_id,
             checkpoint_public_id,
             idempotency_key,
+            page_budget=payload.page_budget,
         )
         response.headers["Location"] = (
             f"/api/v1/cases/{public_id}/syncs/{result['public_id']}"

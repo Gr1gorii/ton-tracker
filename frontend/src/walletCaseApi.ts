@@ -771,12 +771,14 @@ export async function resumeWalletCaseContinuationPlan(
   caseId: string,
   continuationPlanId: string,
   checkpointId: string,
+  pageBudget: number,
   idempotencyKey: string,
   signal?: AbortSignal,
 ): Promise<WalletCaseSync> {
   assertPublicId(caseId, "Wallet Case id");
   assertContinuationPlanId(continuationPlanId);
   assertCheckpointId(checkpointId);
+  assertContinuationPageBudget(pageBudget);
   assertPublicId(idempotencyKey, "Wallet Case sync idempotency key");
   const response = await fetch(
     (
@@ -788,7 +790,11 @@ export async function resumeWalletCaseContinuationPlan(
     {
       method: "POST",
       cache: "no-store",
-      headers: { "Idempotency-Key": idempotencyKey },
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ page_budget: pageBudget }),
       signal,
     },
   );
@@ -803,6 +809,7 @@ export async function resumeWalletCaseContinuationPlan(
     sync.requested_scope.mode !== "resume" ||
     sync.requested_scope.continuation_plan_public_id !== continuationPlanId ||
     sync.requested_scope.source_checkpoint_public_id !== checkpointId ||
+    sync.requested_scope.resume_page_budget !== pageBudget ||
     sync.requested_scope.base_snapshot_public_id === null
   ) {
     throw new Error("Wallet Case continuation plan resume response does not match the request");
@@ -923,6 +930,12 @@ function assertCheckpointId(value: string): void {
 function assertContinuationPlanId(value: string): void {
   if (!CONTINUATION_PLAN_ID.test(value)) {
     throw new Error("Wallet Case continuation plan id is invalid");
+  }
+}
+
+function assertContinuationPageBudget(value: number): void {
+  if (!Number.isInteger(value) || value < 1 || value > 10) {
+    throw new Error("Wallet Case continuation page budget must be from 1 through 10");
   }
 }
 

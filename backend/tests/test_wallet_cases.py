@@ -52,6 +52,7 @@ from services.wallet_cases import (
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
     WalletCaseCheckpointContinuationReceiptResponse,
+    WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseStreamCheckpointChainResponse,
     WalletCaseSyncRequest,
@@ -1693,6 +1694,7 @@ def test_ready_stream_checkpoint_queues_and_executes_one_resume(client):
         "base_snapshot_public_id": source_sync["public_id"],
         "source_checkpoint_public_id": checkpoint_id,
         "continuation_plan_public_id": None,
+        "resume_page_budget": None,
     }
 
     replay = client.post(
@@ -2061,6 +2063,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     queued_response = client.post(
         resume_url,
         headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 3},
     )
 
     assert queued_response.status_code == 202, queued_response.text
@@ -2082,6 +2085,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         "base_snapshot_public_id": source_sync["public_id"],
         "source_checkpoint_public_id": checkpoint_id,
         "continuation_plan_public_id": plan_id,
+        "resume_page_budget": 3,
     }
     with app.state.wallet_case_test_session() as session:
         persisted = session.scalar(
@@ -2091,12 +2095,23 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         assert persisted.request_fingerprint == _checkpoint_resume_fingerprint(
             checkpoint_id,
             continuation_plan_public_id=plan_id,
+            page_budget=3,
         )
         acquisition_plan = json.loads(persisted.coverage_summary_json)[
             "_acquisition"
         ]
-        assert acquisition_plan["version"] == 3
+        assert acquisition_plan["version"] == 4
         assert acquisition_plan["continuation_plan_public_id"] == plan_id
+        assert acquisition_plan["resume_page_budget"] == 3
+    changed_budget_reuse = client.post(
+        resume_url,
+        headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 2},
+    )
+    assert changed_budget_reuse.status_code == 409
+    assert changed_budget_reuse.json()["detail"]["code"] == (
+        "idempotency_conflict"
+    )
     unbound_reuse = client.post(
         f"/api/v1/cases/{case_id}/stream-checkpoints/{checkpoint_id}/resume",
         headers={"Idempotency-Key": idempotency_key},
@@ -2104,11 +2119,19 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     assert unbound_reuse.status_code == 409
     assert unbound_reuse.json()["detail"]["code"] == "idempotency_conflict"
 
+    seen_build_kwargs = []
+
+    def recording_builder(payload, settings, **kwargs):
+        seen_build_kwargs.append(kwargs)
+        return _resumed_transaction_run(payload, settings, **kwargs)
+
     worker = CaseSyncWorker(
         app.state.wallet_case_test_session,
-        builder=_resumed_transaction_run,
+        builder=recording_builder,
     )
     assert worker.run_once() is True
+    assert len(seen_build_kwargs) == 1
+    assert seen_build_kwargs[0]["resume_page_budget"] == 3
     advanced_plan_response = client.get(
         f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
     )
@@ -2119,6 +2142,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     replay = client.post(
         resume_url,
         headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 3},
     )
     assert replay.status_code == 202, replay.text
     assert replay.json()["public_id"] == queued["public_id"]
@@ -2128,6 +2152,7 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
     stale = client.post(
         resume_url,
         headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
     )
     assert stale.status_code == 409
     assert stale.json()["detail"] == {
@@ -2139,6 +2164,37 @@ def test_plan_bound_resume_replays_after_plan_advances_and_rejects_stale_use(
         "current_plan_public_id": advanced_plan_id,
     }
     assert _database_counts() == (1, 2, 2)
+
+
+def test_plan_bound_resume_rejects_noncanonical_page_budgets(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    plan_id = plan["plan"]["public_id"]
+    checkpoint_id = plan["document"]["streams"][0]["tip_checkpoint"][
+        "public_id"
+    ]
+    resume_url = (
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+        f"{plan_id}/{checkpoint_id}/resume"
+    )
+
+    for payload in (
+        {"page_budget": 0},
+        {"page_budget": 11},
+        {"page_budget": "3"},
+        {"page_budget": True},
+        {"page_budget": 1, "unexpected": "field"},
+    ):
+        response = client.post(
+            resume_url,
+            headers={"Idempotency-Key": str(uuid4())},
+            json=payload,
+        )
+        assert response.status_code == 422, response.text
+
+    assert _database_counts() == (1, 1, 1)
 
 
 def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume(
@@ -2160,6 +2216,7 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
             f"{initial_plan['plan']['public_id']}/{input_checkpoint_id}/resume"
         ),
         headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
     )
     assert first_queued.status_code == 202, first_queued.text
     first_sync_id = first_queued.json()["public_id"]
@@ -2176,8 +2233,10 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
     assert receipt_response.status_code == 200, receipt_response.text
     assert receipt_response.headers["cache-control"] == "no-store"
     receipt = receipt_response.json()
-    validated = WalletCaseCheckpointContinuationReceiptResponse.model_validate(
-        receipt
+    validated = (
+        WalletCaseCheckpointContinuationReceiptV2Response.model_validate(
+            receipt
+        )
     )
     assert validated.receipt.public_id == (
         f"ctr_{validated.receipt.content_hash_sha256}"
@@ -2192,6 +2251,7 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
     output_checkpoint_id = receipt["receipt"]["output_checkpoint_public_id"]
     assert output_checkpoint_id != input_checkpoint_id
     assert receipt["document"]["input"]["next_page_index"] == 2
+    assert receipt["document"]["input"]["page_budget"] == 3
     assert receipt["document"]["output"]["next_page_index"] == 3
     assert receipt["document"]["transition"] == {
         "checkpoint_changed": True,
@@ -2199,7 +2259,12 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
         "revision_delta": 1,
         "page_count_delta": 1,
         "pages_succeeded_delta": 1,
+        "page_budget_consumed": 1,
+        "page_budget_remaining": 2,
     }
+    assert receipt["receipt"]["page_budget"] == 3
+    assert receipt["receipt"]["page_budget_consumed"] == 1
+    assert receipt["receipt"]["page_budget_remaining"] == 2
     after_plan = receipt["document"]["after_plan"]
     assert receipt["receipt"]["after_plan_public_id"] == after_plan["plan"][
         "public_id"
@@ -2215,8 +2280,8 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
 
     tampered = json.loads(json.dumps(receipt))
     tampered["document"]["transition"]["page_count_delta"] = 0
-    with pytest.raises(ValueError, match="transition is inconsistent"):
-        WalletCaseCheckpointContinuationReceiptResponse.model_validate(
+    with pytest.raises(ValueError, match="inconsistent"):
+        WalletCaseCheckpointContinuationReceiptV2Response.model_validate(
             tampered
         )
 
@@ -2239,6 +2304,62 @@ def test_continuation_receipt_is_content_addressed_and_stable_after_later_resume
     )
     assert repeated.status_code == 200
     assert repeated.json() == receipt
+
+
+def test_legacy_plan_resume_keeps_the_v1_continuation_receipt(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    plan_id = plan["plan"]["public_id"]
+    checkpoint_id = plan["document"]["streams"][0]["tip_checkpoint"][
+        "public_id"
+    ]
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan/"
+            f"{plan_id}/{checkpoint_id}/resume"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+    )
+    assert queued.status_code == 202, queued.text
+    sync_id = queued.json()["public_id"]
+
+    with app.state.wallet_case_test_session() as session:
+        persisted = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == sync_id)
+        )
+        assert persisted is not None
+        coverage = json.loads(persisted.coverage_summary_json)
+        coverage["_acquisition"]["version"] = 3
+        coverage["_acquisition"].pop("resume_page_budget")
+        persisted.coverage_summary_json = json.dumps(
+            coverage,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        persisted.request_fingerprint = _checkpoint_resume_fingerprint(
+            checkpoint_id,
+            continuation_plan_public_id=plan_id,
+        )
+        session.commit()
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/continuation-receipt"
+    )
+    assert response.status_code == 200, response.text
+    receipt = response.json()
+    WalletCaseCheckpointContinuationReceiptResponse.model_validate(receipt)
+    assert receipt["receipt"]["contract_version"] == (
+        "wallet_case_checkpoint_continuation_receipt_v1"
+    )
+    assert "page_budget" not in receipt["receipt"]
+    assert "page_budget" not in receipt["document"]["input"]
 
 
 def test_continuation_receipt_is_plan_bound_terminal_and_case_scoped(client):

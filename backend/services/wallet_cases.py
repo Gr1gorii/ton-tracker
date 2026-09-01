@@ -884,6 +884,7 @@ class WalletCaseService:
         idempotency_key: str,
         *,
         continuation_plan_public_id: str | None = None,
+        page_budget: int | None = None,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -987,9 +988,18 @@ class WalletCaseService:
                 "Stored Wallet Case stream checkpoint continuation is invalid."
             )
 
+        if continuation_plan_public_id is None:
+            if page_budget is not None:
+                raise ValueError(
+                    "A page budget requires a verified Continuation Plan."
+                )
+        elif type(page_budget) is not int or not 1 <= page_budget <= 10:
+            raise ValueError("Continuation page budget must be from 1 through 10.")
+
         fingerprint = _checkpoint_resume_fingerprint(
             checkpoint.public_id,
             continuation_plan_public_id=continuation_plan_public_id,
+            page_budget=page_budget,
         )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
@@ -1014,7 +1024,7 @@ class WalletCaseService:
             settings or get_settings(),
         )
         acquisition_plan = {
-            "version": 3 if continuation_plan_public_id is not None else 2,
+            "version": 4 if continuation_plan_public_id is not None else 2,
             "mode": "resume",
             "start_at": acquisition_start_text,
             "end_at": acquisition_end_text,
@@ -1029,6 +1039,7 @@ class WalletCaseService:
             acquisition_plan["continuation_plan_public_id"] = (
                 continuation_plan_public_id
             )
+            acquisition_plan["resume_page_budget"] = page_budget
         expected_data_mode = _ENVIRONMENT_DATA_MODE[
             wallet_case.data_environment
         ]
@@ -1109,14 +1120,18 @@ class WalletCaseService:
         checkpoint_public_id: str,
         idempotency_key: str,
         *,
+        page_budget: int = 1,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
         """Queue a continuation only when its verified plan is still current."""
+        if type(page_budget) is not int or not 1 <= page_budget <= 10:
+            raise ValueError("Continuation page budget must be from 1 through 10.")
         wallet_case = self._required_case(case_public_id)
         fingerprint = _checkpoint_resume_fingerprint(
             checkpoint_public_id,
             continuation_plan_public_id=continuation_plan_public_id,
+            page_budget=page_budget,
         )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
@@ -1158,6 +1173,7 @@ class WalletCaseService:
             checkpoint_public_id,
             idempotency_key,
             continuation_plan_public_id=continuation_plan_public_id,
+            page_budget=page_budget,
             settings=settings,
             now=now,
         )
@@ -1207,7 +1223,7 @@ class WalletCaseService:
             ) from exc
         if (
             acquisition_plan.get("mode") != "resume"
-            or acquisition_plan.get("version") != 3
+            or acquisition_plan.get("version") not in {3, 4}
         ):
             raise WalletCaseContinuationReceiptNotFound(
                 "This sync was not accepted from a verified Continuation Plan."
@@ -1315,9 +1331,32 @@ class WalletCaseService:
             raise WalletCaseStreamCheckpointCorrupt(
                 "Stored Wallet Case continuation receipt transition is invalid."
             )
+        page_budget = acquisition_plan.get("resume_page_budget")
+        budgeted = acquisition_plan["version"] == 4
+        if budgeted:
+            if (
+                type(page_budget) is not int
+                or not 1 <= page_budget <= 10
+                or transition["page_count_delta"] > page_budget
+                or transition["pages_succeeded_delta"]
+                > transition["page_count_delta"]
+            ):
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case continuation receipt budget is invalid."
+                )
+            transition.update(
+                {
+                    "page_budget_consumed": transition["page_count_delta"],
+                    "page_budget_remaining": (
+                        page_budget - transition["page_count_delta"]
+                    ),
+                }
+            )
         document = {
             "contract_version": (
-                "wallet_case_checkpoint_continuation_receipt_v1"
+                "wallet_case_checkpoint_continuation_receipt_v2"
+                if budgeted
+                else "wallet_case_checkpoint_continuation_receipt_v1"
             ),
             "case_public_id": wallet_case.public_id,
             "sync_public_id": case_sync.public_id,
@@ -1334,6 +1373,7 @@ class WalletCaseService:
                 "next_page_index": source_document[
                     "continuation_page_index"
                 ],
+                **({"page_budget": page_budget} if budgeted else {}),
             },
             "output": {
                 "checkpoint": output_response["checkpoint"],
@@ -1376,24 +1416,37 @@ class WalletCaseService:
             separators=(",", ":"),
         ).encode("utf-8")
         digest = hashlib.sha256(canonical).hexdigest()
+        receipt = {
+            "public_id": f"ctr_{digest}",
+            "contract_version": document["contract_version"],
+            "content_hash_sha256": digest,
+            "sync_public_id": case_sync.public_id,
+            "input_plan_public_id": acquisition_plan[
+                "continuation_plan_public_id"
+            ],
+            "input_checkpoint_public_id": source.public_id,
+            "output_checkpoint_public_id": output.public_id,
+            "after_plan_public_id": after_plan["plan"]["public_id"],
+            "revision_delta": transition["revision_delta"],
+            "page_count_delta": transition["page_count_delta"],
+            "pages_succeeded_delta": transition[
+                "pages_succeeded_delta"
+            ],
+        }
+        if budgeted:
+            receipt.update(
+                {
+                    "page_budget": page_budget,
+                    "page_budget_consumed": transition[
+                        "page_budget_consumed"
+                    ],
+                    "page_budget_remaining": transition[
+                        "page_budget_remaining"
+                    ],
+                }
+            )
         return {
-            "receipt": {
-                "public_id": f"ctr_{digest}",
-                "contract_version": document["contract_version"],
-                "content_hash_sha256": digest,
-                "sync_public_id": case_sync.public_id,
-                "input_plan_public_id": acquisition_plan[
-                    "continuation_plan_public_id"
-                ],
-                "input_checkpoint_public_id": source.public_id,
-                "output_checkpoint_public_id": output.public_id,
-                "after_plan_public_id": after_plan["plan"]["public_id"],
-                "revision_delta": transition["revision_delta"],
-                "page_count_delta": transition["page_count_delta"],
-                "pages_succeeded_delta": transition[
-                    "pages_succeeded_delta"
-                ],
-            },
+            "receipt": receipt,
             "document": document,
         }
 
@@ -2340,6 +2393,9 @@ class WalletCaseService:
                 "continuation_plan_public_id": acquisition_plan.get(
                     "continuation_plan_public_id"
                 ),
+                "resume_page_budget": acquisition_plan.get(
+                    "resume_page_budget"
+                ),
             },
             "coverage": coverage,
             "summary": summary,
@@ -2401,17 +2457,26 @@ def _checkpoint_resume_fingerprint(
     checkpoint_public_id: str,
     *,
     continuation_plan_public_id: str | None = None,
+    page_budget: int | None = None,
 ) -> str:
     document = {
         "contract": "wallet_case_checkpoint_resume_request_v1",
         "checkpoint_public_id": checkpoint_public_id,
     }
     if continuation_plan_public_id is not None:
-        document = {
-            "contract": "wallet_case_checkpoint_plan_resume_request_v1",
-            "continuation_plan_public_id": continuation_plan_public_id,
-            "checkpoint_public_id": checkpoint_public_id,
-        }
+        if page_budget is None:
+            document = {
+                "contract": "wallet_case_checkpoint_plan_resume_request_v1",
+                "continuation_plan_public_id": continuation_plan_public_id,
+                "checkpoint_public_id": checkpoint_public_id,
+            }
+        else:
+            document = {
+                "contract": "wallet_case_checkpoint_plan_resume_request_v2",
+                "continuation_plan_public_id": continuation_plan_public_id,
+                "checkpoint_public_id": checkpoint_public_id,
+                "page_budget": page_budget,
+            }
     canonical = json.dumps(
         document,
         ensure_ascii=True,
@@ -2619,11 +2684,20 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     version_three_keys = version_two_keys | {
         "continuation_plan_public_id",
     }
-    if not isinstance(stored, dict) or frozenset(stored) not in {
-        frozenset(version_one_keys),
-        frozenset(version_two_keys),
-        frozenset(version_three_keys),
-    }:
+    version_four_keys = version_three_keys | {
+        "resume_page_budget",
+    }
+    expected_keys_by_version = {
+        1: frozenset(version_one_keys),
+        2: frozenset(version_two_keys),
+        3: frozenset(version_three_keys),
+        4: frozenset(version_four_keys),
+    }
+    if (
+        not isinstance(stored, dict)
+        or expected_keys_by_version.get(stored.get("version"))
+        != frozenset(stored)
+    ):
         raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     mode = stored.get("mode")
     start_at = stored.get("start_at")
@@ -2635,8 +2709,9 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     resume_cursor = stored.get("resume_cursor")
     resume_page_index = stored.get("resume_page_index")
     continuation_plan_public_id = stored.get("continuation_plan_public_id")
+    resume_page_budget = stored.get("resume_page_budget")
     if (
-        stored.get("version") not in {1, 2, 3}
+        stored.get("version") not in {1, 2, 3, 4}
         or mode not in {"bounded", "incremental", "resume"}
         or not isinstance(start_at, str)
         or not isinstance(end_at, str)
@@ -2676,7 +2751,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         ):
             raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     elif (
-        stored.get("version") not in {2, 3}
+        stored.get("version") not in {2, 3, 4}
         or not isinstance(base_public_id, str)
         or len(base_public_id) != 36
         or not isinstance(source_checkpoint_public_id, str)
@@ -2692,7 +2767,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         or resume_page_index < 1
         or overlap_seconds != 0
         or (
-            stored.get("version") == 3
+            stored.get("version") in {3, 4}
             and (
                 not isinstance(continuation_plan_public_id, str)
                 or len(continuation_plan_public_id) != 68
@@ -2701,6 +2776,13 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
                     char not in "0123456789abcdef"
                     for char in continuation_plan_public_id[4:]
                 )
+            )
+        )
+        or (
+            stored.get("version") == 4
+            and (
+                type(resume_page_budget) is not int
+                or not 1 <= resume_page_budget <= 10
             )
         )
     ):

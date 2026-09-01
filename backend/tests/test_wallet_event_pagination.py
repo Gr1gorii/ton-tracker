@@ -340,6 +340,64 @@ def test_event_resume_starts_from_verified_cursor_and_page_index(monkeypatch):
     assert stream.termination_reason == "page_cap_reached"
 
 
+@pytest.mark.parametrize(
+    ("configured_cap", "page_budget"),
+    [(5, 2), (2, 10)],
+)
+def test_event_resume_uses_the_lower_operator_or_configured_page_cap(
+    monkeypatch,
+    configured_cap,
+    page_budget,
+):
+    adapter = TonapiWalletActivityLiveAdapter(
+        _settings(page_size=1, page_cap=configured_cap)
+    )
+    calls = _install_pages(
+        monkeypatch,
+        adapter,
+        [
+            _page(
+                [
+                    _event(
+                        "400",
+                        datetime(2026, 7, 10, 11, 0, tzinfo=timezone.utc),
+                        2,
+                    )
+                ],
+                request_cursor="500",
+                limit=1,
+            ),
+            _page(
+                [
+                    _event(
+                        "300",
+                        datetime(2026, 7, 10, 10, 30, tzinfo=timezone.utc),
+                        3,
+                    )
+                ],
+                request_cursor="400",
+                limit=1,
+            ),
+        ],
+    )
+
+    result = adapter.ingest(
+        replace(
+            _request(),
+            resume_stream_key="account_events",
+            resume_cursor="500",
+            resume_page_index=3,
+            resume_page_budget=page_budget,
+        )
+    )
+
+    stream = _stream(result)
+    assert [call[2] for call in calls] == ["500", "400"]
+    assert stream.page_cap == 2
+    assert [page.page_index for page in stream.pages] == [3, 4]
+    assert stream.termination_reason == "page_cap_reached"
+
+
 def test_in_progress_event_prevents_complete_derived_coverage(monkeypatch):
     adapter = TonapiWalletActivityLiveAdapter(_settings(page_size=1))
     _install_pages(

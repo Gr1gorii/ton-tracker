@@ -107,6 +107,7 @@ export interface WalletCaseSync {
     base_snapshot_public_id: string | null;
     source_checkpoint_public_id: string | null;
     continuation_plan_public_id: string | null;
+    resume_page_budget: number | null;
   };
   coverage: WalletCaseCoverage;
   summary: WalletCaseSummary;
@@ -486,6 +487,15 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
   ) {
     throw new Error("case sync continuation plan id is invalid");
   }
+  const resumePageBudget = requestedScope.resume_page_budget === null
+    ? null
+    : positiveInteger(
+        requestedScope.resume_page_budget,
+        "case sync resume page budget",
+      );
+  if (resumePageBudget !== null && resumePageBudget > 10) {
+    throw new Error("case sync resume page budget is outside the supported range");
+  }
   const surfaces = surfaceArray(requestedScope.surfaces, "case sync surfaces");
   const startTime = Date.parse(startAt);
   const endTime = Date.parse(endAt);
@@ -514,19 +524,22 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
       overlapSeconds !== 0 ||
       baseSnapshotPublicId !== null ||
       sourceCheckpointPublicId !== null ||
-      continuationPlanPublicId !== null
+      continuationPlanPublicId !== null ||
+      resumePageBudget !== null
     )) ||
     (mode === "incremental" && (
       timeWindow !== "custom" ||
       baseSnapshotPublicId === null ||
       sourceCheckpointPublicId !== null ||
-      continuationPlanPublicId !== null
+      continuationPlanPublicId !== null ||
+      resumePageBudget !== null
     )) ||
     (mode === "resume" && (
       timeWindow !== "custom" ||
       overlapSeconds !== 0 ||
       baseSnapshotPublicId === null ||
-      sourceCheckpointPublicId === null
+      sourceCheckpointPublicId === null ||
+      (resumePageBudget !== null && continuationPlanPublicId === null)
     ))
   ) {
     throw new Error("case sync acquisition mode contradicts its scope");
@@ -693,6 +706,7 @@ export function parseWalletCaseSync(value: unknown): WalletCaseSync {
       base_snapshot_public_id: baseSnapshotPublicId,
       source_checkpoint_public_id: sourceCheckpointPublicId,
       continuation_plan_public_id: continuationPlanPublicId,
+      resume_page_budget: resumePageBudget,
     },
     coverage,
     summary,

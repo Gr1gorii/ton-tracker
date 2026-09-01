@@ -98,6 +98,7 @@ def build_wallet_ingestion_run(
     resume_stream_key: str | None = None,
     resume_cursor: str | None = None,
     resume_page_index: int | None = None,
+    resume_page_budget: int | None = None,
 ) -> WalletIngestionRun:
     """Build one validated adapter-backed run without publishing it.
 
@@ -132,6 +133,7 @@ def build_wallet_ingestion_run(
             resume_stream_key=resume_stream_key,
             resume_cursor=resume_cursor,
             resume_page_index=resume_page_index,
+            resume_page_budget=resume_page_budget,
         )
     )
     if expected_data_mode is not None and result.data_mode != expected_data_mode:
@@ -600,6 +602,7 @@ def _adapter_request(
     resume_stream_key: str | None = None,
     resume_cursor: str | None = None,
     resume_page_index: int | None = None,
+    resume_page_budget: int | None = None,
 ) -> WalletActivityAdapterRequest:
     return WalletActivityAdapterRequest(
         wallet_address=payload.wallet_address,
@@ -613,6 +616,7 @@ def _adapter_request(
         resume_stream_key=resume_stream_key,
         resume_cursor=resume_cursor,
         resume_page_index=resume_page_index,
+        resume_page_budget=resume_page_budget,
     )
 
 
