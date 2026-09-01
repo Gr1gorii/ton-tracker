@@ -16,7 +16,7 @@ import {
 } from "../test/walletCaseFixtures";
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
 import {
-  checkpointContinuationReceiptFixture,
+  checkpointContinuationReceiptV2Fixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -247,12 +247,17 @@ describe("GramCaseSummary", () => {
     expect(await screen.findByText("Verified continuation plan")).toBeTruthy();
     expect(screen.getByText(continuationPlan.plan.public_id)).toBeTruthy();
     expect(screen.getByText(/2 revisions · 2\/2 pages · ready · next page 3/)).toBeTruthy();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Page budget for transactions stream" }),
+      "4",
+    );
     await user.click(screen.getByRole("button", {
       name: "Resume planned transactions stream",
     }));
     expect(controller.resumePlanned).toHaveBeenCalledWith(
       continuationPlan.plan.public_id,
       continuationPlan.document.streams[0].tip_checkpoint.public_id,
+      4,
     );
     expect(controller.resume).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", {
@@ -311,13 +316,14 @@ describe("GramCaseSummary", () => {
   });
 
   it("verifies and exports the immutable result of a plan-bound resume", async () => {
-    const receipt = checkpointContinuationReceiptFixture();
+    const receipt = checkpointContinuationReceiptV2Fixture();
     const base = resumeSyncFixture();
     const snapshot = resumeSyncFixture({
       requested_scope: {
         ...base.requested_scope,
         source_checkpoint_public_id: receipt.receipt.input_checkpoint_public_id,
         continuation_plan_public_id: receipt.receipt.input_plan_public_id,
+        resume_page_budget: receipt.receipt.page_budget,
       },
     });
     const fetchMock = vi.fn().mockResolvedValue(new Response(
@@ -343,6 +349,8 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText("Provider pages").closest("div")?.textContent).toContain(
       `+${receipt.receipt.page_count_delta}`,
     );
+    expect(screen.getByText("Authorized budget").closest("div")?.textContent).toContain("3");
+    expect(screen.getByText("Budget remaining").closest("div")?.textContent).toContain("2");
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/syncs/${snapshot.public_id}/continuation-receipt`,
       expect.objectContaining({ cache: "no-store" }),

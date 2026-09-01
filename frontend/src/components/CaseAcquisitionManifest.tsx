@@ -90,6 +90,7 @@ export default function CaseAcquisitionManifest({
   onResume: (
     continuationPlanPublicId: string,
     checkpointPublicId: string,
+    pageBudget?: number,
   ) => Promise<void>;
 }) {
   const descriptor = snapshot.acquisition_manifest;
@@ -98,6 +99,7 @@ export default function CaseAcquisitionManifest({
   const [continuationPlan, setContinuationPlan] = useState<WalletCaseCheckpointContinuationPlanResponse | null>(null);
   const [continuationPlanLoading, setContinuationPlanLoading] = useState(false);
   const [continuationPlanError, setContinuationPlanError] = useState<string | null>(null);
+  const [continuationPageBudgets, setContinuationPageBudgets] = useState<Record<string, number>>({});
   const [continuationReceipt, setContinuationReceipt] = useState<WalletCaseCheckpointContinuationReceiptResponse | null>(null);
   const [continuationReceiptLoading, setContinuationReceiptLoading] = useState(false);
   const [continuationReceiptError, setContinuationReceiptError] = useState<string | null>(null);
@@ -125,6 +127,7 @@ export default function CaseAcquisitionManifest({
     setContinuationPlan(null);
     setContinuationPlanLoading(false);
     setContinuationPlanError(null);
+    setContinuationPageBudgets({});
     setContinuationReceipt(null);
     setContinuationReceiptLoading(false);
     setContinuationReceiptError(null);
@@ -335,6 +338,13 @@ export default function CaseAcquisitionManifest({
                     <div><dt>Provider pages</dt><dd>+{continuationReceipt.receipt.page_count_delta}</dd></div>
                     <div><dt>Successful pages</dt><dd>+{continuationReceipt.receipt.pages_succeeded_delta}</dd></div>
                     <div><dt>After-plan streams</dt><dd>{continuationReceipt.document.after_plan.plan.stream_count}</dd></div>
+                    {continuationReceipt.receipt.contract_version === "wallet_case_checkpoint_continuation_receipt_v2" && (
+                      <>
+                        <div><dt>Authorized budget</dt><dd>{continuationReceipt.receipt.page_budget}</dd></div>
+                        <div><dt>Budget consumed</dt><dd>{continuationReceipt.receipt.page_budget_consumed}</dd></div>
+                        <div><dt>Budget remaining</dt><dd>{continuationReceipt.receipt.page_budget_remaining}</dd></div>
+                      </>
+                    )}
                   </dl>
                   <button
                     className="button-secondary case-checkpoint-chain-export"
@@ -460,18 +470,37 @@ export default function CaseAcquisitionManifest({
                                 <code>{stream.chain_public_id}</code>
                               </span>
                               {stream.resume_state === "ready" && (
-                                <button
-                                  className="button-secondary"
-                                  type="button"
-                                  disabled={resumeDisabled}
-                                  aria-label={`Resume planned ${stream.stream_key} stream`}
-                                  onClick={() => void onResume(
-                                    continuationPlan.plan.public_id,
-                                    stream.tip_checkpoint.public_id,
-                                  )}
-                                >
-                                  <ArrowClockwise size={15} /> Resume planned stream
-                                </button>
+                                <div className="case-continuation-resume-controls">
+                                  <label>
+                                    <span>Page budget</span>
+                                    <select
+                                      aria-label={`Page budget for ${stream.stream_key} stream`}
+                                      disabled={resumeDisabled}
+                                      value={continuationPageBudgets[stream.stream_key] ?? 1}
+                                      onChange={(event) => setContinuationPageBudgets((current) => ({
+                                        ...current,
+                                        [stream.stream_key]: Number(event.target.value),
+                                      }))}
+                                    >
+                                      {Array.from({ length: 10 }, (_, index) => index + 1).map((budget) => (
+                                        <option key={budget} value={budget}>{budget} page{budget === 1 ? "" : "s"}</option>
+                                      ))}
+                                    </select>
+                                  </label>
+                                  <button
+                                    className="button-secondary"
+                                    type="button"
+                                    disabled={resumeDisabled}
+                                    aria-label={`Resume planned ${stream.stream_key} stream`}
+                                    onClick={() => void onResume(
+                                      continuationPlan.plan.public_id,
+                                      stream.tip_checkpoint.public_id,
+                                      continuationPageBudgets[stream.stream_key] ?? 1,
+                                    )}
+                                  >
+                                    <ArrowClockwise size={15} /> Resume planned stream
+                                  </button>
+                                </div>
                               )}
                             </li>
                           ))}

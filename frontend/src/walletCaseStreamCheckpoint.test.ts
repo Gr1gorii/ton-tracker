@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   checkpointContinuationReceiptFixture,
+  checkpointContinuationReceiptV2Fixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -221,5 +222,24 @@ describe("Wallet Case stream checkpoint contracts", () => {
         },
       },
     })).toThrow(/continuation plan is inconsistent/);
+  });
+
+  it("accepts budget accounting and rejects a forged v2 remainder", () => {
+    const receipt = checkpointContinuationReceiptV2Fixture();
+
+    expect(parseWalletCaseCheckpointContinuationReceipt(receipt)).toEqual(receipt);
+    expect(JSON.parse(
+      serializeWalletCaseCheckpointContinuationReceipt(receipt),
+    )).toEqual(receipt);
+    expect(() => parseWalletCaseCheckpointContinuationReceipt({
+      ...receipt,
+      document: {
+        ...receipt.document,
+        transition: {
+          ...receipt.document.transition,
+          page_budget_remaining: 1,
+        },
+      },
+    })).toThrow(/transition is inconsistent/);
   });
 });

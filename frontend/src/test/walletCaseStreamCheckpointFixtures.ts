@@ -1,5 +1,6 @@
 import type {
-  WalletCaseCheckpointContinuationReceiptResponse,
+  WalletCaseCheckpointContinuationReceiptV1Response,
+  WalletCaseCheckpointContinuationReceiptV2Response,
   WalletCaseCheckpointContinuationPlanResponse,
   WalletCaseStreamCheckpointCatalogResponse,
   WalletCaseStreamCheckpointChainResponse,
@@ -243,7 +244,7 @@ export function checkpointContinuationPlanFixture(): WalletCaseCheckpointContinu
   };
 }
 
-export function checkpointContinuationReceiptFixture(): WalletCaseCheckpointContinuationReceiptResponse {
+export function checkpointContinuationReceiptFixture(): WalletCaseCheckpointContinuationReceiptV1Response {
   const outputChain = streamCheckpointChainFixture();
   const afterPlan = checkpointContinuationPlanFixture();
   const inputCheckpoint = outputChain.document.revisions[0].checkpoint;
@@ -303,6 +304,32 @@ export function checkpointContinuationReceiptFixture(): WalletCaseCheckpointCont
         code: "continuation_receipt_is_provider_progress",
         message: "The receipt proves one checkpoint transition, not complete history.",
       }],
+    },
+  };
+}
+
+export function checkpointContinuationReceiptV2Fixture(): WalletCaseCheckpointContinuationReceiptV2Response {
+  const legacy = checkpointContinuationReceiptFixture();
+  return {
+    receipt: {
+      ...legacy.receipt,
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v2",
+      page_budget: 3,
+      page_budget_consumed: 1,
+      page_budget_remaining: 2,
+    },
+    document: {
+      ...legacy.document,
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v2",
+      input: {
+        ...legacy.document.input,
+        page_budget: 3,
+      },
+      transition: {
+        ...legacy.document.transition,
+        page_budget_consumed: 1,
+        page_budget_remaining: 2,
+      },
     },
   };
 }

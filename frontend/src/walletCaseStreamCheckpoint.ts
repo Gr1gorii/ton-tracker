@@ -204,7 +204,7 @@ export interface WalletCaseCheckpointContinuationReceiptOutput {
   resume_blocker: string | null;
 }
 
-export interface WalletCaseCheckpointContinuationReceiptResponse {
+export interface WalletCaseCheckpointContinuationReceiptV1Response {
   receipt: {
     public_id: string;
     contract_version: "wallet_case_checkpoint_continuation_receipt_v1";
@@ -235,6 +235,49 @@ export interface WalletCaseCheckpointContinuationReceiptResponse {
     limitations: WalletCaseLimitation[];
   };
 }
+
+export interface WalletCaseCheckpointContinuationReceiptV2Response {
+  receipt: {
+    public_id: string;
+    contract_version: "wallet_case_checkpoint_continuation_receipt_v2";
+    content_hash_sha256: string;
+    sync_public_id: string;
+    input_plan_public_id: string;
+    input_checkpoint_public_id: string;
+    output_checkpoint_public_id: string;
+    after_plan_public_id: string;
+    revision_delta: 1;
+    page_count_delta: number;
+    pages_succeeded_delta: number;
+    page_budget: number;
+    page_budget_consumed: number;
+    page_budget_remaining: number;
+  };
+  document: {
+    contract_version: "wallet_case_checkpoint_continuation_receipt_v2";
+    case_public_id: string;
+    sync_public_id: string;
+    input: WalletCaseCheckpointContinuationReceiptInput & {
+      page_budget: number;
+    };
+    output: WalletCaseCheckpointContinuationReceiptOutput;
+    after_plan: WalletCaseCheckpointContinuationPlanResponse;
+    transition: {
+      checkpoint_changed: true;
+      plan_changed: true;
+      revision_delta: 1;
+      page_count_delta: number;
+      pages_succeeded_delta: number;
+      page_budget_consumed: number;
+      page_budget_remaining: number;
+    };
+    limitations: WalletCaseLimitation[];
+  };
+}
+
+export type WalletCaseCheckpointContinuationReceiptResponse =
+  | WalletCaseCheckpointContinuationReceiptV1Response
+  | WalletCaseCheckpointContinuationReceiptV2Response;
 
 const PUBLIC_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -1114,15 +1157,27 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     ["receipt", "document"],
     "checkpoint continuation receipt response",
   );
+  if (
+    !envelope.receipt || typeof envelope.receipt !== "object" ||
+    Array.isArray(envelope.receipt)
+  ) fail("checkpoint continuation receipt descriptor is invalid");
+  const receiptContract = (envelope.receipt as Record<string, unknown>)
+    .contract_version;
+  const isBudgeted = receiptContract ===
+    "wallet_case_checkpoint_continuation_receipt_v2";
+  if (
+    !isBudgeted &&
+    receiptContract !== "wallet_case_checkpoint_continuation_receipt_v1"
+  ) fail("checkpoint continuation receipt descriptor contract is unsupported");
   const receipt = record(envelope.receipt, [
     "public_id", "contract_version", "content_hash_sha256", "sync_public_id",
     "input_plan_public_id", "input_checkpoint_public_id",
     "output_checkpoint_public_id", "after_plan_public_id", "revision_delta",
     "page_count_delta", "pages_succeeded_delta",
+    ...(isBudgeted ? [
+      "page_budget", "page_budget_consumed", "page_budget_remaining",
+    ] : []),
   ], "checkpoint continuation receipt descriptor");
-  if (receipt.contract_version !== "wallet_case_checkpoint_continuation_receipt_v1") {
-    fail("checkpoint continuation receipt descriptor contract is unsupported");
-  }
   const contentHash = digest(
     receipt.content_hash_sha256,
     "checkpoint continuation receipt hash",
@@ -1167,12 +1222,27 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     receipt.pages_succeeded_delta,
     "checkpoint continuation receipt success delta",
   );
+  const receiptPageBudget = isBudgeted
+    ? integer(receipt.page_budget, "checkpoint continuation receipt page budget")
+    : null;
+  const receiptBudgetConsumed = isBudgeted
+    ? integer(
+        receipt.page_budget_consumed,
+        "checkpoint continuation receipt consumed page budget",
+      )
+    : null;
+  const receiptBudgetRemaining = isBudgeted
+    ? integer(
+        receipt.page_budget_remaining,
+        "checkpoint continuation receipt remaining page budget",
+      )
+    : null;
 
   const document = record(envelope.document, [
     "contract_version", "case_public_id", "sync_public_id", "input", "output",
     "after_plan", "transition", "limitations",
   ], "checkpoint continuation receipt document");
-  if (document.contract_version !== "wallet_case_checkpoint_continuation_receipt_v1") {
+  if (document.contract_version !== receiptContract) {
     fail("checkpoint continuation receipt document contract is unsupported");
   }
   const caseId = publicId(
@@ -1187,6 +1257,7 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     "continuation_plan_public_id", "checkpoint", "chain_public_id",
     "chain_content_hash_sha256", "revision_count", "page_count",
     "pages_succeeded", "next_page_index",
+    ...(isBudgeted ? ["page_budget"] : []),
   ], "checkpoint continuation receipt input");
   const inputPlanId = continuationPlanId(
     sourceItem.continuation_plan_public_id,
@@ -1218,11 +1289,18 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     sourceItem.next_page_index,
     "checkpoint continuation receipt input next page",
   );
+  const inputPageBudget = isBudgeted
+    ? integer(
+        sourceItem.page_budget,
+        "checkpoint continuation receipt input page budget",
+      )
+    : null;
   if (
     inputCheckpoint.resume_state !== "ready" ||
     CHECKPOINT_CHAIN_ID.exec(inputChainId)?.[1] !== inputChainHash ||
     inputRevisionCount < 1 || inputRevisionCount > 99 ||
-    inputSuccessCount > inputPageCount || inputNextPage < 1
+    inputSuccessCount > inputPageCount || inputNextPage < 1 ||
+    (inputPageBudget !== null && (inputPageBudget < 1 || inputPageBudget > 10))
   ) fail("checkpoint continuation receipt input is inconsistent");
   const input: WalletCaseCheckpointContinuationReceiptInput = {
     continuation_plan_public_id: inputPlanId,
@@ -1301,6 +1379,9 @@ export function parseWalletCaseCheckpointContinuationReceipt(
   const transitionItem = record(document.transition, [
     "checkpoint_changed", "plan_changed", "revision_delta",
     "page_count_delta", "pages_succeeded_delta",
+    ...(isBudgeted ? [
+      "page_budget_consumed", "page_budget_remaining",
+    ] : []),
   ], "checkpoint continuation receipt transition");
   const revisionDelta = integer(
     transitionItem.revision_delta,
@@ -1314,6 +1395,18 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     transitionItem.pages_succeeded_delta,
     "checkpoint continuation receipt transition success delta",
   );
+  const budgetConsumed = isBudgeted
+    ? integer(
+        transitionItem.page_budget_consumed,
+        "checkpoint continuation receipt consumed budget",
+      )
+    : null;
+  const budgetRemaining = isBudgeted
+    ? integer(
+        transitionItem.page_budget_remaining,
+        "checkpoint continuation receipt remaining budget",
+      )
+    : null;
   const matchingStreams = afterPlan.document.streams.filter((stream) => (
     stream.provider === output.checkpoint.provider &&
     stream.stream_key === output.checkpoint.stream_key
@@ -1348,8 +1441,65 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     receiptOutputCheckpointId !== outputCheckpoint.public_id ||
     receiptAfterPlanId !== afterPlan.plan.public_id ||
     receiptRevisionDelta !== revisionDelta || receiptRevisionDelta !== 1 ||
-    receiptPageDelta !== pageDelta || receiptSuccessDelta !== successDelta
+    receiptPageDelta !== pageDelta || receiptSuccessDelta !== successDelta ||
+    (isBudgeted && (
+      inputPageBudget === null || inputPageBudget < 1 || inputPageBudget > 10 ||
+      budgetConsumed === null || budgetRemaining === null ||
+      budgetConsumed !== pageDelta || successDelta > budgetConsumed ||
+      budgetConsumed + budgetRemaining !== inputPageBudget ||
+      receiptPageBudget !== inputPageBudget ||
+      receiptBudgetConsumed !== budgetConsumed ||
+      receiptBudgetRemaining !== budgetRemaining
+    ))
   ) fail("checkpoint continuation receipt transition is inconsistent");
+
+  const parsedLimitations = limitations(
+    document.limitations,
+    "checkpoint continuation receipt limitations",
+  );
+  if (isBudgeted) {
+    if (
+      inputPageBudget === null || budgetConsumed === null ||
+      budgetRemaining === null || receiptPageBudget === null ||
+      receiptBudgetConsumed === null || receiptBudgetRemaining === null
+    ) fail("checkpoint continuation receipt budget is inconsistent");
+    return {
+      receipt: {
+        public_id: receiptId,
+        contract_version: "wallet_case_checkpoint_continuation_receipt_v2",
+        content_hash_sha256: contentHash,
+        sync_public_id: receiptSyncId,
+        input_plan_public_id: receiptInputPlanId,
+        input_checkpoint_public_id: receiptInputCheckpointId,
+        output_checkpoint_public_id: receiptOutputCheckpointId,
+        after_plan_public_id: receiptAfterPlanId,
+        revision_delta: 1,
+        page_count_delta: receiptPageDelta,
+        pages_succeeded_delta: receiptSuccessDelta,
+        page_budget: receiptPageBudget,
+        page_budget_consumed: receiptBudgetConsumed,
+        page_budget_remaining: receiptBudgetRemaining,
+      },
+      document: {
+        contract_version: "wallet_case_checkpoint_continuation_receipt_v2",
+        case_public_id: caseId,
+        sync_public_id: syncId,
+        input: { ...input, page_budget: inputPageBudget },
+        output,
+        after_plan: afterPlan,
+        transition: {
+          checkpoint_changed: true,
+          plan_changed: true,
+          revision_delta: 1,
+          page_count_delta: pageDelta,
+          pages_succeeded_delta: successDelta,
+          page_budget_consumed: budgetConsumed,
+          page_budget_remaining: budgetRemaining,
+        },
+        limitations: parsedLimitations,
+      },
+    };
+  }
 
   return {
     receipt: {
@@ -1379,10 +1529,7 @@ export function parseWalletCaseCheckpointContinuationReceipt(
         page_count_delta: pageDelta,
         pages_succeeded_delta: successDelta,
       },
-      limitations: limitations(
-        document.limitations,
-        "checkpoint continuation receipt limitations",
-      ),
+      limitations: parsedLimitations,
     },
   };
 }
