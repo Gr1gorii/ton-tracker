@@ -1,8 +1,8 @@
-# GRAM Scope — v0.93.0 Promotion Checklist
+# GRAM Scope — v0.94.0 Promotion Checklist
 
-Current promotion gates for verifiable plan-bound continuation results:
+Current promotion gates for finite, verifiable plan-bound continuation:
 
-- Product label is `v0.93.0 CONTINUATION RECEIPT`; backend API version stays
+- Product label is `v0.94.0 BUDGETED CONTINUATION`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -103,6 +103,14 @@ Current promotion gates for verifiable plan-bound continuation results:
   stale rejection, and bind both identities into the idempotency fingerprint.
   Replay with the same key must recover the original operation even after a
   successful continuation advances the plan.
+- A new plan-bound resume accepts only a strict integer page budget from 1
+  through 10. Plan, checkpoint, and budget must share one v2 idempotency
+  fingerprint and acquisition-plan-v4 record; changing any of them under the
+  same key must fail closed.
+- The worker must revalidate the stored v4 budget before provider I/O. TonAPI
+  transaction and account-event adapters must execute no more than the lower of
+  the operator budget and configured deployment cap. Legacy v2/v3 resume rows
+  remain executable under their prior compatibility behavior.
 - A Continuation Receipt is available only for a terminal plan-bound resume
   that published exactly one direct child checkpoint. Its canonical
   `ctr_<sha256>` document must bind the accepted plan/input checkpoint, output
@@ -113,6 +121,11 @@ Current promotion gates for verifiable plan-bound continuation results:
   tips at the output checkpoint's history cutoff. Reading the same receipt
   after one or more later resumptions must return the same identity and
   document, while the current live plan may advance independently.
+- Budgeted continuations publish receipt v2 with authorized, consumed, and
+  remaining pages. Consumed pages must equal the checkpoint-chain page delta,
+  successful pages cannot exceed consumed pages, and consumed plus remaining
+  must equal the accepted budget. Historical v3 jobs must retain receipt v1
+  without new fields or changed content identities.
 - The strict client must reject receipt shape, identity, scope, stream, chain,
   state, plan, and delta contradictions. Summary loads only on an explicit
   action, displays the accepted-to-published transition, exports verified JSON,
@@ -240,7 +253,7 @@ Current promotion gates for verifiable plan-bound continuation results:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.93.0 must not be promoted as a hosted Wallet Case release.
+  v0.94.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

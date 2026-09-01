@@ -1,3 +1,31 @@
+# GRAM Scope — v0.94.0 BUDGETED CONTINUATION
+
+v0.94.0 lets an operator advance one verified provider stream by a finite
+budget of 1–10 pages. The plan-bound resume endpoint accepts a strict
+`page_budget`, binds it with the exact Continuation Plan and checkpoint in a v2
+idempotency fingerprint, and records acquisition-plan version 4 provenance.
+Changing the budget while reusing an idempotency key fails closed.
+
+Before provider I/O, the worker reloads and validates the stored budget along
+with the existing checkpoint lineage. TonAPI transaction and account-event
+pagination use the lower of the operator budget and the deployment's configured
+page cap. Invalid, mismatched, boolean, string, zero, over-limit, or unbound
+budgets never reach the provider.
+
+Completed budgeted jobs publish
+`wallet_case_checkpoint_continuation_receipt_v2`, which content-addresses the
+authorized, consumed, and remaining page budget alongside the existing exact
+checkpoint/chain/after-plan transition. Historical acquisition-plan-v3 jobs
+continue to reconstruct the unchanged receipt v1 contract. The browser offers
+an explicit 1–10 page selector, retains the same budget and idempotency key
+across ambiguous retries, strictly validates both receipt versions, displays
+budget accounting, and exports verified JSON. The operation is finite and
+operator-triggered; it is not a scheduler, automatic backfill, or proof of
+complete wallet history. No database migration is added; Alembic remains at
+`20260828_0028` and backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.93.0 CONTINUATION RECEIPT
 
 v0.93.0 makes the result of a plan-bound provider continuation independently

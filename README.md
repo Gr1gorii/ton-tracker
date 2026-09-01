@@ -4,10 +4,28 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.93.0 — Continuation Receipt**<br>
+Current product release: **v0.94.0 — Budgeted Continuation**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.93.0 adds
+## What v0.94.0 adds
+
+A verified Continuation Plan can now authorize a finite budget of 1–10 TonAPI
+pages for one ready provider stream. The strict POST body, acquisition-plan-v4
+provenance, and v2 idempotency fingerprint bind the selected budget to the
+exact `cpl_` plan and `scp_` checkpoint. The worker revalidates that budget
+before provider I/O, and the adapter applies the lower of the operator budget
+and the configured deployment cap.
+
+Budgeted jobs publish a continuation receipt v2 that accounts for authorized,
+consumed, and remaining pages while retaining the exact output checkpoint,
+chain, and after-plan transition. Existing acquisition-plan-v3 jobs keep their
+original receipt v1 shape and content identity. Summary exposes an explicit
+1–10 page selector, preserves the selected budget across ambiguous transport
+retries, and verifies the returned accounting before display or JSON export.
+This remains one finite operator action—not a scheduler or proof of complete
+wallet history. No migration is added; Alembic remains at `20260828_0028`.
+
+## v0.93.0 continuation receipt
 
 Every completed plan-bound resume can now be verified through
 `GET /api/v1/cases/{case}/syncs/{sync}/continuation-receipt`. The response is a
@@ -261,6 +279,8 @@ profit, ownership proof, or complete wallet history.
   verified `cpl_` plan and its exact `scp_` tip.
 - v0.93.0 immutable `ctr_` receipts that reproduce the exact checkpoint and
   plan transition published by a plan-bound resume.
+- v0.94.0 finite 1–10 page continuation budgets bound through request,
+  execution, receipt accounting, retry, and operator UI.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.
