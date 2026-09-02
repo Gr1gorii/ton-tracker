@@ -14,6 +14,7 @@ import {
 
 import type { WalletCaseSync } from "../walletCase";
 import {
+  getWalletCaseBackfillProgress,
   getWalletCaseCheckpointContinuationReceipt,
   getWalletCaseCheckpointContinuationPlan,
   getWalletCaseStreamCheckpoints,
@@ -21,9 +22,11 @@ import {
 } from "../walletCaseApi";
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
 import {
+  serializeWalletCaseBackfillProgress,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
+  type WalletCaseBackfillProgressResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
@@ -46,6 +49,20 @@ function downloadCheckpointChain(
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `checkpoint-chain-${chain.chain.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBackfillProgress(
+  progress: WalletCaseBackfillProgressResponse,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseBackfillProgress(progress)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `backfill-progress-${progress.progress.public_id}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -96,6 +113,9 @@ export default function CaseAcquisitionManifest({
   const descriptor = snapshot.acquisition_manifest;
   const [detail, setDetail] = useState<WalletCaseSyncManifestResponse | null>(null);
   const [checkpoints, setCheckpoints] = useState<WalletCaseStreamCheckpointCatalogResponse | null>(null);
+  const [backfillProgress, setBackfillProgress] = useState<WalletCaseBackfillProgressResponse | null>(null);
+  const [backfillProgressLoading, setBackfillProgressLoading] = useState(false);
+  const [backfillProgressError, setBackfillProgressError] = useState<string | null>(null);
   const [continuationPlan, setContinuationPlan] = useState<WalletCaseCheckpointContinuationPlanResponse | null>(null);
   const [continuationPlanLoading, setContinuationPlanLoading] = useState(false);
   const [continuationPlanError, setContinuationPlanError] = useState<string | null>(null);
@@ -106,6 +126,7 @@ export default function CaseAcquisitionManifest({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
+  const backfillProgressRequestRef = useRef<AbortController | null>(null);
   const continuationPlanRequestRef = useRef<AbortController | null>(null);
   const continuationReceiptRequestRef = useRef<AbortController | null>(null);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
@@ -117,13 +138,18 @@ export default function CaseAcquisitionManifest({
 
   useEffect(() => {
     requestRef.current?.abort();
+    backfillProgressRequestRef.current?.abort();
     continuationPlanRequestRef.current?.abort();
     continuationReceiptRequestRef.current?.abort();
     requestRef.current = null;
+    backfillProgressRequestRef.current = null;
     continuationPlanRequestRef.current = null;
     continuationReceiptRequestRef.current = null;
     setDetail(null);
     setCheckpoints(null);
+    setBackfillProgress(null);
+    setBackfillProgressLoading(false);
+    setBackfillProgressError(null);
     setContinuationPlan(null);
     setContinuationPlanLoading(false);
     setContinuationPlanError(null);
@@ -135,6 +161,7 @@ export default function CaseAcquisitionManifest({
     setError(null);
     return () => {
       requestRef.current?.abort();
+      backfillProgressRequestRef.current?.abort();
       continuationPlanRequestRef.current?.abort();
       continuationReceiptRequestRef.current?.abort();
     };
@@ -196,6 +223,33 @@ export default function CaseAcquisitionManifest({
       if (continuationPlanRequestRef.current === controller) {
         continuationPlanRequestRef.current = null;
         setContinuationPlanLoading(false);
+      }
+    }
+  };
+
+  const loadBackfillProgress = async () => {
+    if (backfillProgressLoading) return;
+    backfillProgressRequestRef.current?.abort();
+    const controller = new AbortController();
+    backfillProgressRequestRef.current = controller;
+    setBackfillProgressLoading(true);
+    setBackfillProgressError(null);
+    try {
+      setBackfillProgress(await getWalletCaseBackfillProgress(
+        caseId,
+        controller.signal,
+      ));
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      setBackfillProgressError(
+        cause instanceof Error
+          ? cause.message
+          : "Backfill progress verification failed.",
+      );
+    } finally {
+      if (backfillProgressRequestRef.current === controller) {
+        backfillProgressRequestRef.current = null;
+        setBackfillProgressLoading(false);
       }
     }
   };
@@ -387,21 +441,38 @@ export default function CaseAcquisitionManifest({
                     {" · "}{checkpoints.complete_count} complete
                     {" · "}{checkpoints.blocked_count} blocked
                   </span>
-                  <button
-                    className="button-secondary case-checkpoint-plan-button"
-                    type="button"
-                    disabled={continuationPlanLoading}
-                    onClick={() => void loadContinuationPlan()}
-                  >
-                    {continuationPlanLoading
-                      ? <SpinnerGap className="spin" size={15} />
-                      : <TreeStructure size={15} />}
-                    {continuationPlanLoading
-                      ? "Verifying plan…"
-                      : continuationPlan
-                        ? "Verify plan again"
-                        : "Verify continuation plan"}
-                  </button>
+                  <div className="case-checkpoint-verification-actions">
+                    <button
+                      className="button-secondary case-checkpoint-plan-button"
+                      type="button"
+                      disabled={backfillProgressLoading}
+                      onClick={() => void loadBackfillProgress()}
+                    >
+                      {backfillProgressLoading
+                        ? <SpinnerGap className="spin" size={15} />
+                        : <ClockCounterClockwise size={15} />}
+                      {backfillProgressLoading
+                        ? "Verifying progress…"
+                        : backfillProgress
+                          ? "Verify progress again"
+                          : "Verify backfill progress"}
+                    </button>
+                    <button
+                      className="button-secondary case-checkpoint-plan-button"
+                      type="button"
+                      disabled={continuationPlanLoading}
+                      onClick={() => void loadContinuationPlan()}
+                    >
+                      {continuationPlanLoading
+                        ? <SpinnerGap className="spin" size={15} />
+                        : <TreeStructure size={15} />}
+                      {continuationPlanLoading
+                        ? "Verifying plan…"
+                        : continuationPlan
+                          ? "Verify plan again"
+                          : "Verify continuation plan"}
+                    </button>
+                  </div>
                   {checkpoints.checkpoints.length === 0 ? (
                     <span>No provider stream emitted a continuation checkpoint.</span>
                   ) : (
@@ -430,6 +501,74 @@ export default function CaseAcquisitionManifest({
                         </li>
                       ))}
                       </ul>
+                  )}
+                  {backfillProgress && (
+                    <section
+                      className="case-checkpoint-chain case-backfill-progress"
+                      aria-label="Verified backfill progress"
+                    >
+                      <header>
+                        <span>
+                          <ClockCounterClockwise size={18} />
+                          <strong>Verified backfill progress</strong>
+                        </span>
+                        <code>{backfillProgress.progress.public_id}</code>
+                      </header>
+                      <dl>
+                        <div><dt>Streams</dt><dd>{backfillProgress.progress.stream_count}</dd></div>
+                        <div><dt>Continued pages</dt><dd>{backfillProgress.progress.continuation_pages_succeeded}/{backfillProgress.progress.continuation_page_count}</dd></div>
+                        <div><dt>Frontiers advanced</dt><dd>{backfillProgress.progress.advanced_frontier_count}/{backfillProgress.progress.observed_frontier_count}</dd></div>
+                        <div><dt>Intervals complete</dt><dd>{backfillProgress.progress.complete_count}/{backfillProgress.progress.stream_count}</dd></div>
+                      </dl>
+                      {backfillProgress.document.streams.length === 0 ? (
+                        <span>No current provider stream checkpoints are available.</span>
+                      ) : (
+                        <ol>
+                          {backfillProgress.document.streams.map((stream) => (
+                            <li key={`${stream.provider}:${stream.stream_key}`}>
+                              <span>
+                                <b>{stream.provider} / {stream.stream_key}</b>
+                                <small>
+                                  {stream.initial_pages_succeeded}/{stream.initial_page_count} initial pages
+                                  {" · +"}{stream.continuation_pages_succeeded}/{stream.continuation_page_count} continued
+                                  {" · "}{stream.requested_interval_complete
+                                    ? "requested interval complete"
+                                    : stream.resume_state}
+                                </small>
+                                <small>
+                                  Frontier page {stream.root_frontier?.page.page_index ?? "unobserved"}
+                                  {" → "}{stream.current_frontier?.page.page_index ?? "unobserved"}
+                                  {stream.current_frontier?.page.min_timestamp
+                                    ? ` · oldest page activity ${formatTimestamp(stream.current_frontier.page.min_timestamp)}`
+                                    : stream.current_frontier?.page.min_logical_time
+                                      ? ` · minimum logical time ${stream.current_frontier.page.min_logical_time}`
+                                      : ""}
+                                </small>
+                                <code>{stream.chain_public_id}</code>
+                              </span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      <button
+                        className="button-secondary case-checkpoint-chain-export"
+                        type="button"
+                        onClick={() => downloadBackfillProgress(backfillProgress)}
+                      >
+                        <DownloadSimple size={15} /> Export verified backfill progress JSON
+                      </button>
+                      <small className="case-checkpoint-history-boundary">
+                        {backfillProgress.document.limitations[
+                          backfillProgress.document.limitations.length - 1
+                        ]?.message}
+                      </small>
+                    </section>
+                  )}
+                  {backfillProgressError && (
+                    <div className="case-sync-message is-error" role="alert">
+                      <WarningCircle size={16} weight="fill" />
+                      <span>{backfillProgressError}</span>
+                    </div>
                   )}
                   {continuationPlan && (
                     <section
