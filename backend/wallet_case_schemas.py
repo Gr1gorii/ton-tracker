@@ -55,6 +55,10 @@ BackfillProgressPublicId = Annotated[
     str,
     Field(pattern=r"^bfp_[0-9a-f]{64}$", max_length=68),
 ]
+BackfillSchedulePublicId = Annotated[
+    str,
+    Field(pattern=r"^bfs_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -909,6 +913,129 @@ class WalletCaseBackfillProgressResponse(_StrictModel):
             != self.document.checkpoint_cutoff_public_id
         ):
             raise ValueError("backfill progress content address is inconsistent")
+        return self
+
+
+class WalletCaseBackfillScheduleSelection(_StrictModel):
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    checkpoint_public_id: CheckpointPublicId
+    continuation_revision_count: int = Field(ge=0, le=99)
+    continuation_page_count: int = Field(ge=0)
+    next_page_index: int = Field(ge=1)
+
+
+class WalletCaseBackfillScheduleDocument(_StrictModel):
+    contract_version: Literal["wallet_case_backfill_schedule_v1"]
+    case_public_id: CanonicalPublicId
+    input_progress_public_id: BackfillProgressPublicId
+    input_plan_public_id: CheckpointContinuationPlanPublicId
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    page_budget: int = Field(strict=True, ge=1, le=10)
+    selection_policy: Literal[
+        "least_continuation_pages_then_revisions_then_provider_stream_v1"
+    ]
+    state: Literal["ready", "backpressured", "empty", "complete", "blocked"]
+    stream_count: int = Field(ge=0, le=32)
+    ready_count: int = Field(ge=0, le=32)
+    complete_count: int = Field(ge=0, le=32)
+    blocked_count: int = Field(ge=0, le=32)
+    active_sync_public_id: CanonicalPublicId | None = None
+    selection: WalletCaseBackfillScheduleSelection | None = None
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_schedule(self):
+        if self.stream_count != (
+            self.ready_count + self.complete_count + self.blocked_count
+        ):
+            raise ValueError("backfill schedule counts are inconsistent")
+        if self.state == "ready":
+            valid_state = (
+                self.ready_count > 0
+                and self.active_sync_public_id is None
+                and self.selection is not None
+            )
+        elif self.state == "backpressured":
+            valid_state = (
+                self.active_sync_public_id is not None
+                and self.selection is None
+            )
+        elif self.state == "empty":
+            valid_state = (
+                self.stream_count == 0
+                and self.active_sync_public_id is None
+                and self.selection is None
+            )
+        elif self.state == "complete":
+            valid_state = (
+                self.stream_count > 0
+                and self.ready_count == 0
+                and self.blocked_count == 0
+                and self.active_sync_public_id is None
+                and self.selection is None
+            )
+        else:
+            valid_state = (
+                self.ready_count == 0
+                and self.blocked_count > 0
+                and self.active_sync_public_id is None
+                and self.selection is None
+            )
+        if not valid_state:
+            raise ValueError("backfill schedule state is inconsistent")
+        return self
+
+
+class WalletCaseBackfillScheduleDescriptor(_StrictModel):
+    public_id: BackfillSchedulePublicId
+    contract_version: Literal["wallet_case_backfill_schedule_v1"]
+    content_hash_sha256: Sha256Digest
+    state: Literal["ready", "backpressured", "empty", "complete", "blocked"]
+    input_progress_public_id: BackfillProgressPublicId
+    input_plan_public_id: CheckpointContinuationPlanPublicId
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    page_budget: int = Field(strict=True, ge=1, le=10)
+    selected_checkpoint_public_id: CheckpointPublicId | None = None
+    active_sync_public_id: CanonicalPublicId | None = None
+
+
+class WalletCaseBackfillScheduleResponse(_StrictModel):
+    schedule: WalletCaseBackfillScheduleDescriptor
+    document: WalletCaseBackfillScheduleDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        selected = (
+            self.document.selection.checkpoint_public_id
+            if self.document.selection is not None
+            else None
+        )
+        if (
+            self.schedule.public_id != f"bfs_{digest}"
+            or self.schedule.content_hash_sha256 != digest
+            or self.schedule.contract_version != self.document.contract_version
+            or self.schedule.state != self.document.state
+            or self.schedule.input_progress_public_id
+            != self.document.input_progress_public_id
+            or self.schedule.input_plan_public_id
+            != self.document.input_plan_public_id
+            or self.schedule.checkpoint_cutoff_public_id
+            != self.document.checkpoint_cutoff_public_id
+            or self.schedule.page_budget != self.document.page_budget
+            or self.schedule.selected_checkpoint_public_id != selected
+            or self.schedule.active_sync_public_id
+            != self.document.active_sync_public_id
+        ):
+            raise ValueError("backfill schedule content address is inconsistent")
         return self
 
 

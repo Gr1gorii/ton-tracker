@@ -52,6 +52,7 @@ from services.wallet_cases import (
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
     WalletCaseBackfillProgressResponse,
+    WalletCaseBackfillScheduleResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationPlanResponse,
@@ -308,7 +309,11 @@ def _publish_transaction_checkpoint(
     return case_id, queued, claimed
 
 
-def _publish_multi_stream_checkpoints(client):
+def _publish_multi_stream_checkpoints(
+    client,
+    *,
+    account_events_ready: bool = False,
+):
     case_id = _create_case(client)["case"]["public_id"]
     with app.state.wallet_case_test_session() as session:
         queued, _ = WalletCaseService(session).enqueue_sync(
@@ -336,9 +341,13 @@ def _publish_multi_stream_checkpoints(client):
     _attach_transaction_stream(
         run,
         claimed,
-        cursor=None,
-        completion_state="complete",
-        termination_reason="end_reached",
+        cursor="20" if account_events_ready else None,
+        completion_state=(
+            "incomplete" if account_events_ready else "complete"
+        ),
+        termination_reason=(
+            "page_cap_reached" if account_events_ready else "end_reached"
+        ),
         stream_key="account_events",
         contract_version="tonapi_account_events_display_v1",
     )
@@ -2112,6 +2121,99 @@ def test_backfill_progress_schema_rejects_aggregate_and_frontier_drift(client):
     frontier_drift["document"]["streams"][0]["frontier_advanced"] = True
     with pytest.raises(ValueError, match="backfill progress stream"):
         WalletCaseBackfillProgressResponse.model_validate(frontier_drift)
+
+
+def test_backfill_schedule_selects_least_advanced_ready_stream(client):
+    case_id, _source_sync, _claimed = _publish_multi_stream_checkpoints(
+        client,
+        account_events_ready=True,
+    )
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "3"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["schedule"]["public_id"] == (
+        f"bfs_{body['schedule']['content_hash_sha256']}"
+    )
+    assert body["schedule"]["contract_version"] == (
+        "wallet_case_backfill_schedule_v1"
+    )
+    assert body["schedule"]["state"] == "ready"
+    assert body["schedule"]["page_budget"] == 3
+    assert body["document"]["selection_policy"] == (
+        "least_continuation_pages_then_revisions_then_provider_stream_v1"
+    )
+    assert body["document"]["ready_count"] == 2
+    assert body["document"]["selection"] == {
+        "provider": "tonapi",
+        "stream_key": "account_events",
+        "checkpoint_public_id": body["schedule"][
+            "selected_checkpoint_public_id"
+        ],
+        "continuation_revision_count": 0,
+        "continuation_page_count": 0,
+        "next_page_index": 2,
+    }
+    progress = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-progress"
+    ).json()
+    plan = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/continuation-plan"
+    ).json()
+    assert body["schedule"]["input_progress_public_id"] == progress[
+        "progress"
+    ]["public_id"]
+    assert body["schedule"]["input_plan_public_id"] == plan["plan"][
+        "public_id"
+    ]
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "3"},
+    )
+    assert repeated.json() == body
+    tampered = json.loads(json.dumps(body))
+    tampered["schedule"]["selected_checkpoint_public_id"] = f"scp_{'0' * 64}"
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseBackfillScheduleResponse.model_validate(tampered)
+
+
+def test_backfill_schedule_exposes_empty_and_active_backpressure(client):
+    empty_case_id = _create_case(client)["case"]["public_id"]
+    empty = client.get(
+        f"/api/v1/cases/{empty_case_id}/stream-checkpoints/backfill-schedule"
+    )
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["document"]["state"] == "empty"
+    assert empty.json()["document"]["selection"] is None
+
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        queued, _ = WalletCaseService(session).enqueue_sync(
+            case_id,
+            WalletCaseSyncRequest(
+                time_window="24h",
+                surfaces=["transactions"],
+            ),
+            str(uuid4()),
+        )
+    backpressured = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule"
+    )
+    assert backpressured.status_code == 200, backpressured.text
+    assert backpressured.json()["document"]["state"] == "backpressured"
+    assert backpressured.json()["document"]["active_sync_public_id"] == (
+        queued["public_id"]
+    )
+    assert backpressured.json()["document"]["selection"] is None
+    assert client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "0"},
+    ).status_code == 422
 
 
 def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):

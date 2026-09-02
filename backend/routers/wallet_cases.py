@@ -29,6 +29,7 @@ from services.wallet_cases import (
 from services.wallet_case_access import require_local_wallet_case_access
 from wallet_case_schemas import (
     WalletCaseBackfillProgressResponse,
+    WalletCaseBackfillScheduleResponse,
     WalletCaseCreateRequest,
     WalletCaseDeletionResponse,
     WalletCaseListResponse,
@@ -766,6 +767,53 @@ def read_wallet_case_backfill_progress(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case backfill progress storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/stream-checkpoints/backfill-schedule",
+    response_model=WalletCaseBackfillScheduleResponse,
+)
+def read_wallet_case_backfill_schedule(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    page_budget: str = Query(
+        "1",
+        pattern=r"^(10|[1-9])$",
+        max_length=2,
+        description="Finite TonAPI page budget for the selected stream.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Select one fair continuation while honoring the active-job slot."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_backfill_schedule(
+            public_id,
+            page_budget=int(page_budget),
+        )
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "backfill_schedule_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case backfill schedule storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

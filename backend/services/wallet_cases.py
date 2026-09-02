@@ -1656,6 +1656,170 @@ class WalletCaseService:
             "document": document,
         }
 
+    def get_backfill_schedule(
+        self,
+        case_public_id: str,
+        *,
+        page_budget: int = 1,
+    ) -> dict[str, Any]:
+        """Select one fair, finite continuation from current verified state."""
+        if type(page_budget) is not int or not 1 <= page_budget <= 10:
+            raise ValueError("Backfill page budget must be from 1 through 10.")
+        wallet_case = self._required_case(case_public_id)
+        progress = self.get_backfill_progress(wallet_case.public_id)
+        plan = self._checkpoint_continuation_plan_response(wallet_case)
+        progress_document = progress["document"]
+        plan_document = plan["document"]
+        if (
+            progress_document["checkpoint_cutoff_public_id"]
+            != plan_document["checkpoint_cutoff_public_id"]
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Wallet Case backfill schedule inputs have different checkpoint cutoffs."
+            )
+
+        plan_by_identity = {
+            (stream["provider"], stream["stream_key"]): stream
+            for stream in plan_document["streams"]
+        }
+        ready_streams = [
+            stream
+            for stream in progress_document["streams"]
+            if stream["resume_state"] == "ready"
+        ]
+        ready_streams.sort(
+            key=lambda stream: (
+                stream["continuation_page_count"],
+                stream["continuation_revision_count"],
+                stream["provider"],
+                stream["stream_key"],
+            )
+        )
+        selected_progress = ready_streams[0] if ready_streams else None
+        selected_plan = (
+            plan_by_identity.get(
+                (
+                    selected_progress["provider"],
+                    selected_progress["stream_key"],
+                )
+            )
+            if selected_progress is not None
+            else None
+        )
+        if selected_progress is not None and (
+            selected_plan is None
+            or selected_plan["resume_state"] != "ready"
+            or selected_plan["tip_checkpoint"]["public_id"]
+            != selected_progress["tip_checkpoint"]["public_id"]
+            or selected_plan["next_page_index"]
+            != selected_progress["next_page_index"]
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Wallet Case backfill schedule inputs disagree on the selected stream."
+            )
+
+        active = self.repository.get_active_sync(case_id=wallet_case.id)
+        aggregate = progress_document["aggregate"]
+        if active is not None:
+            state = "backpressured"
+            selection = None
+        elif selected_progress is not None:
+            state = "ready"
+            selection = {
+                "provider": selected_progress["provider"],
+                "stream_key": selected_progress["stream_key"],
+                "checkpoint_public_id": selected_progress["tip_checkpoint"][
+                    "public_id"
+                ],
+                "continuation_revision_count": selected_progress[
+                    "continuation_revision_count"
+                ],
+                "continuation_page_count": selected_progress[
+                    "continuation_page_count"
+                ],
+                "next_page_index": selected_progress["next_page_index"],
+            }
+        elif aggregate["stream_count"] == 0:
+            state = "empty"
+            selection = None
+        elif aggregate["blocked_count"] > 0:
+            state = "blocked"
+            selection = None
+        else:
+            state = "complete"
+            selection = None
+
+        document = {
+            "contract_version": "wallet_case_backfill_schedule_v1",
+            "case_public_id": wallet_case.public_id,
+            "input_progress_public_id": progress["progress"]["public_id"],
+            "input_plan_public_id": plan["plan"]["public_id"],
+            "checkpoint_cutoff_public_id": progress_document[
+                "checkpoint_cutoff_public_id"
+            ],
+            "page_budget": page_budget,
+            "selection_policy": (
+                "least_continuation_pages_then_revisions_then_provider_stream_v1"
+            ),
+            "state": state,
+            "stream_count": aggregate["stream_count"],
+            "ready_count": aggregate["ready_count"],
+            "complete_count": aggregate["complete_count"],
+            "blocked_count": aggregate["blocked_count"],
+            "active_sync_public_id": (
+                active.public_id if active is not None else None
+            ),
+            "selection": selection,
+            "limitations": [
+                _limitation(
+                    "backfill_schedule_is_one_finite_step",
+                    (
+                        "This schedule selects at most one provider stream and "
+                        "authorizes only the displayed page budget; it does not "
+                        "repeat or crawl in the background."
+                    ),
+                ),
+                _limitation(
+                    "backfill_schedule_requires_fresh_state",
+                    (
+                        "Any active synchronization applies backpressure, and a "
+                        "new schedule must be verified after every published result."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "schedule": {
+                "public_id": f"bfs_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "state": state,
+                "input_progress_public_id": document[
+                    "input_progress_public_id"
+                ],
+                "input_plan_public_id": document["input_plan_public_id"],
+                "checkpoint_cutoff_public_id": document[
+                    "checkpoint_cutoff_public_id"
+                ],
+                "page_budget": page_budget,
+                "selected_checkpoint_public_id": (
+                    selection["checkpoint_public_id"]
+                    if selection is not None
+                    else None
+                ),
+                "active_sync_public_id": document["active_sync_public_id"],
+            },
+            "document": document,
+        }
+
     def _checkpoint_continuation_plan_response(
         self,
         wallet_case: WalletCase,
