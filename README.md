@@ -4,10 +4,27 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.94.0 — Budgeted Continuation**<br>
+Current product release: **v0.95.0 — Backfill Progress**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.94.0 adds
+## What v0.95.0 adds
+
+Wallet Case can now measure verified historical-acquisition movement across
+every latest provider stream through
+`GET /api/v1/cases/{case}/stream-checkpoints/backfill-progress`. The canonical
+`bfp_<sha256>` document binds the current checkpoint cutoff, each verified
+root-to-tip chain, initial and continuation page counts, requested interval
+state, and both the root and latest successful page frontier.
+
+Summary exposes an explicit verification action, shows which stream frontiers
+actually advanced, distinguishes initial from continued pages, and exports the
+strictly parsed progress JSON. The contract deliberately reports no percentage
+or remaining-page estimate because provider cursors do not supply a reliable
+denominator. A frontier is page evidence, not proof of the wallet's earliest
+activity or complete history. No migration is added; Alembic remains at
+`20260828_0028`.
+
+## v0.94.0 budgeted continuation
 
 A verified Continuation Plan can now authorize a finite budget of 1–10 TonAPI
 pages for one ready provider stream. The strict POST body, acquisition-plan-v4
@@ -279,6 +296,7 @@ profit, ownership proof, or complete wallet history.
   verified `cpl_` plan and its exact `scp_` tip.
 - v0.93.0 immutable `ctr_` receipts that reproduce the exact checkpoint and
   plan transition published by a plan-bound resume.
+- v0.95.0 content-addressed backfill progress across verified stream frontiers.
 - v0.94.0 finite 1–10 page continuation budgets bound through request,
   execution, receipt accounting, retry, and operator UI.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
