@@ -15,6 +15,7 @@ import {
 import type { WalletCaseSync } from "../walletCase";
 import {
   getWalletCaseBackfillProgress,
+  getWalletCaseBackfillSchedule,
   getWalletCaseCheckpointContinuationReceipt,
   getWalletCaseCheckpointContinuationPlan,
   getWalletCaseStreamCheckpoints,
@@ -23,10 +24,12 @@ import {
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
 import {
   serializeWalletCaseBackfillProgress,
+  serializeWalletCaseBackfillSchedule,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
   type WalletCaseBackfillProgressResponse,
+  type WalletCaseBackfillScheduleResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
@@ -67,6 +70,20 @@ function downloadBackfillProgress(
   URL.revokeObjectURL(url);
 }
 
+function downloadBackfillSchedule(
+  schedule: WalletCaseBackfillScheduleResponse,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseBackfillSchedule(schedule)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `backfill-schedule-${schedule.schedule.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function downloadContinuationPlan(
   plan: WalletCaseCheckpointContinuationPlanResponse,
 ): void {
@@ -100,6 +117,7 @@ export default function CaseAcquisitionManifest({
   snapshot,
   resumeDisabled,
   onResume,
+  onRunSchedule,
 }: {
   caseId: string;
   snapshot: WalletCaseSync;
@@ -109,6 +127,7 @@ export default function CaseAcquisitionManifest({
     checkpointPublicId: string,
     pageBudget?: number,
   ) => Promise<void>;
+  onRunSchedule: (schedule: WalletCaseBackfillScheduleResponse) => Promise<void>;
 }) {
   const descriptor = snapshot.acquisition_manifest;
   const [detail, setDetail] = useState<WalletCaseSyncManifestResponse | null>(null);
@@ -116,6 +135,10 @@ export default function CaseAcquisitionManifest({
   const [backfillProgress, setBackfillProgress] = useState<WalletCaseBackfillProgressResponse | null>(null);
   const [backfillProgressLoading, setBackfillProgressLoading] = useState(false);
   const [backfillProgressError, setBackfillProgressError] = useState<string | null>(null);
+  const [backfillSchedule, setBackfillSchedule] = useState<WalletCaseBackfillScheduleResponse | null>(null);
+  const [backfillScheduleBudget, setBackfillScheduleBudget] = useState(1);
+  const [backfillScheduleLoading, setBackfillScheduleLoading] = useState(false);
+  const [backfillScheduleError, setBackfillScheduleError] = useState<string | null>(null);
   const [continuationPlan, setContinuationPlan] = useState<WalletCaseCheckpointContinuationPlanResponse | null>(null);
   const [continuationPlanLoading, setContinuationPlanLoading] = useState(false);
   const [continuationPlanError, setContinuationPlanError] = useState<string | null>(null);
@@ -127,6 +150,7 @@ export default function CaseAcquisitionManifest({
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const backfillProgressRequestRef = useRef<AbortController | null>(null);
+  const backfillScheduleRequestRef = useRef<AbortController | null>(null);
   const continuationPlanRequestRef = useRef<AbortController | null>(null);
   const continuationReceiptRequestRef = useRef<AbortController | null>(null);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
@@ -139,10 +163,12 @@ export default function CaseAcquisitionManifest({
   useEffect(() => {
     requestRef.current?.abort();
     backfillProgressRequestRef.current?.abort();
+    backfillScheduleRequestRef.current?.abort();
     continuationPlanRequestRef.current?.abort();
     continuationReceiptRequestRef.current?.abort();
     requestRef.current = null;
     backfillProgressRequestRef.current = null;
+    backfillScheduleRequestRef.current = null;
     continuationPlanRequestRef.current = null;
     continuationReceiptRequestRef.current = null;
     setDetail(null);
@@ -150,6 +176,10 @@ export default function CaseAcquisitionManifest({
     setBackfillProgress(null);
     setBackfillProgressLoading(false);
     setBackfillProgressError(null);
+    setBackfillSchedule(null);
+    setBackfillScheduleBudget(1);
+    setBackfillScheduleLoading(false);
+    setBackfillScheduleError(null);
     setContinuationPlan(null);
     setContinuationPlanLoading(false);
     setContinuationPlanError(null);
@@ -162,6 +192,7 @@ export default function CaseAcquisitionManifest({
     return () => {
       requestRef.current?.abort();
       backfillProgressRequestRef.current?.abort();
+      backfillScheduleRequestRef.current?.abort();
       continuationPlanRequestRef.current?.abort();
       continuationReceiptRequestRef.current?.abort();
     };
@@ -250,6 +281,34 @@ export default function CaseAcquisitionManifest({
       if (backfillProgressRequestRef.current === controller) {
         backfillProgressRequestRef.current = null;
         setBackfillProgressLoading(false);
+      }
+    }
+  };
+
+  const loadBackfillSchedule = async () => {
+    if (backfillScheduleLoading) return;
+    backfillScheduleRequestRef.current?.abort();
+    const controller = new AbortController();
+    backfillScheduleRequestRef.current = controller;
+    setBackfillScheduleLoading(true);
+    setBackfillScheduleError(null);
+    try {
+      setBackfillSchedule(await getWalletCaseBackfillSchedule(
+        caseId,
+        backfillScheduleBudget,
+        controller.signal,
+      ));
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      setBackfillScheduleError(
+        cause instanceof Error
+          ? cause.message
+          : "Backfill schedule verification failed.",
+      );
+    } finally {
+      if (backfillScheduleRequestRef.current === controller) {
+        backfillScheduleRequestRef.current = null;
+        setBackfillScheduleLoading(false);
       }
     }
   };
@@ -392,12 +451,15 @@ export default function CaseAcquisitionManifest({
                     <div><dt>Provider pages</dt><dd>+{continuationReceipt.receipt.page_count_delta}</dd></div>
                     <div><dt>Successful pages</dt><dd>+{continuationReceipt.receipt.pages_succeeded_delta}</dd></div>
                     <div><dt>After-plan streams</dt><dd>{continuationReceipt.document.after_plan.plan.stream_count}</dd></div>
-                    {continuationReceipt.receipt.contract_version === "wallet_case_checkpoint_continuation_receipt_v2" && (
+                    {continuationReceipt.receipt.contract_version !== "wallet_case_checkpoint_continuation_receipt_v1" && (
                       <>
                         <div><dt>Authorized budget</dt><dd>{continuationReceipt.receipt.page_budget}</dd></div>
                         <div><dt>Budget consumed</dt><dd>{continuationReceipt.receipt.page_budget_consumed}</dd></div>
                         <div><dt>Budget remaining</dt><dd>{continuationReceipt.receipt.page_budget_remaining}</dd></div>
                       </>
+                    )}
+                    {continuationReceipt.receipt.contract_version === "wallet_case_checkpoint_continuation_receipt_v3" && (
+                      <div><dt>Input schedule</dt><dd><code>{continuationReceipt.receipt.input_schedule_public_id}</code></dd></div>
                     )}
                   </dl>
                   <button
@@ -442,6 +504,38 @@ export default function CaseAcquisitionManifest({
                     {" · "}{checkpoints.blocked_count} blocked
                   </span>
                   <div className="case-checkpoint-verification-actions">
+                    <label className="case-backfill-schedule-budget">
+                      <span>Step budget</span>
+                      <select
+                        aria-label="Backfill schedule page budget"
+                        disabled={resumeDisabled || backfillScheduleLoading}
+                        value={backfillScheduleBudget}
+                        onChange={(event) => {
+                          setBackfillScheduleBudget(Number(event.target.value));
+                          setBackfillSchedule(null);
+                          setBackfillScheduleError(null);
+                        }}
+                      >
+                        {Array.from({ length: 10 }, (_, index) => index + 1).map((budget) => (
+                          <option key={budget} value={budget}>{budget} page{budget === 1 ? "" : "s"}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="button-secondary case-checkpoint-plan-button"
+                      type="button"
+                      disabled={backfillScheduleLoading}
+                      onClick={() => void loadBackfillSchedule()}
+                    >
+                      {backfillScheduleLoading
+                        ? <SpinnerGap className="spin" size={15} />
+                        : <ArrowClockwise size={15} />}
+                      {backfillScheduleLoading
+                        ? "Scheduling…"
+                        : backfillSchedule
+                          ? "Verify schedule again"
+                          : "Prepare next backfill step"}
+                    </button>
                     <button
                       className="button-secondary case-checkpoint-plan-button"
                       type="button"
@@ -568,6 +662,77 @@ export default function CaseAcquisitionManifest({
                     <div className="case-sync-message is-error" role="alert">
                       <WarningCircle size={16} weight="fill" />
                       <span>{backfillProgressError}</span>
+                    </div>
+                  )}
+                  {backfillSchedule && (
+                    <section
+                      className="case-checkpoint-chain case-backfill-schedule"
+                      aria-label="Verified backfill schedule"
+                    >
+                      <header>
+                        <span>
+                          <ArrowClockwise size={18} />
+                          <strong>Verified backfill schedule</strong>
+                        </span>
+                        <code>{backfillSchedule.schedule.public_id}</code>
+                      </header>
+                      <dl>
+                        <div><dt>State</dt><dd>{backfillSchedule.document.state}</dd></div>
+                        <div><dt>Page budget</dt><dd>{backfillSchedule.document.page_budget}</dd></div>
+                        <div><dt>Ready streams</dt><dd>{backfillSchedule.document.ready_count}</dd></div>
+                        <div><dt>Complete streams</dt><dd>{backfillSchedule.document.complete_count}</dd></div>
+                      </dl>
+                      {backfillSchedule.document.selection ? (
+                        <div className="case-backfill-schedule-selection">
+                          <span>
+                            <b>
+                              {backfillSchedule.document.selection.provider}
+                              {" / "}{backfillSchedule.document.selection.stream_key}
+                            </b>
+                            <small>
+                              Least advanced ready stream
+                              {" · "}{backfillSchedule.document.selection.continuation_page_count} continued pages
+                              {" · next page "}{backfillSchedule.document.selection.next_page_index}
+                            </small>
+                            <code>{backfillSchedule.document.selection.checkpoint_public_id}</code>
+                          </span>
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            disabled={resumeDisabled}
+                            aria-label={`Run scheduled ${backfillSchedule.document.selection.stream_key} backfill step`}
+                            onClick={() => void onRunSchedule(backfillSchedule)}
+                          >
+                            <ArrowClockwise size={15} /> Run one scheduled step
+                          </button>
+                        </div>
+                      ) : (
+                        <span>
+                          {backfillSchedule.document.state === "backpressured"
+                            ? `Paused behind active sync ${backfillSchedule.document.active_sync_public_id}.`
+                            : backfillSchedule.document.state === "complete"
+                              ? "Every current provider stream completed its requested interval."
+                              : backfillSchedule.document.state === "blocked"
+                                ? "No ready stream remains; at least one stream is blocked."
+                                : "No provider stream checkpoint is available yet."}
+                        </span>
+                      )}
+                      <button
+                        className="button-secondary case-checkpoint-chain-export"
+                        type="button"
+                        onClick={() => downloadBackfillSchedule(backfillSchedule)}
+                      >
+                        <DownloadSimple size={15} /> Export verified backfill schedule JSON
+                      </button>
+                      <small className="case-checkpoint-history-boundary">
+                        {backfillSchedule.document.limitations[0]?.message}
+                      </small>
+                    </section>
+                  )}
+                  {backfillScheduleError && (
+                    <div className="case-sync-message is-error" role="alert">
+                      <WarningCircle size={16} weight="fill" />
+                      <span>{backfillScheduleError}</span>
                     </div>
                   )}
                   {continuationPlan && (

@@ -46,6 +46,7 @@ from services.wallet_cases import (
     WalletCaseService,
     _actual_provider,
     _bounded_message,
+    _checkpoint_resume_fingerprint,
     _coverage_record,
     _json_dumps,
     _json_list,
@@ -145,6 +146,7 @@ class ClaimedCaseSync:
     resume_cursor: str | None
     resume_page_index: int | None
     resume_page_budget: int | None
+    request_fingerprint: str
 
 
 class CaseSyncWorker:
@@ -453,6 +455,7 @@ class CaseSyncWorker:
                 resume_page_budget=acquisition_plan.get(
                     "resume_page_budget"
                 ),
+                request_fingerprint=case_sync.request_fingerprint,
             )
 
     def _close_unavailable_claim(self, sync_id: int, lease_token: str) -> bool:
@@ -656,16 +659,31 @@ class CaseSyncWorker:
             )
         plan_version = claimed.acquisition_plan.get("version")
         if (
-            plan_version == 4
+            plan_version in {4, 5}
             and (
                 type(claimed.resume_page_budget) is not int
                 or not 1 <= claimed.resume_page_budget <= 10
             )
         ) or (
-            plan_version != 4 and claimed.resume_page_budget is not None
+            plan_version not in {4, 5} and claimed.resume_page_budget is not None
         ):
             raise WalletCaseRuntimeConflict(
                 "Checkpoint continuation page budget is invalid."
+            )
+        if plan_version == 5 and claimed.request_fingerprint != (
+            _checkpoint_resume_fingerprint(
+                claimed.source_checkpoint_public_id or "",
+                continuation_plan_public_id=claimed.acquisition_plan[
+                    "continuation_plan_public_id"
+                ],
+                page_budget=claimed.resume_page_budget,
+                backfill_schedule_public_id=claimed.acquisition_plan[
+                    "backfill_schedule_public_id"
+                ],
+            )
+        ):
+            raise WalletCaseRuntimeConflict(
+                "Scheduled continuation request fingerprint is invalid."
             )
         checkpoint = session.scalar(
             select(WalletCaseStreamCheckpoint).where(

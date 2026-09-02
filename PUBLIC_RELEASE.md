@@ -1,4 +1,4 @@
-# GRAM Scope - v0.95.0 Public Release
+# GRAM Scope - v0.96.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -65,6 +65,11 @@ Public release handoff for the current TON wallet intelligence workspace.
   latest checkpoint chain, separates initial and continued pages, retains root
   and current successful-page frontiers, and reports requested-interval state.
   Summary verifies and exports it without inventing a remaining-page percentage.
+- A budget-bound `bfs_<sha256>` Backfill Schedule that derives one fair ready
+  stream from the exact current Progress and Continuation Plan, pauses under
+  active-sync backpressure, and executes only after exact stale-state and
+  idempotency checks. Acquisition-plan v5 and receipt v3 preserve the selected
+  schedule while keeping execution to one finite, non-repeating step.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -106,7 +111,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.95.0 BACKFILL PROGRESS`.
+- Product release label: `v0.96.0 BACKFILL SCHEDULE`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -261,13 +266,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.95.0`, confirm:
+Before tagging `v0.96.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.95.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.96.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the

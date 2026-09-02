@@ -4,10 +4,31 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.95.0 — Backfill Progress**<br>
+Current product release: **v0.96.0 — Backfill Schedule**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.95.0 adds
+## What v0.96.0 adds
+
+Wallet Case can now turn verified provider-history state into one finite,
+content-addressed Backfill Schedule. A budget-bound
+`GET /api/v1/cases/{case}/stream-checkpoints/backfill-schedule?page_budget=1`
+revalidates the current Backfill Progress and Continuation Plan, applies active
+sync backpressure, and selects the ready stream with the fewest continuation
+pages, then revisions, then stable provider/stream identity. Its canonical
+`bfs_<sha256>` binds all inputs, policy, state, selected checkpoint, and the
+operator's 1–10 page budget.
+
+`POST /api/v1/cases/{case}/stream-checkpoints/backfill-schedule/{schedule}/run`
+executes only that exact current selection. Budget drift, a changed checkpoint,
+or a newly active sync makes the schedule stale; ambiguous retries preserve one
+idempotency key and return the original durable job. Scheduled jobs retain
+acquisition-plan-v5 provenance and publish receipt v3, which binds the accepted
+`bfs_` alongside the existing checkpoint, chain, after-plan, and budget
+accounting. Summary prepares, displays, runs, and exports this one step. It never
+repeats in the background or claims a remaining-page count. No migration is
+added; Alembic remains at `20260828_0028` and backend API remains `0.2.1`.
+
+## v0.95.0 backfill progress
 
 Wallet Case can now measure verified historical-acquisition movement across
 every latest provider stream through
@@ -296,6 +317,8 @@ profit, ownership proof, or complete wallet history.
   verified `cpl_` plan and its exact `scp_` tip.
 - v0.93.0 immutable `ctr_` receipts that reproduce the exact checkpoint and
   plan transition published by a plan-bound resume.
+- v0.96.0 finite, fair, content-addressed Backfill Schedules with active-job
+  backpressure, stale-safe execution, and schedule-bound receipt v3.
 - v0.95.0 content-addressed backfill progress across verified stream frontiers.
 - v0.94.0 finite 1–10 page continuation budgets bound through request,
   execution, receipt accounting, retry, and operator UI.

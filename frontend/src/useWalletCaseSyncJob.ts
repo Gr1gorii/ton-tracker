@@ -7,8 +7,10 @@ import {
   getWalletCaseSync,
   resumeWalletCaseContinuationPlan,
   resumeWalletCaseStreamCheckpoint,
+  runWalletCaseBackfillSchedule,
 } from "./walletCaseApi";
 import type { WalletCaseSync, WalletCaseSyncRequest } from "./walletCase";
+import type { WalletCaseBackfillScheduleResponse } from "./walletCaseStreamCheckpoint";
 
 export type WalletCaseSyncTransportState =
   | "idle"
@@ -28,6 +30,7 @@ export interface WalletCaseSyncJobController {
     checkpointPublicId: string,
     pageBudget?: number,
   ) => Promise<void>;
+  runSchedule: (schedule: WalletCaseBackfillScheduleResponse) => Promise<void>;
   retryPending: () => Promise<void>;
   retry: () => Promise<void>;
   cancel: () => Promise<void>;
@@ -50,6 +53,7 @@ type PendingStart = {
       checkpointPublicId: string;
       pageBudget: number | null;
     }
+  | { kind: "schedule"; schedule: WalletCaseBackfillScheduleResponse }
 );
 
 type RequestedStart =
@@ -59,7 +63,8 @@ type RequestedStart =
       continuationPlanPublicId: string | null;
       checkpointPublicId: string;
       pageBudget: number | null;
-    };
+    }
+  | { kind: "schedule"; schedule: WalletCaseBackfillScheduleResponse };
 
 const TERMINAL_STATES = new Set(["partial", "succeeded", "failed", "cancelled"]);
 const MIN_POLL_MS = 500;
@@ -274,7 +279,9 @@ export function useWalletCaseSyncJob({
         (existing.kind === "resume" && requested.kind === "resume" &&
           existing.continuationPlanPublicId === requested.continuationPlanPublicId &&
           existing.checkpointPublicId === requested.checkpointPublicId &&
-          existing.pageBudget === requested.pageBudget)
+          existing.pageBudget === requested.pageBudget) ||
+        (existing.kind === "schedule" && requested.kind === "schedule" &&
+          existing.schedule.schedule.public_id === requested.schedule.schedule.public_id)
       )
     );
     if (!matchesPending) {
@@ -300,6 +307,13 @@ export function useWalletCaseSyncJob({
             pending.idempotencyKey,
             controller.signal,
           )
+        : pending.kind === "schedule"
+          ? await runWalletCaseBackfillSchedule(
+              caseId,
+              pending.schedule,
+              pending.idempotencyKey,
+              controller.signal,
+            )
         : pending.continuationPlanPublicId === null
           ? await resumeWalletCaseStreamCheckpoint(
               caseId,
@@ -373,11 +387,19 @@ export function useWalletCaseSyncJob({
     });
   }, [begin]);
 
+  const runSchedule = useCallback(async (
+    schedule: WalletCaseBackfillScheduleResponse,
+  ) => {
+    await begin({ kind: "schedule", schedule });
+  }, [begin]);
+
   const retryPending = useCallback(async () => {
     const pending = pendingStartRef.current;
     if (!pending) return;
     if (pending.kind === "sync") {
       await begin({ kind: "sync", request: pending.request });
+    } else if (pending.kind === "schedule") {
+      await begin({ kind: "schedule", schedule: pending.schedule });
     } else {
       await begin({
         kind: "resume",
@@ -461,6 +483,7 @@ export function useWalletCaseSyncJob({
     start,
     resume,
     resumePlanned,
+    runSchedule,
     retryPending,
     retry,
     cancel,

@@ -10,6 +10,7 @@ import {
   createWalletCaseSync,
   deleteWalletCase,
   getWalletCaseBackfillProgress,
+  getWalletCaseBackfillSchedule,
   getWalletCase,
   getWalletCaseCheckpointContinuationReceipt,
   getWalletCaseCheckpointContinuationPlan,
@@ -24,6 +25,7 @@ import {
   listWalletCases,
   restoreWalletCase,
   resumeWalletCaseContinuationPlan,
+  runWalletCaseBackfillSchedule,
   resumeWalletCaseStreamCheckpoint,
   updateWalletCaseMetadata,
 } from "./walletCaseApi";
@@ -49,6 +51,7 @@ import {
 import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
 import {
   backfillProgressFixture,
+  backfillScheduleFixture,
   checkpointContinuationReceiptFixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
@@ -607,6 +610,37 @@ describe("Wallet Case API", () => {
     );
   });
 
+  it("reads a budget-bound no-store backfill schedule", async () => {
+    const schedule = backfillScheduleFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(schedule));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseBackfillSchedule(
+      CASE_ID,
+      3,
+      controller.signal,
+    )).resolves.toEqual(schedule);
+    expect(fetchMock).toHaveBeenCalledWith(
+      (
+        `${API_BASE}/api/v1/cases/${CASE_ID}` +
+        "/stream-checkpoints/backfill-schedule?page_budget=3"
+      ),
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...schedule,
+      document: { ...schedule.document, case_public_id: OTHER_CASE_ID },
+    }));
+    await expect(getWalletCaseBackfillSchedule(CASE_ID, 3)).rejects.toThrow(
+      /does not match/,
+    );
+    await expect(getWalletCaseBackfillSchedule(CASE_ID, 11)).rejects.toThrow(
+      /page budget/,
+    );
+  });
+
   it("reads a no-store continuation plan bound to its Wallet Case", async () => {
     const plan = checkpointContinuationPlanFixture();
     const fetchMock = vi.fn().mockResolvedValue(jsonResponse(plan));
@@ -752,6 +786,54 @@ describe("Wallet Case API", () => {
       CONTINUATION_PLAN_ID,
       CHECKPOINT_ID,
       3,
+      IDEMPOTENCY_KEY,
+    )).rejects.toThrow(/does not match/);
+  });
+
+  it("runs one exact backfill schedule selection", async () => {
+    const schedule = backfillScheduleFixture();
+    const queued = activeResumeSyncFixture();
+    const scheduled = {
+      ...queued,
+      requested_scope: {
+        ...queued.requested_scope,
+        continuation_plan_public_id: schedule.document.input_plan_public_id,
+        source_checkpoint_public_id:
+          schedule.document.selection?.checkpoint_public_id ?? null,
+        resume_page_budget: schedule.document.page_budget,
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(scheduled, 202));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(runWalletCaseBackfillSchedule(
+      CASE_ID,
+      schedule,
+      IDEMPOTENCY_KEY,
+      controller.signal,
+    )).resolves.toEqual(scheduled);
+    expect(fetchMock).toHaveBeenCalledWith(
+      (
+        `${API_BASE}/api/v1/cases/${CASE_ID}/stream-checkpoints/` +
+        `backfill-schedule/${schedule.schedule.public_id}/run`
+      ),
+      {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": IDEMPOTENCY_KEY,
+        },
+        body: JSON.stringify({ page_budget: 3 }),
+        signal: controller.signal,
+      },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(queued, 202));
+    await expect(runWalletCaseBackfillSchedule(
+      CASE_ID,
+      schedule,
       IDEMPOTENCY_KEY,
     )).rejects.toThrow(/does not match/);
   });

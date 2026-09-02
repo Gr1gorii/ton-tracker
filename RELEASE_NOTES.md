@@ -1,3 +1,36 @@
+# GRAM Scope — v0.96.0 BACKFILL SCHEDULE
+
+v0.96.0 converts verified backfill state into one safe operator-controlled
+action. `GET /api/v1/cases/{case}/stream-checkpoints/backfill-schedule` accepts
+a finite 1–10 page budget, revalidates the current `bfp_` Backfill Progress and
+`cpl_` Continuation Plan, and returns a canonical `bfs_<sha256>` document. The
+selection policy advances the ready stream with the fewest continuation pages,
+then revisions, then provider/stream identity, preventing a repeatedly chosen
+stream from silently starving a less-advanced one.
+
+The schedule state explicitly distinguishes `ready`, `backpressured`, `empty`,
+`complete`, and `blocked`. An active Case sync suppresses selection and binds
+its public ID into the backpressured schedule. The run endpoint accepts only an
+exact current `bfs_` plus its original page budget. Changed budgets, checkpoint
+frontiers, or active work fail stale before provider I/O; successful and
+ambiguous retries remain bound to one idempotency key and durable CaseSync.
+
+Accepted runs store acquisition-plan version 5. Their content-addressed
+continuation receipt v3 adds the input schedule ID while preserving the exact
+input/output checkpoints, verified chains, history-cutoff after-plan, and
+authorized/consumed/remaining page accounting. Receipt v1 and v2 contracts
+remain unchanged. The strict client rejects shape, identity, state, selection,
+budget, and provenance drift before display.
+
+Summary now prepares a budgeted schedule, explains the server-selected stream,
+runs exactly one step through the durable sync controller, surfaces
+backpressure and terminal no-selection states, and exports schedule JSON.
+There is no repeating background crawler, percentage, ETA, or complete-history
+claim. No database migration is added; Alembic remains at `20260828_0028` and
+backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.95.0 BACKFILL PROGRESS
 
 v0.95.0 makes backward provider acquisition measurable without inventing a

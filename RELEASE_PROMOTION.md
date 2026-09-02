@@ -1,8 +1,8 @@
-# GRAM Scope — v0.95.0 Promotion Checklist
+# GRAM Scope — v0.96.0 Promotion Checklist
 
-Current promotion gates for verifiable provider-history progress:
+Current promotion gates for finite, verifiable provider-history scheduling:
 
-- Product label is `v0.95.0 BACKFILL PROGRESS`; backend API version stays
+- Product label is `v0.96.0 BACKFILL SCHEDULE`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -140,6 +140,17 @@ Current promotion gates for verifiable provider-history progress:
   counts must be derived from those exact pages; the contract must not invent a
   remaining-page count, ETA, earliest-wallet-activity claim, or full-history
   proof. Summary verifies, displays, and exports the strict contract explicitly.
+- Backfill Schedule must bind its requested 1–10 page budget, exact current
+  `bfp_`, exact current `cpl_`, checkpoint cutoff, selection policy, state,
+  active sync, and optional selected checkpoint into one canonical `bfs_`.
+  Selection must be deterministic by continuation pages, continuation revisions,
+  provider, and stream key. Active Case work must yield `backpressured` with no
+  selection; empty, complete, and blocked states must also enqueue nothing.
+- Schedule execution must reject a changed schedule or budget before provider
+  I/O, retain the accepted `bfs_` in acquisition-plan v5, preserve idempotent
+  replay after checkpoint advancement, and publish receipt v3 with exact
+  schedule provenance plus finite budget accounting. It must enqueue one step
+  only and never repeat automatically.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -263,7 +274,7 @@ Current promotion gates for verifiable provider-history progress:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.95.0 must not be promoted as a hosted Wallet Case release.
+  v0.96.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

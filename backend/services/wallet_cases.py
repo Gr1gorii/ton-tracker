@@ -151,6 +151,28 @@ class WalletCaseContinuationPlanStale(RuntimeError):
         self.current_plan_public_id = current_plan_public_id
 
 
+class WalletCaseBackfillScheduleStale(RuntimeError):
+    """Raised when execution is bound to a superseded schedule."""
+
+    def __init__(self, current_public_id: str, current_state: str) -> None:
+        super().__init__(
+            "Backfill Schedule changed; verify the current schedule before running it."
+        )
+        self.current_public_id = current_public_id
+        self.current_state = current_state
+
+
+class WalletCaseBackfillScheduleUnavailable(RuntimeError):
+    """Raised when the current schedule has no executable selection."""
+
+    def __init__(self, state: str, active_sync_public_id: str | None) -> None:
+        super().__init__(
+            "This Backfill Schedule is not ready to enqueue a provider request."
+        )
+        self.state = state
+        self.active_sync_public_id = active_sync_public_id
+
+
 class WalletCaseContinuationReceiptNotFound(LookupError):
     """Raised when a sync did not publish a plan-bound continuation result."""
 
@@ -885,6 +907,7 @@ class WalletCaseService:
         *,
         continuation_plan_public_id: str | None = None,
         page_budget: int | None = None,
+        backfill_schedule_public_id: str | None = None,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -989,17 +1012,27 @@ class WalletCaseService:
             )
 
         if continuation_plan_public_id is None:
-            if page_budget is not None:
+            if page_budget is not None or backfill_schedule_public_id is not None:
                 raise ValueError(
                     "A page budget requires a verified Continuation Plan."
                 )
         elif type(page_budget) is not int or not 1 <= page_budget <= 10:
             raise ValueError("Continuation page budget must be from 1 through 10.")
+        if backfill_schedule_public_id is not None and (
+            len(backfill_schedule_public_id) != 68
+            or not backfill_schedule_public_id.startswith("bfs_")
+            or any(
+                char not in "0123456789abcdef"
+                for char in backfill_schedule_public_id[4:]
+            )
+        ):
+            raise ValueError("Backfill Schedule public ID is invalid.")
 
         fingerprint = _checkpoint_resume_fingerprint(
             checkpoint.public_id,
             continuation_plan_public_id=continuation_plan_public_id,
             page_budget=page_budget,
+            backfill_schedule_public_id=backfill_schedule_public_id,
         )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
@@ -1024,7 +1057,13 @@ class WalletCaseService:
             settings or get_settings(),
         )
         acquisition_plan = {
-            "version": 4 if continuation_plan_public_id is not None else 2,
+            "version": (
+                5
+                if backfill_schedule_public_id is not None
+                else 4
+                if continuation_plan_public_id is not None
+                else 2
+            ),
             "mode": "resume",
             "start_at": acquisition_start_text,
             "end_at": acquisition_end_text,
@@ -1040,6 +1079,10 @@ class WalletCaseService:
                 continuation_plan_public_id
             )
             acquisition_plan["resume_page_budget"] = page_budget
+        if backfill_schedule_public_id is not None:
+            acquisition_plan["backfill_schedule_public_id"] = (
+                backfill_schedule_public_id
+            )
         expected_data_mode = _ENVIRONMENT_DATA_MODE[
             wallet_case.data_environment
         ]
@@ -1121,6 +1164,7 @@ class WalletCaseService:
         idempotency_key: str,
         *,
         page_budget: int = 1,
+        backfill_schedule_public_id: str | None = None,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -1132,6 +1176,7 @@ class WalletCaseService:
             checkpoint_public_id,
             continuation_plan_public_id=continuation_plan_public_id,
             page_budget=page_budget,
+            backfill_schedule_public_id=backfill_schedule_public_id,
         )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
@@ -1174,6 +1219,7 @@ class WalletCaseService:
             idempotency_key,
             continuation_plan_public_id=continuation_plan_public_id,
             page_budget=page_budget,
+            backfill_schedule_public_id=backfill_schedule_public_id,
             settings=settings,
             now=now,
         )
@@ -1223,7 +1269,7 @@ class WalletCaseService:
             ) from exc
         if (
             acquisition_plan.get("mode") != "resume"
-            or acquisition_plan.get("version") not in {3, 4}
+            or acquisition_plan.get("version") not in {3, 4, 5}
         ):
             raise WalletCaseContinuationReceiptNotFound(
                 "This sync was not accepted from a verified Continuation Plan."
@@ -1332,7 +1378,26 @@ class WalletCaseService:
                 "Stored Wallet Case continuation receipt transition is invalid."
             )
         page_budget = acquisition_plan.get("resume_page_budget")
-        budgeted = acquisition_plan["version"] == 4
+        budgeted = acquisition_plan["version"] in {4, 5}
+        scheduled = acquisition_plan["version"] == 5
+        scheduled_fingerprint = (
+            _checkpoint_resume_fingerprint(
+                source_public_id,
+                continuation_plan_public_id=acquisition_plan[
+                    "continuation_plan_public_id"
+                ],
+                page_budget=page_budget,
+                backfill_schedule_public_id=acquisition_plan[
+                    "backfill_schedule_public_id"
+                ],
+            )
+            if scheduled
+            else None
+        )
+        if scheduled and case_sync.request_fingerprint != scheduled_fingerprint:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case scheduled continuation fingerprint is invalid."
+            )
         if budgeted:
             if (
                 type(page_budget) is not int
@@ -1354,9 +1419,13 @@ class WalletCaseService:
             )
         document = {
             "contract_version": (
-                "wallet_case_checkpoint_continuation_receipt_v2"
-                if budgeted
-                else "wallet_case_checkpoint_continuation_receipt_v1"
+                "wallet_case_checkpoint_continuation_receipt_v3"
+                if scheduled
+                else (
+                    "wallet_case_checkpoint_continuation_receipt_v2"
+                    if budgeted
+                    else "wallet_case_checkpoint_continuation_receipt_v1"
+                )
             ),
             "case_public_id": wallet_case.public_id,
             "sync_public_id": case_sync.public_id,
@@ -1374,6 +1443,15 @@ class WalletCaseService:
                     "continuation_page_index"
                 ],
                 **({"page_budget": page_budget} if budgeted else {}),
+                **(
+                    {
+                        "backfill_schedule_public_id": acquisition_plan[
+                            "backfill_schedule_public_id"
+                        ]
+                    }
+                    if scheduled
+                    else {}
+                ),
             },
             "output": {
                 "checkpoint": output_response["checkpoint"],
@@ -1400,10 +1478,20 @@ class WalletCaseService:
                     ),
                 ),
                 _limitation(
-                    "continuation_receipt_does_not_schedule_next_page",
                     (
-                        "The after-plan is reconstructed at publication time and "
-                        "does not automatically enqueue another provider request."
+                        "continuation_receipt_does_not_repeat_schedule"
+                        if scheduled
+                        else "continuation_receipt_does_not_schedule_next_page"
+                    ),
+                    (
+                        "The accepted schedule authorized this one finite step; "
+                        "the after-plan does not automatically enqueue another "
+                        "provider request."
+                        if scheduled
+                        else (
+                            "The after-plan is reconstructed at publication time and "
+                            "does not automatically enqueue another provider request."
+                        )
                     ),
                 ),
             ],
@@ -1445,6 +1533,10 @@ class WalletCaseService:
                     ],
                 }
             )
+        if scheduled:
+            receipt["input_schedule_public_id"] = acquisition_plan[
+                "backfill_schedule_public_id"
+            ]
         return {
             "receipt": receipt,
             "document": document,
@@ -1655,6 +1747,257 @@ class WalletCaseService:
             },
             "document": document,
         }
+
+    def get_backfill_schedule(
+        self,
+        case_public_id: str,
+        *,
+        page_budget: int = 1,
+    ) -> dict[str, Any]:
+        """Select one fair, finite continuation from current verified state."""
+        if type(page_budget) is not int or not 1 <= page_budget <= 10:
+            raise ValueError("Backfill page budget must be from 1 through 10.")
+        wallet_case = self._required_case(case_public_id)
+        progress = self.get_backfill_progress(wallet_case.public_id)
+        plan = self._checkpoint_continuation_plan_response(wallet_case)
+        progress_document = progress["document"]
+        plan_document = plan["document"]
+        if (
+            progress_document["checkpoint_cutoff_public_id"]
+            != plan_document["checkpoint_cutoff_public_id"]
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Wallet Case backfill schedule inputs have different checkpoint cutoffs."
+            )
+
+        plan_by_identity = {
+            (stream["provider"], stream["stream_key"]): stream
+            for stream in plan_document["streams"]
+        }
+        ready_streams = [
+            stream
+            for stream in progress_document["streams"]
+            if stream["resume_state"] == "ready"
+        ]
+        ready_streams.sort(
+            key=lambda stream: (
+                stream["continuation_page_count"],
+                stream["continuation_revision_count"],
+                stream["provider"],
+                stream["stream_key"],
+            )
+        )
+        selected_progress = ready_streams[0] if ready_streams else None
+        selected_plan = (
+            plan_by_identity.get(
+                (
+                    selected_progress["provider"],
+                    selected_progress["stream_key"],
+                )
+            )
+            if selected_progress is not None
+            else None
+        )
+        if selected_progress is not None and (
+            selected_plan is None
+            or selected_plan["resume_state"] != "ready"
+            or selected_plan["tip_checkpoint"]["public_id"]
+            != selected_progress["tip_checkpoint"]["public_id"]
+            or selected_plan["next_page_index"]
+            != selected_progress["next_page_index"]
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Wallet Case backfill schedule inputs disagree on the selected stream."
+            )
+
+        active = self.repository.get_active_sync(case_id=wallet_case.id)
+        aggregate = progress_document["aggregate"]
+        if active is not None:
+            state = "backpressured"
+            selection = None
+        elif selected_progress is not None:
+            state = "ready"
+            selection = {
+                "provider": selected_progress["provider"],
+                "stream_key": selected_progress["stream_key"],
+                "checkpoint_public_id": selected_progress["tip_checkpoint"][
+                    "public_id"
+                ],
+                "continuation_revision_count": selected_progress[
+                    "continuation_revision_count"
+                ],
+                "continuation_page_count": selected_progress[
+                    "continuation_page_count"
+                ],
+                "next_page_index": selected_progress["next_page_index"],
+            }
+        elif aggregate["stream_count"] == 0:
+            state = "empty"
+            selection = None
+        elif aggregate["blocked_count"] > 0:
+            state = "blocked"
+            selection = None
+        else:
+            state = "complete"
+            selection = None
+
+        document = {
+            "contract_version": "wallet_case_backfill_schedule_v1",
+            "case_public_id": wallet_case.public_id,
+            "input_progress_public_id": progress["progress"]["public_id"],
+            "input_plan_public_id": plan["plan"]["public_id"],
+            "checkpoint_cutoff_public_id": progress_document[
+                "checkpoint_cutoff_public_id"
+            ],
+            "page_budget": page_budget,
+            "selection_policy": (
+                "least_continuation_pages_then_revisions_then_provider_stream_v1"
+            ),
+            "state": state,
+            "stream_count": aggregate["stream_count"],
+            "ready_count": aggregate["ready_count"],
+            "complete_count": aggregate["complete_count"],
+            "blocked_count": aggregate["blocked_count"],
+            "active_sync_public_id": (
+                active.public_id if active is not None else None
+            ),
+            "selection": selection,
+            "limitations": [
+                _limitation(
+                    "backfill_schedule_is_one_finite_step",
+                    (
+                        "This schedule selects at most one provider stream and "
+                        "authorizes only the displayed page budget; it does not "
+                        "repeat or crawl in the background."
+                    ),
+                ),
+                _limitation(
+                    "backfill_schedule_requires_fresh_state",
+                    (
+                        "Any active synchronization applies backpressure, and a "
+                        "new schedule must be verified after every published result."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "schedule": {
+                "public_id": f"bfs_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "state": state,
+                "input_progress_public_id": document[
+                    "input_progress_public_id"
+                ],
+                "input_plan_public_id": document["input_plan_public_id"],
+                "checkpoint_cutoff_public_id": document[
+                    "checkpoint_cutoff_public_id"
+                ],
+                "page_budget": page_budget,
+                "selected_checkpoint_public_id": (
+                    selection["checkpoint_public_id"]
+                    if selection is not None
+                    else None
+                ),
+                "active_sync_public_id": document["active_sync_public_id"],
+            },
+            "document": document,
+        }
+
+    def enqueue_backfill_schedule(
+        self,
+        case_public_id: str,
+        schedule_public_id: str,
+        idempotency_key: str,
+        *,
+        page_budget: int = 1,
+        settings=None,
+        now: datetime | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Queue the one selection bound to an exact current schedule."""
+        if type(page_budget) is not int or not 1 <= page_budget <= 10:
+            raise ValueError("Backfill page budget must be from 1 through 10.")
+        wallet_case = self._required_case(case_public_id)
+        replay = self.repository.get_by_idempotency_key(
+            case_id=wallet_case.id,
+            idempotency_key=idempotency_key,
+        )
+        if replay is not None:
+            try:
+                replay_plan = _sync_acquisition_plan(replay)
+            except ValueError as exc:
+                raise WalletCaseIdempotencyConflict(
+                    "Idempotency-Key was already used for another sync scope."
+                ) from exc
+            if (
+                replay_plan.get("version") != 5
+                or replay_plan.get("backfill_schedule_public_id")
+                != schedule_public_id
+                or replay_plan.get("resume_page_budget") != page_budget
+                or replay.request_fingerprint
+                != _checkpoint_resume_fingerprint(
+                    replay_plan.get("source_checkpoint_public_id", ""),
+                    continuation_plan_public_id=replay_plan.get(
+                        "continuation_plan_public_id"
+                    ),
+                    page_budget=replay_plan.get("resume_page_budget"),
+                    backfill_schedule_public_id=replay_plan.get(
+                        "backfill_schedule_public_id"
+                    ),
+                )
+            ):
+                raise WalletCaseIdempotencyConflict(
+                    "Idempotency-Key was already used for another sync scope."
+                )
+            return self._sync_response(
+                replay,
+                case_public_id=wallet_case.public_id,
+            ), True
+
+        current = self.get_backfill_schedule(
+            wallet_case.public_id,
+            page_budget=page_budget,
+        )
+        descriptor = current["schedule"]
+        if descriptor["public_id"] != schedule_public_id:
+            raise WalletCaseBackfillScheduleStale(
+                descriptor["public_id"],
+                descriptor["state"],
+            )
+        selection = current["document"]["selection"]
+        if descriptor["state"] != "ready" or selection is None:
+            raise WalletCaseBackfillScheduleUnavailable(
+                descriptor["state"],
+                descriptor["active_sync_public_id"],
+            )
+        try:
+            return self.enqueue_checkpoint_plan_resume(
+                wallet_case.public_id,
+                descriptor["input_plan_public_id"],
+                selection["checkpoint_public_id"],
+                idempotency_key,
+                page_budget=page_budget,
+                backfill_schedule_public_id=schedule_public_id,
+                settings=settings,
+                now=now,
+            )
+        except WalletCaseContinuationPlanStale as exc:
+            current = self.get_backfill_schedule(
+                wallet_case.public_id,
+                page_budget=page_budget,
+            )["schedule"]
+            raise WalletCaseBackfillScheduleStale(
+                current["public_id"],
+                current["state"],
+            ) from exc
 
     def _checkpoint_continuation_plan_response(
         self,
@@ -2634,12 +2977,21 @@ def _checkpoint_resume_fingerprint(
     *,
     continuation_plan_public_id: str | None = None,
     page_budget: int | None = None,
+    backfill_schedule_public_id: str | None = None,
 ) -> str:
     document = {
         "contract": "wallet_case_checkpoint_resume_request_v1",
         "checkpoint_public_id": checkpoint_public_id,
     }
-    if continuation_plan_public_id is not None:
+    if backfill_schedule_public_id is not None:
+        document = {
+            "contract": "wallet_case_backfill_schedule_run_request_v1",
+            "backfill_schedule_public_id": backfill_schedule_public_id,
+            "continuation_plan_public_id": continuation_plan_public_id,
+            "checkpoint_public_id": checkpoint_public_id,
+            "page_budget": page_budget,
+        }
+    elif continuation_plan_public_id is not None:
         if page_budget is None:
             document = {
                 "contract": "wallet_case_checkpoint_plan_resume_request_v1",
@@ -2863,11 +3215,15 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     version_four_keys = version_three_keys | {
         "resume_page_budget",
     }
+    version_five_keys = version_four_keys | {
+        "backfill_schedule_public_id",
+    }
     expected_keys_by_version = {
         1: frozenset(version_one_keys),
         2: frozenset(version_two_keys),
         3: frozenset(version_three_keys),
         4: frozenset(version_four_keys),
+        5: frozenset(version_five_keys),
     }
     if (
         not isinstance(stored, dict)
@@ -2886,8 +3242,9 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     resume_page_index = stored.get("resume_page_index")
     continuation_plan_public_id = stored.get("continuation_plan_public_id")
     resume_page_budget = stored.get("resume_page_budget")
+    backfill_schedule_public_id = stored.get("backfill_schedule_public_id")
     if (
-        stored.get("version") not in {1, 2, 3, 4}
+        stored.get("version") not in {1, 2, 3, 4, 5}
         or mode not in {"bounded", "incremental", "resume"}
         or not isinstance(start_at, str)
         or not isinstance(end_at, str)
@@ -2927,7 +3284,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         ):
             raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     elif (
-        stored.get("version") not in {2, 3, 4}
+        stored.get("version") not in {2, 3, 4, 5}
         or not isinstance(base_public_id, str)
         or len(base_public_id) != 36
         or not isinstance(source_checkpoint_public_id, str)
@@ -2943,7 +3300,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         or resume_page_index < 1
         or overlap_seconds != 0
         or (
-            stored.get("version") in {3, 4}
+            stored.get("version") in {3, 4, 5}
             and (
                 not isinstance(continuation_plan_public_id, str)
                 or len(continuation_plan_public_id) != 68
@@ -2955,10 +3312,22 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
             )
         )
         or (
-            stored.get("version") == 4
+            stored.get("version") in {4, 5}
             and (
                 type(resume_page_budget) is not int
                 or not 1 <= resume_page_budget <= 10
+            )
+        )
+        or (
+            stored.get("version") == 5
+            and (
+                not isinstance(backfill_schedule_public_id, str)
+                or len(backfill_schedule_public_id) != 68
+                or not backfill_schedule_public_id.startswith("bfs_")
+                or any(
+                    char not in "0123456789abcdef"
+                    for char in backfill_schedule_public_id[4:]
+                )
             )
         )
     ):

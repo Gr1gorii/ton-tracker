@@ -30,6 +30,7 @@ function controllerFixture(
     start: vi.fn().mockResolvedValue(undefined),
     resume: vi.fn().mockResolvedValue(undefined),
     resumePlanned: vi.fn().mockResolvedValue(undefined),
+    runSchedule: vi.fn().mockResolvedValue(undefined),
     retryPending: vi.fn().mockResolvedValue(undefined),
     retry: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined),

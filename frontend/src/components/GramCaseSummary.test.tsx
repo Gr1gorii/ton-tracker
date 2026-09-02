@@ -17,7 +17,8 @@ import {
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
 import {
   backfillProgressFixture,
-  checkpointContinuationReceiptV2Fixture,
+  backfillScheduleFixture,
+  checkpointContinuationReceiptV3Fixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -43,6 +44,7 @@ function controllerFixture(overrides: Partial<WalletCaseSyncJobController> = {})
     start: vi.fn().mockResolvedValue(undefined),
     resume: vi.fn().mockResolvedValue(undefined),
     resumePlanned: vi.fn().mockResolvedValue(undefined),
+    runSchedule: vi.fn().mockResolvedValue(undefined),
     retryPending: vi.fn().mockResolvedValue(undefined),
     retry: vi.fn().mockResolvedValue(undefined),
     cancel: vi.fn().mockResolvedValue(undefined),
@@ -197,6 +199,7 @@ describe("GramCaseSummary", () => {
     const checkpointDetail = streamCheckpointDetailFixture();
     const checkpointChain = streamCheckpointChainFixture();
     const backfillProgress = backfillProgressFixture();
+    const backfillSchedule = backfillScheduleFixture();
     const continuationPlan = checkpointContinuationPlanFixture();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -213,6 +216,10 @@ describe("GramCaseSummary", () => {
       ))
       .mockResolvedValueOnce(new Response(
         JSON.stringify(backfillProgress),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(backfillSchedule),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ))
       .mockResolvedValueOnce(new Response(
@@ -254,6 +261,18 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText(backfillProgress.progress.public_id)).toBeTruthy();
     expect(screen.getByText(/1\/1 initial pages · \+1\/1 continued · ready/)).toBeTruthy();
     expect(screen.getByText(/Frontier page 1 → 2/)).toBeTruthy();
+    await user.selectOptions(
+      screen.getByRole("combobox", { name: "Backfill schedule page budget" }),
+      "3",
+    );
+    await user.click(screen.getByRole("button", { name: "Prepare next backfill step" }));
+    expect(await screen.findByText("Verified backfill schedule")).toBeTruthy();
+    expect(screen.getByText(backfillSchedule.schedule.public_id)).toBeTruthy();
+    expect(screen.getByText(/Least advanced ready stream · 1 continued pages · next page 3/)).toBeTruthy();
+    await user.click(screen.getByRole("button", {
+      name: "Run scheduled transactions backfill step",
+    }));
+    expect(controller.runSchedule).toHaveBeenCalledWith(backfillSchedule);
     await user.click(screen.getByRole("button", { name: "Verify continuation plan" }));
     expect(await screen.findByText("Verified continuation plan")).toBeTruthy();
     expect(screen.getByText(continuationPlan.plan.public_id)).toBeTruthy();
@@ -283,6 +302,7 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText("#2 · resume")).toBeTruthy();
     const createObjectUrl = vi.fn()
       .mockReturnValueOnce("blob:backfill-progress")
+      .mockReturnValueOnce("blob:backfill-schedule")
       .mockReturnValueOnce("blob:continuation-plan")
       .mockReturnValueOnce("blob:checkpoint-chain");
     const revokeObjectUrl = vi.fn();
@@ -293,12 +313,14 @@ describe("GramCaseSummary", () => {
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => undefined);
     await user.click(screen.getByRole("button", { name: "Export verified backfill progress JSON" }));
+    await user.click(screen.getByRole("button", { name: "Export verified backfill schedule JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified continuation plan JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified chain JSON" }));
-    expect(createObjectUrl).toHaveBeenCalledTimes(3);
-    expect(anchorClick).toHaveBeenCalledTimes(3);
+    expect(createObjectUrl).toHaveBeenCalledTimes(4);
+    expect(anchorClick).toHaveBeenCalledTimes(4);
     expect(revokeObjectUrl.mock.calls).toEqual([
       ["blob:backfill-progress"],
+      ["blob:backfill-schedule"],
       ["blob:continuation-plan"],
       ["blob:checkpoint-chain"],
     ]);
@@ -320,6 +342,10 @@ describe("GramCaseSummary", () => {
       expect.objectContaining({ cache: "no-store" }),
     );
     expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/backfill-schedule?page_budget=3`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/continuation-plan`,
       expect.objectContaining({ cache: "no-store" }),
     );
@@ -334,7 +360,7 @@ describe("GramCaseSummary", () => {
   });
 
   it("verifies and exports the immutable result of a plan-bound resume", async () => {
-    const receipt = checkpointContinuationReceiptV2Fixture();
+    const receipt = checkpointContinuationReceiptV3Fixture();
     const base = resumeSyncFixture();
     const snapshot = resumeSyncFixture({
       requested_scope: {
@@ -369,6 +395,9 @@ describe("GramCaseSummary", () => {
     );
     expect(screen.getByText("Authorized budget").closest("div")?.textContent).toContain("3");
     expect(screen.getByText("Budget remaining").closest("div")?.textContent).toContain("2");
+    expect(screen.getByText("Input schedule").closest("div")?.textContent).toContain(
+      receipt.receipt.input_schedule_public_id,
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/syncs/${snapshot.public_id}/continuation-receipt`,
       expect.objectContaining({ cache: "no-store" }),
