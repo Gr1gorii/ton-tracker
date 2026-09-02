@@ -23,6 +23,7 @@ import {
 } from "./walletCaseSyncManifest";
 import {
   parseWalletCaseBackfillProgress,
+  parseWalletCaseBackfillSchedule,
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
@@ -30,6 +31,7 @@ import {
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
   type WalletCaseBackfillProgressResponse,
+  type WalletCaseBackfillScheduleResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
@@ -57,6 +59,7 @@ const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const CHECKPOINT_ID = /^scp_[0-9a-f]{64}$/;
 const CONTINUATION_PLAN_ID = /^cpl_[0-9a-f]{64}$/;
+const BACKFILL_SCHEDULE_ID = /^bfs_[0-9a-f]{64}$/;
 const ACTIVITY_KINDS = ["transaction", "transfer", "swap"] as const;
 const ACTIVITY_DIRECTIONS = ["in", "out", "unknown"] as const;
 const ACTIVITY_OUTCOMES = ["success", "failed", "unknown"] as const;
@@ -686,6 +689,36 @@ export async function getWalletCaseBackfillProgress(
   return progress;
 }
 
+export async function getWalletCaseBackfillSchedule(
+  caseId: string,
+  pageBudget: number,
+  signal?: AbortSignal,
+): Promise<WalletCaseBackfillScheduleResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  assertContinuationPageBudget(pageBudget);
+  const response = await fetch(
+    (
+      `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}` +
+      `/stream-checkpoints/backfill-schedule?page_budget=${pageBudget}`
+    ),
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case backfill schedule read failed",
+    );
+  }
+  const schedule = parseWalletCaseBackfillSchedule(await response.json());
+  if (
+    schedule.document.case_public_id !== caseId ||
+    schedule.document.page_budget !== pageBudget
+  ) {
+    throw new Error("Wallet Case backfill schedule does not match the request");
+  }
+  return schedule;
+}
+
 export async function getWalletCaseCheckpointContinuationReceipt(
   caseId: string,
   syncId: string,
@@ -841,6 +874,58 @@ export async function resumeWalletCaseContinuationPlan(
   return sync;
 }
 
+export async function runWalletCaseBackfillSchedule(
+  caseId: string,
+  value: WalletCaseBackfillScheduleResponse,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseSync> {
+  assertPublicId(caseId, "Wallet Case id");
+  const schedule = parseWalletCaseBackfillSchedule(value);
+  assertBackfillScheduleId(schedule.schedule.public_id);
+  assertPublicId(idempotencyKey, "Wallet Case sync idempotency key");
+  if (
+    schedule.document.case_public_id !== caseId ||
+    schedule.schedule.state !== "ready" ||
+    schedule.document.selection === null
+  ) {
+    throw new Error("Wallet Case backfill schedule is not ready for this request");
+  }
+  const response = await fetch(
+    (
+      `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}` +
+      "/stream-checkpoints/backfill-schedule/" +
+      `${encodeURIComponent(schedule.schedule.public_id)}/run`
+    ),
+    {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ page_budget: schedule.document.page_budget }),
+      signal,
+    },
+  );
+  if (response.status !== 202) {
+    throw await walletCaseResponseError(response, "Wallet Case backfill schedule run failed");
+  }
+  const sync = bindSyncToRequest(await response.json(), caseId);
+  if (
+    sync.requested_scope.mode !== "resume" ||
+    sync.requested_scope.continuation_plan_public_id !==
+      schedule.document.input_plan_public_id ||
+    sync.requested_scope.source_checkpoint_public_id !==
+      schedule.document.selection.checkpoint_public_id ||
+    sync.requested_scope.resume_page_budget !== schedule.document.page_budget ||
+    sync.requested_scope.base_snapshot_public_id === null
+  ) {
+    throw new Error("Wallet Case backfill schedule response does not match the request");
+  }
+  return sync;
+}
+
 export async function cancelWalletCaseSync(
   caseId: string,
   syncId: string,
@@ -954,6 +1039,12 @@ function assertCheckpointId(value: string): void {
 function assertContinuationPlanId(value: string): void {
   if (!CONTINUATION_PLAN_ID.test(value)) {
     throw new Error("Wallet Case continuation plan id is invalid");
+  }
+}
+
+function assertBackfillScheduleId(value: string): void {
+  if (!BACKFILL_SCHEDULE_ID.test(value)) {
+    throw new Error("Wallet Case backfill schedule id is invalid");
   }
 }
 

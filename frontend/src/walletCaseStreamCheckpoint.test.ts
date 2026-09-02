@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   backfillProgressFixture,
+  backfillScheduleFixture,
   checkpointContinuationReceiptFixture,
   checkpointContinuationReceiptV2Fixture,
+  checkpointContinuationReceiptV3Fixture,
   checkpointContinuationPlanFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -12,6 +14,7 @@ import {
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
   parseWalletCaseBackfillProgress,
+  parseWalletCaseBackfillSchedule,
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
@@ -19,6 +22,7 @@ import {
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
   serializeWalletCaseBackfillProgress,
+  serializeWalletCaseBackfillSchedule,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
@@ -177,6 +181,38 @@ describe("Wallet Case stream checkpoint contracts", () => {
     })).toThrow(/stream 0 is inconsistent/);
   });
 
+  it("accepts and exports a finite content-addressed backfill schedule", () => {
+    const schedule = backfillScheduleFixture();
+
+    expect(parseWalletCaseBackfillSchedule(schedule)).toEqual(schedule);
+    expect(JSON.parse(serializeWalletCaseBackfillSchedule(schedule))).toEqual(schedule);
+  });
+
+  it("rejects backfill schedule identity, budget, selection, and state drift", () => {
+    const schedule = backfillScheduleFixture();
+    expect(() => parseWalletCaseBackfillSchedule({
+      ...schedule,
+      schedule: { ...schedule.schedule, public_id: `bfs_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseBackfillSchedule({
+      ...schedule,
+      document: { ...schedule.document, page_budget: 11 },
+    })).toThrow(/page budget/);
+    expect(() => parseWalletCaseBackfillSchedule({
+      ...schedule,
+      document: { ...schedule.document, selection: null },
+    })).toThrow(/inconsistent/);
+    expect(() => parseWalletCaseBackfillSchedule({
+      ...schedule,
+      document: {
+        ...schedule.document,
+        state: "backpressured",
+        active_sync_public_id: null,
+        selection: null,
+      },
+    })).toThrow(/inconsistent/);
+  });
+
   it("accepts and exports a strictly aggregated continuation plan", () => {
     const plan = checkpointContinuationPlanFixture();
 
@@ -274,6 +310,22 @@ describe("Wallet Case stream checkpoint contracts", () => {
           ...receipt.document.transition,
           page_budget_remaining: 1,
         },
+      },
+    })).toThrow(/transition is inconsistent/);
+  });
+
+  it("binds a scheduled receipt v3 to its exact backfill schedule", () => {
+    const receipt = checkpointContinuationReceiptV3Fixture();
+
+    expect(parseWalletCaseCheckpointContinuationReceipt(receipt)).toEqual(receipt);
+    expect(JSON.parse(
+      serializeWalletCaseCheckpointContinuationReceipt(receipt),
+    )).toEqual(receipt);
+    expect(() => parseWalletCaseCheckpointContinuationReceipt({
+      ...receipt,
+      receipt: {
+        ...receipt.receipt,
+        input_schedule_public_id: `bfs_${"0".repeat(64)}`,
       },
     })).toThrow(/transition is inconsistent/);
   });

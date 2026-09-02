@@ -204,6 +204,54 @@ export interface WalletCaseBackfillProgressResponse {
   };
 }
 
+export type WalletCaseBackfillScheduleState =
+  | "ready"
+  | "backpressured"
+  | "empty"
+  | "complete"
+  | "blocked";
+
+export interface WalletCaseBackfillScheduleSelection {
+  provider: string;
+  stream_key: string;
+  checkpoint_public_id: string;
+  continuation_revision_count: number;
+  continuation_page_count: number;
+  next_page_index: number;
+}
+
+export interface WalletCaseBackfillScheduleResponse {
+  schedule: {
+    public_id: string;
+    contract_version: "wallet_case_backfill_schedule_v1";
+    content_hash_sha256: string;
+    state: WalletCaseBackfillScheduleState;
+    input_progress_public_id: string;
+    input_plan_public_id: string;
+    checkpoint_cutoff_public_id: string | null;
+    page_budget: number;
+    selected_checkpoint_public_id: string | null;
+    active_sync_public_id: string | null;
+  };
+  document: {
+    contract_version: "wallet_case_backfill_schedule_v1";
+    case_public_id: string;
+    input_progress_public_id: string;
+    input_plan_public_id: string;
+    checkpoint_cutoff_public_id: string | null;
+    page_budget: number;
+    selection_policy: "least_continuation_pages_then_revisions_then_provider_stream_v1";
+    state: WalletCaseBackfillScheduleState;
+    stream_count: number;
+    ready_count: number;
+    complete_count: number;
+    blocked_count: number;
+    active_sync_public_id: string | null;
+    selection: WalletCaseBackfillScheduleSelection | null;
+    limitations: WalletCaseLimitation[];
+  };
+}
+
 export interface WalletCaseCheckpointContinuationPlanStream {
   provider: string;
   stream_key: string;
@@ -340,9 +388,23 @@ export interface WalletCaseCheckpointContinuationReceiptV2Response {
   };
 }
 
+export interface WalletCaseCheckpointContinuationReceiptV3Response {
+  receipt: Omit<WalletCaseCheckpointContinuationReceiptV2Response["receipt"], "contract_version"> & {
+    contract_version: "wallet_case_checkpoint_continuation_receipt_v3";
+    input_schedule_public_id: string;
+  };
+  document: Omit<WalletCaseCheckpointContinuationReceiptV2Response["document"], "contract_version" | "input"> & {
+    contract_version: "wallet_case_checkpoint_continuation_receipt_v3";
+    input: WalletCaseCheckpointContinuationReceiptV2Response["document"]["input"] & {
+      backfill_schedule_public_id: string;
+    };
+  };
+}
+
 export type WalletCaseCheckpointContinuationReceiptResponse =
   | WalletCaseCheckpointContinuationReceiptV1Response
-  | WalletCaseCheckpointContinuationReceiptV2Response;
+  | WalletCaseCheckpointContinuationReceiptV2Response
+  | WalletCaseCheckpointContinuationReceiptV3Response;
 
 const PUBLIC_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -350,6 +412,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const CHECKPOINT_ID = /^scp_([0-9a-f]{64})$/;
 const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
 const BACKFILL_PROGRESS_ID = /^bfp_([0-9a-f]{64})$/;
+const BACKFILL_SCHEDULE_ID = /^bfs_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_PLAN_ID = /^cpl_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_RECEIPT_ID = /^ctr_([0-9a-f]{64})$/;
 const MANIFEST_ID = /^smf_([0-9a-f]{64})$/;
@@ -1309,6 +1372,166 @@ export function serializeWalletCaseBackfillProgress(value: unknown): string {
   return `${JSON.stringify(parseWalletCaseBackfillProgress(value), null, 2)}\n`;
 }
 
+export function parseWalletCaseBackfillSchedule(
+  value: unknown,
+): WalletCaseBackfillScheduleResponse {
+  const envelope = record(value, ["schedule", "document"], "backfill schedule response");
+  const descriptor = record(envelope.schedule, [
+    "public_id", "contract_version", "content_hash_sha256", "state",
+    "input_progress_public_id", "input_plan_public_id",
+    "checkpoint_cutoff_public_id", "page_budget",
+    "selected_checkpoint_public_id", "active_sync_public_id",
+  ], "backfill schedule descriptor");
+  if (descriptor.contract_version !== "wallet_case_backfill_schedule_v1") {
+    fail("backfill schedule descriptor contract is unsupported");
+  }
+  const contentHash = digest(descriptor.content_hash_sha256, "backfill schedule hash");
+  const scheduleId = text(descriptor.public_id, "backfill schedule id", 68);
+  if (BACKFILL_SCHEDULE_ID.exec(scheduleId)?.[1] !== contentHash) {
+    fail("backfill schedule identity is invalid");
+  }
+  const descriptorState = backfillScheduleState(
+    descriptor.state,
+    "backfill schedule descriptor state",
+  );
+  const descriptorProgressId = backfillProgressId(
+    descriptor.input_progress_public_id,
+    "backfill schedule descriptor progress id",
+  );
+  const descriptorPlanId = continuationPlanId(
+    descriptor.input_plan_public_id,
+    "backfill schedule descriptor plan id",
+  );
+  const descriptorCutoff = descriptor.checkpoint_cutoff_public_id === null
+    ? null : checkpointId(descriptor.checkpoint_cutoff_public_id, "backfill schedule descriptor cutoff");
+  const descriptorBudget = backfillPageBudget(
+    descriptor.page_budget,
+    "backfill schedule descriptor page budget",
+  );
+  const descriptorSelected = descriptor.selected_checkpoint_public_id === null
+    ? null : checkpointId(
+      descriptor.selected_checkpoint_public_id,
+      "backfill schedule descriptor selected checkpoint",
+    );
+  const descriptorActive = descriptor.active_sync_public_id === null
+    ? null : publicId(descriptor.active_sync_public_id, "backfill schedule descriptor active sync");
+
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "input_progress_public_id",
+    "input_plan_public_id", "checkpoint_cutoff_public_id", "page_budget",
+    "selection_policy", "state", "stream_count", "ready_count",
+    "complete_count", "blocked_count", "active_sync_public_id", "selection",
+    "limitations",
+  ], "backfill schedule document");
+  if (document.contract_version !== "wallet_case_backfill_schedule_v1") {
+    fail("backfill schedule document contract is unsupported");
+  }
+  const caseId = publicId(document.case_public_id, "backfill schedule case id");
+  const progressId = backfillProgressId(
+    document.input_progress_public_id,
+    "backfill schedule progress id",
+  );
+  const planId = continuationPlanId(document.input_plan_public_id, "backfill schedule plan id");
+  const cutoff = document.checkpoint_cutoff_public_id === null
+    ? null : checkpointId(document.checkpoint_cutoff_public_id, "backfill schedule cutoff");
+  const pageBudget = backfillPageBudget(document.page_budget, "backfill schedule page budget");
+  if (
+    document.selection_policy !==
+    "least_continuation_pages_then_revisions_then_provider_stream_v1"
+  ) fail("backfill schedule selection policy is unsupported");
+  const state = backfillScheduleState(document.state, "backfill schedule state");
+  const streamCount = integer(document.stream_count, "backfill schedule stream count");
+  const readyCount = integer(document.ready_count, "backfill schedule ready count");
+  const completeCount = integer(document.complete_count, "backfill schedule complete count");
+  const blockedCount = integer(document.blocked_count, "backfill schedule blocked count");
+  const activeSyncId = document.active_sync_public_id === null
+    ? null : publicId(document.active_sync_public_id, "backfill schedule active sync id");
+  let selection: WalletCaseBackfillScheduleSelection | null = null;
+  if (document.selection !== null) {
+    const item = record(document.selection, [
+      "provider", "stream_key", "checkpoint_public_id",
+      "continuation_revision_count", "continuation_page_count", "next_page_index",
+    ], "backfill schedule selection");
+    selection = {
+      provider: text(item.provider, "backfill schedule selection provider", 64),
+      stream_key: text(item.stream_key, "backfill schedule selection stream", 40),
+      checkpoint_public_id: checkpointId(
+        item.checkpoint_public_id,
+        "backfill schedule selection checkpoint",
+      ),
+      continuation_revision_count: integer(
+        item.continuation_revision_count,
+        "backfill schedule selection continuation revisions",
+      ),
+      continuation_page_count: integer(
+        item.continuation_page_count,
+        "backfill schedule selection continuation pages",
+      ),
+      next_page_index: integer(item.next_page_index, "backfill schedule selection next page"),
+    };
+    if (
+      selection.continuation_revision_count > 99 || selection.next_page_index < 1
+    ) fail("backfill schedule selection is inconsistent");
+  }
+  const countsValid = streamCount <= 32 && readyCount <= 32 &&
+    completeCount <= 32 && blockedCount <= 32 &&
+    streamCount === readyCount + completeCount + blockedCount;
+  const stateValid = state === "ready"
+    ? readyCount > 0 && activeSyncId === null && selection !== null
+    : state === "backpressured"
+      ? activeSyncId !== null && selection === null
+      : state === "empty"
+        ? streamCount === 0 && activeSyncId === null && selection === null
+        : state === "complete"
+          ? streamCount > 0 && readyCount === 0 && blockedCount === 0 &&
+            activeSyncId === null && selection === null
+          : readyCount === 0 && blockedCount > 0 && activeSyncId === null && selection === null;
+  if (
+    !countsValid || !stateValid || descriptorState !== state ||
+    descriptorProgressId !== progressId || descriptorPlanId !== planId ||
+    descriptorCutoff !== cutoff || descriptorBudget !== pageBudget ||
+    descriptorSelected !== (
+      selection === null ? null : selection.checkpoint_public_id
+    ) ||
+    descriptorActive !== activeSyncId
+  ) fail("backfill schedule is inconsistent");
+  return {
+    schedule: {
+      public_id: scheduleId,
+      contract_version: "wallet_case_backfill_schedule_v1",
+      content_hash_sha256: contentHash,
+      state: descriptorState,
+      input_progress_public_id: descriptorProgressId,
+      input_plan_public_id: descriptorPlanId,
+      checkpoint_cutoff_public_id: descriptorCutoff,
+      page_budget: descriptorBudget,
+      selected_checkpoint_public_id: descriptorSelected,
+      active_sync_public_id: descriptorActive,
+    },
+    document: {
+      contract_version: "wallet_case_backfill_schedule_v1",
+      case_public_id: caseId,
+      input_progress_public_id: progressId,
+      input_plan_public_id: planId,
+      checkpoint_cutoff_public_id: cutoff,
+      page_budget: pageBudget,
+      selection_policy: "least_continuation_pages_then_revisions_then_provider_stream_v1",
+      state,
+      stream_count: streamCount,
+      ready_count: readyCount,
+      complete_count: completeCount,
+      blocked_count: blockedCount,
+      active_sync_public_id: activeSyncId,
+      selection,
+      limitations: limitations(document.limitations, "backfill schedule limitations"),
+    },
+  };
+}
+
+export function serializeWalletCaseBackfillSchedule(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseBackfillSchedule(value), null, 2)}\n`;
+}
+
 export function parseWalletCaseCheckpointContinuationPlan(
   value: unknown,
 ): WalletCaseCheckpointContinuationPlanResponse {
@@ -1534,7 +1757,9 @@ export function parseWalletCaseCheckpointContinuationReceipt(
   ) fail("checkpoint continuation receipt descriptor is invalid");
   const receiptContract = (envelope.receipt as Record<string, unknown>)
     .contract_version;
-  const isBudgeted = receiptContract ===
+  const isScheduled = receiptContract ===
+    "wallet_case_checkpoint_continuation_receipt_v3";
+  const isBudgeted = isScheduled || receiptContract ===
     "wallet_case_checkpoint_continuation_receipt_v2";
   if (
     !isBudgeted &&
@@ -1548,6 +1773,7 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     ...(isBudgeted ? [
       "page_budget", "page_budget_consumed", "page_budget_remaining",
     ] : []),
+    ...(isScheduled ? ["input_schedule_public_id"] : []),
   ], "checkpoint continuation receipt descriptor");
   const contentHash = digest(
     receipt.content_hash_sha256,
@@ -1608,6 +1834,12 @@ export function parseWalletCaseCheckpointContinuationReceipt(
         "checkpoint continuation receipt remaining page budget",
       )
     : null;
+  const receiptInputScheduleId = isScheduled
+    ? backfillScheduleId(
+        receipt.input_schedule_public_id,
+        "checkpoint continuation receipt input schedule id",
+      )
+    : null;
 
   const document = record(envelope.document, [
     "contract_version", "case_public_id", "sync_public_id", "input", "output",
@@ -1629,6 +1861,7 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     "chain_content_hash_sha256", "revision_count", "page_count",
     "pages_succeeded", "next_page_index",
     ...(isBudgeted ? ["page_budget"] : []),
+    ...(isScheduled ? ["backfill_schedule_public_id"] : []),
   ], "checkpoint continuation receipt input");
   const inputPlanId = continuationPlanId(
     sourceItem.continuation_plan_public_id,
@@ -1664,6 +1897,12 @@ export function parseWalletCaseCheckpointContinuationReceipt(
     ? integer(
         sourceItem.page_budget,
         "checkpoint continuation receipt input page budget",
+      )
+    : null;
+  const inputScheduleId = isScheduled
+    ? backfillScheduleId(
+        sourceItem.backfill_schedule_public_id,
+        "checkpoint continuation receipt accepted schedule id",
       )
     : null;
   if (
@@ -1821,7 +2060,8 @@ export function parseWalletCaseCheckpointContinuationReceipt(
       receiptPageBudget !== inputPageBudget ||
       receiptBudgetConsumed !== budgetConsumed ||
       receiptBudgetRemaining !== budgetRemaining
-    ))
+    )) ||
+    (isScheduled && receiptInputScheduleId !== inputScheduleId)
   ) fail("checkpoint continuation receipt transition is inconsistent");
 
   const parsedLimitations = limitations(
@@ -1834,10 +2074,10 @@ export function parseWalletCaseCheckpointContinuationReceipt(
       budgetRemaining === null || receiptPageBudget === null ||
       receiptBudgetConsumed === null || receiptBudgetRemaining === null
     ) fail("checkpoint continuation receipt budget is inconsistent");
-    return {
+    const budgetedResponse = {
       receipt: {
         public_id: receiptId,
-        contract_version: "wallet_case_checkpoint_continuation_receipt_v2",
+        contract_version: receiptContract,
         content_hash_sha256: contentHash,
         sync_public_id: receiptSyncId,
         input_plan_public_id: receiptInputPlanId,
@@ -1850,12 +2090,21 @@ export function parseWalletCaseCheckpointContinuationReceipt(
         page_budget: receiptPageBudget,
         page_budget_consumed: receiptBudgetConsumed,
         page_budget_remaining: receiptBudgetRemaining,
+        ...(isScheduled && inputScheduleId !== null
+          ? { input_schedule_public_id: inputScheduleId }
+          : {}),
       },
       document: {
-        contract_version: "wallet_case_checkpoint_continuation_receipt_v2",
+        contract_version: receiptContract,
         case_public_id: caseId,
         sync_public_id: syncId,
-        input: { ...input, page_budget: inputPageBudget },
+        input: {
+          ...input,
+          page_budget: inputPageBudget,
+          ...(isScheduled && inputScheduleId !== null
+            ? { backfill_schedule_public_id: inputScheduleId }
+            : {}),
+        },
         output,
         after_plan: afterPlan,
         transition: {
@@ -1870,6 +2119,7 @@ export function parseWalletCaseCheckpointContinuationReceipt(
         limitations: parsedLimitations,
       },
     };
+    return budgetedResponse as WalletCaseCheckpointContinuationReceiptResponse;
   }
 
   return {
@@ -1908,6 +2158,35 @@ export function parseWalletCaseCheckpointContinuationReceipt(
 function continuationPlanId(value: unknown, label: string): string {
   const result = text(value, label, 68);
   if (!CHECKPOINT_CONTINUATION_PLAN_ID.test(result)) fail(`${label} is invalid`);
+  return result;
+}
+
+function backfillProgressId(value: unknown, label: string): string {
+  const result = text(value, label, 68);
+  if (!BACKFILL_PROGRESS_ID.test(result)) fail(`${label} is invalid`);
+  return result;
+}
+
+function backfillScheduleId(value: unknown, label: string): string {
+  const result = text(value, label, 68);
+  if (!BACKFILL_SCHEDULE_ID.test(result)) fail(`${label} is invalid`);
+  return result;
+}
+
+function backfillScheduleState(
+  value: unknown,
+  label: string,
+): WalletCaseBackfillScheduleState {
+  const result = text(value, label, 16) as WalletCaseBackfillScheduleState;
+  if (!new Set(["ready", "backpressured", "empty", "complete", "blocked"]).has(result)) {
+    fail(`${label} is invalid`);
+  }
+  return result;
+}
+
+function backfillPageBudget(value: unknown, label: string): number {
+  const result = integer(value, label);
+  if (result < 1 || result > 10) fail(`${label} is invalid`);
   return result;
 }
 

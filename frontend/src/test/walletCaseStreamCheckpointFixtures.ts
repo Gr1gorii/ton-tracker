@@ -1,7 +1,9 @@
 import type {
   WalletCaseBackfillProgressResponse,
+  WalletCaseBackfillScheduleResponse,
   WalletCaseCheckpointContinuationReceiptV1Response,
   WalletCaseCheckpointContinuationReceiptV2Response,
+  WalletCaseCheckpointContinuationReceiptV3Response,
   WalletCaseCheckpointContinuationPlanResponse,
   WalletCaseStreamCheckpointCatalogResponse,
   WalletCaseStreamCheckpointChainResponse,
@@ -338,6 +340,54 @@ export function backfillProgressFixture(): WalletCaseBackfillProgressResponse {
   };
 }
 
+export function backfillScheduleFixture(): WalletCaseBackfillScheduleResponse {
+  const progress = backfillProgressFixture();
+  const plan = checkpointContinuationPlanFixture();
+  const selected = progress.document.streams[0];
+  const scheduleHash = "8c".repeat(32);
+  return {
+    schedule: {
+      public_id: `bfs_${scheduleHash}`,
+      contract_version: "wallet_case_backfill_schedule_v1",
+      content_hash_sha256: scheduleHash,
+      state: "ready",
+      input_progress_public_id: progress.progress.public_id,
+      input_plan_public_id: plan.plan.public_id,
+      checkpoint_cutoff_public_id: progress.progress.checkpoint_cutoff_public_id,
+      page_budget: 3,
+      selected_checkpoint_public_id: selected.tip_checkpoint.public_id,
+      active_sync_public_id: null,
+    },
+    document: {
+      contract_version: "wallet_case_backfill_schedule_v1",
+      case_public_id: CASE_ID,
+      input_progress_public_id: progress.progress.public_id,
+      input_plan_public_id: plan.plan.public_id,
+      checkpoint_cutoff_public_id: progress.progress.checkpoint_cutoff_public_id,
+      page_budget: 3,
+      selection_policy: "least_continuation_pages_then_revisions_then_provider_stream_v1",
+      state: "ready",
+      stream_count: 1,
+      ready_count: 1,
+      complete_count: 0,
+      blocked_count: 0,
+      active_sync_public_id: null,
+      selection: {
+        provider: selected.provider,
+        stream_key: selected.stream_key,
+        checkpoint_public_id: selected.tip_checkpoint.public_id,
+        continuation_revision_count: selected.continuation_revision_count,
+        continuation_page_count: selected.continuation_page_count,
+        next_page_index: selected.next_page_index as number,
+      },
+      limitations: [{
+        code: "backfill_schedule_is_one_finite_step",
+        message: "This schedule selects one finite provider continuation.",
+      }],
+    },
+  };
+}
+
 export function checkpointContinuationReceiptFixture(): WalletCaseCheckpointContinuationReceiptV1Response {
   const outputChain = streamCheckpointChainFixture();
   const afterPlan = checkpointContinuationPlanFixture();
@@ -423,6 +473,26 @@ export function checkpointContinuationReceiptV2Fixture(): WalletCaseCheckpointCo
         ...legacy.document.transition,
         page_budget_consumed: 1,
         page_budget_remaining: 2,
+      },
+    },
+  };
+}
+
+export function checkpointContinuationReceiptV3Fixture(): WalletCaseCheckpointContinuationReceiptV3Response {
+  const budgeted = checkpointContinuationReceiptV2Fixture();
+  const scheduleId = backfillScheduleFixture().schedule.public_id;
+  return {
+    receipt: {
+      ...budgeted.receipt,
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v3",
+      input_schedule_public_id: scheduleId,
+    },
+    document: {
+      ...budgeted.document,
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v3",
+      input: {
+        ...budgeted.document.input,
+        backfill_schedule_public_id: scheduleId,
       },
     },
   };
