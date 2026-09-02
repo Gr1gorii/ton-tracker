@@ -1,8 +1,8 @@
-# GRAM Scope — v0.94.0 Promotion Checklist
+# GRAM Scope — v0.95.0 Promotion Checklist
 
-Current promotion gates for finite, verifiable plan-bound continuation:
+Current promotion gates for verifiable provider-history progress:
 
-- Product label is `v0.94.0 BUDGETED CONTINUATION`; backend API version stays
+- Product label is `v0.95.0 BACKFILL PROGRESS`; backend API version stays
   independently frozen at `0.2.1`.
 - Alembic reaches revision `20260828_0028` with exact model parity from fresh,
   legacy, current-0018/0019/0020/0021, and every accepted interrupted table/index
@@ -130,6 +130,16 @@ Current promotion gates for finite, verifiable plan-bound continuation:
   state, plan, and delta contradictions. Summary loads only on an explicit
   action, displays the accepted-to-published transition, exports verified JSON,
   and preserves the not-full-history and no-automatic-scheduling boundaries.
+- Backfill Progress must recursively verify every latest provider-stream chain,
+  bind its checkpoint cutoff and `cch_` identities, separate initial from
+  continuation revision/page totals, and recompute its canonical
+  `bfp_<sha256>` identity. Empty Cases remain deterministic and corrupt member
+  chains fail closed.
+- Root and current frontiers must contain only successful-page evidence already
+  present in the verified checkpoints. `frontier_advanced` and all aggregate
+  counts must be derived from those exact pages; the contract must not invent a
+  remaining-page count, ETA, earliest-wallet-activity claim, or full-history
+  proof. Summary verifies, displays, and exports the strict contract explicitly.
 - Incremental enqueue requires the latest usable base snapshot, identical
   surfaces, and a forward request time. It persists a composed snapshot period,
   a 15-minute acquisition overlap, the actual provider bounds, and the base
@@ -253,7 +263,7 @@ Current promotion gates for finite, verifiable plan-bound continuation:
   basis, and is not used by PnL. The report does not inflate that artifact.
 - The pre-authentication facade and Evidence runner are direct-loopback only.
   Hosted access remains disabled until authentication supplies an owner scope;
-  v0.94.0 must not be promoted as a hosted Wallet Case release.
+  v0.95.0 must not be promoted as a hosted Wallet Case release.
 - Backend, frontend, migration rehearsal, production contract, browser, live
   provider, credential, and prohibited-brand checks pass before tagging.
 

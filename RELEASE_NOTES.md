@@ -1,3 +1,30 @@
+# GRAM Scope — v0.95.0 BACKFILL PROGRESS
+
+v0.95.0 makes backward provider acquisition measurable without inventing a
+completion percentage. The new
+`GET /api/v1/cases/{case}/stream-checkpoints/backfill-progress` endpoint
+recursively verifies every latest provider-stream chain and returns a canonical
+`bfp_<sha256>` document bound to its checkpoint cutoff.
+
+Each stream separates initial from continuation revisions and pages, binds its
+root and tip checkpoint plus `cch_` chain identity, reports the requested
+interval state, and retains root/current successful-page frontiers with page,
+cursor, digest, logical-time, timestamp, and fetch-time evidence. Aggregates
+show observed and actually advanced frontiers alongside ready, complete, and
+blocked states. Empty Cases remain deterministic; corrupt checkpoint,
+manifest, acquisition-plan, or lineage data fails closed.
+
+The strict browser parser rejects shape, identity, total, state, and frontier
+contradictions before display. Summary verifies progress only on explicit
+request, visualizes root-to-current frontier movement and continuation page
+counts, and exports the verified JSON. Provider cursors do not reveal a
+reliable remaining-page denominator, so this release deliberately omits ETA
+and percent-complete claims. Frontier evidence does not prove earliest wallet
+activity or complete history. No database migration is added; Alembic remains
+at `20260828_0028` and backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.94.0 BUDGETED CONTINUATION
 
 v0.94.0 lets an operator advance one verified provider stream by a finite

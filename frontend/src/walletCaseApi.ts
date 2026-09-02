@@ -22,12 +22,14 @@ import {
   type WalletCaseSyncManifestResponse,
 } from "./walletCaseSyncManifest";
 import {
+  parseWalletCaseBackfillProgress,
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
+  type WalletCaseBackfillProgressResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
@@ -660,6 +662,28 @@ export async function getWalletCaseCheckpointContinuationPlan(
     throw new Error("Wallet Case checkpoint continuation plan does not match the request");
   }
   return plan;
+}
+
+export async function getWalletCaseBackfillProgress(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseBackfillProgressResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/stream-checkpoints/backfill-progress`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case backfill progress read failed",
+    );
+  }
+  const progress = parseWalletCaseBackfillProgress(await response.json());
+  if (progress.document.case_public_id !== caseId) {
+    throw new Error("Wallet Case backfill progress does not match the request");
+  }
+  return progress;
 }
 
 export async function getWalletCaseCheckpointContinuationReceipt(

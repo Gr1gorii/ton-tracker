@@ -139,6 +139,71 @@ export interface WalletCaseStreamCheckpointChainResponse {
   };
 }
 
+export interface WalletCaseBackfillProgressFrontier {
+  checkpoint_public_id: string;
+  page: WalletCaseStreamCheckpointLastPage;
+}
+
+export interface WalletCaseBackfillProgressStream {
+  provider: string;
+  stream_key: string;
+  provider_contract_version: string;
+  root_checkpoint_public_id: string;
+  tip_checkpoint: WalletCaseStreamCheckpointDescriptor;
+  chain_public_id: string;
+  chain_content_hash_sha256: string;
+  root_acquisition_mode: "bounded" | "incremental";
+  requested_period: WalletCaseSyncManifestPeriod;
+  revision_count: number;
+  initial_page_count: number;
+  initial_pages_succeeded: number;
+  continuation_revision_count: number;
+  continuation_page_count: number;
+  continuation_pages_succeeded: number;
+  page_count: number;
+  pages_succeeded: number;
+  resume_state: WalletCaseStreamResumeState;
+  requested_interval_complete: boolean;
+  next_page_index: number | null;
+  termination_reason: string | null;
+  resume_blocker: string | null;
+  root_frontier: WalletCaseBackfillProgressFrontier | null;
+  current_frontier: WalletCaseBackfillProgressFrontier | null;
+  frontier_advanced: boolean;
+}
+
+export interface WalletCaseBackfillProgressAggregate {
+  stream_count: number;
+  ready_count: number;
+  complete_count: number;
+  blocked_count: number;
+  revision_count: number;
+  continuation_revision_count: number;
+  page_count: number;
+  pages_succeeded: number;
+  continuation_page_count: number;
+  continuation_pages_succeeded: number;
+  observed_frontier_count: number;
+  advanced_frontier_count: number;
+}
+
+export interface WalletCaseBackfillProgressResponse {
+  progress: {
+    public_id: string;
+    contract_version: "wallet_case_backfill_progress_v1";
+    content_hash_sha256: string;
+    checkpoint_cutoff_public_id: string | null;
+  } & WalletCaseBackfillProgressAggregate;
+  document: {
+    contract_version: "wallet_case_backfill_progress_v1";
+    case_public_id: string;
+    checkpoint_cutoff_public_id: string | null;
+    aggregate: WalletCaseBackfillProgressAggregate;
+    streams: WalletCaseBackfillProgressStream[];
+    limitations: WalletCaseLimitation[];
+  };
+}
+
 export interface WalletCaseCheckpointContinuationPlanStream {
   provider: string;
   stream_key: string;
@@ -284,6 +349,7 @@ const PUBLIC_ID =
 const SHA256 = /^[0-9a-f]{64}$/;
 const CHECKPOINT_ID = /^scp_([0-9a-f]{64})$/;
 const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
+const BACKFILL_PROGRESS_ID = /^bfp_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_PLAN_ID = /^cpl_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_RECEIPT_ID = /^ctr_([0-9a-f]{64})$/;
 const MANIFEST_ID = /^smf_([0-9a-f]{64})$/;
@@ -936,6 +1002,311 @@ export function parseWalletCaseStreamCheckpointChain(
 
 export function serializeWalletCaseStreamCheckpointChain(value: unknown): string {
   return `${JSON.stringify(parseWalletCaseStreamCheckpointChain(value), null, 2)}\n`;
+}
+
+function parseBackfillProgressAggregate(
+  value: Record<string, unknown>,
+  label: string,
+): WalletCaseBackfillProgressAggregate {
+  const aggregate = {
+    stream_count: integer(value.stream_count, `${label} stream count`),
+    ready_count: integer(value.ready_count, `${label} ready count`),
+    complete_count: integer(value.complete_count, `${label} complete count`),
+    blocked_count: integer(value.blocked_count, `${label} blocked count`),
+    revision_count: integer(value.revision_count, `${label} revision count`),
+    continuation_revision_count: integer(
+      value.continuation_revision_count,
+      `${label} continuation revision count`,
+    ),
+    page_count: integer(value.page_count, `${label} page count`),
+    pages_succeeded: integer(value.pages_succeeded, `${label} pages succeeded`),
+    continuation_page_count: integer(
+      value.continuation_page_count,
+      `${label} continuation page count`,
+    ),
+    continuation_pages_succeeded: integer(
+      value.continuation_pages_succeeded,
+      `${label} continuation pages succeeded`,
+    ),
+    observed_frontier_count: integer(
+      value.observed_frontier_count,
+      `${label} observed frontier count`,
+    ),
+    advanced_frontier_count: integer(
+      value.advanced_frontier_count,
+      `${label} advanced frontier count`,
+    ),
+  };
+  if (
+    aggregate.stream_count > 32 || aggregate.ready_count > 32 ||
+    aggregate.complete_count > 32 || aggregate.blocked_count > 32 ||
+    aggregate.revision_count > 3_200 ||
+    aggregate.continuation_revision_count > 3_168 ||
+    aggregate.observed_frontier_count > 32 ||
+    aggregate.advanced_frontier_count > aggregate.observed_frontier_count ||
+    aggregate.pages_succeeded > aggregate.page_count ||
+    aggregate.continuation_pages_succeeded > aggregate.continuation_page_count ||
+    aggregate.stream_count !== aggregate.ready_count + aggregate.complete_count + aggregate.blocked_count
+  ) fail(`${label} is inconsistent`);
+  return aggregate;
+}
+
+function parseBackfillFrontier(
+  value: unknown,
+  label: string,
+): WalletCaseBackfillProgressFrontier | null {
+  if (value === null) return null;
+  const item = record(value, ["checkpoint_public_id", "page"], label);
+  const page = lastPage(item.page);
+  if (page === null) fail(`${label} page is invalid`);
+  return {
+    checkpoint_public_id: checkpointId(
+      item.checkpoint_public_id,
+      `${label} checkpoint id`,
+    ),
+    page,
+  };
+}
+
+export function parseWalletCaseBackfillProgress(
+  value: unknown,
+): WalletCaseBackfillProgressResponse {
+  const envelope = record(value, ["progress", "document"], "backfill progress response");
+  const descriptor = record(envelope.progress, [
+    "public_id", "contract_version", "content_hash_sha256",
+    "checkpoint_cutoff_public_id", "stream_count", "ready_count",
+    "complete_count", "blocked_count", "revision_count",
+    "continuation_revision_count", "page_count", "pages_succeeded",
+    "continuation_page_count", "continuation_pages_succeeded",
+    "observed_frontier_count", "advanced_frontier_count",
+  ], "backfill progress descriptor");
+  if (descriptor.contract_version !== "wallet_case_backfill_progress_v1") {
+    fail("backfill progress descriptor contract is unsupported");
+  }
+  const contentHash = digest(
+    descriptor.content_hash_sha256,
+    "backfill progress hash",
+  );
+  const progressId = text(descriptor.public_id, "backfill progress id", 68);
+  if (BACKFILL_PROGRESS_ID.exec(progressId)?.[1] !== contentHash) {
+    fail("backfill progress identity is invalid");
+  }
+  const descriptorCutoff = descriptor.checkpoint_cutoff_public_id === null
+    ? null
+    : checkpointId(
+      descriptor.checkpoint_cutoff_public_id,
+      "backfill progress descriptor cutoff",
+    );
+  const descriptorAggregate = parseBackfillProgressAggregate(
+    descriptor,
+    "backfill progress descriptor",
+  );
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "checkpoint_cutoff_public_id",
+    "aggregate", "streams", "limitations",
+  ], "backfill progress document");
+  if (document.contract_version !== "wallet_case_backfill_progress_v1") {
+    fail("backfill progress document contract is unsupported");
+  }
+  const caseId = publicId(document.case_public_id, "backfill progress case id");
+  const cutoff = document.checkpoint_cutoff_public_id === null
+    ? null
+    : checkpointId(
+      document.checkpoint_cutoff_public_id,
+      "backfill progress cutoff",
+    );
+  const aggregate = parseBackfillProgressAggregate(
+    record(document.aggregate, [
+      "stream_count", "ready_count", "complete_count", "blocked_count",
+      "revision_count", "continuation_revision_count", "page_count",
+      "pages_succeeded", "continuation_page_count",
+      "continuation_pages_succeeded", "observed_frontier_count",
+      "advanced_frontier_count",
+    ], "backfill progress aggregate"),
+    "backfill progress aggregate",
+  );
+  if (!Array.isArray(document.streams) || document.streams.length > 32) {
+    fail("backfill progress streams are invalid");
+  }
+  const streams = document.streams.map((value, index) => {
+    const label = `backfill progress stream ${index}`;
+    const item = record(value, [
+      "provider", "stream_key", "provider_contract_version",
+      "root_checkpoint_public_id", "tip_checkpoint", "chain_public_id",
+      "chain_content_hash_sha256", "root_acquisition_mode",
+      "requested_period", "revision_count", "initial_page_count",
+      "initial_pages_succeeded", "continuation_revision_count",
+      "continuation_page_count", "continuation_pages_succeeded",
+      "page_count", "pages_succeeded", "resume_state",
+      "requested_interval_complete", "next_page_index", "termination_reason",
+      "resume_blocker", "root_frontier", "current_frontier",
+      "frontier_advanced",
+    ], label);
+    const provider = text(item.provider, `${label} provider`, 64);
+    const streamKey = text(item.stream_key, `${label} key`, 40);
+    const providerContract = text(
+      item.provider_contract_version,
+      `${label} provider contract`,
+      48,
+    );
+    const rootCheckpointId = checkpointId(
+      item.root_checkpoint_public_id,
+      `${label} root checkpoint id`,
+    );
+    const tip = parseDescriptor(item.tip_checkpoint);
+    const chainHash = digest(item.chain_content_hash_sha256, `${label} chain hash`);
+    const chainId = text(item.chain_public_id, `${label} chain id`, 68);
+    const rootMode = text(item.root_acquisition_mode, `${label} root mode`, 16);
+    if (rootMode !== "bounded" && rootMode !== "incremental") {
+      fail(`${label} root mode is invalid`);
+    }
+    const revisionCount = integer(item.revision_count, `${label} revision count`);
+    const initialPageCount = integer(item.initial_page_count, `${label} initial page count`);
+    const initialPagesSucceeded = integer(
+      item.initial_pages_succeeded,
+      `${label} initial pages succeeded`,
+    );
+    const continuationRevisionCount = integer(
+      item.continuation_revision_count,
+      `${label} continuation revision count`,
+    );
+    const continuationPageCount = integer(
+      item.continuation_page_count,
+      `${label} continuation page count`,
+    );
+    const continuationPagesSucceeded = integer(
+      item.continuation_pages_succeeded,
+      `${label} continuation pages succeeded`,
+    );
+    const pageCount = integer(item.page_count, `${label} page count`);
+    const pagesSucceeded = integer(item.pages_succeeded, `${label} pages succeeded`);
+    const state = resumeState(item.resume_state, `${label} resume state`);
+    if (typeof item.requested_interval_complete !== "boolean") {
+      fail(`${label} requested interval state is invalid`);
+    }
+    const requestedIntervalComplete = item.requested_interval_complete;
+    const nextPage = item.next_page_index === null
+      ? null : integer(item.next_page_index, `${label} next page`);
+    const terminationReason = nullableText(
+      item.termination_reason,
+      `${label} termination reason`,
+      48,
+    );
+    const blocker = nullableText(item.resume_blocker, `${label} blocker`, 64);
+    const rootFrontier = parseBackfillFrontier(item.root_frontier, `${label} root frontier`);
+    const currentFrontier = parseBackfillFrontier(
+      item.current_frontier,
+      `${label} current frontier`,
+    );
+    if (typeof item.frontier_advanced !== "boolean") {
+      fail(`${label} frontier state is invalid`);
+    }
+    const frontierAdvanced = item.frontier_advanced;
+    if (
+      tip.provider !== provider || tip.stream_key !== streamKey ||
+      tip.provider_contract_version !== providerContract ||
+      tip.resume_state !== state || CHECKPOINT_CHAIN_ID.exec(chainId)?.[1] !== chainHash ||
+      revisionCount < 1 || revisionCount > 100 ||
+      revisionCount !== continuationRevisionCount + 1 ||
+      initialPagesSucceeded > initialPageCount ||
+      continuationPagesSucceeded > continuationPageCount ||
+      pageCount !== initialPageCount + continuationPageCount ||
+      pagesSucceeded !== initialPagesSucceeded + continuationPagesSucceeded ||
+      requestedIntervalComplete !== (state === "complete") ||
+      (state === "ready") !== (nextPage !== null) ||
+      (nextPage !== null && nextPage < 1) ||
+      (state === "blocked") !== (blocker !== null) ||
+      (rootFrontier === null) !== (initialPagesSucceeded === 0) ||
+      (currentFrontier === null) !== (pagesSucceeded === 0) ||
+      (rootFrontier !== null && rootFrontier.checkpoint_public_id !== rootCheckpointId) ||
+      frontierAdvanced !== (
+        rootFrontier !== null && currentFrontier !== null &&
+        JSON.stringify(rootFrontier.page) !== JSON.stringify(currentFrontier.page)
+      )
+    ) fail(`${label} is inconsistent`);
+    return {
+      provider,
+      stream_key: streamKey,
+      provider_contract_version: providerContract,
+      root_checkpoint_public_id: rootCheckpointId,
+      tip_checkpoint: tip,
+      chain_public_id: chainId,
+      chain_content_hash_sha256: chainHash,
+      root_acquisition_mode: rootMode,
+      requested_period: period(item.requested_period),
+      revision_count: revisionCount,
+      initial_page_count: initialPageCount,
+      initial_pages_succeeded: initialPagesSucceeded,
+      continuation_revision_count: continuationRevisionCount,
+      continuation_page_count: continuationPageCount,
+      continuation_pages_succeeded: continuationPagesSucceeded,
+      page_count: pageCount,
+      pages_succeeded: pagesSucceeded,
+      resume_state: state,
+      requested_interval_complete: requestedIntervalComplete,
+      next_page_index: nextPage,
+      termination_reason: terminationReason,
+      resume_blocker: blocker,
+      root_frontier: rootFrontier,
+      current_frontier: currentFrontier,
+      frontier_advanced: frontierAdvanced,
+    } satisfies WalletCaseBackfillProgressStream;
+  });
+  const keys = streams.map(({ provider, stream_key }) => `${provider}\0${stream_key}`);
+  const states = streams.map(({ resume_state }) => resume_state);
+  const expectedAggregate: WalletCaseBackfillProgressAggregate = {
+    stream_count: streams.length,
+    ready_count: states.filter((state) => state === "ready").length,
+    complete_count: states.filter((state) => state === "complete").length,
+    blocked_count: states.filter((state) => state === "blocked").length,
+    revision_count: streams.reduce((total, item) => total + item.revision_count, 0),
+    continuation_revision_count: streams.reduce(
+      (total, item) => total + item.continuation_revision_count,
+      0,
+    ),
+    page_count: streams.reduce((total, item) => total + item.page_count, 0),
+    pages_succeeded: streams.reduce((total, item) => total + item.pages_succeeded, 0),
+    continuation_page_count: streams.reduce(
+      (total, item) => total + item.continuation_page_count,
+      0,
+    ),
+    continuation_pages_succeeded: streams.reduce(
+      (total, item) => total + item.continuation_pages_succeeded,
+      0,
+    ),
+    observed_frontier_count: streams.filter((item) => item.current_frontier !== null).length,
+    advanced_frontier_count: streams.filter((item) => item.frontier_advanced).length,
+  };
+  const cutoffIds = new Set(streams.map(({ tip_checkpoint }) => tip_checkpoint.public_id));
+  if (
+    JSON.stringify(aggregate) !== JSON.stringify(expectedAggregate) ||
+    JSON.stringify(descriptorAggregate) !== JSON.stringify(aggregate) ||
+    descriptorCutoff !== cutoff || lenOrNullMismatch(cutoff, streams.length) ||
+    (cutoff !== null && !cutoffIds.has(cutoff)) ||
+    new Set(keys).size !== keys.length ||
+    JSON.stringify(keys) !== JSON.stringify([...keys].sort())
+  ) fail("backfill progress is inconsistent");
+  return {
+    progress: {
+      public_id: progressId,
+      contract_version: "wallet_case_backfill_progress_v1",
+      content_hash_sha256: contentHash,
+      checkpoint_cutoff_public_id: descriptorCutoff,
+      ...descriptorAggregate,
+    },
+    document: {
+      contract_version: "wallet_case_backfill_progress_v1",
+      case_public_id: caseId,
+      checkpoint_cutoff_public_id: cutoff,
+      aggregate,
+      streams,
+      limitations: limitations(document.limitations, "backfill progress limitations"),
+    },
+  };
+}
+
+export function serializeWalletCaseBackfillProgress(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseBackfillProgress(value), null, 2)}\n`;
 }
 
 export function parseWalletCaseCheckpointContinuationPlan(

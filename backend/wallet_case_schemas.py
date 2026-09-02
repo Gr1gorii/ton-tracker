@@ -51,6 +51,10 @@ CheckpointContinuationReceiptPublicId = Annotated[
     str,
     Field(pattern=r"^ctr_[0-9a-f]{64}$", max_length=68),
 ]
+BackfillProgressPublicId = Annotated[
+    str,
+    Field(pattern=r"^bfp_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -708,6 +712,203 @@ class WalletCaseStreamCheckpointChainResponse(_StrictModel):
             != self.document.aggregate.pages_succeeded
         ):
             raise ValueError("checkpoint chain content address is inconsistent")
+        return self
+
+
+class WalletCaseBackfillProgressFrontier(_StrictModel):
+    checkpoint_public_id: CheckpointPublicId
+    page: WalletCaseStreamCheckpointLastPage
+
+
+class WalletCaseBackfillProgressStream(_StrictModel):
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    provider_contract_version: str = Field(min_length=1, max_length=48)
+    root_checkpoint_public_id: CheckpointPublicId
+    tip_checkpoint: WalletCaseStreamCheckpointDescriptor
+    chain_public_id: CheckpointChainPublicId
+    chain_content_hash_sha256: Sha256Digest
+    root_acquisition_mode: Literal["bounded", "incremental"]
+    requested_period: WalletCaseSyncManifestPeriod
+    revision_count: int = Field(ge=1, le=100)
+    initial_page_count: int = Field(ge=0)
+    initial_pages_succeeded: int = Field(ge=0)
+    continuation_revision_count: int = Field(ge=0, le=99)
+    continuation_page_count: int = Field(ge=0)
+    continuation_pages_succeeded: int = Field(ge=0)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    resume_state: Literal["ready", "complete", "blocked"]
+    requested_interval_complete: bool
+    next_page_index: int | None = Field(default=None, ge=1)
+    termination_reason: str | None = Field(default=None, max_length=48)
+    resume_blocker: str | None = Field(default=None, max_length=64)
+    root_frontier: WalletCaseBackfillProgressFrontier | None = None
+    current_frontier: WalletCaseBackfillProgressFrontier | None = None
+    frontier_advanced: bool
+
+    @model_validator(mode="after")
+    def _validate_stream(self):
+        if (
+            self.tip_checkpoint.provider != self.provider
+            or self.tip_checkpoint.stream_key != self.stream_key
+            or self.tip_checkpoint.provider_contract_version
+            != self.provider_contract_version
+            or self.tip_checkpoint.resume_state != self.resume_state
+            or self.chain_public_id
+            != f"cch_{self.chain_content_hash_sha256}"
+            or self.revision_count != self.continuation_revision_count + 1
+            or self.initial_pages_succeeded > self.initial_page_count
+            or self.continuation_pages_succeeded
+            > self.continuation_page_count
+            or self.page_count
+            != self.initial_page_count + self.continuation_page_count
+            or self.pages_succeeded
+            != self.initial_pages_succeeded
+            + self.continuation_pages_succeeded
+            or self.pages_succeeded > self.page_count
+            or self.requested_interval_complete
+            != (self.resume_state == "complete")
+            or (self.resume_state == "ready")
+            != (self.next_page_index is not None)
+            or (self.resume_state == "blocked")
+            != (self.resume_blocker is not None)
+            or (self.root_frontier is None)
+            != (self.initial_pages_succeeded == 0)
+            or (self.current_frontier is None)
+            != (self.pages_succeeded == 0)
+            or (
+                self.root_frontier is not None
+                and self.root_frontier.checkpoint_public_id
+                != self.root_checkpoint_public_id
+            )
+            or self.frontier_advanced
+            != (
+                self.root_frontier is not None
+                and self.current_frontier is not None
+                and self.root_frontier.page != self.current_frontier.page
+            )
+        ):
+            raise ValueError("backfill progress stream is inconsistent")
+        return self
+
+
+class WalletCaseBackfillProgressAggregate(_StrictModel):
+    stream_count: int = Field(ge=0, le=32)
+    ready_count: int = Field(ge=0, le=32)
+    complete_count: int = Field(ge=0, le=32)
+    blocked_count: int = Field(ge=0, le=32)
+    revision_count: int = Field(ge=0, le=3200)
+    continuation_revision_count: int = Field(ge=0, le=3168)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    continuation_page_count: int = Field(ge=0)
+    continuation_pages_succeeded: int = Field(ge=0)
+    observed_frontier_count: int = Field(ge=0, le=32)
+    advanced_frontier_count: int = Field(ge=0, le=32)
+
+
+class WalletCaseBackfillProgressDocument(_StrictModel):
+    contract_version: Literal["wallet_case_backfill_progress_v1"]
+    case_public_id: CanonicalPublicId
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    aggregate: WalletCaseBackfillProgressAggregate
+    streams: list[WalletCaseBackfillProgressStream] = Field(max_length=32)
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_progress(self):
+        states = [item.resume_state for item in self.streams]
+        keys = [f"{item.provider}\0{item.stream_key}" for item in self.streams]
+        expected = {
+            "stream_count": len(self.streams),
+            "ready_count": states.count("ready"),
+            "complete_count": states.count("complete"),
+            "blocked_count": states.count("blocked"),
+            "revision_count": sum(item.revision_count for item in self.streams),
+            "continuation_revision_count": sum(
+                item.continuation_revision_count for item in self.streams
+            ),
+            "page_count": sum(item.page_count for item in self.streams),
+            "pages_succeeded": sum(
+                item.pages_succeeded for item in self.streams
+            ),
+            "continuation_page_count": sum(
+                item.continuation_page_count for item in self.streams
+            ),
+            "continuation_pages_succeeded": sum(
+                item.continuation_pages_succeeded for item in self.streams
+            ),
+            "observed_frontier_count": sum(
+                item.current_frontier is not None for item in self.streams
+            ),
+            "advanced_frontier_count": sum(
+                item.frontier_advanced for item in self.streams
+            ),
+        }
+        if (
+            self.aggregate.model_dump() != expected
+            or len(set(keys)) != len(keys)
+            or keys != sorted(keys)
+            or (self.checkpoint_cutoff_public_id is None)
+            != (not self.streams)
+            or (
+                self.checkpoint_cutoff_public_id is not None
+                and self.checkpoint_cutoff_public_id
+                not in {
+                    item.tip_checkpoint.public_id for item in self.streams
+                }
+            )
+        ):
+            raise ValueError("backfill progress is inconsistent")
+        return self
+
+
+class WalletCaseBackfillProgressDescriptor(_StrictModel):
+    public_id: BackfillProgressPublicId
+    contract_version: Literal["wallet_case_backfill_progress_v1"]
+    content_hash_sha256: Sha256Digest
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    stream_count: int = Field(ge=0, le=32)
+    ready_count: int = Field(ge=0, le=32)
+    complete_count: int = Field(ge=0, le=32)
+    blocked_count: int = Field(ge=0, le=32)
+    revision_count: int = Field(ge=0, le=3200)
+    continuation_revision_count: int = Field(ge=0, le=3168)
+    page_count: int = Field(ge=0)
+    pages_succeeded: int = Field(ge=0)
+    continuation_page_count: int = Field(ge=0)
+    continuation_pages_succeeded: int = Field(ge=0)
+    observed_frontier_count: int = Field(ge=0, le=32)
+    advanced_frontier_count: int = Field(ge=0, le=32)
+
+
+class WalletCaseBackfillProgressResponse(_StrictModel):
+    progress: WalletCaseBackfillProgressDescriptor
+    document: WalletCaseBackfillProgressDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        aggregate = self.document.aggregate.model_dump()
+        descriptor = self.progress.model_dump()
+        if any(descriptor[key] != value for key, value in aggregate.items()):
+            raise ValueError("backfill progress content address is inconsistent")
+        if (
+            self.progress.public_id != f"bfp_{digest}"
+            or self.progress.content_hash_sha256 != digest
+            or self.progress.contract_version != self.document.contract_version
+            or self.progress.checkpoint_cutoff_public_id
+            != self.document.checkpoint_cutoff_public_id
+        ):
+            raise ValueError("backfill progress content address is inconsistent")
         return self
 
 

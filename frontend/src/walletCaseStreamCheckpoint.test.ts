@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  backfillProgressFixture,
   checkpointContinuationReceiptFixture,
   checkpointContinuationReceiptV2Fixture,
   checkpointContinuationPlanFixture,
@@ -10,12 +11,14 @@ import {
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
+  parseWalletCaseBackfillProgress,
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
+  serializeWalletCaseBackfillProgress,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
@@ -140,6 +143,38 @@ describe("Wallet Case stream checkpoint contracts", () => {
         )),
       },
     })).toThrow(/parent lineage/);
+  });
+
+  it("accepts and exports verified backfill progress", () => {
+    const progress = backfillProgressFixture();
+
+    expect(parseWalletCaseBackfillProgress(progress)).toEqual(progress);
+    expect(JSON.parse(serializeWalletCaseBackfillProgress(progress))).toEqual(progress);
+  });
+
+  it("rejects backfill identity, aggregate, and frontier drift", () => {
+    const progress = backfillProgressFixture();
+    expect(() => parseWalletCaseBackfillProgress({
+      ...progress,
+      progress: { ...progress.progress, public_id: `bfp_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseBackfillProgress({
+      ...progress,
+      document: {
+        ...progress.document,
+        aggregate: { ...progress.document.aggregate, page_count: 1 },
+      },
+    })).toThrow(/inconsistent/);
+    expect(() => parseWalletCaseBackfillProgress({
+      ...progress,
+      document: {
+        ...progress.document,
+        streams: progress.document.streams.map((stream) => ({
+          ...stream,
+          frontier_advanced: false,
+        })),
+      },
+    })).toThrow(/stream 0 is inconsistent/);
   });
 
   it("accepts and exports a strictly aggregated continuation plan", () => {

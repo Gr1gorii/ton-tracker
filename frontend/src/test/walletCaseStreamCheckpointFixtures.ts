@@ -1,4 +1,5 @@
 import type {
+  WalletCaseBackfillProgressResponse,
   WalletCaseCheckpointContinuationReceiptV1Response,
   WalletCaseCheckpointContinuationReceiptV2Response,
   WalletCaseCheckpointContinuationPlanResponse,
@@ -239,6 +240,99 @@ export function checkpointContinuationPlanFixture(): WalletCaseCheckpointContinu
       limitations: [{
         code: "continuation_plan_is_not_automatic_backfill",
         message: "The plan does not schedule provider requests or prove complete history.",
+      }],
+    },
+  };
+}
+
+export function backfillProgressFixture(): WalletCaseBackfillProgressResponse {
+  const chain = streamCheckpointChainFixture();
+  const root = chain.document.revisions[0].checkpoint;
+  const tip = chain.document.revisions[1].checkpoint;
+  const rootPage = {
+    page_index: 1,
+    response_cursor: "10",
+    response_digest_sha256: "56".repeat(32),
+    min_logical_time: "10",
+    max_logical_time: "20",
+    min_timestamp: "2026-08-09T11:50:00Z",
+    max_timestamp: "2026-08-09T11:55:00Z",
+    fetched_at: "2026-08-09T12:00:00Z",
+  };
+  const currentPage = {
+    ...rootPage,
+    page_index: 2,
+    response_cursor: "20",
+    response_digest_sha256: "ab".repeat(32),
+    min_logical_time: "1",
+    max_logical_time: "9",
+    min_timestamp: "2026-08-09T11:40:00Z",
+    max_timestamp: "2026-08-09T11:49:00Z",
+  };
+  const aggregate = {
+    stream_count: 1,
+    ready_count: 1,
+    complete_count: 0,
+    blocked_count: 0,
+    revision_count: 2,
+    continuation_revision_count: 1,
+    page_count: 2,
+    pages_succeeded: 2,
+    continuation_page_count: 1,
+    continuation_pages_succeeded: 1,
+    observed_frontier_count: 1,
+    advanced_frontier_count: 1,
+  };
+  const progressHash = "9b".repeat(32);
+  return {
+    progress: {
+      public_id: `bfp_${progressHash}`,
+      contract_version: "wallet_case_backfill_progress_v1",
+      content_hash_sha256: progressHash,
+      checkpoint_cutoff_public_id: tip.public_id,
+      ...aggregate,
+    },
+    document: {
+      contract_version: "wallet_case_backfill_progress_v1",
+      case_public_id: CASE_ID,
+      checkpoint_cutoff_public_id: tip.public_id,
+      aggregate,
+      streams: [{
+        provider: tip.provider,
+        stream_key: tip.stream_key,
+        provider_contract_version: tip.provider_contract_version,
+        root_checkpoint_public_id: root.public_id,
+        tip_checkpoint: tip,
+        chain_public_id: chain.chain.public_id,
+        chain_content_hash_sha256: chain.chain.content_hash_sha256,
+        root_acquisition_mode: "bounded",
+        requested_period: chain.document.revisions[0].requested_period,
+        revision_count: 2,
+        initial_page_count: 1,
+        initial_pages_succeeded: 1,
+        continuation_revision_count: 1,
+        continuation_page_count: 1,
+        continuation_pages_succeeded: 1,
+        page_count: 2,
+        pages_succeeded: 2,
+        resume_state: "ready",
+        requested_interval_complete: false,
+        next_page_index: 3,
+        termination_reason: "page_cap_reached",
+        resume_blocker: null,
+        root_frontier: {
+          checkpoint_public_id: root.public_id,
+          page: rootPage,
+        },
+        current_frontier: {
+          checkpoint_public_id: tip.public_id,
+          page: currentPage,
+        },
+        frontier_advanced: true,
+      }],
+      limitations: [{
+        code: "backfill_remaining_work_is_unknown",
+        message: "Provider cursors do not expose a reliable remaining-page count.",
       }],
     },
   };
