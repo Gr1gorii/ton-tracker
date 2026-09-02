@@ -1269,7 +1269,7 @@ class WalletCaseService:
             ) from exc
         if (
             acquisition_plan.get("mode") != "resume"
-            or acquisition_plan.get("version") not in {3, 4}
+            or acquisition_plan.get("version") not in {3, 4, 5}
         ):
             raise WalletCaseContinuationReceiptNotFound(
                 "This sync was not accepted from a verified Continuation Plan."
@@ -1378,7 +1378,8 @@ class WalletCaseService:
                 "Stored Wallet Case continuation receipt transition is invalid."
             )
         page_budget = acquisition_plan.get("resume_page_budget")
-        budgeted = acquisition_plan["version"] == 4
+        budgeted = acquisition_plan["version"] in {4, 5}
+        scheduled = acquisition_plan["version"] == 5
         if budgeted:
             if (
                 type(page_budget) is not int
@@ -1400,9 +1401,13 @@ class WalletCaseService:
             )
         document = {
             "contract_version": (
-                "wallet_case_checkpoint_continuation_receipt_v2"
-                if budgeted
-                else "wallet_case_checkpoint_continuation_receipt_v1"
+                "wallet_case_checkpoint_continuation_receipt_v3"
+                if scheduled
+                else (
+                    "wallet_case_checkpoint_continuation_receipt_v2"
+                    if budgeted
+                    else "wallet_case_checkpoint_continuation_receipt_v1"
+                )
             ),
             "case_public_id": wallet_case.public_id,
             "sync_public_id": case_sync.public_id,
@@ -1420,6 +1425,15 @@ class WalletCaseService:
                     "continuation_page_index"
                 ],
                 **({"page_budget": page_budget} if budgeted else {}),
+                **(
+                    {
+                        "backfill_schedule_public_id": acquisition_plan[
+                            "backfill_schedule_public_id"
+                        ]
+                    }
+                    if scheduled
+                    else {}
+                ),
             },
             "output": {
                 "checkpoint": output_response["checkpoint"],
@@ -1446,10 +1460,20 @@ class WalletCaseService:
                     ),
                 ),
                 _limitation(
-                    "continuation_receipt_does_not_schedule_next_page",
                     (
-                        "The after-plan is reconstructed at publication time and "
-                        "does not automatically enqueue another provider request."
+                        "continuation_receipt_does_not_repeat_schedule"
+                        if scheduled
+                        else "continuation_receipt_does_not_schedule_next_page"
+                    ),
+                    (
+                        "The accepted schedule authorized this one finite step; "
+                        "the after-plan does not automatically enqueue another "
+                        "provider request."
+                        if scheduled
+                        else (
+                            "The after-plan is reconstructed at publication time and "
+                            "does not automatically enqueue another provider request."
+                        )
                     ),
                 ),
             ],
@@ -1491,6 +1515,10 @@ class WalletCaseService:
                     ],
                 }
             )
+        if scheduled:
+            receipt["input_schedule_public_id"] = acquisition_plan[
+                "backfill_schedule_public_id"
+            ]
         return {
             "receipt": receipt,
             "document": document,

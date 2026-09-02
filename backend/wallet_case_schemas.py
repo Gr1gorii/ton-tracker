@@ -1422,6 +1422,48 @@ class WalletCaseCheckpointContinuationReceiptV2Response(
         return self
 
 
+class WalletCaseCheckpointContinuationReceiptV3Input(
+    WalletCaseCheckpointContinuationReceiptV2Input
+):
+    backfill_schedule_public_id: BackfillSchedulePublicId
+
+
+class WalletCaseCheckpointContinuationReceiptV3Document(
+    WalletCaseCheckpointContinuationReceiptV2Document
+):
+    contract_version: Literal[
+        "wallet_case_checkpoint_continuation_receipt_v3"
+    ]
+    input: WalletCaseCheckpointContinuationReceiptV3Input
+
+
+class WalletCaseCheckpointContinuationReceiptV3Descriptor(
+    WalletCaseCheckpointContinuationReceiptV2Descriptor
+):
+    contract_version: Literal[
+        "wallet_case_checkpoint_continuation_receipt_v3"
+    ]
+    input_schedule_public_id: BackfillSchedulePublicId
+
+
+class WalletCaseCheckpointContinuationReceiptV3Response(
+    WalletCaseCheckpointContinuationReceiptV2Response
+):
+    receipt: WalletCaseCheckpointContinuationReceiptV3Descriptor
+    document: WalletCaseCheckpointContinuationReceiptV3Document
+
+    @model_validator(mode="after")
+    def _validate_schedule_descriptor(self):
+        if (
+            self.receipt.input_schedule_public_id
+            != self.document.input.backfill_schedule_public_id
+        ):
+            raise ValueError(
+                "continuation receipt schedule descriptor is inconsistent"
+            )
+        return self
+
+
 class WalletCaseSyncResponse(_StrictModel):
     case_public_id: CanonicalPublicId
     public_id: CanonicalPublicId

@@ -55,6 +55,7 @@ from wallet_case_schemas import (
     WalletCaseBackfillScheduleResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationReceiptV2Response,
+    WalletCaseCheckpointContinuationReceiptV3Response,
     WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseStreamCheckpointChainResponse,
     WalletCaseSyncRequest,
@@ -2284,6 +2285,31 @@ def test_backfill_schedule_run_is_finite_bound_and_idempotent(client):
         builder=_resumed_transaction_run,
     )
     assert worker.run_once() is True
+    receipt_response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{queued['public_id']}/continuation-receipt"
+    )
+    assert receipt_response.status_code == 200, receipt_response.text
+    receipt = receipt_response.json()
+    assert receipt["receipt"]["contract_version"] == (
+        "wallet_case_checkpoint_continuation_receipt_v3"
+    )
+    assert receipt["receipt"]["input_schedule_public_id"] == schedule_id
+    assert receipt["document"]["input"]["backfill_schedule_public_id"] == (
+        schedule_id
+    )
+    assert receipt["document"]["input"]["page_budget"] == 3
+    assert receipt["document"]["transition"]["page_budget_consumed"] == 1
+    assert receipt["document"]["transition"]["page_budget_remaining"] == 2
+    assert receipt["document"]["limitations"][1]["code"] == (
+        "continuation_receipt_does_not_repeat_schedule"
+    )
+    WalletCaseCheckpointContinuationReceiptV3Response.model_validate(receipt)
+    tampered_receipt = json.loads(json.dumps(receipt))
+    tampered_receipt["receipt"]["input_schedule_public_id"] = f"bfs_{'0' * 64}"
+    with pytest.raises(ValueError, match="schedule descriptor"):
+        WalletCaseCheckpointContinuationReceiptV3Response.model_validate(
+            tampered_receipt
+        )
     replay = client.post(
         run_url,
         headers={"Idempotency-Key": idempotency_key},

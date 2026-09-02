@@ -42,6 +42,7 @@ from wallet_case_schemas import (
     WalletCaseSyncManifestResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationReceiptV2Response,
+    WalletCaseCheckpointContinuationReceiptV3Response,
     WalletCaseCheckpointContinuationPlanResponse,
     WalletCaseCheckpointPlanResumeRequest,
     WalletCaseStreamCheckpointCatalogResponse,
@@ -563,6 +564,7 @@ def read_wallet_case_sync(
     response_model=(
         WalletCaseCheckpointContinuationReceiptResponse
         | WalletCaseCheckpointContinuationReceiptV2Response
+        | WalletCaseCheckpointContinuationReceiptV3Response
     ),
 )
 def read_wallet_case_checkpoint_continuation_receipt(
