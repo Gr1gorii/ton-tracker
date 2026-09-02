@@ -51,6 +51,7 @@ from services.wallet_cases import (
 )
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
+    WalletCaseBackfillProgressResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationPlanResponse,
@@ -1950,6 +1951,92 @@ def test_checkpoint_chain_aggregates_verified_root_to_tip_progress(client):
     tampered["chain"]["content_hash_sha256"] = "0" * 64
     with pytest.raises(ValueError, match="content address"):
         WalletCaseStreamCheckpointChainResponse.model_validate(tampered)
+
+
+def test_backfill_progress_measures_verified_frontier_movement(client):
+    case_id, _source_sync, _claimed = _publish_multi_stream_checkpoints(client)
+    with app.state.wallet_case_test_session() as session:
+        roots = list(
+            session.scalars(
+                select(WalletCaseStreamCheckpoint)
+                .where(WalletCaseStreamCheckpoint.case.has(public_id=case_id))
+                .order_by(WalletCaseStreamCheckpoint.stream_key)
+            )
+        )
+        transaction_root_id = roots[1].public_id
+    _completed, transaction_tip_id = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=transaction_root_id,
+    )
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-progress"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["progress"]["public_id"] == (
+        f"bfp_{body['progress']['content_hash_sha256']}"
+    )
+    assert body["progress"]["contract_version"] == (
+        "wallet_case_backfill_progress_v1"
+    )
+    assert body["progress"]["checkpoint_cutoff_public_id"] == (
+        transaction_tip_id
+    )
+    assert body["document"]["aggregate"] == {
+        "stream_count": 2,
+        "ready_count": 1,
+        "complete_count": 1,
+        "blocked_count": 0,
+        "revision_count": 3,
+        "continuation_revision_count": 1,
+        "page_count": 3,
+        "pages_succeeded": 3,
+        "continuation_page_count": 1,
+        "continuation_pages_succeeded": 1,
+        "observed_frontier_count": 2,
+        "advanced_frontier_count": 1,
+    }
+    assert {
+        key: body["progress"][key]
+        for key in body["document"]["aggregate"]
+    } == body["document"]["aggregate"]
+    completed_stream, ready_stream = body["document"]["streams"]
+    assert completed_stream["stream_key"] == "account_events"
+    assert completed_stream["requested_interval_complete"] is True
+    assert completed_stream["continuation_revision_count"] == 0
+    assert completed_stream["frontier_advanced"] is False
+    assert ready_stream["stream_key"] == "transactions"
+    assert ready_stream["root_checkpoint_public_id"] == transaction_root_id
+    assert ready_stream["tip_checkpoint"]["public_id"] == transaction_tip_id
+    assert ready_stream["requested_interval_complete"] is False
+    assert ready_stream["continuation_revision_count"] == 1
+    assert ready_stream["continuation_page_count"] == 1
+    assert ready_stream["continuation_pages_succeeded"] == 1
+    assert ready_stream["root_frontier"]["checkpoint_public_id"] == (
+        transaction_root_id
+    )
+    assert ready_stream["root_frontier"]["page"]["page_index"] == 1
+    assert ready_stream["current_frontier"]["checkpoint_public_id"] == (
+        transaction_tip_id
+    )
+    assert ready_stream["current_frontier"]["page"]["page_index"] == 2
+    assert ready_stream["frontier_advanced"] is True
+    assert body["document"]["limitations"][0]["code"] == (
+        "backfill_frontier_is_page_evidence"
+    )
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-progress"
+    )
+    assert repeated.status_code == 200
+    assert repeated.json() == body
+    tampered = json.loads(json.dumps(body))
+    tampered["progress"]["public_id"] = f"bfp_{'0' * 64}"
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseBackfillProgressResponse.model_validate(tampered)
 
 
 def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):

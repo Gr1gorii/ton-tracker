@@ -28,6 +28,7 @@ from services.wallet_cases import (
 )
 from services.wallet_case_access import require_local_wallet_case_access
 from wallet_case_schemas import (
+    WalletCaseBackfillProgressResponse,
     WalletCaseCreateRequest,
     WalletCaseDeletionResponse,
     WalletCaseListResponse,
@@ -727,6 +728,44 @@ def list_wallet_case_stream_checkpoint_history(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case checkpoint history storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/stream-checkpoints/backfill-progress",
+    response_model=WalletCaseBackfillProgressResponse,
+)
+def read_wallet_case_backfill_progress(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read content-addressed progress across verified provider stream chains."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_backfill_progress(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "backfill_progress_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case backfill progress storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

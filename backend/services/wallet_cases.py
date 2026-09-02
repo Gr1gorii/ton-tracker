@@ -1480,6 +1480,182 @@ class WalletCaseService:
         wallet_case = self._required_case(case_public_id)
         return self._checkpoint_continuation_plan_response(wallet_case)
 
+    def get_backfill_progress(self, case_public_id: str) -> dict[str, Any]:
+        """Measure verified provider history movement across latest stream chains."""
+        wallet_case = self._required_case(case_public_id)
+        checkpoints = self.repository.latest_stream_checkpoints(
+            case_id=wallet_case.id
+        )
+        if len(checkpoints) > _MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Wallet Case backfill progress contains too many provider streams."
+            )
+        streams: list[dict[str, Any]] = []
+        for checkpoint in checkpoints:
+            chain = self._verified_stream_checkpoint_chain(
+                checkpoint,
+                case_id=wallet_case.id,
+                case_public_id=wallet_case.public_id,
+            )
+            chain_response = self._stream_checkpoint_chain_response(
+                wallet_case,
+                chain,
+            )
+            root_response = chain[0]["response"]
+            root_document = root_response["document"]
+            tip_response = chain[-1]["response"]
+            tip_descriptor = tip_response["checkpoint"]
+            tip_document = tip_response["document"]
+            if any(
+                item["response"]["document"]["requested_period"]
+                != root_document["requested_period"]
+                for item in chain[1:]
+            ):
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case backfill period changed within one stream chain."
+                )
+            root_frontier = _backfill_frontier(chain[0])
+            current_frontier = next(
+                (
+                    frontier
+                    for item in reversed(chain)
+                    if (frontier := _backfill_frontier(item)) is not None
+                ),
+                None,
+            )
+            chain_descriptor = chain_response["chain"]
+            initial_page_count = root_document["page_count"]
+            initial_pages_succeeded = root_document["pages_succeeded"]
+            continuation_page_count = (
+                chain_descriptor["page_count"] - initial_page_count
+            )
+            continuation_pages_succeeded = (
+                chain_descriptor["pages_succeeded"]
+                - initial_pages_succeeded
+            )
+            streams.append(
+                {
+                    "provider": tip_descriptor["provider"],
+                    "stream_key": tip_descriptor["stream_key"],
+                    "provider_contract_version": tip_descriptor[
+                        "provider_contract_version"
+                    ],
+                    "root_checkpoint_public_id": root_response["checkpoint"][
+                        "public_id"
+                    ],
+                    "tip_checkpoint": tip_descriptor,
+                    "chain_public_id": chain_descriptor["public_id"],
+                    "chain_content_hash_sha256": chain_descriptor[
+                        "content_hash_sha256"
+                    ],
+                    "root_acquisition_mode": chain[0]["plan"]["mode"],
+                    "requested_period": root_document["requested_period"],
+                    "revision_count": chain_descriptor["revision_count"],
+                    "initial_page_count": initial_page_count,
+                    "initial_pages_succeeded": initial_pages_succeeded,
+                    "continuation_revision_count": len(chain) - 1,
+                    "continuation_page_count": continuation_page_count,
+                    "continuation_pages_succeeded": (
+                        continuation_pages_succeeded
+                    ),
+                    "page_count": chain_descriptor["page_count"],
+                    "pages_succeeded": chain_descriptor["pages_succeeded"],
+                    "resume_state": tip_document["resume_state"],
+                    "requested_interval_complete": (
+                        tip_document["resume_state"] == "complete"
+                    ),
+                    "next_page_index": tip_document[
+                        "continuation_page_index"
+                    ],
+                    "termination_reason": tip_document[
+                        "termination_reason"
+                    ],
+                    "resume_blocker": tip_document["resume_blocker"],
+                    "root_frontier": root_frontier,
+                    "current_frontier": current_frontier,
+                    "frontier_advanced": (
+                        root_frontier is not None
+                        and current_frontier is not None
+                        and root_frontier["page"] != current_frontier["page"]
+                    ),
+                }
+            )
+        states = [item["resume_state"] for item in streams]
+        aggregate = {
+            "stream_count": len(streams),
+            "ready_count": states.count("ready"),
+            "complete_count": states.count("complete"),
+            "blocked_count": states.count("blocked"),
+            "revision_count": sum(item["revision_count"] for item in streams),
+            "continuation_revision_count": sum(
+                item["continuation_revision_count"] for item in streams
+            ),
+            "page_count": sum(item["page_count"] for item in streams),
+            "pages_succeeded": sum(
+                item["pages_succeeded"] for item in streams
+            ),
+            "continuation_page_count": sum(
+                item["continuation_page_count"] for item in streams
+            ),
+            "continuation_pages_succeeded": sum(
+                item["continuation_pages_succeeded"] for item in streams
+            ),
+            "observed_frontier_count": sum(
+                item["current_frontier"] is not None for item in streams
+            ),
+            "advanced_frontier_count": sum(
+                item["frontier_advanced"] for item in streams
+            ),
+        }
+        cutoff = max(checkpoints, key=lambda item: item.id) if checkpoints else None
+        document = {
+            "contract_version": "wallet_case_backfill_progress_v1",
+            "case_public_id": wallet_case.public_id,
+            "checkpoint_cutoff_public_id": (
+                cutoff.public_id if cutoff is not None else None
+            ),
+            "aggregate": aggregate,
+            "streams": streams,
+            "limitations": [
+                _limitation(
+                    "backfill_frontier_is_page_evidence",
+                    (
+                        "Each frontier is metadata from the latest successful "
+                        "provider page in a verified chain; it is not proof of "
+                        "the wallet's earliest activity."
+                    ),
+                ),
+                _limitation(
+                    "backfill_remaining_work_is_unknown",
+                    (
+                        "Provider cursors do not expose a reliable remaining-page "
+                        "count, so progress reports acquired pages and state instead "
+                        "of a completion percentage."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "progress": {
+                "public_id": f"bfp_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "checkpoint_cutoff_public_id": document[
+                    "checkpoint_cutoff_public_id"
+                ],
+                **aggregate,
+            },
+            "document": document,
+        }
+
     def _checkpoint_continuation_plan_response(
         self,
         wallet_case: WalletCase,
@@ -3061,6 +3237,20 @@ def _stream_checkpoint_response(
             "created_at": _isoformat(checkpoint.created_at),
         },
         "document": document,
+    }
+
+
+def _backfill_frontier(
+    item: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Bind one successful provider-page boundary to its checkpoint revision."""
+    response = item["response"]
+    last_page = response["document"]["last_successful_page"]
+    if last_page is None:
+        return None
+    return {
+        "checkpoint_public_id": response["checkpoint"]["public_id"],
+        "page": last_page,
     }
 
 
