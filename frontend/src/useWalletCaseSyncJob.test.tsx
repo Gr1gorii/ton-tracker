@@ -15,6 +15,7 @@ import {
   resumeSyncFixture,
   succeededSyncFixture,
 } from "./test/walletCaseFixtures";
+import { backfillScheduleFixture } from "./test/walletCaseStreamCheckpointFixtures";
 
 const apiMocks = vi.hoisted(() => ({
   cancelWalletCaseSync: vi.fn(),
@@ -22,6 +23,7 @@ const apiMocks = vi.hoisted(() => ({
   getWalletCaseSync: vi.fn(),
   resumeWalletCaseContinuationPlan: vi.fn(),
   resumeWalletCaseStreamCheckpoint: vi.fn(),
+  runWalletCaseBackfillSchedule: vi.fn(),
 }));
 
 vi.mock("./walletCaseApi", async (importOriginal) => {
@@ -182,6 +184,45 @@ describe("useWalletCaseSyncJob", () => {
       IDEMPOTENCY_KEY,
     );
     expect(apiMocks.resumeWalletCaseContinuationPlan.mock.calls[1][4]).toBe(
+      IDEMPOTENCY_KEY,
+    );
+    expect(result.current.sync?.requested_scope.mode).toBe("resume");
+  });
+
+  it("reuses one idempotency key while starting a scheduled backfill step", async () => {
+    const schedule = backfillScheduleFixture();
+    const scheduled = {
+      ...resumeSyncFixture({
+        public_id: "550e8400-e29b-41d4-b716-446655440004",
+      }),
+      requested_scope: {
+        ...resumeSyncFixture().requested_scope,
+        continuation_plan_public_id: schedule.document.input_plan_public_id,
+        source_checkpoint_public_id: schedule.document.selection?.checkpoint_public_id ?? null,
+        resume_page_budget: schedule.document.page_budget,
+      },
+    };
+    apiMocks.runWalletCaseBackfillSchedule
+      .mockRejectedValueOnce(new TypeError("Network connection reset"))
+      .mockResolvedValueOnce(scheduled);
+    const initial = succeededSyncFixture();
+    const { result } = renderHook(() => useWalletCaseSyncJob({
+      caseId: CASE_ID,
+      initialSync: initial,
+      onTerminal: vi.fn(),
+    }));
+
+    await act(async () => { await result.current.runSchedule(schedule); });
+    expect(result.current.transportError).toContain("Network connection reset");
+    await act(async () => { await result.current.runSchedule(schedule); });
+
+    expect(apiMocks.runWalletCaseBackfillSchedule).toHaveBeenCalledTimes(2);
+    expect(apiMocks.runWalletCaseBackfillSchedule.mock.calls[0][1]).toEqual(schedule);
+    expect(apiMocks.runWalletCaseBackfillSchedule.mock.calls[1][1]).toEqual(schedule);
+    expect(apiMocks.runWalletCaseBackfillSchedule.mock.calls[0][2]).toBe(
+      IDEMPOTENCY_KEY,
+    );
+    expect(apiMocks.runWalletCaseBackfillSchedule.mock.calls[1][2]).toBe(
       IDEMPOTENCY_KEY,
     );
     expect(result.current.sync?.requested_scope.mode).toBe("resume");

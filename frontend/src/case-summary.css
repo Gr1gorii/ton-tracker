@@ -244,6 +244,12 @@
 .case-checkpoint-chain > ol { overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); list-style: none; }
 .case-continuation-plan { margin-top: 8px; border-color: color-mix(in srgb, var(--success) 35%, var(--border)); background: color-mix(in srgb, var(--success) 6%, var(--surface-solid)); }
 .case-backfill-progress { margin-top: 8px; border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); }
+.case-backfill-schedule { margin-top: 8px; border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 5%, var(--surface-solid)); }
+.case-backfill-schedule-budget { display: inline-grid; gap: 3px; color: var(--muted); font-size: .72rem; font-weight: 700; }
+.case-backfill-schedule-budget select { min-width: 96px; }
+.case-backfill-schedule-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.case-backfill-schedule-selection > span { min-width: 0; display: grid; gap: 4px; }
+.case-backfill-schedule-selection code { overflow-wrap: anywhere; }
 .case-continuation-resume-controls { display: flex; flex: 0 0 auto; align-items: flex-end; gap: 8px; }
 .case-continuation-resume-controls label { display: grid; gap: 3px; color: var(--text-muted); font-size: 0.62rem; font-weight: 720; letter-spacing: 0.04em; text-transform: uppercase; }
 .case-continuation-resume-controls select { min-height: 32px; padding: 0 28px 0 9px; border: 1px solid var(--border-strong); border-radius: 8px; color: var(--text); background: var(--surface-solid); font: inherit; font-size: 0.72rem; text-transform: none; }
@@ -766,6 +772,9 @@
   .case-continuation-resume-controls { width: 100%; align-items: stretch; flex-direction: column; }
   .case-continuation-resume-controls button,
   .case-continuation-resume-controls select { width: 100%; }
+  .case-backfill-schedule-budget select { width: 100%; }
+  .case-backfill-schedule-selection { align-items: stretch; flex-direction: column; }
+  .case-backfill-schedule-selection button { width: 100%; justify-content: center; }
   .case-limitations li { grid-template-columns: 1fr; gap: 5px; }
   .case-cancel-confirm { align-items: stretch; flex-direction: column; }
   .case-cancel-confirm p { margin: 0 0 5px; }

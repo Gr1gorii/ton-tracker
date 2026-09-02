@@ -193,6 +193,7 @@ export default function GramCaseSummary({
               syncController.transportState !== "idle"
             }
             onResume={syncController.resumePlanned}
+            onRunSchedule={syncController.runSchedule}
           />
         )}
       </div>
