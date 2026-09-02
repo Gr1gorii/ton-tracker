@@ -656,13 +656,13 @@ class CaseSyncWorker:
             )
         plan_version = claimed.acquisition_plan.get("version")
         if (
-            plan_version == 4
+            plan_version in {4, 5}
             and (
                 type(claimed.resume_page_budget) is not int
                 or not 1 <= claimed.resume_page_budget <= 10
             )
         ) or (
-            plan_version != 4 and claimed.resume_page_budget is not None
+            plan_version not in {4, 5} and claimed.resume_page_budget is not None
         ):
             raise WalletCaseRuntimeConflict(
                 "Checkpoint continuation page budget is invalid."

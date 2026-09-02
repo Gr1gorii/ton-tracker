@@ -2216,6 +2216,126 @@ def test_backfill_schedule_exposes_empty_and_active_backpressure(client):
     ).status_code == 422
 
 
+def test_backfill_schedule_run_is_finite_bound_and_idempotent(client):
+    case_id, source_sync, _claimed = _publish_transaction_checkpoint(client)
+    schedule_response = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "3"},
+    )
+    assert schedule_response.status_code == 200
+    schedule = schedule_response.json()
+    schedule_id = schedule["schedule"]["public_id"]
+    idempotency_key = str(uuid4())
+    run_url = (
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+        f"{schedule_id}/run"
+    )
+
+    queued_response = client.post(
+        run_url,
+        headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 3},
+    )
+
+    assert queued_response.status_code == 202, queued_response.text
+    queued = queued_response.json()
+    assert queued["requested_scope"]["continuation_plan_public_id"] == (
+        schedule["schedule"]["input_plan_public_id"]
+    )
+    assert queued["requested_scope"]["source_checkpoint_public_id"] == (
+        schedule["schedule"]["selected_checkpoint_public_id"]
+    )
+    assert queued["requested_scope"]["resume_page_budget"] == 3
+    with app.state.wallet_case_test_session() as session:
+        row = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == queued["public_id"])
+        )
+        assert row is not None
+        acquisition = json.loads(row.coverage_summary_json)["_acquisition"]
+        assert acquisition["version"] == 5
+        assert acquisition["backfill_schedule_public_id"] == schedule_id
+
+    backpressured = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "3"},
+    ).json()
+    assert backpressured["schedule"]["state"] == "backpressured"
+    blocked_run = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+            f"{backpressured['schedule']['public_id']}/run"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
+    )
+    assert blocked_run.status_code == 409
+    assert blocked_run.json()["detail"] == {
+        "code": "backfill_schedule_not_ready",
+        "message_safe": (
+            "This Backfill Schedule is not ready to enqueue a provider request."
+        ),
+        "retryable": False,
+        "state": "backpressured",
+        "active_sync_public_id": queued["public_id"],
+    }
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    replay = client.post(
+        run_url,
+        headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 3},
+    )
+    assert replay.status_code == 202, replay.text
+    assert replay.json()["public_id"] == queued["public_id"]
+    assert replay.json()["state"] in {"partial", "succeeded"}
+    assert replay.json()["requested_scope"]["start_at"] == source_sync[
+        "requested_scope"
+    ]["start_at"]
+
+    stale = client.post(
+        run_url,
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "backfill_schedule_stale"
+    assert stale.json()["detail"]["current_state"] == "ready"
+    assert stale.json()["detail"]["current_schedule_public_id"] != schedule_id
+
+
+def test_backfill_schedule_run_rejects_budget_drift_and_invalid_body(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    schedule = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "3"},
+    ).json()
+    url = (
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+        f"{schedule['schedule']['public_id']}/run"
+    )
+    drift = client.post(
+        url,
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 2},
+    )
+    assert drift.status_code == 409
+    assert drift.json()["detail"]["code"] == "backfill_schedule_stale"
+    assert client.post(
+        url,
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 1.0},
+    ).status_code == 422
+    assert client.post(
+        url,
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3, "repeat": True},
+    ).status_code == 422
+
+
 def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):
     case_id, _source_sync, _claimed = _publish_multi_stream_checkpoints(client)
     with app.state.wallet_case_test_session() as session:

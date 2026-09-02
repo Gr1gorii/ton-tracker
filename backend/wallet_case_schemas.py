@@ -146,6 +146,10 @@ class WalletCaseCheckpointPlanResumeRequest(_StrictModel):
     page_budget: int = Field(default=1, strict=True, ge=1, le=10)
 
 
+class WalletCaseBackfillScheduleRunRequest(_StrictModel):
+    page_budget: int = Field(default=1, strict=True, ge=1, le=10)
+
+
 class WalletCaseMetadataUpdateRequest(_StrictModel):
     expected_metadata_version: int = Field(ge=1)
     label: str | None = Field(default=None, max_length=120)
