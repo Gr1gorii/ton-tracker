@@ -1380,6 +1380,24 @@ class WalletCaseService:
         page_budget = acquisition_plan.get("resume_page_budget")
         budgeted = acquisition_plan["version"] in {4, 5}
         scheduled = acquisition_plan["version"] == 5
+        scheduled_fingerprint = (
+            _checkpoint_resume_fingerprint(
+                source_public_id,
+                continuation_plan_public_id=acquisition_plan[
+                    "continuation_plan_public_id"
+                ],
+                page_budget=page_budget,
+                backfill_schedule_public_id=acquisition_plan[
+                    "backfill_schedule_public_id"
+                ],
+            )
+            if scheduled
+            else None
+        )
+        if scheduled and case_sync.request_fingerprint != scheduled_fingerprint:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case scheduled continuation fingerprint is invalid."
+            )
         if budgeted:
             if (
                 type(page_budget) is not int
@@ -1924,6 +1942,17 @@ class WalletCaseService:
                 or replay_plan.get("backfill_schedule_public_id")
                 != schedule_public_id
                 or replay_plan.get("resume_page_budget") != page_budget
+                or replay.request_fingerprint
+                != _checkpoint_resume_fingerprint(
+                    replay_plan.get("source_checkpoint_public_id", ""),
+                    continuation_plan_public_id=replay_plan.get(
+                        "continuation_plan_public_id"
+                    ),
+                    page_budget=replay_plan.get("resume_page_budget"),
+                    backfill_schedule_public_id=replay_plan.get(
+                        "backfill_schedule_public_id"
+                    ),
+                )
             ):
                 raise WalletCaseIdempotencyConflict(
                     "Idempotency-Key was already used for another sync scope."
@@ -1949,16 +1978,26 @@ class WalletCaseService:
                 descriptor["state"],
                 descriptor["active_sync_public_id"],
             )
-        return self.enqueue_checkpoint_plan_resume(
-            wallet_case.public_id,
-            descriptor["input_plan_public_id"],
-            selection["checkpoint_public_id"],
-            idempotency_key,
-            page_budget=page_budget,
-            backfill_schedule_public_id=schedule_public_id,
-            settings=settings,
-            now=now,
-        )
+        try:
+            return self.enqueue_checkpoint_plan_resume(
+                wallet_case.public_id,
+                descriptor["input_plan_public_id"],
+                selection["checkpoint_public_id"],
+                idempotency_key,
+                page_budget=page_budget,
+                backfill_schedule_public_id=schedule_public_id,
+                settings=settings,
+                now=now,
+            )
+        except WalletCaseContinuationPlanStale as exc:
+            current = self.get_backfill_schedule(
+                wallet_case.public_id,
+                page_budget=page_budget,
+            )["schedule"]
+            raise WalletCaseBackfillScheduleStale(
+                current["public_id"],
+                current["state"],
+            ) from exc
 
     def _checkpoint_continuation_plan_response(
         self,

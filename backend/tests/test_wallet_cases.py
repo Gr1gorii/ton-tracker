@@ -2362,6 +2362,59 @@ def test_backfill_schedule_run_rejects_budget_drift_and_invalid_body(client):
     ).status_code == 422
 
 
+def test_backfill_schedule_fingerprint_tamper_fails_before_provider_io(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    schedule = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule"
+    ).json()
+    idempotency_key = str(uuid4())
+    url = (
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+        f"{schedule['schedule']['public_id']}/run"
+    )
+    queued = client.post(
+        url,
+        headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 1},
+    )
+    assert queued.status_code == 202, queued.text
+    with app.state.wallet_case_test_session() as session:
+        row = session.scalar(
+            select(CaseSync).where(
+                CaseSync.public_id == queued.json()["public_id"]
+            )
+        )
+        assert row is not None
+        row.request_fingerprint = "0" * 64
+        session.commit()
+
+    provider_called = False
+
+    def forbidden_builder(*_args, **_kwargs):
+        nonlocal provider_called
+        provider_called = True
+        raise AssertionError("provider I/O must not start")
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=forbidden_builder,
+    )
+    assert worker.run_once() is True
+    assert provider_called is False
+    failed = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{queued.json()['public_id']}"
+    ).json()
+    assert failed["state"] == "failed"
+    assert failed["error"]["code"] == "runtime_scope_conflict"
+    replay = client.post(
+        url,
+        headers={"Idempotency-Key": idempotency_key},
+        json={"page_budget": 1},
+    )
+    assert replay.status_code == 409
+    assert replay.json()["detail"]["code"] == "idempotency_conflict"
+
+
 def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):
     case_id, _source_sync, _claimed = _publish_multi_stream_checkpoints(client)
     with app.state.wallet_case_test_session() as session:
