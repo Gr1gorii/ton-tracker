@@ -2039,6 +2039,81 @@ def test_backfill_progress_measures_verified_frontier_movement(client):
         WalletCaseBackfillProgressResponse.model_validate(tampered)
 
 
+def test_backfill_progress_is_empty_scoped_and_fails_closed(client):
+    empty_case_id = _create_case(client)["case"]["public_id"]
+    response = client.get(
+        f"/api/v1/cases/{empty_case_id}/stream-checkpoints/backfill-progress"
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["progress"]["checkpoint_cutoff_public_id"] is None
+    assert body["document"]["streams"] == []
+    assert body["document"]["aggregate"] == {
+        "stream_count": 0,
+        "ready_count": 0,
+        "complete_count": 0,
+        "blocked_count": 0,
+        "revision_count": 0,
+        "continuation_revision_count": 0,
+        "page_count": 0,
+        "pages_succeeded": 0,
+        "continuation_page_count": 0,
+        "continuation_pages_succeeded": 0,
+        "observed_frontier_count": 0,
+        "advanced_frontier_count": 0,
+    }
+    assert client.get(
+        f"/api/v1/cases/{uuid4()}/stream-checkpoints/backfill-progress"
+    ).status_code == 404
+
+    populated_case_id, _source_sync, _claimed = (
+        _publish_transaction_checkpoint(client)
+    )
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case.has(
+                    public_id=populated_case_id
+                )
+            )
+        )
+        assert checkpoint is not None
+        checkpoint.checkpoint_json = (
+            '{"contract_version":"wallet_case_stream_checkpoint_v1"}'
+        )
+        session.commit()
+
+    corrupt = client.get(
+        f"/api/v1/cases/{populated_case_id}/stream-checkpoints/backfill-progress"
+    )
+    assert corrupt.status_code == 503
+    assert corrupt.json()["detail"] == {
+        "code": "backfill_progress_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ),
+        "retryable": False,
+    }
+
+
+def test_backfill_progress_schema_rejects_aggregate_and_frontier_drift(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    body = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-progress"
+    ).json()
+
+    aggregate_drift = json.loads(json.dumps(body))
+    aggregate_drift["document"]["aggregate"]["page_count"] += 1
+    with pytest.raises(ValueError, match="backfill progress"):
+        WalletCaseBackfillProgressResponse.model_validate(aggregate_drift)
+
+    frontier_drift = json.loads(json.dumps(body))
+    frontier_drift["document"]["streams"][0]["frontier_advanced"] = True
+    with pytest.raises(ValueError, match="backfill progress stream"):
+        WalletCaseBackfillProgressResponse.model_validate(frontier_drift)
+
+
 def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):
     case_id, _source_sync, _claimed = _publish_multi_stream_checkpoints(client)
     with app.state.wallet_case_test_session() as session:
