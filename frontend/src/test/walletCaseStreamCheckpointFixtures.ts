@@ -1,4 +1,5 @@
 import type {
+  WalletCaseBackfillOutcomeResponse,
   WalletCaseBackfillProgressResponse,
   WalletCaseBackfillScheduleResponse,
   WalletCaseCheckpointContinuationReceiptV1Response,
@@ -494,6 +495,235 @@ export function checkpointContinuationReceiptV3Fixture(): WalletCaseCheckpointCo
         ...budgeted.document.input,
         backfill_schedule_public_id: scheduleId,
       },
+    },
+  };
+}
+
+export function backfillOutcomeFixture(): WalletCaseBackfillOutcomeResponse {
+  const inputSchedule = backfillScheduleFixture();
+  const inputProgress = backfillProgressFixture();
+  const inputStream = inputProgress.document.streams[0];
+  const outputHash = "67".repeat(32);
+  const outputCheckpoint = {
+    ...inputStream.tip_checkpoint,
+    public_id: `scp_${outputHash}`,
+    checkpoint_hash_sha256: outputHash,
+    source_sync_public_id: SYNC_ID,
+    created_at: "2026-08-28T13:00:03Z",
+  };
+  const outputChainHash = "68".repeat(32);
+  const outputPlanHash = "69".repeat(32);
+  const outputProgressHash = "6a".repeat(32);
+  const receiptHash = "6b".repeat(32);
+  const outcomeHash = "6c".repeat(32);
+  const outputAggregate = {
+    ...inputProgress.document.aggregate,
+    revision_count: 3,
+    continuation_revision_count: 2,
+    page_count: 3,
+    pages_succeeded: 3,
+    continuation_page_count: 2,
+    continuation_pages_succeeded: 2,
+  };
+  const outputPage = {
+    ...(inputStream.current_frontier?.page as NonNullable<
+      typeof inputStream.current_frontier
+    >["page"]),
+    page_index: 3,
+    response_cursor: "30",
+    response_digest_sha256: "6d".repeat(32),
+    min_logical_time: "1",
+    max_logical_time: "8",
+  };
+  const outputProgress: WalletCaseBackfillProgressResponse = {
+    progress: {
+      public_id: `bfp_${outputProgressHash}`,
+      contract_version: "wallet_case_backfill_progress_v1",
+      content_hash_sha256: outputProgressHash,
+      checkpoint_cutoff_public_id: outputCheckpoint.public_id,
+      ...outputAggregate,
+    },
+    document: {
+      ...inputProgress.document,
+      checkpoint_cutoff_public_id: outputCheckpoint.public_id,
+      aggregate: outputAggregate,
+      streams: [{
+        ...inputStream,
+        tip_checkpoint: outputCheckpoint,
+        chain_public_id: `cch_${outputChainHash}`,
+        chain_content_hash_sha256: outputChainHash,
+        revision_count: 3,
+        continuation_revision_count: 2,
+        continuation_page_count: 2,
+        continuation_pages_succeeded: 2,
+        page_count: 3,
+        pages_succeeded: 3,
+        next_page_index: 4,
+        current_frontier: {
+          checkpoint_public_id: outputCheckpoint.public_id,
+          page: outputPage,
+        },
+      }],
+    },
+  };
+  const afterPlan: WalletCaseCheckpointContinuationPlanResponse = {
+    plan: {
+      public_id: `cpl_${outputPlanHash}`,
+      contract_version: "wallet_case_checkpoint_continuation_plan_v1",
+      content_hash_sha256: outputPlanHash,
+      checkpoint_cutoff_public_id: outputCheckpoint.public_id,
+      stream_count: 1,
+      ready_count: 1,
+      complete_count: 0,
+      blocked_count: 0,
+      revision_count: 3,
+      page_count: 3,
+      pages_succeeded: 3,
+    },
+    document: {
+      contract_version: "wallet_case_checkpoint_continuation_plan_v1",
+      case_public_id: CASE_ID,
+      checkpoint_cutoff_public_id: outputCheckpoint.public_id,
+      aggregate: {
+        stream_count: 1,
+        ready_count: 1,
+        complete_count: 0,
+        blocked_count: 0,
+        revision_count: 3,
+        page_count: 3,
+        pages_succeeded: 3,
+      },
+      streams: [{
+        provider: outputCheckpoint.provider,
+        stream_key: outputCheckpoint.stream_key,
+        provider_contract_version: outputCheckpoint.provider_contract_version,
+        tip_checkpoint: outputCheckpoint,
+        chain_public_id: `cch_${outputChainHash}`,
+        chain_content_hash_sha256: outputChainHash,
+        revision_count: 3,
+        page_count: 3,
+        pages_succeeded: 3,
+        resume_state: "ready",
+        next_page_index: 4,
+        resume_blocker: null,
+      }],
+      limitations: [{
+        code: "continuation_plan_is_not_automatic_backfill",
+        message: "The after-plan does not start another provider request.",
+      }],
+    },
+  };
+  const receipt: WalletCaseCheckpointContinuationReceiptV3Response = {
+    receipt: {
+      public_id: `ctr_${receiptHash}`,
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v3",
+      content_hash_sha256: receiptHash,
+      sync_public_id: SYNC_ID,
+      input_plan_public_id: inputSchedule.schedule.input_plan_public_id,
+      input_checkpoint_public_id: inputStream.tip_checkpoint.public_id,
+      output_checkpoint_public_id: outputCheckpoint.public_id,
+      after_plan_public_id: afterPlan.plan.public_id,
+      revision_delta: 1,
+      page_count_delta: 1,
+      pages_succeeded_delta: 1,
+      page_budget: 3,
+      page_budget_consumed: 1,
+      page_budget_remaining: 2,
+      input_schedule_public_id: inputSchedule.schedule.public_id,
+    },
+    document: {
+      contract_version: "wallet_case_checkpoint_continuation_receipt_v3",
+      case_public_id: CASE_ID,
+      sync_public_id: SYNC_ID,
+      input: {
+        continuation_plan_public_id: inputSchedule.schedule.input_plan_public_id,
+        checkpoint: inputStream.tip_checkpoint,
+        chain_public_id: inputStream.chain_public_id,
+        chain_content_hash_sha256: inputStream.chain_content_hash_sha256,
+        revision_count: 2,
+        page_count: 2,
+        pages_succeeded: 2,
+        next_page_index: 3,
+        page_budget: 3,
+        backfill_schedule_public_id: inputSchedule.schedule.public_id,
+      },
+      output: {
+        checkpoint: outputCheckpoint,
+        chain_public_id: `cch_${outputChainHash}`,
+        chain_content_hash_sha256: outputChainHash,
+        revision_count: 3,
+        page_count: 3,
+        pages_succeeded: 3,
+        resume_state: "ready",
+        next_page_index: 4,
+        resume_blocker: null,
+      },
+      after_plan: afterPlan,
+      transition: {
+        checkpoint_changed: true,
+        plan_changed: true,
+        revision_delta: 1,
+        page_count_delta: 1,
+        pages_succeeded_delta: 1,
+        page_budget_consumed: 1,
+        page_budget_remaining: 2,
+      },
+      limitations: [{
+        code: "continuation_receipt_is_provider_progress",
+        message: "The receipt proves one checkpoint transition.",
+      }],
+    },
+  };
+  const transition = {
+    provider: inputStream.provider,
+    stream_key: inputStream.stream_key,
+    input_checkpoint_public_id: inputStream.tip_checkpoint.public_id,
+    output_checkpoint_public_id: outputCheckpoint.public_id,
+    before_resume_state: "ready" as const,
+    after_resume_state: "ready" as const,
+    revision_delta: 1 as const,
+    page_count_delta: 1,
+    pages_succeeded_delta: 1,
+    continuation_revision_delta: 1 as const,
+    continuation_page_count_delta: 1,
+    continuation_pages_succeeded_delta: 1,
+    ready_count_delta: 0,
+    complete_count_delta: 0,
+    blocked_count_delta: 0,
+    frontier_changed: true,
+  };
+  return {
+    outcome: {
+      public_id: `bfo_${outcomeHash}`,
+      contract_version: "wallet_case_backfill_outcome_v1",
+      content_hash_sha256: outcomeHash,
+      sync_public_id: SYNC_ID,
+      outcome: "advanced",
+      input_schedule_public_id: inputSchedule.schedule.public_id,
+      continuation_receipt_public_id: receipt.receipt.public_id,
+      input_progress_public_id: inputProgress.progress.public_id,
+      output_progress_public_id: outputProgress.progress.public_id,
+      provider: transition.provider,
+      stream_key: transition.stream_key,
+      page_count_delta: 1,
+      pages_succeeded_delta: 1,
+      before_resume_state: "ready",
+      after_resume_state: "ready",
+    },
+    document: {
+      contract_version: "wallet_case_backfill_outcome_v1",
+      case_public_id: CASE_ID,
+      sync_public_id: SYNC_ID,
+      input_schedule: inputSchedule,
+      input_progress: inputProgress,
+      continuation_receipt: receipt,
+      output_progress: outputProgress,
+      outcome: "advanced",
+      transition,
+      limitations: [{
+        code: "backfill_outcome_is_not_full_history_proof",
+        message: "The outcome does not prove complete wallet history.",
+      }],
     },
   };
 }

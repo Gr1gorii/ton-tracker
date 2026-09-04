@@ -51,6 +51,7 @@ from services.wallet_cases import (
 )
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
+    WalletCaseBackfillOutcomeResponse,
     WalletCaseBackfillProgressResponse,
     WalletCaseBackfillScheduleResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
@@ -2253,8 +2254,28 @@ def test_backfill_schedule_run_is_finite_bound_and_idempotent(client):
         )
         assert row is not None
         acquisition = json.loads(row.coverage_summary_json)["_acquisition"]
-        assert acquisition["version"] == 5
+        assert acquisition["version"] == 6
         assert acquisition["backfill_schedule_public_id"] == schedule_id
+        assert acquisition["backfill_progress_public_id"] == schedule[
+            "schedule"
+        ]["input_progress_public_id"]
+        assert acquisition["backfill_checkpoint_cutoff_public_id"] == (
+            schedule["schedule"]["checkpoint_cutoff_public_id"]
+        )
+        assert row.request_fingerprint == _checkpoint_resume_fingerprint(
+            schedule["schedule"]["selected_checkpoint_public_id"],
+            continuation_plan_public_id=schedule["schedule"][
+                "input_plan_public_id"
+            ],
+            page_budget=3,
+            backfill_schedule_public_id=schedule_id,
+            backfill_progress_public_id=schedule["schedule"][
+                "input_progress_public_id"
+            ],
+            backfill_checkpoint_cutoff_public_id=schedule["schedule"][
+                "checkpoint_cutoff_public_id"
+            ],
+        )
 
     backpressured = client.get(
         f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
@@ -2331,6 +2352,125 @@ def test_backfill_schedule_run_is_finite_bound_and_idempotent(client):
     assert stale.json()["detail"]["code"] == "backfill_schedule_stale"
     assert stale.json()["detail"]["current_state"] == "ready"
     assert stale.json()["detail"]["current_schedule_public_id"] != schedule_id
+
+
+def test_backfill_outcome_proves_stable_progress_transition(client):
+    case_id, source_sync, _claimed = _publish_transaction_checkpoint(client)
+    input_progress = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-progress"
+    ).json()
+    schedule = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "3"},
+    ).json()
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+            f"{schedule['schedule']['public_id']}/run"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
+    )
+    assert queued.status_code == 202, queued.text
+    sync_id = queued.json()["public_id"]
+    unavailable = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+    assert unavailable.status_code == 404
+    assert unavailable.json()["detail"]["code"] == (
+        "backfill_outcome_not_available"
+    )
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    descriptor = body["outcome"]
+    transition = body["document"]["transition"]
+    assert descriptor["public_id"] == (
+        f"bfo_{descriptor['content_hash_sha256']}"
+    )
+    assert descriptor["contract_version"] == (
+        "wallet_case_backfill_outcome_v1"
+    )
+    assert descriptor["sync_public_id"] == sync_id
+    assert descriptor["outcome"] == "advanced"
+    assert descriptor["input_schedule_public_id"] == schedule["schedule"][
+        "public_id"
+    ]
+    assert descriptor["input_progress_public_id"] == input_progress[
+        "progress"
+    ]["public_id"]
+    assert descriptor["output_progress_public_id"] != descriptor[
+        "input_progress_public_id"
+    ]
+    assert transition["before_resume_state"] == "ready"
+    assert transition["after_resume_state"] == "ready"
+    assert transition["revision_delta"] == 1
+    assert transition["continuation_revision_delta"] == 1
+    assert transition["page_count_delta"] == 1
+    assert transition["pages_succeeded_delta"] == 1
+    assert transition["continuation_page_count_delta"] == 1
+    assert transition["continuation_pages_succeeded_delta"] == 1
+    assert transition["frontier_changed"] is True
+    assert body["document"]["continuation_receipt"]["receipt"][
+        "public_id"
+    ] == descriptor["continuation_receipt_public_id"]
+    assert body["document"]["limitations"][1]["code"] == (
+        "backfill_outcome_is_not_full_history_proof"
+    )
+    WalletCaseBackfillOutcomeResponse.model_validate(body)
+    tampered = json.loads(json.dumps(body))
+    tampered["outcome"]["output_progress_public_id"] = f"bfp_{'0' * 64}"
+    with pytest.raises(ValueError, match="backfill outcome content address"):
+        WalletCaseBackfillOutcomeResponse.model_validate(tampered)
+
+    _later, _later_checkpoint = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=transition["output_checkpoint_public_id"],
+    )
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json() == body
+    legacy = client.get(
+        (
+            f"/api/v1/cases/{case_id}/syncs/"
+            f"{source_sync['public_id']}/backfill-outcome"
+        )
+    )
+    assert legacy.status_code == 404
+    assert legacy.json()["detail"]["code"] == (
+        "backfill_outcome_not_available"
+    )
+    with app.state.wallet_case_test_session() as session:
+        row = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == sync_id)
+        )
+        assert row is not None
+        coverage = json.loads(row.coverage_summary_json)
+        coverage["_acquisition"]["backfill_progress_public_id"] = (
+            f"bfp_{'0' * 64}"
+        )
+        row.coverage_summary_json = json.dumps(coverage)
+        session.commit()
+    corrupt = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+    assert corrupt.status_code == 503
+    assert corrupt.json()["detail"]["code"] == (
+        "backfill_outcome_integrity_error"
+    )
 
 
 def test_backfill_schedule_run_rejects_budget_drift_and_invalid_body(client):
@@ -2413,6 +2553,77 @@ def test_backfill_schedule_fingerprint_tamper_fails_before_provider_io(client):
     )
     assert replay.status_code == 409
     assert replay.json()["detail"]["code"] == "idempotency_conflict"
+
+
+@pytest.mark.parametrize("field,prefix", [
+    ("backfill_progress_public_id", "bfp_"),
+    ("backfill_checkpoint_cutoff_public_id", "scp_"),
+])
+def test_backfill_schedule_provenance_tamper_fails_before_provider_io(
+    client,
+    field,
+    prefix,
+):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    schedule = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule"
+    ).json()
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+            f"{schedule['schedule']['public_id']}/run"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 1},
+    )
+    assert queued.status_code == 202, queued.text
+    with app.state.wallet_case_test_session() as session:
+        row = session.scalar(
+            select(CaseSync).where(
+                CaseSync.public_id == queued.json()["public_id"]
+            )
+        )
+        assert row is not None
+        coverage = json.loads(row.coverage_summary_json)
+        acquisition = coverage["_acquisition"]
+        acquisition[field] = f"{prefix}{'0' * 64}"
+        row.coverage_summary_json = json.dumps(coverage)
+        row.request_fingerprint = _checkpoint_resume_fingerprint(
+            acquisition["source_checkpoint_public_id"],
+            continuation_plan_public_id=acquisition[
+                "continuation_plan_public_id"
+            ],
+            page_budget=acquisition["resume_page_budget"],
+            backfill_schedule_public_id=acquisition[
+                "backfill_schedule_public_id"
+            ],
+            backfill_progress_public_id=acquisition[
+                "backfill_progress_public_id"
+            ],
+            backfill_checkpoint_cutoff_public_id=acquisition[
+                "backfill_checkpoint_cutoff_public_id"
+            ],
+        )
+        session.commit()
+
+    provider_called = False
+
+    def forbidden_builder(*_args, **_kwargs):
+        nonlocal provider_called
+        provider_called = True
+        raise AssertionError("provider I/O must not start")
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=forbidden_builder,
+    )
+    assert worker.run_once() is True
+    assert provider_called is False
+    failed = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{queued.json()['public_id']}"
+    ).json()
+    assert failed["state"] == "failed"
+    assert failed["error"]["code"] == "runtime_scope_conflict"
 
 
 def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):

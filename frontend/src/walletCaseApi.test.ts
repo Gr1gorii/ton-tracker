@@ -10,6 +10,7 @@ import {
   createWalletCaseSync,
   deleteWalletCase,
   getWalletCaseBackfillProgress,
+  getWalletCaseBackfillOutcome,
   getWalletCaseBackfillSchedule,
   getWalletCase,
   getWalletCaseCheckpointContinuationReceipt,
@@ -50,6 +51,7 @@ import {
 } from "./test/walletCaseActivityFixtures";
 import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
 import {
+  backfillOutcomeFixture,
   backfillProgressFixture,
   backfillScheduleFixture,
   checkpointContinuationReceiptFixture,
@@ -683,6 +685,30 @@ describe("Wallet Case API", () => {
 
     fetchMock.mockResolvedValueOnce(jsonResponse(receipt));
     await expect(getWalletCaseCheckpointContinuationReceipt(
+      CASE_ID,
+      OTHER_SYNC_ID,
+    )).rejects.toThrow(/does not match/);
+  });
+
+  it("reads a no-store backfill outcome bound to its Case and sync", async () => {
+    const outcome = backfillOutcomeFixture();
+    const syncId = outcome.outcome.sync_public_id;
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(outcome));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseBackfillOutcome(
+      CASE_ID,
+      syncId,
+      controller.signal,
+    )).resolves.toEqual(outcome);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/syncs/${syncId}/backfill-outcome`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(outcome));
+    await expect(getWalletCaseBackfillOutcome(
       CASE_ID,
       OTHER_SYNC_ID,
     )).rejects.toThrow(/does not match/);
