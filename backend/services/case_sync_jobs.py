@@ -659,18 +659,19 @@ class CaseSyncWorker:
             )
         plan_version = claimed.acquisition_plan.get("version")
         if (
-            plan_version in {4, 5}
+            plan_version in {4, 5, 6}
             and (
                 type(claimed.resume_page_budget) is not int
                 or not 1 <= claimed.resume_page_budget <= 10
             )
         ) or (
-            plan_version not in {4, 5} and claimed.resume_page_budget is not None
+            plan_version not in {4, 5, 6}
+            and claimed.resume_page_budget is not None
         ):
             raise WalletCaseRuntimeConflict(
                 "Checkpoint continuation page budget is invalid."
             )
-        if plan_version == 5 and claimed.request_fingerprint != (
+        if plan_version in {5, 6} and claimed.request_fingerprint != (
             _checkpoint_resume_fingerprint(
                 claimed.source_checkpoint_public_id or "",
                 continuation_plan_public_id=claimed.acquisition_plan[
@@ -680,6 +681,14 @@ class CaseSyncWorker:
                 backfill_schedule_public_id=claimed.acquisition_plan[
                     "backfill_schedule_public_id"
                 ],
+                backfill_progress_public_id=claimed.acquisition_plan.get(
+                    "backfill_progress_public_id"
+                ),
+                backfill_checkpoint_cutoff_public_id=(
+                    claimed.acquisition_plan.get(
+                        "backfill_checkpoint_cutoff_public_id"
+                    )
+                ),
             )
         ):
             raise WalletCaseRuntimeConflict(

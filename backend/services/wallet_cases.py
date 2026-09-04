@@ -908,6 +908,8 @@ class WalletCaseService:
         continuation_plan_public_id: str | None = None,
         page_budget: int | None = None,
         backfill_schedule_public_id: str | None = None,
+        backfill_progress_public_id: str | None = None,
+        backfill_checkpoint_cutoff_public_id: str | None = None,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -1011,8 +1013,15 @@ class WalletCaseService:
                 "Stored Wallet Case stream checkpoint continuation is invalid."
             )
 
+        schedule_provenance = (
+            backfill_schedule_public_id,
+            backfill_progress_public_id,
+            backfill_checkpoint_cutoff_public_id,
+        )
         if continuation_plan_public_id is None:
-            if page_budget is not None or backfill_schedule_public_id is not None:
+            if page_budget is not None or any(
+                value is not None for value in schedule_provenance
+            ):
                 raise ValueError(
                     "A page budget requires a verified Continuation Plan."
                 )
@@ -1027,12 +1036,38 @@ class WalletCaseService:
             )
         ):
             raise ValueError("Backfill Schedule public ID is invalid.")
+        if any(value is not None for value in schedule_provenance) and not all(
+            value is not None for value in schedule_provenance
+        ):
+            raise ValueError("Backfill Schedule provenance is incomplete.")
+        if backfill_progress_public_id is not None and (
+            len(backfill_progress_public_id) != 68
+            or not backfill_progress_public_id.startswith("bfp_")
+            or any(
+                char not in "0123456789abcdef"
+                for char in backfill_progress_public_id[4:]
+            )
+        ):
+            raise ValueError("Backfill Progress public ID is invalid.")
+        if backfill_checkpoint_cutoff_public_id is not None and (
+            len(backfill_checkpoint_cutoff_public_id) != 68
+            or not backfill_checkpoint_cutoff_public_id.startswith("scp_")
+            or any(
+                char not in "0123456789abcdef"
+                for char in backfill_checkpoint_cutoff_public_id[4:]
+            )
+        ):
+            raise ValueError("Backfill checkpoint cutoff public ID is invalid.")
 
         fingerprint = _checkpoint_resume_fingerprint(
             checkpoint.public_id,
             continuation_plan_public_id=continuation_plan_public_id,
             page_budget=page_budget,
             backfill_schedule_public_id=backfill_schedule_public_id,
+            backfill_progress_public_id=backfill_progress_public_id,
+            backfill_checkpoint_cutoff_public_id=(
+                backfill_checkpoint_cutoff_public_id
+            ),
         )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
@@ -1058,7 +1093,7 @@ class WalletCaseService:
         )
         acquisition_plan = {
             "version": (
-                5
+                6
                 if backfill_schedule_public_id is not None
                 else 4
                 if continuation_plan_public_id is not None
@@ -1082,6 +1117,12 @@ class WalletCaseService:
         if backfill_schedule_public_id is not None:
             acquisition_plan["backfill_schedule_public_id"] = (
                 backfill_schedule_public_id
+            )
+            acquisition_plan["backfill_progress_public_id"] = (
+                backfill_progress_public_id
+            )
+            acquisition_plan["backfill_checkpoint_cutoff_public_id"] = (
+                backfill_checkpoint_cutoff_public_id
             )
         expected_data_mode = _ENVIRONMENT_DATA_MODE[
             wallet_case.data_environment
@@ -1165,6 +1206,8 @@ class WalletCaseService:
         *,
         page_budget: int = 1,
         backfill_schedule_public_id: str | None = None,
+        backfill_progress_public_id: str | None = None,
+        backfill_checkpoint_cutoff_public_id: str | None = None,
         settings=None,
         now: datetime | None = None,
     ) -> tuple[dict[str, Any], bool]:
@@ -1177,6 +1220,10 @@ class WalletCaseService:
             continuation_plan_public_id=continuation_plan_public_id,
             page_budget=page_budget,
             backfill_schedule_public_id=backfill_schedule_public_id,
+            backfill_progress_public_id=backfill_progress_public_id,
+            backfill_checkpoint_cutoff_public_id=(
+                backfill_checkpoint_cutoff_public_id
+            ),
         )
         replay = self.repository.get_by_idempotency_key(
             case_id=wallet_case.id,
@@ -1220,6 +1267,10 @@ class WalletCaseService:
             continuation_plan_public_id=continuation_plan_public_id,
             page_budget=page_budget,
             backfill_schedule_public_id=backfill_schedule_public_id,
+            backfill_progress_public_id=backfill_progress_public_id,
+            backfill_checkpoint_cutoff_public_id=(
+                backfill_checkpoint_cutoff_public_id
+            ),
             settings=settings,
             now=now,
         )
@@ -1269,7 +1320,7 @@ class WalletCaseService:
             ) from exc
         if (
             acquisition_plan.get("mode") != "resume"
-            or acquisition_plan.get("version") not in {3, 4, 5}
+            or acquisition_plan.get("version") not in {3, 4, 5, 6}
         ):
             raise WalletCaseContinuationReceiptNotFound(
                 "This sync was not accepted from a verified Continuation Plan."
@@ -1378,8 +1429,8 @@ class WalletCaseService:
                 "Stored Wallet Case continuation receipt transition is invalid."
             )
         page_budget = acquisition_plan.get("resume_page_budget")
-        budgeted = acquisition_plan["version"] in {4, 5}
-        scheduled = acquisition_plan["version"] == 5
+        budgeted = acquisition_plan["version"] in {4, 5, 6}
+        scheduled = acquisition_plan["version"] in {5, 6}
         scheduled_fingerprint = (
             _checkpoint_resume_fingerprint(
                 source_public_id,
@@ -1390,6 +1441,12 @@ class WalletCaseService:
                 backfill_schedule_public_id=acquisition_plan[
                     "backfill_schedule_public_id"
                 ],
+                backfill_progress_public_id=acquisition_plan.get(
+                    "backfill_progress_public_id"
+                ),
+                backfill_checkpoint_cutoff_public_id=acquisition_plan.get(
+                    "backfill_checkpoint_cutoff_public_id"
+                ),
             )
             if scheduled
             else None
@@ -1938,9 +1995,13 @@ class WalletCaseService:
                     "Idempotency-Key was already used for another sync scope."
                 ) from exc
             if (
-                replay_plan.get("version") != 5
+                replay_plan.get("version") != 6
                 or replay_plan.get("backfill_schedule_public_id")
                 != schedule_public_id
+                or replay_plan.get("backfill_progress_public_id")
+                is None
+                or replay_plan.get("backfill_checkpoint_cutoff_public_id")
+                is None
                 or replay_plan.get("resume_page_budget") != page_budget
                 or replay.request_fingerprint
                 != _checkpoint_resume_fingerprint(
@@ -1951,6 +2012,12 @@ class WalletCaseService:
                     page_budget=replay_plan.get("resume_page_budget"),
                     backfill_schedule_public_id=replay_plan.get(
                         "backfill_schedule_public_id"
+                    ),
+                    backfill_progress_public_id=replay_plan.get(
+                        "backfill_progress_public_id"
+                    ),
+                    backfill_checkpoint_cutoff_public_id=replay_plan.get(
+                        "backfill_checkpoint_cutoff_public_id"
                     ),
                 )
             ):
@@ -1986,6 +2053,12 @@ class WalletCaseService:
                 idempotency_key,
                 page_budget=page_budget,
                 backfill_schedule_public_id=schedule_public_id,
+                backfill_progress_public_id=descriptor[
+                    "input_progress_public_id"
+                ],
+                backfill_checkpoint_cutoff_public_id=descriptor[
+                    "checkpoint_cutoff_public_id"
+                ],
                 settings=settings,
                 now=now,
             )
@@ -2978,6 +3051,8 @@ def _checkpoint_resume_fingerprint(
     continuation_plan_public_id: str | None = None,
     page_budget: int | None = None,
     backfill_schedule_public_id: str | None = None,
+    backfill_progress_public_id: str | None = None,
+    backfill_checkpoint_cutoff_public_id: str | None = None,
 ) -> str:
     document = {
         "contract": "wallet_case_checkpoint_resume_request_v1",
@@ -2985,12 +3060,29 @@ def _checkpoint_resume_fingerprint(
     }
     if backfill_schedule_public_id is not None:
         document = {
-            "contract": "wallet_case_backfill_schedule_run_request_v1",
+            "contract": (
+                "wallet_case_backfill_schedule_run_request_v2"
+                if backfill_progress_public_id is not None
+                or backfill_checkpoint_cutoff_public_id is not None
+                else "wallet_case_backfill_schedule_run_request_v1"
+            ),
             "backfill_schedule_public_id": backfill_schedule_public_id,
             "continuation_plan_public_id": continuation_plan_public_id,
             "checkpoint_public_id": checkpoint_public_id,
             "page_budget": page_budget,
         }
+        if (
+            backfill_progress_public_id is not None
+            or backfill_checkpoint_cutoff_public_id is not None
+        ):
+            document.update(
+                {
+                    "backfill_progress_public_id": backfill_progress_public_id,
+                    "backfill_checkpoint_cutoff_public_id": (
+                        backfill_checkpoint_cutoff_public_id
+                    ),
+                }
+            )
     elif continuation_plan_public_id is not None:
         if page_budget is None:
             document = {
@@ -3218,12 +3310,17 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     version_five_keys = version_four_keys | {
         "backfill_schedule_public_id",
     }
+    version_six_keys = version_five_keys | {
+        "backfill_progress_public_id",
+        "backfill_checkpoint_cutoff_public_id",
+    }
     expected_keys_by_version = {
         1: frozenset(version_one_keys),
         2: frozenset(version_two_keys),
         3: frozenset(version_three_keys),
         4: frozenset(version_four_keys),
         5: frozenset(version_five_keys),
+        6: frozenset(version_six_keys),
     }
     if (
         not isinstance(stored, dict)
@@ -3243,8 +3340,12 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     continuation_plan_public_id = stored.get("continuation_plan_public_id")
     resume_page_budget = stored.get("resume_page_budget")
     backfill_schedule_public_id = stored.get("backfill_schedule_public_id")
+    backfill_progress_public_id = stored.get("backfill_progress_public_id")
+    backfill_checkpoint_cutoff_public_id = stored.get(
+        "backfill_checkpoint_cutoff_public_id"
+    )
     if (
-        stored.get("version") not in {1, 2, 3, 4, 5}
+        stored.get("version") not in {1, 2, 3, 4, 5, 6}
         or mode not in {"bounded", "incremental", "resume"}
         or not isinstance(start_at, str)
         or not isinstance(end_at, str)
@@ -3284,7 +3385,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         ):
             raise ValueError("Stored Wallet Case acquisition plan is invalid.")
     elif (
-        stored.get("version") not in {2, 3, 4, 5}
+        stored.get("version") not in {2, 3, 4, 5, 6}
         or not isinstance(base_public_id, str)
         or len(base_public_id) != 36
         or not isinstance(source_checkpoint_public_id, str)
@@ -3300,7 +3401,7 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
         or resume_page_index < 1
         or overlap_seconds != 0
         or (
-            stored.get("version") in {3, 4, 5}
+            stored.get("version") in {3, 4, 5, 6}
             and (
                 not isinstance(continuation_plan_public_id, str)
                 or len(continuation_plan_public_id) != 68
@@ -3312,14 +3413,14 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
             )
         )
         or (
-            stored.get("version") in {4, 5}
+            stored.get("version") in {4, 5, 6}
             and (
                 type(resume_page_budget) is not int
                 or not 1 <= resume_page_budget <= 10
             )
         )
         or (
-            stored.get("version") == 5
+            stored.get("version") in {5, 6}
             and (
                 not isinstance(backfill_schedule_public_id, str)
                 or len(backfill_schedule_public_id) != 68
@@ -3327,6 +3428,28 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
                 or any(
                     char not in "0123456789abcdef"
                     for char in backfill_schedule_public_id[4:]
+                )
+            )
+        )
+        or (
+            stored.get("version") == 6
+            and (
+                not isinstance(backfill_progress_public_id, str)
+                or len(backfill_progress_public_id) != 68
+                or not backfill_progress_public_id.startswith("bfp_")
+                or any(
+                    char not in "0123456789abcdef"
+                    for char in backfill_progress_public_id[4:]
+                )
+                or not isinstance(
+                    backfill_checkpoint_cutoff_public_id,
+                    str,
+                )
+                or len(backfill_checkpoint_cutoff_public_id) != 68
+                or not backfill_checkpoint_cutoff_public_id.startswith("scp_")
+                or any(
+                    char not in "0123456789abcdef"
+                    for char in backfill_checkpoint_cutoff_public_id[4:]
                 )
             )
         )

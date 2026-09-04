@@ -2253,8 +2253,28 @@ def test_backfill_schedule_run_is_finite_bound_and_idempotent(client):
         )
         assert row is not None
         acquisition = json.loads(row.coverage_summary_json)["_acquisition"]
-        assert acquisition["version"] == 5
+        assert acquisition["version"] == 6
         assert acquisition["backfill_schedule_public_id"] == schedule_id
+        assert acquisition["backfill_progress_public_id"] == schedule[
+            "schedule"
+        ]["input_progress_public_id"]
+        assert acquisition["backfill_checkpoint_cutoff_public_id"] == (
+            schedule["schedule"]["checkpoint_cutoff_public_id"]
+        )
+        assert row.request_fingerprint == _checkpoint_resume_fingerprint(
+            schedule["schedule"]["selected_checkpoint_public_id"],
+            continuation_plan_public_id=schedule["schedule"][
+                "input_plan_public_id"
+            ],
+            page_budget=3,
+            backfill_schedule_public_id=schedule_id,
+            backfill_progress_public_id=schedule["schedule"][
+                "input_progress_public_id"
+            ],
+            backfill_checkpoint_cutoff_public_id=schedule["schedule"][
+                "checkpoint_cutoff_public_id"
+            ],
+        )
 
     backpressured = client.get(
         f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
