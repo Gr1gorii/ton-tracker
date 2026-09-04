@@ -51,6 +51,7 @@ from services.wallet_cases import (
 )
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
+    WalletCaseBackfillOutcomeResponse,
     WalletCaseBackfillProgressResponse,
     WalletCaseBackfillScheduleResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
@@ -2351,6 +2352,107 @@ def test_backfill_schedule_run_is_finite_bound_and_idempotent(client):
     assert stale.json()["detail"]["code"] == "backfill_schedule_stale"
     assert stale.json()["detail"]["current_state"] == "ready"
     assert stale.json()["detail"]["current_schedule_public_id"] != schedule_id
+
+
+def test_backfill_outcome_proves_stable_progress_transition(client):
+    case_id, source_sync, _claimed = _publish_transaction_checkpoint(client)
+    input_progress = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-progress"
+    ).json()
+    schedule = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": "3"},
+    ).json()
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+            f"{schedule['schedule']['public_id']}/run"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 3},
+    )
+    assert queued.status_code == 202, queued.text
+    sync_id = queued.json()["public_id"]
+    unavailable = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+    assert unavailable.status_code == 404
+    assert unavailable.json()["detail"]["code"] == (
+        "backfill_outcome_not_available"
+    )
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    )
+    assert worker.run_once() is True
+    response = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    descriptor = body["outcome"]
+    transition = body["document"]["transition"]
+    assert descriptor["public_id"] == (
+        f"bfo_{descriptor['content_hash_sha256']}"
+    )
+    assert descriptor["contract_version"] == (
+        "wallet_case_backfill_outcome_v1"
+    )
+    assert descriptor["sync_public_id"] == sync_id
+    assert descriptor["outcome"] == "advanced"
+    assert descriptor["input_schedule_public_id"] == schedule["schedule"][
+        "public_id"
+    ]
+    assert descriptor["input_progress_public_id"] == input_progress[
+        "progress"
+    ]["public_id"]
+    assert descriptor["output_progress_public_id"] != descriptor[
+        "input_progress_public_id"
+    ]
+    assert transition["before_resume_state"] == "ready"
+    assert transition["after_resume_state"] == "ready"
+    assert transition["revision_delta"] == 1
+    assert transition["continuation_revision_delta"] == 1
+    assert transition["page_count_delta"] == 1
+    assert transition["pages_succeeded_delta"] == 1
+    assert transition["continuation_page_count_delta"] == 1
+    assert transition["continuation_pages_succeeded_delta"] == 1
+    assert transition["frontier_changed"] is True
+    assert body["document"]["continuation_receipt"]["receipt"][
+        "public_id"
+    ] == descriptor["continuation_receipt_public_id"]
+    assert body["document"]["limitations"][1]["code"] == (
+        "backfill_outcome_is_not_full_history_proof"
+    )
+    WalletCaseBackfillOutcomeResponse.model_validate(body)
+    tampered = json.loads(json.dumps(body))
+    tampered["outcome"]["output_progress_public_id"] = f"bfp_{'0' * 64}"
+    with pytest.raises(ValueError, match="backfill outcome content address"):
+        WalletCaseBackfillOutcomeResponse.model_validate(tampered)
+
+    _later, _later_checkpoint = _resume_transaction_checkpoint(
+        client,
+        case_id=case_id,
+        checkpoint_id=transition["output_checkpoint_public_id"],
+    )
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json() == body
+    legacy = client.get(
+        (
+            f"/api/v1/cases/{case_id}/syncs/"
+            f"{source_sync['public_id']}/backfill-outcome"
+        )
+    )
+    assert legacy.status_code == 404
+    assert legacy.json()["detail"]["code"] == (
+        "backfill_outcome_not_available"
+    )
 
 
 def test_backfill_schedule_run_rejects_budget_drift_and_invalid_body(client):

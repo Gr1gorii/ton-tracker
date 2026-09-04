@@ -59,6 +59,10 @@ BackfillSchedulePublicId = Annotated[
     str,
     Field(pattern=r"^bfs_[0-9a-f]{64}$", max_length=68),
 ]
+BackfillOutcomePublicId = Annotated[
+    str,
+    Field(pattern=r"^bfo_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -1461,6 +1465,190 @@ class WalletCaseCheckpointContinuationReceiptV3Response(
             raise ValueError(
                 "continuation receipt schedule descriptor is inconsistent"
             )
+        return self
+
+
+class WalletCaseBackfillOutcomeTransition(_StrictModel):
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    input_checkpoint_public_id: CheckpointPublicId
+    output_checkpoint_public_id: CheckpointPublicId
+    before_resume_state: Literal["ready"]
+    after_resume_state: Literal["ready", "complete", "blocked"]
+    revision_delta: int = Field(ge=1, le=1)
+    page_count_delta: int = Field(ge=0, le=10)
+    pages_succeeded_delta: int = Field(ge=0, le=10)
+    continuation_revision_delta: int = Field(ge=1, le=1)
+    continuation_page_count_delta: int = Field(ge=0, le=10)
+    continuation_pages_succeeded_delta: int = Field(ge=0, le=10)
+    ready_count_delta: int = Field(ge=-32, le=32)
+    complete_count_delta: int = Field(ge=-32, le=32)
+    blocked_count_delta: int = Field(ge=-32, le=32)
+    frontier_changed: bool
+
+
+class WalletCaseBackfillOutcomeDocument(_StrictModel):
+    contract_version: Literal["wallet_case_backfill_outcome_v1"]
+    case_public_id: CanonicalPublicId
+    sync_public_id: CanonicalPublicId
+    input_schedule: WalletCaseBackfillScheduleResponse
+    input_progress: WalletCaseBackfillProgressResponse
+    continuation_receipt: WalletCaseCheckpointContinuationReceiptV3Response
+    output_progress: WalletCaseBackfillProgressResponse
+    outcome: Literal["advanced", "completed", "blocked", "no_progress"]
+    transition: WalletCaseBackfillOutcomeTransition
+    limitations: list[WalletCaseLimitation]
+
+
+class WalletCaseBackfillOutcomeDescriptor(_StrictModel):
+    public_id: BackfillOutcomePublicId
+    contract_version: Literal["wallet_case_backfill_outcome_v1"]
+    content_hash_sha256: Sha256Digest
+    sync_public_id: CanonicalPublicId
+    outcome: Literal["advanced", "completed", "blocked", "no_progress"]
+    input_schedule_public_id: BackfillSchedulePublicId
+    continuation_receipt_public_id: CheckpointContinuationReceiptPublicId
+    input_progress_public_id: BackfillProgressPublicId
+    output_progress_public_id: BackfillProgressPublicId
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    page_count_delta: int = Field(ge=0, le=10)
+    pages_succeeded_delta: int = Field(ge=0, le=10)
+    before_resume_state: Literal["ready"]
+    after_resume_state: Literal["ready", "complete", "blocked"]
+
+
+class WalletCaseBackfillOutcomeResponse(_StrictModel):
+    outcome: WalletCaseBackfillOutcomeDescriptor
+    document: WalletCaseBackfillOutcomeDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        schedule = self.document.input_schedule
+        before = self.document.input_progress
+        receipt = self.document.continuation_receipt
+        after = self.document.output_progress
+        transition = self.document.transition
+        selected = schedule.document.selection
+        before_stream = next(
+            (
+                item
+                for item in before.document.streams
+                if selected is not None
+                and item.provider == selected.provider
+                and item.stream_key == selected.stream_key
+            ),
+            None,
+        )
+        after_stream = next(
+            (
+                item
+                for item in after.document.streams
+                if selected is not None
+                and item.provider == selected.provider
+                and item.stream_key == selected.stream_key
+            ),
+            None,
+        )
+        expected_outcome = (
+            "completed"
+            if transition.after_resume_state == "complete"
+            else "blocked"
+            if transition.after_resume_state == "blocked"
+            else "advanced"
+            if transition.pages_succeeded_delta > 0
+            else "no_progress"
+        )
+        expected_transition = None
+        if selected is not None and before_stream is not None and after_stream is not None:
+            expected_transition = {
+                "provider": selected.provider,
+                "stream_key": selected.stream_key,
+                "input_checkpoint_public_id": selected.checkpoint_public_id,
+                "output_checkpoint_public_id": after_stream.tip_checkpoint.public_id,
+                "before_resume_state": before_stream.resume_state,
+                "after_resume_state": after_stream.resume_state,
+                "revision_delta": (
+                    after.progress.revision_count - before.progress.revision_count
+                ),
+                "page_count_delta": (
+                    after.progress.page_count - before.progress.page_count
+                ),
+                "pages_succeeded_delta": (
+                    after.progress.pages_succeeded - before.progress.pages_succeeded
+                ),
+                "continuation_revision_delta": (
+                    after.progress.continuation_revision_count
+                    - before.progress.continuation_revision_count
+                ),
+                "continuation_page_count_delta": (
+                    after.progress.continuation_page_count
+                    - before.progress.continuation_page_count
+                ),
+                "continuation_pages_succeeded_delta": (
+                    after.progress.continuation_pages_succeeded
+                    - before.progress.continuation_pages_succeeded
+                ),
+                "ready_count_delta": (
+                    after.progress.ready_count - before.progress.ready_count
+                ),
+                "complete_count_delta": (
+                    after.progress.complete_count - before.progress.complete_count
+                ),
+                "blocked_count_delta": (
+                    after.progress.blocked_count - before.progress.blocked_count
+                ),
+                "frontier_changed": (
+                    before_stream.current_frontier != after_stream.current_frontier
+                ),
+            }
+        descriptor = self.outcome
+        if (
+            descriptor.public_id != f"bfo_{digest}"
+            or descriptor.content_hash_sha256 != digest
+            or descriptor.contract_version != self.document.contract_version
+            or descriptor.sync_public_id != self.document.sync_public_id
+            or descriptor.outcome != self.document.outcome
+            or descriptor.input_schedule_public_id != schedule.schedule.public_id
+            or descriptor.continuation_receipt_public_id != receipt.receipt.public_id
+            or descriptor.input_progress_public_id != before.progress.public_id
+            or descriptor.output_progress_public_id != after.progress.public_id
+            or descriptor.provider != transition.provider
+            or descriptor.stream_key != transition.stream_key
+            or descriptor.page_count_delta != transition.page_count_delta
+            or descriptor.pages_succeeded_delta
+            != transition.pages_succeeded_delta
+            or descriptor.before_resume_state != transition.before_resume_state
+            or descriptor.after_resume_state != transition.after_resume_state
+            or self.document.case_public_id != before.document.case_public_id
+            or self.document.case_public_id != after.document.case_public_id
+            or self.document.case_public_id != schedule.document.case_public_id
+            or self.document.case_public_id != receipt.document.case_public_id
+            or self.document.sync_public_id != receipt.document.sync_public_id
+            or schedule.document.state != "ready"
+            or schedule.schedule.input_progress_public_id
+            != before.progress.public_id
+            or schedule.schedule.checkpoint_cutoff_public_id
+            != before.progress.checkpoint_cutoff_public_id
+            or receipt.receipt.input_schedule_public_id
+            != schedule.schedule.public_id
+            or receipt.receipt.output_checkpoint_public_id
+            != after.progress.checkpoint_cutoff_public_id
+            or receipt.receipt.page_count_delta != transition.page_count_delta
+            or receipt.receipt.pages_succeeded_delta
+            != transition.pages_succeeded_delta
+            or expected_transition != transition.model_dump()
+            or self.document.outcome != expected_outcome
+        ):
+            raise ValueError("backfill outcome content address is inconsistent")
         return self
 
 

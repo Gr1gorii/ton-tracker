@@ -11,6 +11,7 @@ from services.wallet_cases import (
     WalletCaseArchiveConflict,
     WalletCaseBackfillScheduleStale,
     WalletCaseBackfillScheduleUnavailable,
+    WalletCaseBackfillOutcomeNotFound,
     WalletCaseCatalogInvalidCursor,
     WalletCaseCheckpointHistoryInvalidCursor,
     WalletCaseCheckpointResumeUnavailable,
@@ -31,6 +32,7 @@ from services.wallet_cases import (
 from services.wallet_case_access import require_local_wallet_case_access
 from wallet_case_schemas import (
     WalletCaseBackfillProgressResponse,
+    WalletCaseBackfillOutcomeResponse,
     WalletCaseBackfillScheduleRunRequest,
     WalletCaseBackfillScheduleResponse,
     WalletCaseCreateRequest,
@@ -614,6 +616,62 @@ def read_wallet_case_checkpoint_continuation_receipt(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case continuation receipt storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/syncs/{sync_public_id}/backfill-outcome",
+    response_model=WalletCaseBackfillOutcomeResponse,
+)
+def read_wallet_case_backfill_outcome(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    sync_public_id: str = Path(
+        ...,
+        pattern=_PUBLIC_ID_PATTERN,
+        max_length=36,
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Verify one immutable scheduled-backfill progress transition."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_backfill_outcome(
+            public_id,
+            sync_public_id,
+        )
+    except WalletCaseBackfillOutcomeNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": exc.code,
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "backfill_outcome_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case backfill outcome storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

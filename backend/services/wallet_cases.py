@@ -179,6 +179,12 @@ class WalletCaseContinuationReceiptNotFound(LookupError):
     code = "continuation_receipt_not_available"
 
 
+class WalletCaseBackfillOutcomeNotFound(LookupError):
+    """Raised when a sync has no reproducible scheduled-backfill result."""
+
+    code = "backfill_outcome_not_available"
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
@@ -1599,6 +1605,276 @@ class WalletCaseService:
             "document": document,
         }
 
+    def get_backfill_outcome(
+        self,
+        case_public_id: str,
+        sync_public_id: str,
+    ) -> dict[str, Any]:
+        """Reproduce the exact verified progress transition of one schedule run."""
+        wallet_case = self._required_case(case_public_id)
+        case_sync = self.repository.get_sync(
+            case_id=wallet_case.id,
+            public_id=sync_public_id,
+        )
+        if case_sync is None:
+            raise WalletCaseNotFound("Wallet Case sync not found")
+        try:
+            acquisition_plan = _sync_acquisition_plan(case_sync)
+        except ValueError as exc:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case backfill outcome provenance is invalid."
+            ) from exc
+        if acquisition_plan.get("version") != 6:
+            raise WalletCaseBackfillOutcomeNotFound(
+                "This sync has no reproducible Backfill Outcome."
+            )
+        if case_sync.state not in {"partial", "succeeded"}:
+            raise WalletCaseBackfillOutcomeNotFound(
+                "This scheduled backfill has not published a result."
+            )
+
+        receipt = self.get_checkpoint_continuation_receipt(
+            wallet_case.public_id,
+            case_sync.public_id,
+        )
+        if receipt["receipt"]["contract_version"] != (
+            "wallet_case_checkpoint_continuation_receipt_v3"
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case backfill outcome receipt is invalid."
+            )
+
+        input_cutoff = self.repository.get_stream_checkpoint(
+            case_id=wallet_case.id,
+            public_id=acquisition_plan[
+                "backfill_checkpoint_cutoff_public_id"
+            ],
+        )
+        output_cutoff = self.repository.get_stream_checkpoint(
+            case_id=wallet_case.id,
+            public_id=receipt["receipt"]["output_checkpoint_public_id"],
+        )
+        if input_cutoff is None or output_cutoff is None:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case backfill outcome boundaries are unavailable."
+            )
+        input_tips = self.repository.latest_stream_checkpoints_at_cutoff(
+            case_id=wallet_case.id,
+            cutoff_id=input_cutoff.id,
+        )
+        output_tips = self.repository.latest_stream_checkpoints_at_cutoff(
+            case_id=wallet_case.id,
+            cutoff_id=output_cutoff.id,
+        )
+        input_progress = self._backfill_progress_response(
+            wallet_case,
+            input_tips,
+        )
+        input_plan = self._checkpoint_continuation_plan_response(
+            wallet_case,
+            checkpoints=input_tips,
+        )
+        input_schedule = self._backfill_schedule_response(
+            wallet_case,
+            progress=input_progress,
+            plan=input_plan,
+            page_budget=acquisition_plan["resume_page_budget"],
+            active_sync_public_id=None,
+        )
+        output_progress = self._backfill_progress_response(
+            wallet_case,
+            output_tips,
+        )
+        if (
+            input_progress["progress"]["public_id"]
+            != acquisition_plan["backfill_progress_public_id"]
+            or input_schedule["schedule"]["public_id"]
+            != acquisition_plan["backfill_schedule_public_id"]
+            or input_schedule["schedule"]["input_plan_public_id"]
+            != acquisition_plan["continuation_plan_public_id"]
+            or input_schedule["schedule"]["selected_checkpoint_public_id"]
+            != acquisition_plan["source_checkpoint_public_id"]
+            or receipt["receipt"]["input_schedule_public_id"]
+            != input_schedule["schedule"]["public_id"]
+            or output_progress["progress"]["checkpoint_cutoff_public_id"]
+            != output_cutoff.public_id
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case backfill outcome inputs changed identity."
+            )
+
+        selection = input_schedule["document"]["selection"]
+        if selection is None:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case backfill outcome has no input selection."
+            )
+        identity = (selection["provider"], selection["stream_key"])
+        before_stream = next(
+            (
+                item
+                for item in input_progress["document"]["streams"]
+                if (item["provider"], item["stream_key"]) == identity
+            ),
+            None,
+        )
+        after_stream = next(
+            (
+                item
+                for item in output_progress["document"]["streams"]
+                if (item["provider"], item["stream_key"]) == identity
+            ),
+            None,
+        )
+        if before_stream is None or after_stream is None:
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case backfill outcome stream is unavailable."
+            )
+        before_aggregate = input_progress["document"]["aggregate"]
+        after_aggregate = output_progress["document"]["aggregate"]
+        transition = {
+            "provider": selection["provider"],
+            "stream_key": selection["stream_key"],
+            "input_checkpoint_public_id": selection[
+                "checkpoint_public_id"
+            ],
+            "output_checkpoint_public_id": after_stream["tip_checkpoint"][
+                "public_id"
+            ],
+            "before_resume_state": before_stream["resume_state"],
+            "after_resume_state": after_stream["resume_state"],
+            "revision_delta": (
+                after_aggregate["revision_count"]
+                - before_aggregate["revision_count"]
+            ),
+            "page_count_delta": (
+                after_aggregate["page_count"]
+                - before_aggregate["page_count"]
+            ),
+            "pages_succeeded_delta": (
+                after_aggregate["pages_succeeded"]
+                - before_aggregate["pages_succeeded"]
+            ),
+            "continuation_revision_delta": (
+                after_aggregate["continuation_revision_count"]
+                - before_aggregate["continuation_revision_count"]
+            ),
+            "continuation_page_count_delta": (
+                after_aggregate["continuation_page_count"]
+                - before_aggregate["continuation_page_count"]
+            ),
+            "continuation_pages_succeeded_delta": (
+                after_aggregate["continuation_pages_succeeded"]
+                - before_aggregate["continuation_pages_succeeded"]
+            ),
+            "ready_count_delta": (
+                after_aggregate["ready_count"]
+                - before_aggregate["ready_count"]
+            ),
+            "complete_count_delta": (
+                after_aggregate["complete_count"]
+                - before_aggregate["complete_count"]
+            ),
+            "blocked_count_delta": (
+                after_aggregate["blocked_count"]
+                - before_aggregate["blocked_count"]
+            ),
+            "frontier_changed": (
+                before_stream["current_frontier"]
+                != after_stream["current_frontier"]
+            ),
+        }
+        if (
+            transition["before_resume_state"] != "ready"
+            or transition["revision_delta"] != 1
+            or transition["continuation_revision_delta"] != 1
+            or transition["page_count_delta"]
+            != receipt["receipt"]["page_count_delta"]
+            or transition["pages_succeeded_delta"]
+            != receipt["receipt"]["pages_succeeded_delta"]
+            or transition["continuation_page_count_delta"]
+            != transition["page_count_delta"]
+            or transition["continuation_pages_succeeded_delta"]
+            != transition["pages_succeeded_delta"]
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Stored Wallet Case backfill outcome transition is invalid."
+            )
+        outcome_state = (
+            "completed"
+            if transition["after_resume_state"] == "complete"
+            else "blocked"
+            if transition["after_resume_state"] == "blocked"
+            else "advanced"
+            if transition["pages_succeeded_delta"] > 0
+            else "no_progress"
+        )
+        document = {
+            "contract_version": "wallet_case_backfill_outcome_v1",
+            "case_public_id": wallet_case.public_id,
+            "sync_public_id": case_sync.public_id,
+            "input_schedule": input_schedule,
+            "input_progress": input_progress,
+            "continuation_receipt": receipt,
+            "output_progress": output_progress,
+            "outcome": outcome_state,
+            "transition": transition,
+            "limitations": [
+                _limitation(
+                    "backfill_outcome_is_one_finite_transition",
+                    (
+                        "This outcome proves the progress change from one "
+                        "accepted schedule; it does not repeat or authorize "
+                        "another provider request."
+                    ),
+                ),
+                _limitation(
+                    "backfill_outcome_is_not_full_history_proof",
+                    (
+                        "A completed requested provider interval is not proof "
+                        "of the wallet's earliest activity or full history."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "outcome": {
+                "public_id": f"bfo_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "sync_public_id": case_sync.public_id,
+                "outcome": outcome_state,
+                "input_schedule_public_id": input_schedule["schedule"][
+                    "public_id"
+                ],
+                "continuation_receipt_public_id": receipt["receipt"][
+                    "public_id"
+                ],
+                "input_progress_public_id": input_progress["progress"][
+                    "public_id"
+                ],
+                "output_progress_public_id": output_progress["progress"][
+                    "public_id"
+                ],
+                "provider": transition["provider"],
+                "stream_key": transition["stream_key"],
+                "page_count_delta": transition["page_count_delta"],
+                "pages_succeeded_delta": transition[
+                    "pages_succeeded_delta"
+                ],
+                "before_resume_state": transition["before_resume_state"],
+                "after_resume_state": transition["after_resume_state"],
+            },
+            "document": document,
+        }
+
     def list_stream_checkpoints(self, case_public_id: str) -> dict[str, Any]:
         wallet_case = self._required_case(case_public_id)
         checkpoints = [
@@ -1635,6 +1911,14 @@ class WalletCaseService:
         checkpoints = self.repository.latest_stream_checkpoints(
             case_id=wallet_case.id
         )
+        return self._backfill_progress_response(wallet_case, checkpoints)
+
+    def _backfill_progress_response(
+        self,
+        wallet_case: WalletCase,
+        checkpoints: list[WalletCaseStreamCheckpoint],
+    ) -> dict[str, Any]:
+        """Build progress at a caller-selected immutable checkpoint boundary."""
         if len(checkpoints) > _MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS:
             raise WalletCaseStreamCheckpointCorrupt(
                 "Wallet Case backfill progress contains too many provider streams."
@@ -1827,6 +2111,38 @@ class WalletCaseService:
                 "Wallet Case backfill schedule inputs have different checkpoint cutoffs."
             )
 
+        active = self.repository.get_active_sync(case_id=wallet_case.id)
+        return self._backfill_schedule_response(
+            wallet_case,
+            progress=progress,
+            plan=plan,
+            page_budget=page_budget,
+            active_sync_public_id=(
+                active.public_id if active is not None else None
+            ),
+        )
+
+    def _backfill_schedule_response(
+        self,
+        wallet_case: WalletCase,
+        *,
+        progress: dict[str, Any],
+        plan: dict[str, Any],
+        page_budget: int,
+        active_sync_public_id: str | None,
+    ) -> dict[str, Any]:
+        """Build one schedule from explicitly supplied, already verified inputs."""
+        if type(page_budget) is not int or not 1 <= page_budget <= 10:
+            raise ValueError("Backfill page budget must be from 1 through 10.")
+        progress_document = progress["document"]
+        plan_document = plan["document"]
+        if (
+            progress_document["checkpoint_cutoff_public_id"]
+            != plan_document["checkpoint_cutoff_public_id"]
+        ):
+            raise WalletCaseStreamCheckpointCorrupt(
+                "Wallet Case backfill schedule inputs have different checkpoint cutoffs."
+            )
         plan_by_identity = {
             (stream["provider"], stream["stream_key"]): stream
             for stream in plan_document["streams"]
@@ -1867,9 +2183,8 @@ class WalletCaseService:
                 "Wallet Case backfill schedule inputs disagree on the selected stream."
             )
 
-        active = self.repository.get_active_sync(case_id=wallet_case.id)
         aggregate = progress_document["aggregate"]
-        if active is not None:
+        if active_sync_public_id is not None:
             state = "backpressured"
             selection = None
         elif selected_progress is not None:
@@ -1915,9 +2230,7 @@ class WalletCaseService:
             "ready_count": aggregate["ready_count"],
             "complete_count": aggregate["complete_count"],
             "blocked_count": aggregate["blocked_count"],
-            "active_sync_public_id": (
-                active.public_id if active is not None else None
-            ),
+            "active_sync_public_id": active_sync_public_id,
             "selection": selection,
             "limitations": [
                 _limitation(
