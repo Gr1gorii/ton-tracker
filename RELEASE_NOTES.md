@@ -1,3 +1,37 @@
+# GRAM Scope — v0.97.0 BACKFILL OUTCOME
+
+v0.97.0 makes the result of one scheduled backfill step independently
+reproducible. New acquisition-plan-v6 jobs bind the exact input Backfill
+Schedule, Backfill Progress, checkpoint cutoff, selected provider stream, and
+finite page budget. Before provider I/O, the worker reconstructs those inputs
+from immutable checkpoint history and fails closed if their stored provenance
+or content-addressed identities no longer agree.
+
+After a successful or partial scheduled run,
+`GET /api/v1/cases/{case}/syncs/{sync}/backfill-outcome` reconstructs the exact
+input schedule and progress, verifies the schedule-bound continuation receipt,
+and derives output progress at the published checkpoint cutoff. Its canonical
+`bfo_<sha256>` document binds the complete `bfp_` before-to-after transition,
+provider and stream, input and output checkpoints, progress states, frontier
+change, and revision, page, successful-page, continuation-page, and
+state-count deltas.
+
+Outcome state explicitly distinguishes `advanced`, `completed`, `blocked`, and
+`no_progress`. Active, unrelated, legacy-v5, or otherwise unreproducible jobs
+do not receive an outcome; inconsistent immutable evidence fails with a
+structured integrity error. Existing acquisition-plan-v5 schedules and receipt
+v3 documents remain readable and unchanged.
+
+Summary exposes outcome verification only after the continuation receipt is
+verified, displays the exact `bfp_` before/after identities and transition
+facts, and exports strictly parsed JSON. The browser rejects content identity,
+nested provenance, state, and delta contradictions before display. An outcome
+proves one finite acquisition transition, not earliest activity, a remaining
+page count, or complete wallet history. No database migration is added;
+Alembic remains at `20260828_0028` and backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.96.0 BACKFILL SCHEDULE
 
 v0.96.0 converts verified backfill state into one safe operator-controlled

@@ -4,10 +4,32 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.96.0 — Backfill Schedule**<br>
+Current product release: **v0.97.0 — Backfill Outcome**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.96.0 adds
+## What v0.97.0 adds
+
+Every new scheduled backfill run now binds the exact input Backfill Schedule,
+Backfill Progress, and checkpoint cutoff in acquisition-plan-v6 provenance.
+The worker reconstructs that immutable input before provider I/O. A mismatch
+fails closed instead of running against a changed or fabricated frontier.
+
+After a terminal scheduled step,
+`GET /api/v1/cases/{case}/syncs/{sync}/backfill-outcome` reproduces the input
+schedule and progress, schedule-bound continuation receipt, and output progress
+at the newly published checkpoint cutoff. The content-addressed
+`bfo_<sha256>` document reports the exact `bfp_` before-to-after transition,
+provider stream, checkpoints, frontier change, progress states, and page,
+revision, success, continuation, and state-count deltas.
+
+Summary verifies this outcome only after its receipt is verified, displays the
+transition, and exports strict JSON. The outcome proves one finite scheduled
+step—not earliest wallet activity, a remaining-page estimate, or complete
+history. Existing schedule-v5 and receipt-v3 records remain compatible. No
+migration is added; Alembic remains at `20260828_0028` and backend API remains
+`0.2.1`.
+
+## v0.96.0 backfill schedule
 
 Wallet Case can now turn verified provider-history state into one finite,
 content-addressed Backfill Schedule. A budget-bound
@@ -317,11 +339,13 @@ profit, ownership proof, or complete wallet history.
   verified `cpl_` plan and its exact `scp_` tip.
 - v0.93.0 immutable `ctr_` receipts that reproduce the exact checkpoint and
   plan transition published by a plan-bound resume.
-- v0.96.0 finite, fair, content-addressed Backfill Schedules with active-job
-  backpressure, stale-safe execution, and schedule-bound receipt v3.
-- v0.95.0 content-addressed backfill progress across verified stream frontiers.
 - v0.94.0 finite 1–10 page continuation budgets bound through request,
   execution, receipt accounting, retry, and operator UI.
+- v0.95.0 content-addressed backfill progress across verified stream frontiers.
+- v0.96.0 finite, fair, content-addressed Backfill Schedules with active-job
+  backpressure, stale-safe execution, and schedule-bound receipt v3.
+- v0.97.0 immutable `bfo_` outcomes that reproduce one scheduled run's exact
+  Backfill Progress transition and fail closed on provenance or delta drift.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

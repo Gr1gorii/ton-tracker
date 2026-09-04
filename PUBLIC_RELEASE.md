@@ -1,4 +1,4 @@
-# GRAM Scope - v0.96.0 Public Release
+# GRAM Scope - v0.97.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -70,6 +70,11 @@ Public release handoff for the current TON wallet intelligence workspace.
   active-sync backpressure, and executes only after exact stale-state and
   idempotency checks. Acquisition-plan v5 and receipt v3 preserve the selected
   schedule while keeping execution to one finite, non-repeating step.
+- A canonical `bfo_<sha256>` Backfill Outcome for each reproducible terminal
+  acquisition-plan-v6 scheduled run. It binds the exact input schedule,
+  progress, and cutoff to the schedule-bound receipt and output progress,
+  publishing verified frontier, state, revision, page, successful-page,
+  continuation-page, and state-count deltas for one finite transition.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -111,7 +116,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.96.0 BACKFILL SCHEDULE`.
+- Product release label: `v0.97.0 BACKFILL OUTCOME`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -198,6 +203,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 ## Known Limitations
 
 - Selected bounded intervals and captures do not establish complete history.
+- A Backfill Outcome proves only the immutable before-to-after transition for
+  one eligible scheduled run. It does not prove the wallet's earliest activity,
+  a remaining-page denominator, or complete provider history.
 - Activity combines only usable case syncs up to its pinned revision. Rows
   without a fully revalidated identity are intentionally not deduplicated, and
   semantic identity conflicts are published as gaps rather than guessed.
@@ -266,13 +274,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.96.0`, confirm:
+Before tagging `v0.97.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.96.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.97.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -308,6 +316,11 @@ Before tagging `v0.96.0`, confirm:
 - Case Findings reproducibility, content-ID binding, same-symbol asset
   separation, flow conservation, rule support, weakest-evidence labelling,
   strict URL state, response redaction, and Activity deep links pass.
+- Backfill Outcome tests cover acquisition-plan-v6 input binding, worker-time
+  schedule reconstruction before provider I/O, immutable before/after progress,
+  receipt and checkpoint provenance, every transition state and delta, legacy
+  unavailability, integrity failure, strict client parsing, UI display, and
+  exact JSON export.
 - Migration 0021, current-policy selection, legacy trust-0 rejection,
   checkpoint/digest binding, whole-operation timeout, terminate/kill cleanup,
   cancellation bound, and locked persistent-cache tests pass.
