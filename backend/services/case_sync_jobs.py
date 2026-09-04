@@ -762,6 +762,62 @@ class CaseSyncWorker:
             raise WalletCaseRuntimeConflict(
                 "The source stream checkpoint no longer matches this resume job."
             )
+        if plan_version == 6:
+            cutoff = session.scalar(
+                select(WalletCaseStreamCheckpoint).where(
+                    WalletCaseStreamCheckpoint.case_id == wallet_case.id,
+                    WalletCaseStreamCheckpoint.public_id
+                    == claimed.acquisition_plan[
+                        "backfill_checkpoint_cutoff_public_id"
+                    ],
+                )
+            )
+            if cutoff is None:
+                raise WalletCaseRuntimeConflict(
+                    "The scheduled backfill checkpoint boundary is unavailable."
+                )
+            service = WalletCaseService(session)
+            try:
+                tips = service.repository.latest_stream_checkpoints_at_cutoff(
+                    case_id=wallet_case.id,
+                    cutoff_id=cutoff.id,
+                )
+                progress = service._backfill_progress_response(
+                    wallet_case,
+                    tips,
+                )
+                plan = service._checkpoint_continuation_plan_response(
+                    wallet_case,
+                    checkpoints=tips,
+                )
+                schedule = service._backfill_schedule_response(
+                    wallet_case,
+                    progress=progress,
+                    plan=plan,
+                    page_budget=claimed.resume_page_budget or 0,
+                    active_sync_public_id=None,
+                )
+            except (ValueError, WalletCaseStreamCheckpointCorrupt) as exc:
+                raise WalletCaseRuntimeConflict(
+                    "The scheduled backfill provenance failed integrity validation."
+                ) from exc
+            descriptor = schedule["schedule"]
+            if (
+                descriptor["state"] != "ready"
+                or descriptor["public_id"]
+                != claimed.acquisition_plan["backfill_schedule_public_id"]
+                or descriptor["input_progress_public_id"]
+                != claimed.acquisition_plan["backfill_progress_public_id"]
+                or descriptor["input_plan_public_id"]
+                != claimed.acquisition_plan["continuation_plan_public_id"]
+                or descriptor["checkpoint_cutoff_public_id"]
+                != cutoff.public_id
+                or descriptor["selected_checkpoint_public_id"]
+                != checkpoint.public_id
+            ):
+                raise WalletCaseRuntimeConflict(
+                    "The scheduled backfill provenance no longer matches this job."
+                )
 
     def _advance_to_ingestion(self, claimed: ClaimedCaseSync) -> bool:
         return self._advance(

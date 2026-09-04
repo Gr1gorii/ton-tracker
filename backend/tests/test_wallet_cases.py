@@ -2453,6 +2453,24 @@ def test_backfill_outcome_proves_stable_progress_transition(client):
     assert legacy.json()["detail"]["code"] == (
         "backfill_outcome_not_available"
     )
+    with app.state.wallet_case_test_session() as session:
+        row = session.scalar(
+            select(CaseSync).where(CaseSync.public_id == sync_id)
+        )
+        assert row is not None
+        coverage = json.loads(row.coverage_summary_json)
+        coverage["_acquisition"]["backfill_progress_public_id"] = (
+            f"bfp_{'0' * 64}"
+        )
+        row.coverage_summary_json = json.dumps(coverage)
+        session.commit()
+    corrupt = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{sync_id}/backfill-outcome"
+    )
+    assert corrupt.status_code == 503
+    assert corrupt.json()["detail"]["code"] == (
+        "backfill_outcome_integrity_error"
+    )
 
 
 def test_backfill_schedule_run_rejects_budget_drift_and_invalid_body(client):
@@ -2535,6 +2553,77 @@ def test_backfill_schedule_fingerprint_tamper_fails_before_provider_io(client):
     )
     assert replay.status_code == 409
     assert replay.json()["detail"]["code"] == "idempotency_conflict"
+
+
+@pytest.mark.parametrize("field,prefix", [
+    ("backfill_progress_public_id", "bfp_"),
+    ("backfill_checkpoint_cutoff_public_id", "scp_"),
+])
+def test_backfill_schedule_provenance_tamper_fails_before_provider_io(
+    client,
+    field,
+    prefix,
+):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    schedule = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule"
+    ).json()
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+            f"{schedule['schedule']['public_id']}/run"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": 1},
+    )
+    assert queued.status_code == 202, queued.text
+    with app.state.wallet_case_test_session() as session:
+        row = session.scalar(
+            select(CaseSync).where(
+                CaseSync.public_id == queued.json()["public_id"]
+            )
+        )
+        assert row is not None
+        coverage = json.loads(row.coverage_summary_json)
+        acquisition = coverage["_acquisition"]
+        acquisition[field] = f"{prefix}{'0' * 64}"
+        row.coverage_summary_json = json.dumps(coverage)
+        row.request_fingerprint = _checkpoint_resume_fingerprint(
+            acquisition["source_checkpoint_public_id"],
+            continuation_plan_public_id=acquisition[
+                "continuation_plan_public_id"
+            ],
+            page_budget=acquisition["resume_page_budget"],
+            backfill_schedule_public_id=acquisition[
+                "backfill_schedule_public_id"
+            ],
+            backfill_progress_public_id=acquisition[
+                "backfill_progress_public_id"
+            ],
+            backfill_checkpoint_cutoff_public_id=acquisition[
+                "backfill_checkpoint_cutoff_public_id"
+            ],
+        )
+        session.commit()
+
+    provider_called = False
+
+    def forbidden_builder(*_args, **_kwargs):
+        nonlocal provider_called
+        provider_called = True
+        raise AssertionError("provider I/O must not start")
+
+    worker = CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=forbidden_builder,
+    )
+    assert worker.run_once() is True
+    assert provider_called is False
+    failed = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{queued.json()['public_id']}"
+    ).json()
+    assert failed["state"] == "failed"
+    assert failed["error"]["code"] == "runtime_scope_conflict"
 
 
 def test_checkpoint_continuation_plan_aggregates_latest_stream_chains(client):
