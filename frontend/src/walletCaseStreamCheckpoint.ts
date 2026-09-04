@@ -406,6 +406,63 @@ export type WalletCaseCheckpointContinuationReceiptResponse =
   | WalletCaseCheckpointContinuationReceiptV2Response
   | WalletCaseCheckpointContinuationReceiptV3Response;
 
+export type WalletCaseBackfillOutcomeState =
+  | "advanced"
+  | "completed"
+  | "blocked"
+  | "no_progress";
+
+export interface WalletCaseBackfillOutcomeTransition {
+  provider: string;
+  stream_key: string;
+  input_checkpoint_public_id: string;
+  output_checkpoint_public_id: string;
+  before_resume_state: "ready";
+  after_resume_state: WalletCaseStreamResumeState;
+  revision_delta: 1;
+  page_count_delta: number;
+  pages_succeeded_delta: number;
+  continuation_revision_delta: 1;
+  continuation_page_count_delta: number;
+  continuation_pages_succeeded_delta: number;
+  ready_count_delta: number;
+  complete_count_delta: number;
+  blocked_count_delta: number;
+  frontier_changed: boolean;
+}
+
+export interface WalletCaseBackfillOutcomeResponse {
+  outcome: {
+    public_id: string;
+    contract_version: "wallet_case_backfill_outcome_v1";
+    content_hash_sha256: string;
+    sync_public_id: string;
+    outcome: WalletCaseBackfillOutcomeState;
+    input_schedule_public_id: string;
+    continuation_receipt_public_id: string;
+    input_progress_public_id: string;
+    output_progress_public_id: string;
+    provider: string;
+    stream_key: string;
+    page_count_delta: number;
+    pages_succeeded_delta: number;
+    before_resume_state: "ready";
+    after_resume_state: WalletCaseStreamResumeState;
+  };
+  document: {
+    contract_version: "wallet_case_backfill_outcome_v1";
+    case_public_id: string;
+    sync_public_id: string;
+    input_schedule: WalletCaseBackfillScheduleResponse;
+    input_progress: WalletCaseBackfillProgressResponse;
+    continuation_receipt: WalletCaseCheckpointContinuationReceiptV3Response;
+    output_progress: WalletCaseBackfillProgressResponse;
+    outcome: WalletCaseBackfillOutcomeState;
+    transition: WalletCaseBackfillOutcomeTransition;
+    limitations: WalletCaseLimitation[];
+  };
+}
+
 const PUBLIC_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -413,6 +470,7 @@ const CHECKPOINT_ID = /^scp_([0-9a-f]{64})$/;
 const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
 const BACKFILL_PROGRESS_ID = /^bfp_([0-9a-f]{64})$/;
 const BACKFILL_SCHEDULE_ID = /^bfs_([0-9a-f]{64})$/;
+const BACKFILL_OUTCOME_ID = /^bfo_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_PLAN_ID = /^cpl_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_RECEIPT_ID = /^ctr_([0-9a-f]{64})$/;
 const MANIFEST_ID = /^smf_([0-9a-f]{64})$/;
@@ -460,6 +518,11 @@ function integer(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
     fail(`${label} is invalid`);
   }
+  return value as number;
+}
+
+function signedInteger(value: unknown, label: string): number {
+  if (!Number.isSafeInteger(value)) fail(`${label} is invalid`);
   return value as number;
 }
 
@@ -2173,6 +2236,23 @@ function backfillScheduleId(value: unknown, label: string): string {
   return result;
 }
 
+function continuationReceiptId(value: unknown, label: string): string {
+  const result = text(value, label, 68);
+  if (!CHECKPOINT_CONTINUATION_RECEIPT_ID.test(result)) fail(`${label} is invalid`);
+  return result;
+}
+
+function backfillOutcomeState(
+  value: unknown,
+  label: string,
+): WalletCaseBackfillOutcomeState {
+  const result = text(value, label, 16) as WalletCaseBackfillOutcomeState;
+  if (!new Set(["advanced", "completed", "blocked", "no_progress"]).has(result)) {
+    fail(`${label} is invalid`);
+  }
+  return result;
+}
+
 function backfillScheduleState(
   value: unknown,
   label: string,
@@ -2194,6 +2274,262 @@ export function serializeWalletCaseCheckpointContinuationReceipt(
   value: unknown,
 ): string {
   return `${JSON.stringify(parseWalletCaseCheckpointContinuationReceipt(value), null, 2)}\n`;
+}
+
+export function parseWalletCaseBackfillOutcome(
+  value: unknown,
+): WalletCaseBackfillOutcomeResponse {
+  const envelope = record(value, ["outcome", "document"], "backfill outcome response");
+  const descriptor = record(envelope.outcome, [
+    "public_id", "contract_version", "content_hash_sha256", "sync_public_id",
+    "outcome", "input_schedule_public_id", "continuation_receipt_public_id",
+    "input_progress_public_id", "output_progress_public_id", "provider",
+    "stream_key", "page_count_delta", "pages_succeeded_delta",
+    "before_resume_state", "after_resume_state",
+  ], "backfill outcome descriptor");
+  if (descriptor.contract_version !== "wallet_case_backfill_outcome_v1") {
+    fail("backfill outcome descriptor contract is unsupported");
+  }
+  const contentHash = digest(descriptor.content_hash_sha256, "backfill outcome hash");
+  const outcomeId = text(descriptor.public_id, "backfill outcome id", 68);
+  if (BACKFILL_OUTCOME_ID.exec(outcomeId)?.[1] !== contentHash) {
+    fail("backfill outcome identity is invalid");
+  }
+  const descriptorSyncId = publicId(descriptor.sync_public_id, "backfill outcome sync id");
+  const descriptorState = backfillOutcomeState(
+    descriptor.outcome,
+    "backfill outcome descriptor state",
+  );
+  const descriptorScheduleId = backfillScheduleId(
+    descriptor.input_schedule_public_id,
+    "backfill outcome schedule id",
+  );
+  const descriptorReceiptId = continuationReceiptId(
+    descriptor.continuation_receipt_public_id,
+    "backfill outcome receipt id",
+  );
+  const descriptorInputProgressId = backfillProgressId(
+    descriptor.input_progress_public_id,
+    "backfill outcome input progress id",
+  );
+  const descriptorOutputProgressId = backfillProgressId(
+    descriptor.output_progress_public_id,
+    "backfill outcome output progress id",
+  );
+  const descriptorProvider = text(descriptor.provider, "backfill outcome provider", 64);
+  const descriptorStreamKey = text(descriptor.stream_key, "backfill outcome stream", 40);
+  const descriptorPageDelta = integer(
+    descriptor.page_count_delta,
+    "backfill outcome page delta",
+  );
+  const descriptorSuccessDelta = integer(
+    descriptor.pages_succeeded_delta,
+    "backfill outcome success delta",
+  );
+  const descriptorBeforeState = resumeState(
+    descriptor.before_resume_state,
+    "backfill outcome before state",
+  );
+  const descriptorAfterState = resumeState(
+    descriptor.after_resume_state,
+    "backfill outcome after state",
+  );
+
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "sync_public_id", "input_schedule",
+    "input_progress", "continuation_receipt", "output_progress", "outcome",
+    "transition", "limitations",
+  ], "backfill outcome document");
+  if (document.contract_version !== "wallet_case_backfill_outcome_v1") {
+    fail("backfill outcome document contract is unsupported");
+  }
+  const caseId = publicId(document.case_public_id, "backfill outcome case id");
+  const syncId = publicId(document.sync_public_id, "backfill outcome document sync id");
+  const schedule = parseWalletCaseBackfillSchedule(document.input_schedule);
+  const before = parseWalletCaseBackfillProgress(document.input_progress);
+  const parsedReceipt = parseWalletCaseCheckpointContinuationReceipt(
+    document.continuation_receipt,
+  );
+  if (parsedReceipt.receipt.contract_version !== (
+    "wallet_case_checkpoint_continuation_receipt_v3"
+  )) fail("backfill outcome receipt contract is unsupported");
+  const receipt = parsedReceipt as WalletCaseCheckpointContinuationReceiptV3Response;
+  const after = parseWalletCaseBackfillProgress(document.output_progress);
+  const state = backfillOutcomeState(document.outcome, "backfill outcome state");
+  const item = record(document.transition, [
+    "provider", "stream_key", "input_checkpoint_public_id",
+    "output_checkpoint_public_id", "before_resume_state", "after_resume_state",
+    "revision_delta", "page_count_delta", "pages_succeeded_delta",
+    "continuation_revision_delta", "continuation_page_count_delta",
+    "continuation_pages_succeeded_delta", "ready_count_delta",
+    "complete_count_delta", "blocked_count_delta", "frontier_changed",
+  ], "backfill outcome transition");
+  const provider = text(item.provider, "backfill outcome transition provider", 64);
+  const streamKey = text(item.stream_key, "backfill outcome transition stream", 40);
+  const inputCheckpointId = checkpointId(
+    item.input_checkpoint_public_id,
+    "backfill outcome input checkpoint id",
+  );
+  const outputCheckpointId = checkpointId(
+    item.output_checkpoint_public_id,
+    "backfill outcome output checkpoint id",
+  );
+  const beforeState = resumeState(item.before_resume_state, "backfill outcome transition before state");
+  const afterState = resumeState(item.after_resume_state, "backfill outcome transition after state");
+  const revisionDelta = integer(item.revision_delta, "backfill outcome revision delta");
+  const pageDelta = integer(item.page_count_delta, "backfill outcome transition page delta");
+  const successDelta = integer(
+    item.pages_succeeded_delta,
+    "backfill outcome transition success delta",
+  );
+  const continuationRevisionDelta = integer(
+    item.continuation_revision_delta,
+    "backfill outcome continuation revision delta",
+  );
+  const continuationPageDelta = integer(
+    item.continuation_page_count_delta,
+    "backfill outcome continuation page delta",
+  );
+  const continuationSuccessDelta = integer(
+    item.continuation_pages_succeeded_delta,
+    "backfill outcome continuation success delta",
+  );
+  const readyDelta = signedInteger(item.ready_count_delta, "backfill outcome ready delta");
+  const completeDelta = signedInteger(
+    item.complete_count_delta,
+    "backfill outcome complete delta",
+  );
+  const blockedDelta = signedInteger(
+    item.blocked_count_delta,
+    "backfill outcome blocked delta",
+  );
+  if (typeof item.frontier_changed !== "boolean") {
+    fail("backfill outcome frontier change is invalid");
+  }
+  const frontierChanged = item.frontier_changed;
+  const selection = schedule.document.selection;
+  const beforeStream = before.document.streams.find((stream) => (
+    selection !== null && stream.provider === selection.provider &&
+    stream.stream_key === selection.stream_key
+  ));
+  const afterStream = after.document.streams.find((stream) => (
+    selection !== null && stream.provider === selection.provider &&
+    stream.stream_key === selection.stream_key
+  ));
+  const expectedState: WalletCaseBackfillOutcomeState = afterState === "complete"
+    ? "completed"
+    : afterState === "blocked"
+      ? "blocked"
+      : successDelta > 0
+        ? "advanced"
+        : "no_progress";
+  if (
+    schedule.schedule.state !== "ready" || selection === null ||
+    !beforeStream || !afterStream || beforeState !== "ready" ||
+    beforeStream.resume_state !== beforeState || afterStream.resume_state !== afterState ||
+    provider !== selection.provider || streamKey !== selection.stream_key ||
+    inputCheckpointId !== selection.checkpoint_public_id ||
+    outputCheckpointId !== afterStream.tip_checkpoint.public_id ||
+    revisionDelta !== 1 || continuationRevisionDelta !== 1 ||
+    pageDelta > 10 || successDelta > pageDelta ||
+    continuationPageDelta !== pageDelta || continuationSuccessDelta !== successDelta ||
+    readyDelta !== after.progress.ready_count - before.progress.ready_count ||
+    completeDelta !== after.progress.complete_count - before.progress.complete_count ||
+    blockedDelta !== after.progress.blocked_count - before.progress.blocked_count ||
+    revisionDelta !== after.progress.revision_count - before.progress.revision_count ||
+    pageDelta !== after.progress.page_count - before.progress.page_count ||
+    successDelta !== after.progress.pages_succeeded - before.progress.pages_succeeded ||
+    continuationRevisionDelta !== (
+      after.progress.continuation_revision_count - before.progress.continuation_revision_count
+    ) ||
+    continuationPageDelta !== (
+      after.progress.continuation_page_count - before.progress.continuation_page_count
+    ) ||
+    continuationSuccessDelta !== (
+      after.progress.continuation_pages_succeeded -
+      before.progress.continuation_pages_succeeded
+    ) ||
+    frontierChanged !== (
+      JSON.stringify(beforeStream.current_frontier) !==
+      JSON.stringify(afterStream.current_frontier)
+    ) ||
+    state !== expectedState || syncId !== descriptorSyncId ||
+    caseId !== schedule.document.case_public_id ||
+    caseId !== before.document.case_public_id || caseId !== after.document.case_public_id ||
+    caseId !== receipt.document.case_public_id || syncId !== receipt.document.sync_public_id ||
+    schedule.schedule.input_progress_public_id !== before.progress.public_id ||
+    schedule.schedule.checkpoint_cutoff_public_id !== before.progress.checkpoint_cutoff_public_id ||
+    schedule.schedule.public_id !== receipt.receipt.input_schedule_public_id ||
+    receipt.receipt.output_checkpoint_public_id !== after.progress.checkpoint_cutoff_public_id ||
+    receipt.receipt.page_count_delta !== pageDelta ||
+    receipt.receipt.pages_succeeded_delta !== successDelta ||
+    descriptorScheduleId !== schedule.schedule.public_id ||
+    descriptorReceiptId !== receipt.receipt.public_id ||
+    descriptorInputProgressId !== before.progress.public_id ||
+    descriptorOutputProgressId !== after.progress.public_id ||
+    descriptorInputProgressId === descriptorOutputProgressId ||
+    descriptorProvider !== provider || descriptorStreamKey !== streamKey ||
+    descriptorPageDelta !== pageDelta || descriptorSuccessDelta !== successDelta ||
+    descriptorBeforeState !== beforeState || descriptorAfterState !== afterState ||
+    descriptorState !== state
+  ) fail("backfill outcome is inconsistent");
+  if (
+    readyDelta < -32 || readyDelta > 32 || completeDelta < -32 ||
+    completeDelta > 32 || blockedDelta < -32 || blockedDelta > 32
+  ) fail("backfill outcome state deltas are invalid");
+  const transition: WalletCaseBackfillOutcomeTransition = {
+    provider,
+    stream_key: streamKey,
+    input_checkpoint_public_id: inputCheckpointId,
+    output_checkpoint_public_id: outputCheckpointId,
+    before_resume_state: "ready",
+    after_resume_state: afterState,
+    revision_delta: 1,
+    page_count_delta: pageDelta,
+    pages_succeeded_delta: successDelta,
+    continuation_revision_delta: 1,
+    continuation_page_count_delta: continuationPageDelta,
+    continuation_pages_succeeded_delta: continuationSuccessDelta,
+    ready_count_delta: readyDelta,
+    complete_count_delta: completeDelta,
+    blocked_count_delta: blockedDelta,
+    frontier_changed: frontierChanged,
+  };
+  return {
+    outcome: {
+      public_id: outcomeId,
+      contract_version: "wallet_case_backfill_outcome_v1",
+      content_hash_sha256: contentHash,
+      sync_public_id: descriptorSyncId,
+      outcome: descriptorState,
+      input_schedule_public_id: descriptorScheduleId,
+      continuation_receipt_public_id: descriptorReceiptId,
+      input_progress_public_id: descriptorInputProgressId,
+      output_progress_public_id: descriptorOutputProgressId,
+      provider: descriptorProvider,
+      stream_key: descriptorStreamKey,
+      page_count_delta: descriptorPageDelta,
+      pages_succeeded_delta: descriptorSuccessDelta,
+      before_resume_state: "ready",
+      after_resume_state: descriptorAfterState,
+    },
+    document: {
+      contract_version: "wallet_case_backfill_outcome_v1",
+      case_public_id: caseId,
+      sync_public_id: syncId,
+      input_schedule: schedule,
+      input_progress: before,
+      continuation_receipt: receipt,
+      output_progress: after,
+      outcome: state,
+      transition,
+      limitations: limitations(document.limitations, "backfill outcome limitations"),
+    },
+  };
+}
+
+export function serializeWalletCaseBackfillOutcome(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseBackfillOutcome(value), null, 2)}\n`;
 }
 
 export function parseWalletCaseStreamCheckpointCatalog(

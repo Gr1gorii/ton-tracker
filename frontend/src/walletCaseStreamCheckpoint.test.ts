@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  backfillOutcomeFixture,
   backfillProgressFixture,
   backfillScheduleFixture,
   checkpointContinuationReceiptFixture,
@@ -13,6 +14,7 @@ import {
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
+  parseWalletCaseBackfillOutcome,
   parseWalletCaseBackfillProgress,
   parseWalletCaseBackfillSchedule,
   parseWalletCaseCheckpointContinuationReceipt,
@@ -22,6 +24,7 @@ import {
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
   serializeWalletCaseBackfillProgress,
+  serializeWalletCaseBackfillOutcome,
   serializeWalletCaseBackfillSchedule,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
@@ -209,6 +212,57 @@ describe("Wallet Case stream checkpoint contracts", () => {
         state: "backpressured",
         active_sync_public_id: null,
         selection: null,
+      },
+    })).toThrow(/inconsistent/);
+  });
+
+  it("accepts and exports a verified scheduled backfill outcome", () => {
+    const outcome = backfillOutcomeFixture();
+
+    expect(parseWalletCaseBackfillOutcome(outcome)).toEqual(outcome);
+    expect(JSON.parse(serializeWalletCaseBackfillOutcome(outcome))).toEqual(outcome);
+  });
+
+  it("rejects backfill outcome identity, receipt, progress, and delta drift", () => {
+    const outcome = backfillOutcomeFixture();
+    expect(() => parseWalletCaseBackfillOutcome({
+      ...outcome,
+      outcome: { ...outcome.outcome, public_id: `bfo_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseBackfillOutcome({
+      ...outcome,
+      document: {
+        ...outcome.document,
+        continuation_receipt: {
+          ...outcome.document.continuation_receipt,
+          receipt: {
+            ...outcome.document.continuation_receipt.receipt,
+            input_schedule_public_id: `bfs_${"0".repeat(64)}`,
+          },
+        },
+      },
+    })).toThrow(/transition is inconsistent/);
+    expect(() => parseWalletCaseBackfillOutcome({
+      ...outcome,
+      document: {
+        ...outcome.document,
+        output_progress: {
+          ...outcome.document.output_progress,
+          progress: {
+            ...outcome.document.output_progress.progress,
+            pages_succeeded: 2,
+          },
+        },
+      },
+    })).toThrow(/backfill progress is inconsistent/);
+    expect(() => parseWalletCaseBackfillOutcome({
+      ...outcome,
+      document: {
+        ...outcome.document,
+        transition: {
+          ...outcome.document.transition,
+          page_count_delta: 0,
+        },
       },
     })).toThrow(/inconsistent/);
   });
