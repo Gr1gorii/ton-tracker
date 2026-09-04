@@ -16,6 +16,7 @@ import {
 } from "../test/walletCaseFixtures";
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
 import {
+  backfillOutcomeFixture,
   backfillProgressFixture,
   backfillScheduleFixture,
   checkpointContinuationReceiptV3Fixture,
@@ -361,6 +362,7 @@ describe("GramCaseSummary", () => {
 
   it("verifies and exports the immutable result of a plan-bound resume", async () => {
     const receipt = checkpointContinuationReceiptV3Fixture();
+    const outcome = backfillOutcomeFixture();
     const base = resumeSyncFixture();
     const snapshot = resumeSyncFixture({
       requested_scope: {
@@ -370,10 +372,15 @@ describe("GramCaseSummary", () => {
         resume_page_budget: receipt.receipt.page_budget,
       },
     });
-    const fetchMock = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify(receipt),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    ));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(receipt),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(outcome),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ));
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     renderSummary(walletCaseFixture({
@@ -402,8 +409,28 @@ describe("GramCaseSummary", () => {
       `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/syncs/${snapshot.public_id}/continuation-receipt`,
       expect.objectContaining({ cache: "no-store" }),
     );
+    await user.click(screen.getByRole("button", {
+      name: "Verify backfill outcome",
+    }));
+    expect(await screen.findByText("Verified backfill outcome")).toBeTruthy();
+    expect(screen.getByText(outcome.outcome.public_id)).toBeTruthy();
+    expect(screen.getByText("Outcome").closest("div")?.textContent).toContain(
+      "advanced",
+    );
+    expect(screen.getByText("Provider stream").closest("div")?.textContent).toContain(
+      "tonapi / transactions",
+    );
+    expect(screen.getByText("Stream state").closest("div")?.textContent).toContain(
+      "ready → ready",
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/syncs/${snapshot.public_id}/backfill-outcome`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
 
-    const createObjectUrl = vi.fn().mockReturnValue("blob:continuation-receipt");
+    const createObjectUrl = vi.fn()
+      .mockReturnValueOnce("blob:continuation-receipt")
+      .mockReturnValueOnce("blob:backfill-outcome");
     const revokeObjectUrl = vi.fn();
     vi.stubGlobal("URL", {
       createObjectURL: createObjectUrl,
@@ -414,8 +441,14 @@ describe("GramCaseSummary", () => {
     await user.click(screen.getByRole("button", {
       name: "Export verified continuation receipt JSON",
     }));
-    expect(createObjectUrl).toHaveBeenCalledOnce();
-    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:continuation-receipt");
+    await user.click(screen.getByRole("button", {
+      name: "Export verified backfill outcome JSON",
+    }));
+    expect(createObjectUrl).toHaveBeenCalledTimes(2);
+    expect(revokeObjectUrl.mock.calls).toEqual([
+      ["blob:continuation-receipt"],
+      ["blob:backfill-outcome"],
+    ]);
     anchorClick.mockRestore();
   });
 

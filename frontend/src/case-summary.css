@@ -245,6 +245,8 @@
 .case-continuation-plan { margin-top: 8px; border-color: color-mix(in srgb, var(--success) 35%, var(--border)); background: color-mix(in srgb, var(--success) 6%, var(--surface-solid)); }
 .case-backfill-progress { margin-top: 8px; border-color: color-mix(in srgb, var(--accent) 38%, var(--border)); }
 .case-backfill-schedule { margin-top: 8px; border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 5%, var(--surface-solid)); }
+.case-backfill-outcome-shell { display: grid; gap: 10px; }
+.case-backfill-outcome { border-color: color-mix(in srgb, var(--success) 42%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); }
 .case-backfill-schedule-budget { display: inline-grid; gap: 3px; color: var(--muted); font-size: .72rem; font-weight: 700; }
 .case-backfill-schedule-budget select { min-width: 96px; }
 .case-backfill-schedule-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

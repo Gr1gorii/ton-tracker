@@ -14,6 +14,7 @@ import {
 
 import type { WalletCaseSync } from "../walletCase";
 import {
+  getWalletCaseBackfillOutcome,
   getWalletCaseBackfillProgress,
   getWalletCaseBackfillSchedule,
   getWalletCaseCheckpointContinuationReceipt,
@@ -23,12 +24,14 @@ import {
 } from "../walletCaseApi";
 import type { WalletCaseSyncManifestResponse } from "../walletCaseSyncManifest";
 import {
+  serializeWalletCaseBackfillOutcome,
   serializeWalletCaseBackfillProgress,
   serializeWalletCaseBackfillSchedule,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseStreamCheckpointChain,
   type WalletCaseBackfillProgressResponse,
+  type WalletCaseBackfillOutcomeResponse,
   type WalletCaseBackfillScheduleResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
@@ -80,6 +83,20 @@ function downloadBackfillSchedule(
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `backfill-schedule-${schedule.schedule.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBackfillOutcome(
+  outcome: WalletCaseBackfillOutcomeResponse,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseBackfillOutcome(outcome)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `backfill-outcome-${outcome.outcome.public_id}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -146,6 +163,9 @@ export default function CaseAcquisitionManifest({
   const [continuationReceipt, setContinuationReceipt] = useState<WalletCaseCheckpointContinuationReceiptResponse | null>(null);
   const [continuationReceiptLoading, setContinuationReceiptLoading] = useState(false);
   const [continuationReceiptError, setContinuationReceiptError] = useState<string | null>(null);
+  const [backfillOutcome, setBackfillOutcome] = useState<WalletCaseBackfillOutcomeResponse | null>(null);
+  const [backfillOutcomeLoading, setBackfillOutcomeLoading] = useState(false);
+  const [backfillOutcomeError, setBackfillOutcomeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef<AbortController | null>(null);
@@ -153,6 +173,7 @@ export default function CaseAcquisitionManifest({
   const backfillScheduleRequestRef = useRef<AbortController | null>(null);
   const continuationPlanRequestRef = useRef<AbortController | null>(null);
   const continuationReceiptRequestRef = useRef<AbortController | null>(null);
+  const backfillOutcomeRequestRef = useRef<AbortController | null>(null);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
   const canVerifyContinuationReceipt = (
     snapshot.requested_scope.mode === "resume" &&
@@ -166,11 +187,13 @@ export default function CaseAcquisitionManifest({
     backfillScheduleRequestRef.current?.abort();
     continuationPlanRequestRef.current?.abort();
     continuationReceiptRequestRef.current?.abort();
+    backfillOutcomeRequestRef.current?.abort();
     requestRef.current = null;
     backfillProgressRequestRef.current = null;
     backfillScheduleRequestRef.current = null;
     continuationPlanRequestRef.current = null;
     continuationReceiptRequestRef.current = null;
+    backfillOutcomeRequestRef.current = null;
     setDetail(null);
     setCheckpoints(null);
     setBackfillProgress(null);
@@ -187,6 +210,9 @@ export default function CaseAcquisitionManifest({
     setContinuationReceipt(null);
     setContinuationReceiptLoading(false);
     setContinuationReceiptError(null);
+    setBackfillOutcome(null);
+    setBackfillOutcomeLoading(false);
+    setBackfillOutcomeError(null);
     setLoading(false);
     setError(null);
     return () => {
@@ -195,6 +221,7 @@ export default function CaseAcquisitionManifest({
       backfillScheduleRequestRef.current?.abort();
       continuationPlanRequestRef.current?.abort();
       continuationReceiptRequestRef.current?.abort();
+      backfillOutcomeRequestRef.current?.abort();
     };
   }, [caseId, snapshot.public_id, descriptor?.public_id]);
 
@@ -341,6 +368,38 @@ export default function CaseAcquisitionManifest({
     }
   };
 
+  const loadBackfillOutcome = async () => {
+    if (
+      continuationReceipt?.receipt.contract_version !==
+        "wallet_case_checkpoint_continuation_receipt_v3" ||
+      backfillOutcomeLoading
+    ) return;
+    backfillOutcomeRequestRef.current?.abort();
+    const controller = new AbortController();
+    backfillOutcomeRequestRef.current = controller;
+    setBackfillOutcomeLoading(true);
+    setBackfillOutcomeError(null);
+    try {
+      setBackfillOutcome(await getWalletCaseBackfillOutcome(
+        caseId,
+        snapshot.public_id,
+        controller.signal,
+      ));
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      setBackfillOutcomeError(
+        cause instanceof Error
+          ? cause.message
+          : "Backfill outcome verification failed.",
+      );
+    } finally {
+      if (backfillOutcomeRequestRef.current === controller) {
+        backfillOutcomeRequestRef.current = null;
+        setBackfillOutcomeLoading(false);
+      }
+    }
+  };
+
   return (
     <article className="case-detail-card case-manifest-card">
       <header>
@@ -472,6 +531,90 @@ export default function CaseAcquisitionManifest({
                   <small className="case-checkpoint-history-boundary">
                     {continuationReceipt.document.limitations[0]?.message}
                   </small>
+                </section>
+              )}
+              {continuationReceipt?.receipt.contract_version ===
+                "wallet_case_checkpoint_continuation_receipt_v3" && (
+                <section className="case-backfill-outcome-shell">
+                  <div className="case-manifest-actions">
+                    <p>
+                      Compare the exact verified progress before and after this
+                      scheduled step, using immutable checkpoint boundaries.
+                    </p>
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      disabled={backfillOutcomeLoading}
+                      onClick={() => void loadBackfillOutcome()}
+                    >
+                      {backfillOutcomeLoading
+                        ? <SpinnerGap className="spin" size={16} />
+                        : <ShieldCheck size={16} />}
+                      {backfillOutcomeLoading
+                        ? "Verifying outcome…"
+                        : backfillOutcome
+                          ? "Verify outcome again"
+                          : "Verify backfill outcome"}
+                    </button>
+                  </div>
+                  {backfillOutcomeError && (
+                    <div className="case-sync-message is-error" role="alert">
+                      <WarningCircle size={16} weight="fill" />
+                      <span>{backfillOutcomeError}</span>
+                    </div>
+                  )}
+                  {backfillOutcome && (
+                    <section
+                      className="case-checkpoint-chain case-backfill-outcome"
+                      aria-label="Verified backfill outcome"
+                      role="status"
+                    >
+                      <header>
+                        <span>
+                          <ShieldCheck size={18} />
+                          <strong>Verified backfill outcome</strong>
+                        </span>
+                        <code>{backfillOutcome.outcome.public_id}</code>
+                      </header>
+                      <div className="case-continuation-transition">
+                        <article>
+                          <small>Input progress</small>
+                          <b>
+                            {backfillOutcome.document.input_progress.progress
+                              .continuation_pages_succeeded} continued pages
+                          </b>
+                          <code>{backfillOutcome.outcome.input_progress_public_id}</code>
+                        </article>
+                        <ArrowRight size={22} aria-hidden="true" />
+                        <article>
+                          <small>Output progress</small>
+                          <b>
+                            {backfillOutcome.document.output_progress.progress
+                              .continuation_pages_succeeded} continued pages
+                          </b>
+                          <code>{backfillOutcome.outcome.output_progress_public_id}</code>
+                        </article>
+                      </div>
+                      <dl>
+                        <div><dt>Outcome</dt><dd>{backfillOutcome.outcome.outcome}</dd></div>
+                        <div><dt>Provider stream</dt><dd>{backfillOutcome.outcome.provider} / {backfillOutcome.outcome.stream_key}</dd></div>
+                        <div><dt>Provider pages</dt><dd>+{backfillOutcome.outcome.page_count_delta}</dd></div>
+                        <div><dt>Successful pages</dt><dd>+{backfillOutcome.outcome.pages_succeeded_delta}</dd></div>
+                        <div><dt>Stream state</dt><dd>{backfillOutcome.outcome.before_resume_state} → {backfillOutcome.outcome.after_resume_state}</dd></div>
+                        <div><dt>Frontier changed</dt><dd>{backfillOutcome.document.transition.frontier_changed ? "yes" : "no"}</dd></div>
+                      </dl>
+                      <button
+                        className="button-secondary case-checkpoint-chain-export"
+                        type="button"
+                        onClick={() => downloadBackfillOutcome(backfillOutcome)}
+                      >
+                        <DownloadSimple size={15} /> Export verified backfill outcome JSON
+                      </button>
+                      <small className="case-checkpoint-history-boundary">
+                        {backfillOutcome.document.limitations[1]?.message}
+                      </small>
+                    </section>
+                  )}
                 </section>
               )}
             </section>

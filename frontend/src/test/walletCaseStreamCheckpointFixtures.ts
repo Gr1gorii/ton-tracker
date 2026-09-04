@@ -508,7 +508,7 @@ export function backfillOutcomeFixture(): WalletCaseBackfillOutcomeResponse {
     ...inputStream.tip_checkpoint,
     public_id: `scp_${outputHash}`,
     checkpoint_hash_sha256: outputHash,
-    source_sync_public_id: OLDER_SYNC_ID,
+    source_sync_public_id: SYNC_ID,
     created_at: "2026-08-28T13:00:03Z",
   };
   const outputChainHash = "68".repeat(32);
@@ -618,7 +618,7 @@ export function backfillOutcomeFixture(): WalletCaseBackfillOutcomeResponse {
       public_id: `ctr_${receiptHash}`,
       contract_version: "wallet_case_checkpoint_continuation_receipt_v3",
       content_hash_sha256: receiptHash,
-      sync_public_id: OLDER_SYNC_ID,
+      sync_public_id: SYNC_ID,
       input_plan_public_id: inputSchedule.schedule.input_plan_public_id,
       input_checkpoint_public_id: inputStream.tip_checkpoint.public_id,
       output_checkpoint_public_id: outputCheckpoint.public_id,
@@ -634,7 +634,7 @@ export function backfillOutcomeFixture(): WalletCaseBackfillOutcomeResponse {
     document: {
       contract_version: "wallet_case_checkpoint_continuation_receipt_v3",
       case_public_id: CASE_ID,
-      sync_public_id: OLDER_SYNC_ID,
+      sync_public_id: SYNC_ID,
       input: {
         continuation_plan_public_id: inputSchedule.schedule.input_plan_public_id,
         checkpoint: inputStream.tip_checkpoint,
@@ -697,7 +697,7 @@ export function backfillOutcomeFixture(): WalletCaseBackfillOutcomeResponse {
       public_id: `bfo_${outcomeHash}`,
       contract_version: "wallet_case_backfill_outcome_v1",
       content_hash_sha256: outcomeHash,
-      sync_public_id: OLDER_SYNC_ID,
+      sync_public_id: SYNC_ID,
       outcome: "advanced",
       input_schedule_public_id: inputSchedule.schedule.public_id,
       continuation_receipt_public_id: receipt.receipt.public_id,
@@ -713,7 +713,7 @@ export function backfillOutcomeFixture(): WalletCaseBackfillOutcomeResponse {
     document: {
       contract_version: "wallet_case_backfill_outcome_v1",
       case_public_id: CASE_ID,
-      sync_public_id: OLDER_SYNC_ID,
+      sync_public_id: SYNC_ID,
       input_schedule: inputSchedule,
       input_progress: inputProgress,
       continuation_receipt: receipt,
