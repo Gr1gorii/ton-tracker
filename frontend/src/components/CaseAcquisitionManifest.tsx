@@ -40,6 +40,7 @@ import {
 } from "../walletCaseStreamCheckpoint";
 import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
 import { useWalletCaseBackfillHistory } from "../useWalletCaseBackfillHistory";
+import BackfillCoverageTimeline from "./BackfillCoverageTimeline";
 
 function formatTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -481,6 +482,9 @@ export default function CaseAcquisitionManifest({
                   {backfillHistory.history.items.length} of
                   {" "}{backfillHistory.history.totalOutcomes} outcomes loaded
                 </small>
+                {backfillHistory.timeline && (
+                  <BackfillCoverageTimeline timeline={backfillHistory.timeline} />
+                )}
                 <ol>
                   {backfillHistory.history.items.map((item) => (
                     <li key={item.outcome.public_id}>

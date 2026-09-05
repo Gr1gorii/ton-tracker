@@ -482,6 +482,13 @@ describe("GramCaseSummary", () => {
     expect(await screen.findByText("1 of 1 outcomes loaded")).toBeTruthy();
     expect(screen.getByText(history.items[0].outcome.public_id)).toBeTruthy();
     expect(screen.getByText(/Continued pages 1 → 2/)).toBeTruthy();
+    expect(screen.getByRole("region", {
+      name: "Backfill coverage timeline",
+    })).toBeTruthy();
+    expect(screen.getByRole("img", {
+      name: /Continuation pages moved from 1 to 2 across 1 verified outcomes/,
+    })).toBeTruthy();
+    expect(screen.getByText("Verified page gain").nextElementSibling?.textContent).toBe("+1");
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/backfill-outcomes?limit=10`,
       expect.objectContaining({ cache: "no-store" }),
