@@ -506,7 +506,10 @@ describe("GramCaseSummary", () => {
       expect.objectContaining({ cache: "no-store" }),
     );
 
-    const createObjectUrl = vi.fn().mockReturnValue("blob:selected-backfill-outcome");
+    const createObjectUrl = vi.fn()
+      .mockReturnValueOnce("blob:backfill-timeline-json")
+      .mockReturnValueOnce("blob:backfill-timeline-csv")
+      .mockReturnValueOnce("blob:selected-backfill-outcome");
     const revokeObjectUrl = vi.fn();
     vi.stubGlobal("URL", {
       createObjectURL: createObjectUrl,
@@ -514,11 +517,19 @@ describe("GramCaseSummary", () => {
     });
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => undefined);
+    await user.click(screen.getByRole("button", { name: "Export timeline JSON" }));
+    await user.click(screen.getByRole("button", { name: "Export timeline CSV" }));
     await user.click(screen.getByRole("button", {
       name: "Export selected Backfill Outcome JSON",
     }));
-    expect(createObjectUrl).toHaveBeenCalledTimes(1);
-    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:selected-backfill-outcome");
+    expect(createObjectUrl).toHaveBeenCalledTimes(3);
+    expect((createObjectUrl.mock.calls[0][0] as Blob).type).toBe("application/json");
+    expect((createObjectUrl.mock.calls[1][0] as Blob).type).toBe("text/csv;charset=utf-8");
+    expect(revokeObjectUrl.mock.calls).toEqual([
+      ["blob:backfill-timeline-json"],
+      ["blob:backfill-timeline-csv"],
+      ["blob:selected-backfill-outcome"],
+    ]);
     anchorClick.mockRestore();
   });
 
