@@ -46,7 +46,7 @@ function message(cause: unknown, fallback: string): string {
 function view(
   response: Awaited<ReturnType<typeof getWalletCaseBackfillOutcomeHistory>>,
 ): WalletCaseBackfillHistoryView {
-  return {
+  const next = {
     casePublicId: response.case_public_id,
     syncCutoffPublicId: response.sync_cutoff_public_id,
     totalOutcomes: response.aggregate.total_outcomes,
@@ -55,6 +55,8 @@ function view(
     nextCursor: response.page.next_cursor,
     limitations: response.limitations,
   };
+  buildWalletCaseBackfillCoverageTimeline(next);
+  return next;
 }
 
 function mergeLimitations(
@@ -163,7 +165,7 @@ export function useWalletCaseBackfillHistory(
       ))) {
         throw new Error("Backfill Outcome history continuation repeated a result.");
       }
-      publishHistory({
+      const next = {
         casePublicId: current.casePublicId,
         syncCutoffPublicId: current.syncCutoffPublicId,
         totalOutcomes: current.totalOutcomes,
@@ -171,7 +173,9 @@ export function useWalletCaseBackfillHistory(
         hasMore: response.page.has_more,
         nextCursor: response.page.next_cursor,
         limitations: mergeLimitations(current.limitations, response.limitations),
-      });
+      };
+      buildWalletCaseBackfillCoverageTimeline(next);
+      publishHistory(next);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setHistoryError(message(cause, "Backfill Outcome history continuation failed."));
