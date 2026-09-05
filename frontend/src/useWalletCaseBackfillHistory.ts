@@ -9,10 +9,15 @@ import type {
   WalletCaseBackfillOutcomeHistoryItem,
   WalletCaseBackfillOutcomeResponse,
 } from "./walletCaseStreamCheckpoint";
+import {
+  buildWalletCaseBackfillCoverageTimeline,
+  type WalletCaseBackfillCoverageTimeline,
+} from "./walletCaseBackfillCoverageTimeline";
 
 const PAGE_LIMIT = 10;
 
 export interface WalletCaseBackfillHistoryView {
+  casePublicId: string;
   syncCutoffPublicId: string | null;
   totalOutcomes: number;
   items: WalletCaseBackfillOutcomeHistoryItem[];
@@ -23,6 +28,7 @@ export interface WalletCaseBackfillHistoryView {
 
 export interface WalletCaseBackfillHistoryController {
   history: WalletCaseBackfillHistoryView | null;
+  timeline: WalletCaseBackfillCoverageTimeline | null;
   historyState: "idle" | "loading" | "loading-more";
   historyError: string | null;
   selected: WalletCaseBackfillOutcomeResponse | null;
@@ -41,6 +47,7 @@ function view(
   response: Awaited<ReturnType<typeof getWalletCaseBackfillOutcomeHistory>>,
 ): WalletCaseBackfillHistoryView {
   return {
+    casePublicId: response.case_public_id,
     syncCutoffPublicId: response.sync_cutoff_public_id,
     totalOutcomes: response.aggregate.total_outcomes,
     items: response.items,
@@ -143,6 +150,7 @@ export function useWalletCaseBackfillHistory(
       });
       if (controller.signal.aborted) return;
       if (
+        response.case_public_id !== current.casePublicId ||
         response.sync_cutoff_public_id !== current.syncCutoffPublicId ||
         response.aggregate.total_outcomes !== current.totalOutcomes
       ) {
@@ -156,6 +164,7 @@ export function useWalletCaseBackfillHistory(
         throw new Error("Backfill Outcome history continuation repeated a result.");
       }
       publishHistory({
+        casePublicId: current.casePublicId,
         syncCutoffPublicId: current.syncCutoffPublicId,
         totalOutcomes: current.totalOutcomes,
         items: [...current.items, ...response.items],
@@ -200,8 +209,13 @@ export function useWalletCaseBackfillHistory(
     }
   }, [caseId]);
 
+  const timeline = history === null
+    ? null
+    : buildWalletCaseBackfillCoverageTimeline(history);
+
   return {
     history,
+    timeline,
     historyState,
     historyError,
     selected,
