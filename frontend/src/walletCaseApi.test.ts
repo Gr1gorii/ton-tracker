@@ -9,6 +9,7 @@ import {
   createWalletCase,
   createWalletCaseSync,
   deleteWalletCase,
+  getWalletCaseBackfillOutcomeHistory,
   getWalletCaseBackfillProgress,
   getWalletCaseBackfillOutcome,
   getWalletCaseBackfillSchedule,
@@ -51,6 +52,7 @@ import {
 } from "./test/walletCaseActivityFixtures";
 import { manifestResponseFixture } from "./test/walletCaseSyncManifestFixtures";
 import {
+  backfillOutcomeHistoryFixture,
   backfillOutcomeFixture,
   backfillProgressFixture,
   backfillScheduleFixture,
@@ -712,6 +714,53 @@ describe("Wallet Case API", () => {
       CASE_ID,
       OTHER_SYNC_ID,
     )).rejects.toThrow(/does not match/);
+  });
+
+  it("reads a no-store frozen Backfill Outcome history page", async () => {
+    const history = backfillOutcomeHistoryFixture({
+      hasMore: true,
+      totalOutcomes: 2,
+    });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(history));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseBackfillOutcomeHistory({
+      caseId: CASE_ID,
+      limit: 1,
+      cursor: "opaque-signed.cursor",
+      signal: controller.signal,
+    })).resolves.toEqual(history);
+    expect(fetchMock).toHaveBeenCalledWith(
+      (
+        `${API_BASE}/api/v1/cases/${CASE_ID}/backfill-outcomes?` +
+        "limit=1&cursor=opaque-signed.cursor"
+      ),
+      { cache: "no-store", signal: controller.signal },
+    );
+  });
+
+  it("rejects unsafe Backfill Outcome history inputs and response scope", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(getWalletCaseBackfillOutcomeHistory({
+      caseId: CASE_ID,
+      limit: 51,
+    })).rejects.toThrow(/1 through 50/);
+    await expect(getWalletCaseBackfillOutcomeHistory({
+      caseId: CASE_ID,
+      cursor: "",
+    })).rejects.toThrow(/cursor is invalid/);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...backfillOutcomeHistoryFixture(),
+      case_public_id: OTHER_CASE_ID,
+    }));
+    await expect(getWalletCaseBackfillOutcomeHistory({
+      caseId: CASE_ID,
+      limit: 1,
+    })).rejects.toThrow(/does not match/);
   });
 
   it("rejects unsafe checkpoint history inputs and response scope", async () => {

@@ -22,6 +22,7 @@ import {
   type WalletCaseSyncManifestResponse,
 } from "./walletCaseSyncManifest";
 import {
+  parseWalletCaseBackfillOutcomeHistory,
   parseWalletCaseBackfillOutcome,
   parseWalletCaseBackfillProgress,
   parseWalletCaseBackfillSchedule,
@@ -32,6 +33,7 @@ import {
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
   type WalletCaseBackfillProgressResponse,
+  type WalletCaseBackfillOutcomeHistoryResponse,
   type WalletCaseBackfillOutcomeResponse,
   type WalletCaseBackfillScheduleResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
@@ -783,6 +785,43 @@ export async function getWalletCaseBackfillOutcome(
     throw new Error("Wallet Case backfill outcome does not match the request");
   }
   return outcome;
+}
+
+export async function getWalletCaseBackfillOutcomeHistory({
+  caseId,
+  limit = 20,
+  cursor,
+  signal,
+}: {
+  caseId: string;
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
+}): Promise<WalletCaseBackfillOutcomeHistoryResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new Error("Wallet Case Backfill Outcome history limit must be from 1 through 50");
+  }
+  if (cursor !== undefined && (!cursor || cursor.length > 1024)) {
+    throw new Error("Wallet Case Backfill Outcome history cursor is invalid");
+  }
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor !== undefined) query.set("cursor", cursor);
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/backfill-outcomes?${query}`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case Backfill Outcome history read failed",
+    );
+  }
+  const history = parseWalletCaseBackfillOutcomeHistory(await response.json());
+  if (history.case_public_id !== caseId || history.page.limit !== limit) {
+    throw new Error("Wallet Case Backfill Outcome history does not match the request");
+  }
+  return history;
 }
 
 export async function getWalletCaseStreamCheckpointHistory({
