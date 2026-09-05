@@ -1,3 +1,34 @@
+# GRAM Scope — v0.99.0 BACKFILL COVERAGE TIMELINE
+
+v0.99.0 turns the frozen Backfill Outcome journal into a useful coverage-over-
+time view without creating another data source. After
+`wallet_case_backfill_outcome_history_v1` passes strict client validation, the
+new timeline model reverses its newest-first items into chronological points
+and retains the exact Case, sync cutoff, `bfo_` identity, sync, provider stream,
+completion time, outcome state, page movement, and frontier-change fact.
+
+The timeline reports successful pages added by the loaded outcomes, frontier
+moves, distinct provider streams, completed/blocked/no-progress steps, and
+successful continuation pages between adjacent outcomes that the loaded series
+does not itself represent. Cross-outcome page regression, duplicate identity,
+timestamp-order drift, inconsistent deltas, changed continuation scope, and a
+page that ends before the frozen total all fail closed. Previously verified
+pages remain visible when a continuation is rejected.
+
+Summary renders the result as an accessible SVG plus exact text metrics. A
+partial traversal is visibly labelled `Loaded window`; only a fully traversed
+frozen outcome set receives the complete-set label. The current loaded series
+can be exported as deterministic JSON or CSV, including the cutoff and exact
+outcome/sync identifiers needed to reopen full evidence.
+
+This is a client-derived analytical view over finite, operator-triggered
+outcomes. It does not add provider I/O, schedule work, estimate remaining
+pages, prove earliest wallet activity, or establish complete wallet history.
+No backend API or database migration changes; Alembic remains at
+`20260828_0028` and backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.98.0 BACKFILL HISTORY
 
 v0.98.0 assembles reproducible scheduled transitions into one bounded Case

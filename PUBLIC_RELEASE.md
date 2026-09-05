@@ -1,4 +1,4 @@
-# GRAM Scope - v0.98.0 Public Release
+# GRAM Scope - v0.99.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -79,6 +79,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   acquisition-plan-v6 runs, with bounded 1–20 result verification,
   process-local authenticated cursors, absolute continued-page movement, safe
   append pagination, exact outcome reopening, and verified JSON export.
+- A client-derived chronological Backfill Coverage Timeline over the loaded
+  frozen outcome window, with fail-closed cross-page composition, accessible
+  movement and plateau metrics, explicit partial-window labelling, and
+  deterministic JSON/CSV export retaining exact outcome and sync identities.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -120,7 +124,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.98.0 BACKFILL HISTORY`.
+- Product release label: `v0.99.0 BACKFILL COVERAGE TIMELINE`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -281,13 +285,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.98.0`, confirm:
+Before tagging `v0.99.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.98.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.99.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -332,6 +336,10 @@ Before tagging `v0.98.0`, confirm:
   cutoffs under concurrent publication, signed cursor tamper and cross-Case
   rejection, bounded recursive verification, strict response parsing, duplicate
   append rejection, selected outcome reopening, and exact export.
+- Backfill Coverage Timeline tests cover chronological composition, frozen
+  partial/complete window labels, absolute and delta metrics, cross-outcome
+  regression, premature pagination end, accessible chart geometry, retained
+  evidence identities, and deterministic JSON/CSV export.
 - Migration 0021, current-policy selection, legacy trust-0 rejection,
   checkpoint/digest binding, whole-operation timeout, terminate/kill cleanup,
   cancellation bound, and locked persistent-cache tests pass.
