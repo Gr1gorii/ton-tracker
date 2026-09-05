@@ -51,6 +51,7 @@ from services.wallet_cases import (
 )
 from schemas import WalletIngestionPreviewRequest
 from wallet_case_schemas import (
+    WalletCaseBackfillOutcomeHistoryResponse,
     WalletCaseBackfillOutcomeResponse,
     WalletCaseBackfillProgressResponse,
     WalletCaseBackfillScheduleResponse,
@@ -309,6 +310,45 @@ def _publish_transaction_checkpoint(
         last_error_retryable=False,
     ) is True
     return case_id, queued, claimed
+
+
+def _run_scheduled_backfill_step(
+    client: TestClient,
+    *,
+    case_id: str,
+    page_budget: int = 1,
+) -> tuple[dict, dict, dict]:
+    schedule = client.get(
+        f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule",
+        params={"page_budget": str(page_budget)},
+    )
+    assert schedule.status_code == 200, schedule.text
+    schedule_body = schedule.json()
+    queued = client.post(
+        (
+            f"/api/v1/cases/{case_id}/stream-checkpoints/backfill-schedule/"
+            f"{schedule_body['schedule']['public_id']}/run"
+        ),
+        headers={"Idempotency-Key": str(uuid4())},
+        json={"page_budget": page_budget},
+    )
+    assert queued.status_code == 202, queued.text
+    assert CaseSyncWorker(
+        app.state.wallet_case_test_session,
+        builder=_resumed_transaction_run,
+    ).run_once() is True
+    completed = client.get(
+        f"/api/v1/cases/{case_id}/syncs/{queued.json()['public_id']}"
+    )
+    assert completed.status_code == 200, completed.text
+    outcome = client.get(
+        (
+            f"/api/v1/cases/{case_id}/syncs/"
+            f"{queued.json()['public_id']}/backfill-outcome"
+        )
+    )
+    assert outcome.status_code == 200, outcome.text
+    return schedule_body, completed.json(), outcome.json()
 
 
 def _publish_multi_stream_checkpoints(
@@ -2471,6 +2511,174 @@ def test_backfill_outcome_proves_stable_progress_transition(client):
     assert corrupt.json()["detail"]["code"] == (
         "backfill_outcome_integrity_error"
     )
+
+
+def test_backfill_outcome_history_is_verified_frozen_and_paginated(client):
+    empty_case_id = _create_case(client)["case"]["public_id"]
+    empty = client.get(
+        f"/api/v1/cases/{empty_case_id}/backfill-outcomes",
+        params={"limit": "1"},
+    )
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == {
+        "contract_version": "wallet_case_backfill_outcome_history_v1",
+        "case_public_id": empty_case_id,
+        "sync_cutoff_public_id": None,
+        "items": [],
+        "aggregate": {"total_outcomes": 0, "returned_count": 0},
+        "page": {"limit": 1, "has_more": False, "next_cursor": None},
+        "limitations": [
+            {
+                "code": "backfill_outcome_history_is_finite_transitions",
+                "message": (
+                    "This history lists verified finite scheduled transitions; "
+                    "it does not prove complete wallet or provider history."
+                ),
+            }
+        ],
+    }
+
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    _schedule_one, sync_one, outcome_one = _run_scheduled_backfill_step(
+        client,
+        case_id=case_id,
+    )
+    _schedule_two, sync_two, outcome_two = _run_scheduled_backfill_step(
+        client,
+        case_id=case_id,
+    )
+    first = client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes",
+        params={"limit": "1"},
+    )
+
+    assert first.status_code == 200, first.text
+    assert first.headers["cache-control"] == "no-store"
+    first_body = first.json()
+    assert first_body["sync_cutoff_public_id"] == sync_two["public_id"]
+    assert first_body["aggregate"] == {
+        "total_outcomes": 2,
+        "returned_count": 1,
+    }
+    assert first_body["page"]["has_more"] is True
+    assert first_body["page"]["next_cursor"] is not None
+    newest = first_body["items"][0]
+    assert newest["outcome"] == outcome_two["outcome"]
+    assert newest["before_continuation_pages_succeeded"] == 1
+    assert newest["after_continuation_pages_succeeded"] == 2
+    assert newest["frontier_changed"] is True
+    assert newest["completed_at"] == sync_two["completed_at"]
+    assert first_body["limitations"][1]["code"] == (
+        "backfill_outcome_history_cursor_local_process_scope"
+    )
+    WalletCaseBackfillOutcomeHistoryResponse.model_validate(first_body)
+
+    _schedule_three, sync_three, _outcome_three = _run_scheduled_backfill_step(
+        client,
+        case_id=case_id,
+    )
+    second = client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes",
+        params={
+            "limit": "1",
+            "cursor": first_body["page"]["next_cursor"],
+        },
+    )
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert second_body["sync_cutoff_public_id"] == sync_two["public_id"]
+    assert second_body["aggregate"] == {
+        "total_outcomes": 2,
+        "returned_count": 1,
+    }
+    assert second_body["page"] == {
+        "limit": 1,
+        "has_more": False,
+        "next_cursor": None,
+    }
+    assert second_body["items"][0]["outcome"] == outcome_one["outcome"]
+    assert second_body["items"][0][
+        "before_continuation_pages_succeeded"
+    ] == 0
+    assert second_body["items"][0][
+        "after_continuation_pages_succeeded"
+    ] == 1
+    assert all(
+        item["outcome"]["sync_public_id"] != sync_three["public_id"]
+        for item in second_body["items"]
+    )
+
+    fresh = client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes",
+        params={"limit": "3"},
+    )
+    assert fresh.status_code == 200, fresh.text
+    assert fresh.json()["aggregate"]["total_outcomes"] == 3
+    assert [
+        item["outcome"]["sync_public_id"]
+        for item in fresh.json()["items"]
+    ] == [sync_three["public_id"], sync_two["public_id"], sync_one["public_id"]]
+
+    tampered_model = json.loads(json.dumps(first_body))
+    tampered_model["items"][0]["after_continuation_pages_succeeded"] += 1
+    with pytest.raises(ValueError, match="progress delta"):
+        WalletCaseBackfillOutcomeHistoryResponse.model_validate(tampered_model)
+
+
+def test_backfill_outcome_history_rejects_invalid_scope_and_query(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    _schedule, _sync, _outcome = _run_scheduled_backfill_step(
+        client,
+        case_id=case_id,
+    )
+    first = client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes",
+        params={"limit": "1"},
+    ).json()
+    cursor = first["page"]["next_cursor"]
+    if cursor is None:
+        _schedule, _sync, _outcome = _run_scheduled_backfill_step(
+            client,
+            case_id=case_id,
+        )
+        cursor = client.get(
+            f"/api/v1/cases/{case_id}/backfill-outcomes",
+            params={"limit": "1"},
+        ).json()["page"]["next_cursor"]
+    assert cursor is not None
+    other_case_id = _create_case(
+        client,
+        address=f"0:{'1' * 64}",
+    )["case"]["public_id"]
+    cross_case = client.get(
+        f"/api/v1/cases/{other_case_id}/backfill-outcomes",
+        params={"limit": "1", "cursor": cursor},
+    )
+    assert cross_case.status_code == 422
+    assert cross_case.json()["detail"]["code"] == (
+        "invalid_backfill_outcome_history_cursor"
+    )
+    tampered = f"{cursor[:-1]}{'0' if cursor[-1] != '0' else '1'}"
+    invalid = client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes",
+        params={"limit": "1", "cursor": tampered},
+    )
+    assert invalid.status_code == 422
+    assert invalid.json()["detail"]["code"] == (
+        "invalid_backfill_outcome_history_cursor"
+    )
+    assert client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes?limit=51"
+    ).status_code == 422
+    assert client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes?limit=1&limit=2"
+    ).status_code == 422
+    assert client.get(
+        f"/api/v1/cases/{case_id}/backfill-outcomes?unexpected=1"
+    ).status_code == 422
+    assert client.get(
+        f"/api/v1/cases/{uuid4()}/backfill-outcomes"
+    ).status_code == 404
 
 
 def test_backfill_schedule_run_rejects_budget_drift_and_invalid_body(client):
