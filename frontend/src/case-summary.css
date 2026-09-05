@@ -257,6 +257,30 @@
 .case-backfill-history ol small { color: var(--text-muted); line-height: 1.4; }
 .case-backfill-history ol code { overflow: hidden; max-width: min(430px, 55vw); color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
 .case-backfill-history .case-backfill-outcome dl code { display: block; overflow: hidden; max-width: 100%; font-size: 0.62rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-backfill-timeline { display: grid; margin-top: 4px; padding: 13px; gap: 10px; border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border)); border-radius: 11px; color: var(--accent); background: color-mix(in srgb, var(--accent) 4%, var(--surface-solid)); }
+.case-backfill-timeline > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.case-backfill-timeline > header > span { display: inline-flex; align-items: center; gap: 7px; color: var(--text); }
+.case-backfill-timeline > header small { display: inline-flex; padding: 5px 8px; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); background: var(--surface-solid); font-weight: 720; }
+.case-backfill-timeline > header small.is-complete { border-color: color-mix(in srgb, var(--success) 38%, var(--border)); color: var(--success); }
+.case-backfill-timeline > header small.is-bounded { border-color: color-mix(in srgb, var(--warning) 40%, var(--border)); color: var(--warning); }
+.case-backfill-timeline svg { width: 100%; height: 176px; overflow: visible; border-radius: 8px; background: color-mix(in srgb, var(--surface-solid) 86%, transparent); }
+.case-backfill-timeline svg text { fill: var(--text-muted); font-size: 11px; font-weight: 700; }
+.case-backfill-timeline-grid { stroke: color-mix(in srgb, var(--border-strong) 64%, transparent); stroke-dasharray: 4 5; }
+.case-backfill-timeline-line { stroke: var(--accent); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.case-backfill-timeline-point { color: var(--accent); stroke: var(--surface-solid); stroke-width: 2; }
+.case-backfill-timeline-point.is-completed { color: var(--success); }
+.case-backfill-timeline-point.is-blocked { color: var(--danger); }
+.case-backfill-timeline-point.is-no_progress { color: var(--text-muted); }
+.case-backfill-timeline-range { display: flex; margin-top: -8px; justify-content: space-between; gap: 12px; color: var(--text-muted); }
+.case-backfill-timeline > dl { display: grid; margin: 0; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+.case-backfill-timeline > dl div { display: grid; padding: 8px 9px; gap: 2px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-solid); }
+.case-backfill-timeline > dl dt { color: var(--text-muted); font-size: 0.62rem; letter-spacing: 0.04em; text-transform: uppercase; }
+.case-backfill-timeline > dl dd { margin: 0; color: var(--text); font-size: 0.9rem; font-weight: 780; }
+.case-backfill-timeline > p,
+.case-backfill-timeline-gap { margin: 0; color: var(--text-muted); line-height: 1.45; }
+.case-backfill-timeline-gap { color: var(--warning); }
+.case-backfill-timeline-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.case-backfill-timeline-actions button { display: inline-flex; padding: 7px 10px; align-items: center; justify-content: center; gap: 6px; font-size: 0.72rem; }
 .case-backfill-schedule-budget { display: inline-grid; gap: 3px; color: var(--muted); font-size: .72rem; font-weight: 700; }
 .case-backfill-schedule-budget select { min-width: 96px; }
 .case-backfill-schedule-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -769,6 +793,10 @@
   .case-backfill-history > header button,
   .case-backfill-history ol li > button { width: 100%; justify-content: center; }
   .case-backfill-history ol li { align-items: stretch; flex-direction: column; }
+  .case-backfill-timeline > header { align-items: flex-start; flex-direction: column; }
+  .case-backfill-timeline > dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .case-backfill-timeline-actions { align-items: stretch; flex-direction: column; }
+  .case-backfill-timeline-actions button { width: 100%; }
   .case-continuation-transition { grid-template-columns: 1fr; }
   .case-continuation-transition > svg { margin: -2px auto; transform: rotate(90deg); }
   .case-checkpoint-catalog li { align-items: stretch; flex-direction: column; }
