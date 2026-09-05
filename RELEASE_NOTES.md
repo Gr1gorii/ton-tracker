@@ -1,3 +1,33 @@
+# GRAM Scope — v0.98.0 BACKFILL HISTORY
+
+v0.98.0 assembles reproducible scheduled transitions into one bounded Case
+journal. `GET /api/v1/cases/{case}/backfill-outcomes` returns a newest-first
+page of terminal acquisition-plan-v6 results at a frozen sync cutoff. Its
+authenticated cursor binds the exact Case, cutoff, and last visible sync, so a
+newly completed run cannot alter an in-progress traversal.
+
+Each compact entry is emitted only after the server reconstructs and validates
+its complete content-addressed `bfo_` Backfill Outcome. It exposes the outcome
+identity and sync, provider stream, completion time, outcome and stream states,
+frontier change, page deltas, and absolute continued successful-page movement.
+Reads are limited to 1–20 outcomes because each result recursively verifies its
+schedule, before/after progress, receipt, checkpoint lineage, and chains.
+
+The strict client rejects unknown fields, invalid identities or timestamps,
+progress-delta contradictions, duplicate outcome or sync IDs, inconsistent
+totals, and cursor-state drift. Summary loads history only on explicit request,
+appends older pages only when their frozen cutoff and total agree, and can
+re-verify and export the exact full `bfo_` behind any entry.
+
+This history records finite operator-triggered transitions. It does not enqueue
+provider work, establish a remaining-page denominator, prove earliest wallet
+activity, or prove complete history. Pagination cursors are authenticated only
+for the current local API process and expire after restart. No database
+migration is added; Alembic remains at `20260828_0028` and backend API version
+remains `0.2.1`.
+
+---
+
 # GRAM Scope — v0.97.0 BACKFILL OUTCOME
 
 v0.97.0 makes the result of one scheduled backfill step independently
