@@ -40,6 +40,12 @@ import {
 } from "../walletCaseStreamCheckpoint";
 import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
 import { useWalletCaseBackfillHistory } from "../useWalletCaseBackfillHistory";
+import {
+  serializeWalletCaseBackfillCoverageTimeline,
+  serializeWalletCaseBackfillCoverageTimelineCsv,
+  type WalletCaseBackfillCoverageSource,
+} from "../walletCaseBackfillCoverageTimeline";
+import BackfillCoverageTimeline from "./BackfillCoverageTimeline";
 
 function formatTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -98,6 +104,25 @@ function downloadBackfillOutcome(
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `backfill-outcome-${outcome.outcome.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadBackfillCoverageTimeline(
+  source: WalletCaseBackfillCoverageSource,
+  format: "json" | "csv",
+): void {
+  const body = format === "json"
+    ? serializeWalletCaseBackfillCoverageTimeline(source)
+    : serializeWalletCaseBackfillCoverageTimelineCsv(source);
+  const url = URL.createObjectURL(new Blob(
+    [body],
+    { type: format === "json" ? "application/json" : "text/csv;charset=utf-8" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download =
+    `backfill-coverage-timeline-${source.syncCutoffPublicId ?? source.casePublicId}.${format}`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -481,6 +506,33 @@ export default function CaseAcquisitionManifest({
                   {backfillHistory.history.items.length} of
                   {" "}{backfillHistory.history.totalOutcomes} outcomes loaded
                 </small>
+                {backfillHistory.timeline && (
+                  <>
+                    <BackfillCoverageTimeline timeline={backfillHistory.timeline} />
+                    <div className="case-backfill-timeline-actions">
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => downloadBackfillCoverageTimeline(
+                          backfillHistory.history!,
+                          "json",
+                        )}
+                      >
+                        <DownloadSimple size={14} /> Export timeline JSON
+                      </button>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => downloadBackfillCoverageTimeline(
+                          backfillHistory.history!,
+                          "csv",
+                        )}
+                      >
+                        <DownloadSimple size={14} /> Export timeline CSV
+                      </button>
+                    </div>
+                  </>
+                )}
                 <ol>
                   {backfillHistory.history.items.map((item) => (
                     <li key={item.outcome.public_id}>

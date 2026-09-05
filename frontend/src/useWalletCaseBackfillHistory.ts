@@ -9,10 +9,15 @@ import type {
   WalletCaseBackfillOutcomeHistoryItem,
   WalletCaseBackfillOutcomeResponse,
 } from "./walletCaseStreamCheckpoint";
+import {
+  buildWalletCaseBackfillCoverageTimeline,
+  type WalletCaseBackfillCoverageTimeline,
+} from "./walletCaseBackfillCoverageTimeline";
 
 const PAGE_LIMIT = 10;
 
 export interface WalletCaseBackfillHistoryView {
+  casePublicId: string;
   syncCutoffPublicId: string | null;
   totalOutcomes: number;
   items: WalletCaseBackfillOutcomeHistoryItem[];
@@ -23,6 +28,7 @@ export interface WalletCaseBackfillHistoryView {
 
 export interface WalletCaseBackfillHistoryController {
   history: WalletCaseBackfillHistoryView | null;
+  timeline: WalletCaseBackfillCoverageTimeline | null;
   historyState: "idle" | "loading" | "loading-more";
   historyError: string | null;
   selected: WalletCaseBackfillOutcomeResponse | null;
@@ -40,7 +46,8 @@ function message(cause: unknown, fallback: string): string {
 function view(
   response: Awaited<ReturnType<typeof getWalletCaseBackfillOutcomeHistory>>,
 ): WalletCaseBackfillHistoryView {
-  return {
+  const next = {
+    casePublicId: response.case_public_id,
     syncCutoffPublicId: response.sync_cutoff_public_id,
     totalOutcomes: response.aggregate.total_outcomes,
     items: response.items,
@@ -48,6 +55,8 @@ function view(
     nextCursor: response.page.next_cursor,
     limitations: response.limitations,
   };
+  buildWalletCaseBackfillCoverageTimeline(next);
+  return next;
 }
 
 function mergeLimitations(
@@ -143,6 +152,7 @@ export function useWalletCaseBackfillHistory(
       });
       if (controller.signal.aborted) return;
       if (
+        response.case_public_id !== current.casePublicId ||
         response.sync_cutoff_public_id !== current.syncCutoffPublicId ||
         response.aggregate.total_outcomes !== current.totalOutcomes
       ) {
@@ -155,14 +165,17 @@ export function useWalletCaseBackfillHistory(
       ))) {
         throw new Error("Backfill Outcome history continuation repeated a result.");
       }
-      publishHistory({
+      const next = {
+        casePublicId: current.casePublicId,
         syncCutoffPublicId: current.syncCutoffPublicId,
         totalOutcomes: current.totalOutcomes,
         items: [...current.items, ...response.items],
         hasMore: response.page.has_more,
         nextCursor: response.page.next_cursor,
         limitations: mergeLimitations(current.limitations, response.limitations),
-      });
+      };
+      buildWalletCaseBackfillCoverageTimeline(next);
+      publishHistory(next);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setHistoryError(message(cause, "Backfill Outcome history continuation failed."));
@@ -200,8 +213,13 @@ export function useWalletCaseBackfillHistory(
     }
   }, [caseId]);
 
+  const timeline = history === null
+    ? null
+    : buildWalletCaseBackfillCoverageTimeline(history);
+
   return {
     history,
+    timeline,
     historyState,
     historyError,
     selected,

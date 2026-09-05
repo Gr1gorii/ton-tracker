@@ -4,10 +4,35 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.98.0 — Backfill History**<br>
+Current product release: **v0.99.0 — Backfill Coverage Timeline**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.98.0 adds
+## What v0.99.0 adds
+
+Wallet Case now turns an explicitly verified Backfill Outcome history into a
+chronological coverage timeline. The client derives the series only after the
+strict `wallet_case_backfill_outcome_history_v1` parser accepts the frozen
+Case, sync cutoff, totals, outcome identities, timestamps, and page deltas.
+Loading older pages extends that same frozen series; changed scope, repeated
+results, regressions, or a page that closes before the frozen total fail closed
+without discarding the last verified window.
+
+The accessible chart shows absolute successful continuation-page movement and
+distinguishes `advanced`, `completed`, `blocked`, and `no_progress` outcomes.
+Text metrics expose verified page gain, frontier moves, provider-stream count,
+plateau steps, and any successful pages between outcome records that are not
+represented by the loaded series. A partial traversal is labelled as a loaded
+window rather than a complete frozen set.
+
+The loaded timeline can be exported as deterministic JSON or analysis-ready
+CSV. Both formats retain the frozen cutoff plus exact `bfo_` and sync identities
+so an analyst can reopen the complete evidence document behind any point. The
+timeline remains a client-derived view of finite operator-triggered outcomes;
+it does not establish a remaining-page denominator, earliest wallet activity,
+automatic acquisition, or complete wallet history. No API or database change
+is added; Alembic remains at `20260828_0028` and backend API remains `0.2.1`.
+
+## v0.98.0 backfill history
 
 Wallet Case now exposes a frozen, newest-first journal of verified scheduled
 transitions through
@@ -372,6 +397,8 @@ profit, ownership proof, or complete wallet history.
   Backfill Progress transition and fail closed on provenance or delta drift.
 - v0.98.0 frozen, signed Backfill Outcome history with bounded verification,
   safe append pagination, exact outcome reopening, and JSON export.
+- v0.99.0 verified chronological Backfill Coverage Timeline with fail-closed
+  frozen-window composition, accessible movement metrics, and JSON/CSV export.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

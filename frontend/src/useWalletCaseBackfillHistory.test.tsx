@@ -60,6 +60,11 @@ describe("useWalletCaseBackfillHistory", () => {
     await act(() => result.current.load());
     expect(result.current.history?.items).toHaveLength(1);
     expect(result.current.history?.hasMore).toBe(true);
+    expect(result.current.timeline?.window).toMatchObject({
+      loadedOutcomes: 1,
+      totalOutcomes: 2,
+      fullyLoaded: false,
+    });
 
     await act(() => result.current.loadMore());
     expect(result.current.history?.items.map(
@@ -69,6 +74,11 @@ describe("useWalletCaseBackfillHistory", () => {
       older.items[0].outcome.sync_public_id,
     ]);
     expect(result.current.history?.hasMore).toBe(false);
+    expect(result.current.timeline?.points.map((point) => point.syncPublicId)).toEqual([
+      older.items[0].outcome.sync_public_id,
+      first.items[0].outcome.sync_public_id,
+    ]);
+    expect(result.current.timeline?.window.fullyLoaded).toBe(true);
     expect(api.getWalletCaseBackfillOutcomeHistory.mock.calls[1][0]).toMatchObject({
       caseId: CASE_ID,
       limit: 10,
@@ -103,6 +113,27 @@ describe("useWalletCaseBackfillHistory", () => {
     expect(result.current.historyError).toMatch(/changed its frozen result set/);
   });
 
+  it("keeps loaded outcomes when a continuation changes case scope", async () => {
+    const first = backfillOutcomeHistoryFixture({
+      hasMore: true,
+      totalOutcomes: 2,
+    });
+    const changed = olderPage();
+    changed.sync_cutoff_public_id = first.sync_cutoff_public_id;
+    changed.case_public_id = OLDER_SYNC_ID;
+    api.getWalletCaseBackfillOutcomeHistory
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(changed);
+    const { result } = renderHook(() => useWalletCaseBackfillHistory(CASE_ID));
+
+    await act(() => result.current.load());
+    await act(() => result.current.loadMore());
+
+    expect(result.current.history?.items).toEqual(first.items);
+    expect(result.current.timeline?.window.loadedOutcomes).toBe(1);
+    expect(result.current.historyError).toMatch(/changed its frozen result set/);
+  });
+
   it("rejects a repeated outcome without discarding the verified page", async () => {
     const first = backfillOutcomeHistoryFixture({
       hasMore: true,
@@ -122,5 +153,39 @@ describe("useWalletCaseBackfillHistory", () => {
 
     expect(result.current.history?.items).toEqual(first.items);
     expect(result.current.historyError).toMatch(/repeated a result/);
+  });
+
+  it("rejects an initial page that prematurely closes the frozen result set", async () => {
+    api.getWalletCaseBackfillOutcomeHistory.mockResolvedValue(
+      backfillOutcomeHistoryFixture({ totalOutcomes: 2 }),
+    );
+    const { result } = renderHook(() => useWalletCaseBackfillHistory(CASE_ID));
+
+    await act(() => result.current.load());
+
+    expect(result.current.history).toBeNull();
+    expect(result.current.timeline).toBeNull();
+    expect(result.current.historyError).toMatch(/window is inconsistent/);
+  });
+
+  it("keeps the verified window when a continuation ends before frozen total", async () => {
+    const first = backfillOutcomeHistoryFixture({
+      hasMore: true,
+      totalOutcomes: 3,
+    });
+    const endedEarly = olderPage();
+    endedEarly.aggregate.total_outcomes = 3;
+    endedEarly.sync_cutoff_public_id = first.sync_cutoff_public_id;
+    api.getWalletCaseBackfillOutcomeHistory
+      .mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(endedEarly);
+    const { result } = renderHook(() => useWalletCaseBackfillHistory(CASE_ID));
+
+    await act(() => result.current.load());
+    await act(() => result.current.loadMore());
+
+    expect(result.current.history?.items).toEqual(first.items);
+    expect(result.current.timeline?.window.loadedOutcomes).toBe(1);
+    expect(result.current.historyError).toMatch(/window is inconsistent/);
   });
 });
