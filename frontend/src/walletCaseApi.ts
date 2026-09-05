@@ -799,8 +799,8 @@ export async function getWalletCaseBackfillOutcomeHistory({
   signal?: AbortSignal;
 }): Promise<WalletCaseBackfillOutcomeHistoryResponse> {
   assertPublicId(caseId, "Wallet Case id");
-  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-    throw new Error("Wallet Case Backfill Outcome history limit must be from 1 through 50");
+  if (!Number.isInteger(limit) || limit < 1 || limit > 20) {
+    throw new Error("Wallet Case Backfill Outcome history limit must be from 1 through 20");
   }
   if (cursor !== undefined && (!cursor || cursor.length > 1024)) {
     throw new Error("Wallet Case Backfill Outcome history cursor is invalid");

@@ -745,8 +745,8 @@ describe("Wallet Case API", () => {
     vi.stubGlobal("fetch", fetchMock);
     await expect(getWalletCaseBackfillOutcomeHistory({
       caseId: CASE_ID,
-      limit: 51,
-    })).rejects.toThrow(/1 through 50/);
+      limit: 21,
+    })).rejects.toThrow(/1 through 20/);
     await expect(getWalletCaseBackfillOutcomeHistory({
       caseId: CASE_ID,
       cursor: "",

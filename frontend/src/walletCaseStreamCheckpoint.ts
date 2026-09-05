@@ -2578,7 +2578,7 @@ export function parseWalletCaseBackfillOutcomeHistory(
   const cutoffId = history.sync_cutoff_public_id === null
     ? null
     : publicId(history.sync_cutoff_public_id, "backfill outcome history cutoff id");
-  if (!Array.isArray(history.items) || history.items.length > 50) {
+  if (!Array.isArray(history.items) || history.items.length > 20) {
     fail("backfill outcome history items are invalid");
   }
   const items = history.items.map((value, index) => {
@@ -2639,7 +2639,7 @@ export function parseWalletCaseBackfillOutcomeHistory(
     1024,
   );
   if (
-    limit < 1 || limit > 50 || items.length > limit ||
+    limit < 1 || limit > 20 || items.length > limit ||
     returnedCount !== items.length || returnedCount > totalOutcomes ||
     (page.has_more && returnedCount >= totalOutcomes) ||
     page.has_more !== (nextCursor !== null) ||

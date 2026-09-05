@@ -690,7 +690,7 @@ def list_wallet_case_backfill_outcomes(
         "20",
         pattern=r"^[1-9][0-9]*$",
         max_length=2,
-        description="Canonical Backfill Outcome page size from 1 through 50.",
+        description="Canonical Backfill Outcome page size from 1 through 20.",
     ),
     cursor: str | None = Query(
         None,
@@ -716,10 +716,10 @@ def list_wallet_case_backfill_outcomes(
                 ),
             )
     canonical_limit = int(limit, 10)
-    if canonical_limit > 50:
+    if canonical_limit > 20:
         raise HTTPException(
             status_code=422,
-            detail="limit must be no greater than 50",
+            detail="limit must be no greater than 20",
         )
     response.headers["Cache-Control"] = "no-store"
     try:

@@ -1674,11 +1674,11 @@ class WalletCaseBackfillOutcomeHistoryItem(_StrictModel):
 
 class WalletCaseBackfillOutcomeHistoryAggregate(_StrictModel):
     total_outcomes: int = Field(ge=0)
-    returned_count: int = Field(ge=0, le=50)
+    returned_count: int = Field(ge=0, le=20)
 
 
 class WalletCaseBackfillOutcomeHistoryPage(_StrictModel):
-    limit: int = Field(ge=1, le=50)
+    limit: int = Field(ge=1, le=20)
     has_more: bool
     next_cursor: str | None = Field(default=None, max_length=1024)
 
@@ -1693,7 +1693,7 @@ class WalletCaseBackfillOutcomeHistoryResponse(_StrictModel):
     contract_version: Literal["wallet_case_backfill_outcome_history_v1"]
     case_public_id: CanonicalPublicId
     sync_cutoff_public_id: CanonicalPublicId | None = None
-    items: list[WalletCaseBackfillOutcomeHistoryItem] = Field(max_length=50)
+    items: list[WalletCaseBackfillOutcomeHistoryItem] = Field(max_length=20)
     aggregate: WalletCaseBackfillOutcomeHistoryAggregate
     page: WalletCaseBackfillOutcomeHistoryPage
     limitations: list[WalletCaseLimitation]

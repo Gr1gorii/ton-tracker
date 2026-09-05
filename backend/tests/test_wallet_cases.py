@@ -2668,7 +2668,7 @@ def test_backfill_outcome_history_rejects_invalid_scope_and_query(client):
         "invalid_backfill_outcome_history_cursor"
     )
     assert client.get(
-        f"/api/v1/cases/{case_id}/backfill-outcomes?limit=51"
+        f"/api/v1/cases/{case_id}/backfill-outcomes?limit=21"
     ).status_code == 422
     assert client.get(
         f"/api/v1/cases/{case_id}/backfill-outcomes?limit=1&limit=2"

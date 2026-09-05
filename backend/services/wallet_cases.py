@@ -1893,9 +1893,9 @@ class WalletCaseService:
         cursor: str | None = None,
     ) -> dict[str, Any]:
         """Read a frozen newest-first journal of verified backfill outcomes."""
-        if limit < 1 or limit > 50:
+        if limit < 1 or limit > 20:
             raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
-                "Backfill Outcome history limit must be between 1 and 50."
+                "Backfill Outcome history limit must be between 1 and 20."
             )
         wallet_case = self._required_case(case_public_id)
         cursor_document = (
