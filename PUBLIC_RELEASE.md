@@ -1,4 +1,4 @@
-# GRAM Scope - v0.97.0 Public Release
+# GRAM Scope - v0.98.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -75,6 +75,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   progress, and cutoff to the schedule-bound receipt and output progress,
   publishing verified frontier, state, revision, page, successful-page,
   continuation-page, and state-count deltas for one finite transition.
+- A frozen newest-first Backfill Outcome journal over terminal
+  acquisition-plan-v6 runs, with bounded 1–20 result verification,
+  process-local authenticated cursors, absolute continued-page movement, safe
+  append pagination, exact outcome reopening, and verified JSON export.
 - Refresh-safe case Summary URLs that resume active-job status and preserve the
   latest usable partial/succeeded snapshot with explicit sync provenance.
 - A snapshot-pinned Wallet Case Activity facade with cross-sync identity
@@ -116,7 +120,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v0.97.0 BACKFILL OUTCOME`.
+- Product release label: `v0.98.0 BACKFILL HISTORY`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -243,6 +247,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 - Report-history cursors are signed and bound to a frozen case revision cutoff,
   but their signing key is process-local. A cursor is not portable across a
   backend restart; opening a fresh first page remains supported.
+- Backfill Outcome history cursors likewise bind one Case, terminal-sync cutoff,
+  and keyset position only for the current backend process. Restarting requires
+  a fresh first page and does not change the underlying immutable outcomes.
 - Case-catalog cursors are likewise authenticated only for the current backend
   process. Restarting invalidates an in-progress continuation without changing
   stored Cases; refreshing the library starts a new frozen traversal.
@@ -274,13 +281,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v0.97.0`, confirm:
+Before tagging `v0.98.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v0.97.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v0.98.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -321,6 +328,10 @@ Before tagging `v0.97.0`, confirm:
   receipt and checkpoint provenance, every transition state and delta, legacy
   unavailability, integrity failure, strict client parsing, UI display, and
   exact JSON export.
+- Backfill Outcome history tests cover empty and multi-step journals, frozen
+  cutoffs under concurrent publication, signed cursor tamper and cross-Case
+  rejection, bounded recursive verification, strict response parsing, duplicate
+  append rejection, selected outcome reopening, and exact export.
 - Migration 0021, current-policy selection, legacy trust-0 rejection,
   checkpoint/digest binding, whole-operation timeout, terminate/kill cleanup,
   cancellation bound, and locked persistent-cache tests pass.

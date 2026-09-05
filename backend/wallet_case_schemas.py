@@ -1652,6 +1652,69 @@ class WalletCaseBackfillOutcomeResponse(_StrictModel):
         return self
 
 
+class WalletCaseBackfillOutcomeHistoryItem(_StrictModel):
+    outcome: WalletCaseBackfillOutcomeDescriptor
+    completed_at: str = Field(min_length=20, max_length=35)
+    before_continuation_pages_succeeded: int = Field(ge=0)
+    after_continuation_pages_succeeded: int = Field(ge=0)
+    frontier_changed: bool
+
+    @model_validator(mode="after")
+    def _validate_progress_delta(self):
+        if (
+            self.after_continuation_pages_succeeded
+            - self.before_continuation_pages_succeeded
+            != self.outcome.pages_succeeded_delta
+        ):
+            raise ValueError(
+                "backfill outcome history progress delta is inconsistent"
+            )
+        return self
+
+
+class WalletCaseBackfillOutcomeHistoryAggregate(_StrictModel):
+    total_outcomes: int = Field(ge=0)
+    returned_count: int = Field(ge=0, le=20)
+
+
+class WalletCaseBackfillOutcomeHistoryPage(_StrictModel):
+    limit: int = Field(ge=1, le=20)
+    has_more: bool
+    next_cursor: str | None = Field(default=None, max_length=1024)
+
+    @model_validator(mode="after")
+    def _validate_cursor(self):
+        if self.has_more != (self.next_cursor is not None):
+            raise ValueError("backfill outcome history cursor is inconsistent")
+        return self
+
+
+class WalletCaseBackfillOutcomeHistoryResponse(_StrictModel):
+    contract_version: Literal["wallet_case_backfill_outcome_history_v1"]
+    case_public_id: CanonicalPublicId
+    sync_cutoff_public_id: CanonicalPublicId | None = None
+    items: list[WalletCaseBackfillOutcomeHistoryItem] = Field(max_length=20)
+    aggregate: WalletCaseBackfillOutcomeHistoryAggregate
+    page: WalletCaseBackfillOutcomeHistoryPage
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_history(self):
+        outcome_ids = [item.outcome.public_id for item in self.items]
+        sync_ids = [item.outcome.sync_public_id for item in self.items]
+        if (
+            self.aggregate.returned_count != len(self.items)
+            or self.aggregate.returned_count > self.aggregate.total_outcomes
+            or len(self.items) > self.page.limit
+            or (self.sync_cutoff_public_id is None)
+            != (self.aggregate.total_outcomes == 0)
+            or len(set(outcome_ids)) != len(outcome_ids)
+            or len(set(sync_ids)) != len(sync_ids)
+        ):
+            raise ValueError("backfill outcome history is inconsistent")
+        return self
+
+
 class WalletCaseSyncResponse(_StrictModel):
     case_public_id: CanonicalPublicId
     public_id: CanonicalPublicId

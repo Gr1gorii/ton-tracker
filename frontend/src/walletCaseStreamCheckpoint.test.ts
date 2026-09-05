@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  backfillOutcomeHistoryFixture,
   backfillOutcomeFixture,
   backfillProgressFixture,
   backfillScheduleFixture,
@@ -14,6 +15,7 @@ import {
   streamCheckpointHistoryFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
+  parseWalletCaseBackfillOutcomeHistory,
   parseWalletCaseBackfillOutcome,
   parseWalletCaseBackfillProgress,
   parseWalletCaseBackfillSchedule,
@@ -24,6 +26,7 @@ import {
   parseWalletCaseStreamCheckpointDetail,
   parseWalletCaseStreamCheckpointHistory,
   serializeWalletCaseBackfillProgress,
+  serializeWalletCaseBackfillOutcomeHistory,
   serializeWalletCaseBackfillOutcome,
   serializeWalletCaseBackfillSchedule,
   serializeWalletCaseCheckpointContinuationReceipt,
@@ -264,6 +267,39 @@ describe("Wallet Case stream checkpoint contracts", () => {
           page_count_delta: 0,
         },
       },
+    })).toThrow(/inconsistent/);
+  });
+
+  it("accepts and exports a frozen Backfill Outcome history page", () => {
+    const history = backfillOutcomeHistoryFixture();
+
+    expect(parseWalletCaseBackfillOutcomeHistory(history)).toEqual(history);
+    expect(JSON.parse(serializeWalletCaseBackfillOutcomeHistory(history))).toEqual(history);
+  });
+
+  it("rejects Backfill Outcome history scope, duplicates, and delta drift", () => {
+    const history = backfillOutcomeHistoryFixture();
+    expect(() => parseWalletCaseBackfillOutcomeHistory({
+      ...history,
+      sync_cutoff_public_id: null,
+    })).toThrow(/inconsistent/);
+    expect(() => parseWalletCaseBackfillOutcomeHistory({
+      ...history,
+      items: [history.items[0], history.items[0]],
+      aggregate: { total_outcomes: 2, returned_count: 2 },
+      page: { limit: 2, has_more: false, next_cursor: null },
+    })).toThrow(/inconsistent/);
+    expect(() => parseWalletCaseBackfillOutcomeHistory({
+      ...history,
+      items: [{
+        ...history.items[0],
+        after_continuation_pages_succeeded: 3,
+      }],
+    })).toThrow(/item 0 is inconsistent/);
+    expect(() => parseWalletCaseBackfillOutcomeHistory({
+      ...history,
+      aggregate: { total_outcomes: 2, returned_count: 1 },
+      page: { limit: 1, has_more: false, next_cursor: "unsigned" },
     })).toThrow(/inconsistent/);
   });
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from models import (
@@ -19,6 +19,19 @@ class WalletCaseRepository:
 
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    @staticmethod
+    def _backfill_outcome_plan_version():
+        return case(
+            (
+                func.json_valid(CaseSync.coverage_summary_json) == 1,
+                func.json_extract(
+                    CaseSync.coverage_summary_json,
+                    "$._acquisition.version",
+                ),
+            ),
+            else_=None,
+        )
 
     def get_by_identity(
         self,
@@ -244,6 +257,67 @@ class WalletCaseRepository:
             )
         )
         return self.session.scalar(statement)
+
+    def latest_backfill_outcome_sync(
+        self,
+        *,
+        case_id: int,
+    ) -> CaseSync | None:
+        """Load the newest terminal scheduled run eligible for an outcome."""
+        return self.session.scalar(
+            select(CaseSync)
+            .where(
+                CaseSync.case_id == case_id,
+                CaseSync.state.in_(("partial", "succeeded")),
+                self._backfill_outcome_plan_version() == 6,
+            )
+            .order_by(CaseSync.id.desc())
+            .limit(1)
+        )
+
+    def backfill_outcome_sync_history(
+        self,
+        *,
+        case_id: int,
+        cutoff_id: int,
+        after_id: int | None,
+        limit: int,
+    ) -> list[CaseSync]:
+        """Load a frozen newest-first page of outcome-eligible scheduled runs."""
+        statement = select(CaseSync).where(
+            CaseSync.case_id == case_id,
+            CaseSync.id <= cutoff_id,
+            CaseSync.state.in_(("partial", "succeeded")),
+            self._backfill_outcome_plan_version() == 6,
+        )
+        if after_id is not None:
+            statement = statement.where(CaseSync.id < after_id)
+        return list(
+            self.session.scalars(
+                statement.order_by(CaseSync.id.desc()).limit(limit)
+            ).unique()
+        )
+
+    def count_backfill_outcome_sync_history(
+        self,
+        *,
+        case_id: int,
+        cutoff_id: int,
+    ) -> int:
+        """Count outcome-eligible scheduled runs within one frozen boundary."""
+        return int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(CaseSync)
+                .where(
+                    CaseSync.case_id == case_id,
+                    CaseSync.id <= cutoff_id,
+                    CaseSync.state.in_(("partial", "succeeded")),
+                    self._backfill_outcome_plan_version() == 6,
+                )
+            )
+            or 0
+        )
 
     def latest_stream_checkpoints(
         self,

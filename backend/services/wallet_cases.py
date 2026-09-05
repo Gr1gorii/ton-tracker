@@ -10,6 +10,7 @@ import hmac
 import json
 import secrets
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import delete, exists, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -41,6 +42,7 @@ from services.wallet_case_stream_checkpoints import (
     verify_wallet_case_stream_checkpoint,
 )
 from wallet_case_schemas import (
+    WalletCaseBackfillOutcomeResponse,
     WalletCaseCreateRequest,
     WalletCaseMetadataUpdateRequest,
     WalletCaseSyncRequest,
@@ -185,12 +187,20 @@ class WalletCaseBackfillOutcomeNotFound(LookupError):
     code = "backfill_outcome_not_available"
 
 
+class WalletCaseBackfillOutcomeHistoryInvalidCursor(ValueError):
+    """Raised when outcome-history continuation cannot be authenticated."""
+
+    code = "invalid_backfill_outcome_history_cursor"
+
+
 _ENVIRONMENT_DATA_MODE = {"demo": "mock", "live": "real"}
 _SYNC_PROGRESS_TOTAL = 3
 _CASE_CATALOG_CURSOR_KEY = secrets.token_bytes(32)
 _CASE_CATALOG_CURSOR_VERSION = 3
 _CHECKPOINT_HISTORY_CURSOR_KEY = secrets.token_bytes(32)
 _CHECKPOINT_HISTORY_CURSOR_VERSION = 1
+_BACKFILL_OUTCOME_HISTORY_CURSOR_KEY = secrets.token_bytes(32)
+_BACKFILL_OUTCOME_HISTORY_CURSOR_VERSION = 1
 _MAX_CHECKPOINT_CHAIN_REVISIONS = 100
 _MAX_CHECKPOINT_CONTINUATION_PLAN_STREAMS = 32
 _INCREMENTAL_OVERLAP = timedelta(minutes=15)
@@ -1873,6 +1883,162 @@ class WalletCaseService:
                 "after_resume_state": transition["after_resume_state"],
             },
             "document": document,
+        }
+
+    def list_backfill_outcome_history(
+        self,
+        case_public_id: str,
+        *,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Read a frozen newest-first journal of verified backfill outcomes."""
+        if limit < 1 or limit > 20:
+            raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+                "Backfill Outcome history limit must be between 1 and 20."
+            )
+        wallet_case = self._required_case(case_public_id)
+        cursor_document = (
+            _decode_backfill_outcome_history_cursor(cursor)
+            if cursor is not None
+            else None
+        )
+        if (
+            cursor_document is not None
+            and cursor_document["case"] != wallet_case.public_id
+        ):
+            raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+                "Backfill Outcome history cursor belongs to another Wallet Case."
+            )
+        cutoff = (
+            self.repository.latest_backfill_outcome_sync(case_id=wallet_case.id)
+            if cursor_document is None
+            else self.repository.get_sync(
+                case_id=wallet_case.id,
+                public_id=cursor_document["cutoff"],
+            )
+        )
+        limitations = [
+            _limitation(
+                "backfill_outcome_history_is_finite_transitions",
+                (
+                    "This history lists verified finite scheduled transitions; "
+                    "it does not prove complete wallet or provider history."
+                ),
+            )
+        ]
+        if cutoff is None:
+            if cursor_document is not None:
+                raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+                    "Backfill Outcome history cursor cutoff is unavailable."
+                )
+            return {
+                "contract_version": "wallet_case_backfill_outcome_history_v1",
+                "case_public_id": wallet_case.public_id,
+                "sync_cutoff_public_id": None,
+                "items": [],
+                "aggregate": {"total_outcomes": 0, "returned_count": 0},
+                "page": {
+                    "limit": limit,
+                    "has_more": False,
+                    "next_cursor": None,
+                },
+                "limitations": limitations,
+            }
+        if not _is_backfill_outcome_history_sync(cutoff):
+            raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+                "Backfill Outcome history cursor cutoff is unavailable."
+            )
+        after_id = None
+        if cursor_document is not None:
+            after = self.repository.get_sync(
+                case_id=wallet_case.id,
+                public_id=cursor_document["after"],
+            )
+            if (
+                after is None
+                or after.id > cutoff.id
+                or not _is_backfill_outcome_history_sync(after)
+            ):
+                raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+                    "Backfill Outcome history cursor position is unavailable."
+                )
+            after_id = after.id
+        rows = self.repository.backfill_outcome_sync_history(
+            case_id=wallet_case.id,
+            cutoff_id=cutoff.id,
+            after_id=after_id,
+            limit=limit + 1,
+        )
+        has_more = len(rows) > limit
+        visible = rows[:limit]
+        items = []
+        for case_sync in visible:
+            if case_sync.completed_at is None:
+                raise WalletCaseStreamCheckpointCorrupt(
+                    "Stored Wallet Case Backfill Outcome history time is invalid."
+                )
+            verified = WalletCaseBackfillOutcomeResponse.model_validate(
+                self.get_backfill_outcome(
+                    wallet_case.public_id,
+                    case_sync.public_id,
+                )
+            ).model_dump(mode="json")
+            before = verified["document"]["input_progress"]["progress"]
+            after = verified["document"]["output_progress"]["progress"]
+            items.append(
+                {
+                    "outcome": verified["outcome"],
+                    "completed_at": _isoformat(case_sync.completed_at),
+                    "before_continuation_pages_succeeded": before[
+                        "continuation_pages_succeeded"
+                    ],
+                    "after_continuation_pages_succeeded": after[
+                        "continuation_pages_succeeded"
+                    ],
+                    "frontier_changed": verified["document"]["transition"][
+                        "frontier_changed"
+                    ],
+                }
+            )
+        next_cursor = None
+        if has_more:
+            next_cursor = _encode_backfill_outcome_history_cursor(
+                {
+                    "v": _BACKFILL_OUTCOME_HISTORY_CURSOR_VERSION,
+                    "case": wallet_case.public_id,
+                    "cutoff": cutoff.public_id,
+                    "after": visible[-1].public_id,
+                }
+            )
+            limitations.append(
+                _limitation(
+                    "backfill_outcome_history_cursor_local_process_scope",
+                    (
+                        "Pagination cursors are authenticated for this local API "
+                        "process and expire after restart."
+                    ),
+                )
+            )
+        total = self.repository.count_backfill_outcome_sync_history(
+            case_id=wallet_case.id,
+            cutoff_id=cutoff.id,
+        )
+        return {
+            "contract_version": "wallet_case_backfill_outcome_history_v1",
+            "case_public_id": wallet_case.public_id,
+            "sync_cutoff_public_id": cutoff.public_id,
+            "items": items,
+            "aggregate": {
+                "total_outcomes": total,
+                "returned_count": len(items),
+            },
+            "page": {
+                "limit": limit,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            },
+            "limitations": limitations,
         }
 
     def list_stream_checkpoints(self, case_public_id: str) -> dict[str, Any]:
@@ -3771,6 +3937,15 @@ def _sync_acquisition_plan(case_sync: CaseSync) -> dict[str, Any]:
     return stored
 
 
+def _is_backfill_outcome_history_sync(case_sync: CaseSync) -> bool:
+    if case_sync.state not in {"partial", "succeeded"}:
+        return False
+    try:
+        return _sync_acquisition_plan(case_sync).get("version") == 6
+    except ValueError:
+        return False
+
+
 def _stored_coverage(case_sync: CaseSync) -> dict[str, Any]:
     coverage = _json_object(case_sync.coverage_summary_json)
     coverage.pop(_ACQUISITION_PLAN_KEY, None)
@@ -4258,6 +4433,84 @@ def _encode_checkpoint_history_cursor(document: dict[str, Any]) -> str:
         hashlib.sha256,
     ).hexdigest()
     return f"{encoded}.{signature}"
+
+
+def _encode_backfill_outcome_history_cursor(
+    document: dict[str, Any],
+) -> str:
+    payload = _case_catalog_cursor_json(document)
+    encoded = base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+    signature = hmac.new(
+        _BACKFILL_OUTCOME_HISTORY_CURSOR_KEY,
+        payload,
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _decode_backfill_outcome_history_cursor(value: str) -> dict[str, Any]:
+    error = "Backfill Outcome history cursor is invalid."
+    if not value or len(value) > 1024 or value.count(".") != 1:
+        raise WalletCaseBackfillOutcomeHistoryInvalidCursor(error)
+    encoded, signature = value.split(".", 1)
+    if (
+        not encoded
+        or len(signature) != 64
+        or any(char not in "0123456789abcdef" for char in signature)
+        or any(
+            char
+            not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+            for char in encoded
+        )
+    ):
+        raise WalletCaseBackfillOutcomeHistoryInvalidCursor(error)
+    try:
+        padding = "=" * ((4 - len(encoded) % 4) % 4)
+        raw = base64.urlsafe_b64decode((encoded + padding).encode("ascii"))
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise WalletCaseBackfillOutcomeHistoryInvalidCursor(error) from exc
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"v", "case", "cutoff", "after"}
+        or document.get("v") != _BACKFILL_OUTCOME_HISTORY_CURSOR_VERSION
+    ):
+        raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+            "Backfill Outcome history cursor shape is invalid."
+        )
+    expected = hmac.new(
+        _BACKFILL_OUTCOME_HISTORY_CURSOR_KEY,
+        raw,
+        hashlib.sha256,
+    ).hexdigest()
+    if (
+        not hmac.compare_digest(signature, expected)
+        or _encode_backfill_outcome_history_cursor(document) != value
+    ):
+        raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+            "Backfill Outcome history cursor signature is invalid."
+        )
+    identifiers = (
+        document.get("case"),
+        document.get("cutoff"),
+        document.get("after"),
+    )
+    try:
+        canonical = all(
+            isinstance(identifier, str)
+            and str(UUID(identifier)) == identifier
+            and UUID(identifier).version in {1, 2, 3, 4, 5}
+            for identifier in identifiers
+        )
+    except ValueError as exc:
+        raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+            "Backfill Outcome history cursor identifiers are invalid."
+        ) from exc
+    if not canonical:
+        raise WalletCaseBackfillOutcomeHistoryInvalidCursor(
+            "Backfill Outcome history cursor identifiers are invalid."
+        )
+    return document
 
 
 def _decode_checkpoint_history_cursor(value: str) -> dict[str, Any]:

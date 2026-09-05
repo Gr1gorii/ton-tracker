@@ -1,4 +1,5 @@
 import type {
+  WalletCaseBackfillOutcomeHistoryResponse,
   WalletCaseBackfillOutcomeResponse,
   WalletCaseBackfillProgressResponse,
   WalletCaseBackfillScheduleResponse,
@@ -725,5 +726,37 @@ export function backfillOutcomeFixture(): WalletCaseBackfillOutcomeResponse {
         message: "The outcome does not prove complete wallet history.",
       }],
     },
+  };
+}
+
+export function backfillOutcomeHistoryFixture({
+  hasMore = false,
+  totalOutcomes = 1,
+}: {
+  hasMore?: boolean;
+  totalOutcomes?: number;
+} = {}): WalletCaseBackfillOutcomeHistoryResponse {
+  const outcome = backfillOutcomeFixture().outcome;
+  return {
+    contract_version: "wallet_case_backfill_outcome_history_v1",
+    case_public_id: CASE_ID,
+    sync_cutoff_public_id: SYNC_ID,
+    items: [{
+      outcome,
+      completed_at: "2026-08-28T13:00:04Z",
+      before_continuation_pages_succeeded: 1,
+      after_continuation_pages_succeeded: 2,
+      frontier_changed: true,
+    }],
+    aggregate: { total_outcomes: totalOutcomes, returned_count: 1 },
+    page: {
+      limit: 1,
+      has_more: hasMore,
+      next_cursor: hasMore ? "opaque-signed.cursor" : null,
+    },
+    limitations: [{
+      code: "backfill_outcome_history_is_finite_transitions",
+      message: "This history does not prove complete wallet history.",
+    }],
   };
 }

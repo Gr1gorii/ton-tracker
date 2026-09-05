@@ -463,6 +463,24 @@ export interface WalletCaseBackfillOutcomeResponse {
   };
 }
 
+export interface WalletCaseBackfillOutcomeHistoryItem {
+  outcome: WalletCaseBackfillOutcomeResponse["outcome"];
+  completed_at: string;
+  before_continuation_pages_succeeded: number;
+  after_continuation_pages_succeeded: number;
+  frontier_changed: boolean;
+}
+
+export interface WalletCaseBackfillOutcomeHistoryResponse {
+  contract_version: "wallet_case_backfill_outcome_history_v1";
+  case_public_id: string;
+  sync_cutoff_public_id: string | null;
+  items: WalletCaseBackfillOutcomeHistoryItem[];
+  aggregate: { total_outcomes: number; returned_count: number };
+  page: { limit: number; has_more: boolean; next_cursor: string | null };
+  limitations: WalletCaseLimitation[];
+}
+
 const PUBLIC_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -2276,11 +2294,10 @@ export function serializeWalletCaseCheckpointContinuationReceipt(
   return `${JSON.stringify(parseWalletCaseCheckpointContinuationReceipt(value), null, 2)}\n`;
 }
 
-export function parseWalletCaseBackfillOutcome(
+function parseBackfillOutcomeDescriptor(
   value: unknown,
-): WalletCaseBackfillOutcomeResponse {
-  const envelope = record(value, ["outcome", "document"], "backfill outcome response");
-  const descriptor = record(envelope.outcome, [
+): WalletCaseBackfillOutcomeResponse["outcome"] {
+  const descriptor = record(value, [
     "public_id", "contract_version", "content_hash_sha256", "sync_public_id",
     "outcome", "input_schedule_public_id", "continuation_receipt_public_id",
     "input_progress_public_id", "output_progress_public_id", "provider",
@@ -2295,45 +2312,76 @@ export function parseWalletCaseBackfillOutcome(
   if (BACKFILL_OUTCOME_ID.exec(outcomeId)?.[1] !== contentHash) {
     fail("backfill outcome identity is invalid");
   }
-  const descriptorSyncId = publicId(descriptor.sync_public_id, "backfill outcome sync id");
-  const descriptorState = backfillOutcomeState(
-    descriptor.outcome,
-    "backfill outcome descriptor state",
-  );
-  const descriptorScheduleId = backfillScheduleId(
-    descriptor.input_schedule_public_id,
-    "backfill outcome schedule id",
-  );
-  const descriptorReceiptId = continuationReceiptId(
-    descriptor.continuation_receipt_public_id,
-    "backfill outcome receipt id",
-  );
-  const descriptorInputProgressId = backfillProgressId(
+  const inputProgressId = backfillProgressId(
     descriptor.input_progress_public_id,
     "backfill outcome input progress id",
   );
-  const descriptorOutputProgressId = backfillProgressId(
+  const outputProgressId = backfillProgressId(
     descriptor.output_progress_public_id,
     "backfill outcome output progress id",
   );
-  const descriptorProvider = text(descriptor.provider, "backfill outcome provider", 64);
-  const descriptorStreamKey = text(descriptor.stream_key, "backfill outcome stream", 40);
-  const descriptorPageDelta = integer(
-    descriptor.page_count_delta,
-    "backfill outcome page delta",
-  );
-  const descriptorSuccessDelta = integer(
-    descriptor.pages_succeeded_delta,
-    "backfill outcome success delta",
-  );
-  const descriptorBeforeState = resumeState(
+  const beforeState = resumeState(
     descriptor.before_resume_state,
     "backfill outcome before state",
   );
-  const descriptorAfterState = resumeState(
+  const afterState = resumeState(
     descriptor.after_resume_state,
     "backfill outcome after state",
   );
+  const pageDelta = integer(descriptor.page_count_delta, "backfill outcome page delta");
+  const successDelta = integer(
+    descriptor.pages_succeeded_delta,
+    "backfill outcome success delta",
+  );
+  if (
+    beforeState !== "ready" || pageDelta > 10 || successDelta > pageDelta ||
+    inputProgressId === outputProgressId
+  ) fail("backfill outcome descriptor is inconsistent");
+  return {
+    public_id: outcomeId,
+    contract_version: "wallet_case_backfill_outcome_v1",
+    content_hash_sha256: contentHash,
+    sync_public_id: publicId(descriptor.sync_public_id, "backfill outcome sync id"),
+    outcome: backfillOutcomeState(
+      descriptor.outcome,
+      "backfill outcome descriptor state",
+    ),
+    input_schedule_public_id: backfillScheduleId(
+      descriptor.input_schedule_public_id,
+      "backfill outcome schedule id",
+    ),
+    continuation_receipt_public_id: continuationReceiptId(
+      descriptor.continuation_receipt_public_id,
+      "backfill outcome receipt id",
+    ),
+    input_progress_public_id: inputProgressId,
+    output_progress_public_id: outputProgressId,
+    provider: text(descriptor.provider, "backfill outcome provider", 64),
+    stream_key: text(descriptor.stream_key, "backfill outcome stream", 40),
+    page_count_delta: pageDelta,
+    pages_succeeded_delta: successDelta,
+    before_resume_state: "ready",
+    after_resume_state: afterState,
+  };
+}
+
+export function parseWalletCaseBackfillOutcome(
+  value: unknown,
+): WalletCaseBackfillOutcomeResponse {
+  const envelope = record(value, ["outcome", "document"], "backfill outcome response");
+  const parsedDescriptor = parseBackfillOutcomeDescriptor(envelope.outcome);
+  const descriptorSyncId = parsedDescriptor.sync_public_id;
+  const descriptorState = parsedDescriptor.outcome;
+  const descriptorScheduleId = parsedDescriptor.input_schedule_public_id;
+  const descriptorReceiptId = parsedDescriptor.continuation_receipt_public_id;
+  const descriptorInputProgressId = parsedDescriptor.input_progress_public_id;
+  const descriptorOutputProgressId = parsedDescriptor.output_progress_public_id;
+  const descriptorProvider = parsedDescriptor.provider;
+  const descriptorStreamKey = parsedDescriptor.stream_key;
+  const descriptorPageDelta = parsedDescriptor.page_count_delta;
+  const descriptorSuccessDelta = parsedDescriptor.pages_succeeded_delta;
+  const descriptorBeforeState = parsedDescriptor.before_resume_state;
+  const descriptorAfterState = parsedDescriptor.after_resume_state;
 
   const document = record(envelope.document, [
     "contract_version", "case_public_id", "sync_public_id", "input_schedule",
@@ -2496,23 +2544,7 @@ export function parseWalletCaseBackfillOutcome(
     frontier_changed: frontierChanged,
   };
   return {
-    outcome: {
-      public_id: outcomeId,
-      contract_version: "wallet_case_backfill_outcome_v1",
-      content_hash_sha256: contentHash,
-      sync_public_id: descriptorSyncId,
-      outcome: descriptorState,
-      input_schedule_public_id: descriptorScheduleId,
-      continuation_receipt_public_id: descriptorReceiptId,
-      input_progress_public_id: descriptorInputProgressId,
-      output_progress_public_id: descriptorOutputProgressId,
-      provider: descriptorProvider,
-      stream_key: descriptorStreamKey,
-      page_count_delta: descriptorPageDelta,
-      pages_succeeded_delta: descriptorSuccessDelta,
-      before_resume_state: "ready",
-      after_resume_state: descriptorAfterState,
-    },
+    outcome: parsedDescriptor,
     document: {
       contract_version: "wallet_case_backfill_outcome_v1",
       case_public_id: caseId,
@@ -2530,6 +2562,114 @@ export function parseWalletCaseBackfillOutcome(
 
 export function serializeWalletCaseBackfillOutcome(value: unknown): string {
   return `${JSON.stringify(parseWalletCaseBackfillOutcome(value), null, 2)}\n`;
+}
+
+export function parseWalletCaseBackfillOutcomeHistory(
+  value: unknown,
+): WalletCaseBackfillOutcomeHistoryResponse {
+  const history = record(value, [
+    "contract_version", "case_public_id", "sync_cutoff_public_id", "items",
+    "aggregate", "page", "limitations",
+  ], "backfill outcome history");
+  if (history.contract_version !== "wallet_case_backfill_outcome_history_v1") {
+    fail("backfill outcome history contract is unsupported");
+  }
+  const caseId = publicId(history.case_public_id, "backfill outcome history case id");
+  const cutoffId = history.sync_cutoff_public_id === null
+    ? null
+    : publicId(history.sync_cutoff_public_id, "backfill outcome history cutoff id");
+  if (!Array.isArray(history.items) || history.items.length > 20) {
+    fail("backfill outcome history items are invalid");
+  }
+  const items = history.items.map((value, index) => {
+    const item = record(value, [
+      "outcome", "completed_at", "before_continuation_pages_succeeded",
+      "after_continuation_pages_succeeded", "frontier_changed",
+    ], `backfill outcome history item ${index}`);
+    const outcome = parseBackfillOutcomeDescriptor(item.outcome);
+    const completedAt = timestamp(
+      item.completed_at,
+      `backfill outcome history item ${index} completion time`,
+    );
+    const beforePages = integer(
+      item.before_continuation_pages_succeeded,
+      `backfill outcome history item ${index} before pages`,
+    );
+    const afterPages = integer(
+      item.after_continuation_pages_succeeded,
+      `backfill outcome history item ${index} after pages`,
+    );
+    if (
+      typeof item.frontier_changed !== "boolean" ||
+      afterPages - beforePages !== outcome.pages_succeeded_delta
+    ) fail(`backfill outcome history item ${index} is inconsistent`);
+    return {
+      outcome,
+      completed_at: completedAt,
+      before_continuation_pages_succeeded: beforePages,
+      after_continuation_pages_succeeded: afterPages,
+      frontier_changed: item.frontier_changed,
+    };
+  });
+  const aggregate = record(
+    history.aggregate,
+    ["total_outcomes", "returned_count"],
+    "backfill outcome history aggregate",
+  );
+  const totalOutcomes = integer(
+    aggregate.total_outcomes,
+    "backfill outcome history total outcomes",
+  );
+  const returnedCount = integer(
+    aggregate.returned_count,
+    "backfill outcome history returned count",
+  );
+  const page = record(
+    history.page,
+    ["limit", "has_more", "next_cursor"],
+    "backfill outcome history page",
+  );
+  const limit = integer(page.limit, "backfill outcome history limit");
+  if (typeof page.has_more !== "boolean") {
+    fail("backfill outcome history has-more flag is invalid");
+  }
+  const nextCursor = nullableText(
+    page.next_cursor,
+    "backfill outcome history cursor",
+    1024,
+  );
+  if (
+    limit < 1 || limit > 20 || items.length > limit ||
+    returnedCount !== items.length || returnedCount > totalOutcomes ||
+    (page.has_more && returnedCount >= totalOutcomes) ||
+    page.has_more !== (nextCursor !== null) ||
+    (cutoffId === null) !== (totalOutcomes === 0) ||
+    new Set(items.map((item) => item.outcome.public_id)).size !== items.length ||
+    new Set(items.map((item) => item.outcome.sync_public_id)).size !== items.length
+  ) fail("backfill outcome history is inconsistent");
+  return {
+    contract_version: "wallet_case_backfill_outcome_history_v1",
+    case_public_id: caseId,
+    sync_cutoff_public_id: cutoffId,
+    items,
+    aggregate: {
+      total_outcomes: totalOutcomes,
+      returned_count: returnedCount,
+    },
+    page: {
+      limit,
+      has_more: page.has_more,
+      next_cursor: nextCursor,
+    },
+    limitations: limitations(
+      history.limitations,
+      "backfill outcome history limitations",
+    ),
+  };
+}
+
+export function serializeWalletCaseBackfillOutcomeHistory(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseBackfillOutcomeHistory(value), null, 2)}\n`;
 }
 
 export function parseWalletCaseStreamCheckpointCatalog(

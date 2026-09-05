@@ -4,10 +4,34 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.97.0 — Backfill Outcome**<br>
+Current product release: **v0.98.0 — Backfill History**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.97.0 adds
+## What v0.98.0 adds
+
+Wallet Case now exposes a frozen, newest-first journal of verified scheduled
+transitions through
+`GET /api/v1/cases/{case}/backfill-outcomes?limit=10`. The first page binds a
+sync cutoff, and each signed continuation cursor retains that exact boundary.
+Newly completed jobs therefore appear only after a fresh read and cannot drift
+into an in-progress traversal.
+
+Every returned item is eligible only when its terminal acquisition-plan-v6 run
+can reproduce the complete content-addressed `bfo_` outcome. The compact entry
+retains its exact outcome identity, sync, provider stream, state transition,
+completion time, frontier-change fact, and absolute continued-page progress.
+Pages are limited to 1–20 because each item is verified from immutable schedule,
+progress, receipt, checkpoint, and chain evidence before publication.
+
+Summary loads the history explicitly, safely appends older pages, rejects
+changed cutoffs, totals, or repeated outcomes, and can reopen and export the
+full verified result for any entry. This is a journal of finite transitions,
+not an automatic crawler, remaining-page estimate, or proof of complete wallet
+history. Cursors are authenticated only for the current local API process. No
+migration is added; Alembic remains at `20260828_0028` and backend API remains
+`0.2.1`.
+
+## v0.97.0 backfill outcome
 
 Every new scheduled backfill run now binds the exact input Backfill Schedule,
 Backfill Progress, and checkpoint cutoff in acquisition-plan-v6 provenance.
@@ -346,6 +370,8 @@ profit, ownership proof, or complete wallet history.
   backpressure, stale-safe execution, and schedule-bound receipt v3.
 - v0.97.0 immutable `bfo_` outcomes that reproduce one scheduled run's exact
   Backfill Progress transition and fail closed on provenance or delta drift.
+- v0.98.0 frozen, signed Backfill Outcome history with bounded verification,
+  safe append pagination, exact outcome reopening, and JSON export.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

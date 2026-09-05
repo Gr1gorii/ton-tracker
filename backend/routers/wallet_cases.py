@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from database import get_session
 from services.wallet_cases import (
     WalletCaseArchiveConflict,
+    WalletCaseBackfillOutcomeHistoryInvalidCursor,
     WalletCaseBackfillScheduleStale,
     WalletCaseBackfillScheduleUnavailable,
     WalletCaseBackfillOutcomeNotFound,
@@ -32,6 +33,7 @@ from services.wallet_cases import (
 from services.wallet_case_access import require_local_wallet_case_access
 from wallet_case_schemas import (
     WalletCaseBackfillProgressResponse,
+    WalletCaseBackfillOutcomeHistoryResponse,
     WalletCaseBackfillOutcomeResponse,
     WalletCaseBackfillScheduleRunRequest,
     WalletCaseBackfillScheduleResponse,
@@ -672,6 +674,91 @@ def read_wallet_case_backfill_outcome(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case backfill outcome storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/backfill-outcomes",
+    response_model=WalletCaseBackfillOutcomeHistoryResponse,
+)
+def list_wallet_case_backfill_outcomes(
+    request: Request,
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    limit: str = Query(
+        "20",
+        pattern=r"^[1-9][0-9]*$",
+        max_length=2,
+        description="Canonical Backfill Outcome page size from 1 through 20.",
+    ),
+    cursor: str | None = Query(
+        None,
+        min_length=1,
+        max_length=1024,
+        description="Authenticated continuation from the preceding outcome page.",
+    ),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read a frozen newest-first page of verified Backfill Outcomes."""
+    query_pairs = request.query_params.multi_items()
+    if any(name not in {"limit", "cursor"} for name, _value in query_pairs):
+        raise HTTPException(
+            status_code=422,
+            detail="Backfill Outcome history contains an unsupported query parameter",
+        )
+    for name in ("limit", "cursor"):
+        if len(request.query_params.getlist(name)) > 1:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Backfill Outcome history {name} must be provided at most once"
+                ),
+            )
+    canonical_limit = int(limit, 10)
+    if canonical_limit > 20:
+        raise HTTPException(
+            status_code=422,
+            detail="limit must be no greater than 20",
+        )
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).list_backfill_outcome_history(
+            public_id,
+            limit=canonical_limit,
+            cursor=cursor,
+        )
+    except WalletCaseBackfillOutcomeHistoryInvalidCursor as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "backfill_outcome_history_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case Backfill Outcome history storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 
