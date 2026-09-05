@@ -247,6 +247,16 @@
 .case-backfill-schedule { margin-top: 8px; border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 5%, var(--surface-solid)); }
 .case-backfill-outcome-shell { display: grid; gap: 10px; }
 .case-backfill-outcome { border-color: color-mix(in srgb, var(--success) 42%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); }
+.case-backfill-history { margin-top: 14px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--success) 30%, var(--border)); border-radius: 13px; background: color-mix(in srgb, var(--success) 4%, var(--surface-solid)); }
+.case-backfill-history > header button { display: inline-flex; flex: 0 0 auto; padding: 7px 10px; align-items: center; gap: 6px; font-size: 0.72rem; }
+.case-backfill-history-intro { max-width: 780px; margin: 0; color: var(--text-muted); font-size: 0.78rem; line-height: 1.5; }
+.case-backfill-history ol li { display: flex; min-width: 0; padding: 10px 12px; align-items: center; justify-content: space-between; gap: 14px; }
+.case-backfill-history ol li + li { border-top: 1px solid var(--border); }
+.case-backfill-history ol li > span { display: grid; min-width: 0; gap: 3px; }
+.case-backfill-history ol b { color: var(--text); font-size: 0.75rem; }
+.case-backfill-history ol small { color: var(--text-muted); line-height: 1.4; }
+.case-backfill-history ol code { overflow: hidden; max-width: min(430px, 55vw); color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-backfill-history .case-backfill-outcome dl code { display: block; overflow: hidden; max-width: 100%; font-size: 0.62rem; text-overflow: ellipsis; white-space: nowrap; }
 .case-backfill-schedule-budget { display: inline-grid; gap: 3px; color: var(--muted); font-size: .72rem; font-weight: 700; }
 .case-backfill-schedule-budget select { min-width: 96px; }
 .case-backfill-schedule-selection { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -755,6 +765,10 @@
   .case-manifest-actions button { width: 100%; justify-content: center; }
   .case-continuation-receipt-shell > header { align-items: stretch; flex-direction: column; }
   .case-continuation-receipt-shell > header button { width: 100%; justify-content: center; }
+  .case-backfill-history > header { align-items: stretch; }
+  .case-backfill-history > header button,
+  .case-backfill-history ol li > button { width: 100%; justify-content: center; }
+  .case-backfill-history ol li { align-items: stretch; flex-direction: column; }
   .case-continuation-transition { grid-template-columns: 1fr; }
   .case-continuation-transition > svg { margin: -2px auto; transform: rotate(90deg); }
   .case-checkpoint-catalog li { align-items: stretch; flex-direction: column; }

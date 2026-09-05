@@ -39,6 +39,7 @@ import {
   type WalletCaseStreamCheckpointChainResponse,
 } from "../walletCaseStreamCheckpoint";
 import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
+import { useWalletCaseBackfillHistory } from "../useWalletCaseBackfillHistory";
 
 function formatTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -174,6 +175,7 @@ export default function CaseAcquisitionManifest({
   const continuationPlanRequestRef = useRef<AbortController | null>(null);
   const continuationReceiptRequestRef = useRef<AbortController | null>(null);
   const backfillOutcomeRequestRef = useRef<AbortController | null>(null);
+  const backfillHistory = useWalletCaseBackfillHistory(caseId);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
   const canVerifyContinuationReceipt = (
     snapshot.requested_scope.mode === "resume" &&
@@ -439,6 +441,138 @@ export default function CaseAcquisitionManifest({
               <span>{error}</span>
             </div>
           )}
+          <section className="case-checkpoint-history case-backfill-history">
+            <header>
+              <span>
+                <ClockCounterClockwise size={17} />
+                <strong>Backfill Outcome history</strong>
+              </span>
+              <button
+                className="button-secondary"
+                type="button"
+                disabled={backfillHistory.historyState !== "idle"}
+                onClick={() => void backfillHistory.load()}
+              >
+                {backfillHistory.historyState === "loading"
+                  ? <SpinnerGap className="spin" size={15} />
+                  : <ShieldCheck size={15} />}
+                {backfillHistory.historyState === "loading"
+                  ? "Verifying history…"
+                  : backfillHistory.history
+                    ? "Verify history again"
+                    : "Verify outcome history"}
+              </button>
+            </header>
+            <p className="case-backfill-history-intro">
+              Inspect the frozen sequence of verified scheduled transitions and
+              reopen any exact outcome without treating it as complete wallet history.
+            </p>
+            {backfillHistory.historyState === "loading" && (
+              <span className="case-checkpoint-history-loading">
+                <SpinnerGap className="spin" size={16} /> Verifying outcomes…
+              </span>
+            )}
+            {backfillHistory.history?.items.length === 0 && (
+              <span>No verified scheduled Backfill Outcomes have been published.</span>
+            )}
+            {backfillHistory.history && backfillHistory.history.items.length > 0 && (
+              <>
+                <small>
+                  {backfillHistory.history.items.length} of
+                  {" "}{backfillHistory.history.totalOutcomes} outcomes loaded
+                </small>
+                <ol>
+                  {backfillHistory.history.items.map((item) => (
+                    <li key={item.outcome.public_id}>
+                      <span>
+                        <b>
+                          {item.outcome.provider} / {item.outcome.stream_key}
+                          {" · "}{item.outcome.outcome}
+                        </b>
+                        <small>
+                          Continued pages {item.before_continuation_pages_succeeded}
+                          {" → "}{item.after_continuation_pages_succeeded}
+                          {" · +"}{item.outcome.pages_succeeded_delta} successful
+                          {" · "}{item.outcome.before_resume_state}
+                          {" → "}{item.outcome.after_resume_state}
+                          {" · "}{formatTimestamp(item.completed_at)}
+                        </small>
+                        <code>{item.outcome.public_id}</code>
+                      </span>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        disabled={backfillHistory.selectionLoading}
+                        aria-label={`Verify Backfill Outcome ${item.outcome.public_id}`}
+                        onClick={() => void backfillHistory.inspect(
+                          item.outcome.sync_public_id,
+                        )}
+                      >
+                        {backfillHistory.selectionLoading
+                          ? <SpinnerGap className="spin" size={14} />
+                          : <MagnifyingGlass size={14} />}
+                        Verify
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
+            {backfillHistory.selected && (
+              <section
+                className="case-checkpoint-chain case-backfill-outcome"
+                aria-label="Selected verified Backfill Outcome"
+                role="status"
+              >
+                <header>
+                  <span>
+                    <ShieldCheck size={18} />
+                    <strong>Selected outcome verified</strong>
+                  </span>
+                  <code>{backfillHistory.selected.outcome.public_id}</code>
+                </header>
+                <dl>
+                  <div><dt>Outcome</dt><dd>{backfillHistory.selected.outcome.outcome}</dd></div>
+                  <div><dt>Provider stream</dt><dd>{backfillHistory.selected.outcome.provider} / {backfillHistory.selected.outcome.stream_key}</dd></div>
+                  <div><dt>Input progress</dt><dd><code>{backfillHistory.selected.outcome.input_progress_public_id}</code></dd></div>
+                  <div><dt>Output progress</dt><dd><code>{backfillHistory.selected.outcome.output_progress_public_id}</code></dd></div>
+                </dl>
+                <button
+                  className="button-secondary case-checkpoint-chain-export"
+                  type="button"
+                  onClick={() => downloadBackfillOutcome(backfillHistory.selected!)}
+                >
+                  <DownloadSimple size={15} /> Export selected Backfill Outcome JSON
+                </button>
+              </section>
+            )}
+            {(backfillHistory.historyError || backfillHistory.selectionError) && (
+              <div className="case-sync-message is-error" role="alert">
+                <WarningCircle size={16} weight="fill" />
+                <span>{backfillHistory.historyError ?? backfillHistory.selectionError}</span>
+              </div>
+            )}
+            {backfillHistory.history?.hasMore && (
+              <button
+                className="button-secondary case-checkpoint-load-more"
+                type="button"
+                disabled={backfillHistory.historyState !== "idle"}
+                onClick={() => void backfillHistory.loadMore()}
+              >
+                {backfillHistory.historyState === "loading-more"
+                  ? <SpinnerGap className="spin" size={15} />
+                  : <ClockCounterClockwise size={15} />}
+                {backfillHistory.historyState === "loading-more"
+                  ? "Loading older…"
+                  : "Load older outcomes"}
+              </button>
+            )}
+            {backfillHistory.history?.limitations[0] && (
+              <small className="case-checkpoint-history-boundary">
+                {backfillHistory.history.limitations[0].message}
+              </small>
+            )}
+          </section>
           {canVerifyContinuationReceipt && (
             <section className="case-continuation-receipt-shell">
               <header>

@@ -16,6 +16,7 @@ import {
 } from "../test/walletCaseFixtures";
 import { manifestResponseFixture } from "../test/walletCaseSyncManifestFixtures";
 import {
+  backfillOutcomeHistoryFixture,
   backfillOutcomeFixture,
   backfillProgressFixture,
   backfillScheduleFixture,
@@ -449,6 +450,68 @@ describe("GramCaseSummary", () => {
       ["blob:continuation-receipt"],
       ["blob:backfill-outcome"],
     ]);
+    anchorClick.mockRestore();
+  });
+
+  it("loads frozen Backfill Outcome history and re-verifies a selected result", async () => {
+    const historyFixture = backfillOutcomeHistoryFixture();
+    const history = {
+      ...historyFixture,
+      page: { ...historyFixture.page, limit: 10 },
+    };
+    const outcome = backfillOutcomeFixture();
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(history),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(outcome),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ));
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    const snapshot = succeededSyncFixture();
+    renderSummary(walletCaseFixture({
+      latestAttempt: snapshot,
+      currentSnapshot: snapshot,
+    }));
+
+    await user.click(screen.getByRole("button", { name: "Verify outcome history" }));
+
+    expect(await screen.findByText("1 of 1 outcomes loaded")).toBeTruthy();
+    expect(screen.getByText(history.items[0].outcome.public_id)).toBeTruthy();
+    expect(screen.getByText(/Continued pages 1 → 2/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/backfill-outcomes?limit=10`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+
+    await user.click(screen.getByRole("button", {
+      name: `Verify Backfill Outcome ${history.items[0].outcome.public_id}`,
+    }));
+    expect(await screen.findByText("Selected outcome verified")).toBeTruthy();
+    expect(screen.getByRole("status", {
+      name: "Selected verified Backfill Outcome",
+    }).textContent).toContain(outcome.outcome.output_progress_public_id);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${snapshot.case_public_id}/syncs/${outcome.outcome.sync_public_id}/backfill-outcome`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+
+    const createObjectUrl = vi.fn().mockReturnValue("blob:selected-backfill-outcome");
+    const revokeObjectUrl = vi.fn();
+    vi.stubGlobal("URL", {
+      createObjectURL: createObjectUrl,
+      revokeObjectURL: revokeObjectUrl,
+    });
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => undefined);
+    await user.click(screen.getByRole("button", {
+      name: "Export selected Backfill Outcome JSON",
+    }));
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:selected-backfill-outcome");
     anchorClick.mockRestore();
   });
 
