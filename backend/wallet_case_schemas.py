@@ -1345,10 +1345,10 @@ class WalletCaseCompleteHistoryGateSummary(_StrictModel):
 
 
 class WalletCaseCompleteHistoryGateDocument(_StrictModel):
-    contract_version: Literal["wallet_case_complete_history_gate_v1"]
+    contract_version: Literal["wallet_case_complete_history_gate_v2"]
     case_public_id: CanonicalPublicId
     data_environment: WalletCaseDataEnvironment
-    input_progress: WalletCaseBackfillProgressResponse
+    input_anchor: WalletCaseEarliestActivityAnchorResponse
     checks: list[WalletCaseCompleteHistoryGateCheck] = Field(
         min_length=6,
         max_length=6,
@@ -1358,7 +1358,9 @@ class WalletCaseCompleteHistoryGateDocument(_StrictModel):
 
     @model_validator(mode="after")
     def _validate_gate(self):
-        progress = self.input_progress.document
+        progress = (
+            self.input_anchor.document.input_floor.document.input_progress.document
+        )
         streams = progress.streams
         complete_count = sum(item.requested_interval_complete for item in streams)
         terminal_count = sum(
@@ -1373,7 +1375,9 @@ class WalletCaseCompleteHistoryGateDocument(_StrictModel):
             "provider_exhaustion_observed": (
                 bool(streams) and terminal_count == len(streams)
             ),
-            "earliest_activity_anchor_verified": False,
+            "earliest_activity_anchor_verified": (
+                self.input_anchor.anchor.earliest_wallet_activity_established
+            ),
             "reorg_invalidation_active": False,
         }
         expected_codes = list(expected_checks)
@@ -1390,6 +1394,7 @@ class WalletCaseCompleteHistoryGateDocument(_StrictModel):
         }
         if (
             self.case_public_id != progress.case_public_id
+            or self.case_public_id != self.input_anchor.document.case_public_id
             or [item.code for item in self.checks] != expected_codes
             or statuses
             != [
@@ -1404,8 +1409,9 @@ class WalletCaseCompleteHistoryGateDocument(_StrictModel):
 
 class WalletCaseCompleteHistoryGateDescriptor(_StrictModel):
     public_id: CompleteHistoryGatePublicId
-    contract_version: Literal["wallet_case_complete_history_gate_v1"]
+    contract_version: Literal["wallet_case_complete_history_gate_v2"]
     content_hash_sha256: Sha256Digest
+    input_anchor_public_id: EarliestActivityAnchorPublicId
     input_progress_public_id: BackfillProgressPublicId
     checkpoint_cutoff_public_id: CheckpointPublicId | None = None
     state: Literal["locked"]
@@ -1429,12 +1435,16 @@ class WalletCaseCompleteHistoryGateResponse(_StrictModel):
         ).encode("utf-8")
         digest = hashlib.sha256(canonical).hexdigest()
         descriptor = self.gate
-        progress = self.document.input_progress.progress
+        anchor = self.document.input_anchor.anchor
+        progress = (
+            self.document.input_anchor.document.input_floor.document.input_progress.progress
+        )
         summary = self.document.summary
         if (
             descriptor.public_id != f"chg_{digest}"
             or descriptor.content_hash_sha256 != digest
             or descriptor.contract_version != self.document.contract_version
+            or descriptor.input_anchor_public_id != anchor.public_id
             or descriptor.input_progress_public_id != progress.public_id
             or descriptor.checkpoint_cutoff_public_id
             != progress.checkpoint_cutoff_public_id

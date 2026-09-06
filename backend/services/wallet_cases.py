@@ -2498,10 +2498,8 @@ class WalletCaseService:
     def get_complete_history_gate(self, case_public_id: str) -> dict[str, Any]:
         """Explain why verified acquisition still cannot claim complete history."""
         wallet_case = self._required_case(case_public_id)
-        progress = self._backfill_progress_response(
-            wallet_case,
-            self.repository.latest_stream_checkpoints(case_id=wallet_case.id),
-        )
+        anchor = self.get_earliest_activity_anchor(wallet_case.public_id)
+        progress = anchor["document"]["input_floor"]["document"]["input_progress"]
         streams = progress["document"]["streams"]
         complete_count = sum(
             item["requested_interval_complete"] for item in streams
@@ -2549,8 +2547,13 @@ class WalletCaseService:
             ),
             (
                 "earliest_activity_anchor_verified",
-                False,
-                "No chain-verifiable earliest wallet activity anchor is implemented.",
+                anchor["anchor"]["earliest_wallet_activity_established"],
+                (
+                    "The first wallet transaction has a canonical inclusion proof "
+                    "and a zero predecessor."
+                    if anchor["anchor"]["earliest_wallet_activity_established"]
+                    else "No chain-verifiable zero-predecessor activity anchor is available."
+                ),
             ),
             (
                 "reorg_invalidation_active",
@@ -2578,10 +2581,10 @@ class WalletCaseService:
             "complete_wallet_history_established": False,
         }
         document = {
-            "contract_version": "wallet_case_complete_history_gate_v1",
+            "contract_version": "wallet_case_complete_history_gate_v2",
             "case_public_id": wallet_case.public_id,
             "data_environment": wallet_case.data_environment,
-            "input_progress": progress,
+            "input_anchor": anchor,
             "checks": checks,
             "summary": summary,
             "limitations": [
@@ -2593,10 +2596,10 @@ class WalletCaseService:
                     ),
                 ),
                 _limitation(
-                    "complete_history_gate_requires_chain_anchor",
+                    "complete_history_gate_tracks_chain_anchor",
                     (
-                        "Complete history stays locked until an earliest-activity "
-                        "anchor can be verified against chain evidence."
+                        "The gate consumes the exact content-addressed earliest-"
+                        "activity anchor instead of inferring it from provider pages."
                     ),
                 ),
                 _limitation(
@@ -2621,6 +2624,7 @@ class WalletCaseService:
                 "public_id": f"chg_{digest}",
                 "contract_version": document["contract_version"],
                 "content_hash_sha256": digest,
+                "input_anchor_public_id": anchor["anchor"]["public_id"],
                 "input_progress_public_id": progress["progress"]["public_id"],
                 "checkpoint_cutoff_public_id": progress["progress"][
                     "checkpoint_cutoff_public_id"
