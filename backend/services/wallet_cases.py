@@ -2079,6 +2079,144 @@ class WalletCaseService:
         )
         return self._backfill_progress_response(wallet_case, checkpoints)
 
+    def get_complete_history_gate(self, case_public_id: str) -> dict[str, Any]:
+        """Explain why verified acquisition still cannot claim complete history."""
+        wallet_case = self._required_case(case_public_id)
+        progress = self._backfill_progress_response(
+            wallet_case,
+            self.repository.latest_stream_checkpoints(case_id=wallet_case.id),
+        )
+        streams = progress["document"]["streams"]
+        complete_count = sum(
+            item["requested_interval_complete"] for item in streams
+        )
+        terminal_count = sum(
+            item["termination_reason"] == "provider_terminal"
+            for item in streams
+        )
+        conditions = [
+            (
+                "live_data_environment",
+                wallet_case.data_environment == "live",
+                (
+                    "The Case uses the live data environment."
+                    if wallet_case.data_environment == "live"
+                    else "Demo data cannot establish complete wallet history."
+                ),
+            ),
+            (
+                "provider_streams_present",
+                bool(streams),
+                (
+                    "At least one verified provider stream is present."
+                    if streams
+                    else "No verified provider streams are available."
+                ),
+            ),
+            (
+                "all_requested_intervals_complete",
+                bool(streams) and complete_count == len(streams),
+                (
+                    "Every provider stream completed its requested interval."
+                    if streams and complete_count == len(streams)
+                    else "One or more provider streams have not completed their requested interval."
+                ),
+            ),
+            (
+                "provider_exhaustion_observed",
+                bool(streams) and terminal_count == len(streams),
+                (
+                    "Every provider stream reported terminal exhaustion."
+                    if streams and terminal_count == len(streams)
+                    else "Terminal provider exhaustion is not verified for every stream."
+                ),
+            ),
+            (
+                "earliest_activity_anchor_verified",
+                False,
+                "No chain-verifiable earliest wallet activity anchor is implemented.",
+            ),
+            (
+                "reorg_invalidation_active",
+                False,
+                "Dependent evidence is not yet protected by a reorg invalidation policy.",
+            ),
+        ]
+        checks = [
+            {
+                "code": code,
+                "status": "satisfied" if satisfied else "unmet",
+                "message": message,
+            }
+            for code, satisfied, message in conditions
+        ]
+        satisfied_count = sum(satisfied for _code, satisfied, _message in conditions)
+        summary = {
+            "stream_count": len(streams),
+            "requested_interval_complete_stream_count": complete_count,
+            "provider_terminal_stream_count": terminal_count,
+            "check_count": len(checks),
+            "satisfied_check_count": satisfied_count,
+            "unmet_check_count": len(checks) - satisfied_count,
+            "state": "locked",
+            "complete_wallet_history_established": False,
+        }
+        document = {
+            "contract_version": "wallet_case_complete_history_gate_v1",
+            "case_public_id": wallet_case.public_id,
+            "data_environment": wallet_case.data_environment,
+            "input_progress": progress,
+            "checks": checks,
+            "summary": summary,
+            "limitations": [
+                _limitation(
+                    "provider_terminal_is_not_earliest_activity_proof",
+                    (
+                        "A provider terminal response is bounded provider evidence, "
+                        "not chain proof of the wallet's first activity."
+                    ),
+                ),
+                _limitation(
+                    "complete_history_gate_requires_chain_anchor",
+                    (
+                        "Complete history stays locked until an earliest-activity "
+                        "anchor can be verified against chain evidence."
+                    ),
+                ),
+                _limitation(
+                    "complete_history_gate_requires_reorg_invalidation",
+                    (
+                        "Complete history stays locked until reorg detection can "
+                        "invalidate dependent aggregates and reports."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "gate": {
+                "public_id": f"chg_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "input_progress_public_id": progress["progress"]["public_id"],
+                "checkpoint_cutoff_public_id": progress["progress"][
+                    "checkpoint_cutoff_public_id"
+                ],
+                "state": summary["state"],
+                "satisfied_check_count": summary["satisfied_check_count"],
+                "unmet_check_count": summary["unmet_check_count"],
+                "complete_wallet_history_established": False,
+            },
+            "document": document,
+        }
+
     def _backfill_progress_response(
         self,
         wallet_case: WalletCase,
