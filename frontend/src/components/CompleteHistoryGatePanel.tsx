@@ -63,8 +63,9 @@ export default function CompleteHistoryGatePanel({
         ))}
       </ol>
       <div className="case-complete-history-provenance">
-        <span>Verified input progress</span>
-        <code>{gate.gate.input_progress_public_id}</code>
+        <span>Verified input earliest activity anchor</span>
+        <code>{gate.gate.input_anchor_public_id}</code>
+        <small>Input progress: {gate.gate.input_progress_public_id}</small>
         <small>
           Checkpoint cutoff: {gate.gate.checkpoint_cutoff_public_id ?? "no stream checkpoint"}
         </small>

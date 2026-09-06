@@ -30,6 +30,7 @@ import {
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseCompleteHistoryGate,
+  serializeWalletCaseEarliestActivityAnchor,
   serializeWalletCaseObservedHistoryFloor,
   serializeWalletCaseStreamCheckpointChain,
   type WalletCaseBackfillProgressResponse,
@@ -43,6 +44,7 @@ import {
 import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
 import { useWalletCaseBackfillHistory } from "../useWalletCaseBackfillHistory";
 import { useWalletCaseCompleteHistoryGate } from "../useWalletCaseCompleteHistoryGate";
+import { useWalletCaseEarliestActivityAnchor } from "../useWalletCaseEarliestActivityAnchor";
 import { useWalletCaseObservedHistoryFloor } from "../useWalletCaseObservedHistoryFloor";
 import {
   serializeWalletCaseBackfillCoverageTimeline,
@@ -51,6 +53,7 @@ import {
 } from "../walletCaseBackfillCoverageTimeline";
 import BackfillCoverageTimeline from "./BackfillCoverageTimeline";
 import CompleteHistoryGatePanel from "./CompleteHistoryGatePanel";
+import EarliestActivityAnchorPanel from "./EarliestActivityAnchorPanel";
 import ObservedHistoryFloorPanel from "./ObservedHistoryFloorPanel";
 
 function formatTimestamp(value: string): string {
@@ -111,6 +114,20 @@ function downloadObservedHistoryFloor(
   anchor.href = url;
   anchor.download = `observed-history-floor-${floor.floor.public_id}.json`;
   anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadEarliestActivityAnchor(
+  anchor: NonNullable<ReturnType<typeof useWalletCaseEarliestActivityAnchor>["anchor"]>,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseEarliestActivityAnchor(anchor)],
+    { type: "application/json" },
+  ));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `earliest-activity-anchor-${anchor.anchor.public_id}.json`;
+  link.click();
   URL.revokeObjectURL(url);
 }
 
@@ -241,6 +258,10 @@ export default function CaseAcquisitionManifest({
     snapshot.public_id,
   );
   const observedHistoryFloor = useWalletCaseObservedHistoryFloor(
+    caseId,
+    snapshot.public_id,
+  );
+  const earliestActivityAnchor = useWalletCaseEarliestActivityAnchor(
     caseId,
     snapshot.public_id,
   );
@@ -940,6 +961,21 @@ export default function CaseAcquisitionManifest({
                     <button
                       className="button-secondary case-checkpoint-plan-button"
                       type="button"
+                      disabled={earliestActivityAnchor.state === "loading"}
+                      onClick={() => void earliestActivityAnchor.verify()}
+                    >
+                      {earliestActivityAnchor.state === "loading"
+                        ? <SpinnerGap className="spin" size={15} />
+                        : <ShieldCheck size={15} />}
+                      {earliestActivityAnchor.state === "loading"
+                        ? "Verifying activity anchor…"
+                        : earliestActivityAnchor.anchor
+                          ? "Verify earliest activity anchor again"
+                          : "Verify earliest activity anchor"}
+                    </button>
+                    <button
+                      className="button-secondary case-checkpoint-plan-button"
+                      type="button"
                       disabled={completeHistoryGate.state === "loading"}
                       onClick={() => void completeHistoryGate.verify()}
                     >
@@ -1077,6 +1113,20 @@ export default function CaseAcquisitionManifest({
                     <div className="case-sync-message is-error" role="alert">
                       <WarningCircle size={16} weight="fill" />
                       <span>{observedHistoryFloor.error}</span>
+                    </div>
+                  )}
+                  {earliestActivityAnchor.anchor && (
+                    <EarliestActivityAnchorPanel
+                      anchor={earliestActivityAnchor.anchor}
+                      onExport={() => downloadEarliestActivityAnchor(
+                        earliestActivityAnchor.anchor!,
+                      )}
+                    />
+                  )}
+                  {earliestActivityAnchor.error && (
+                    <div className="case-sync-message is-error" role="alert">
+                      <WarningCircle size={16} weight="fill" />
+                      <span>{earliestActivityAnchor.error}</span>
                     </div>
                   )}
                   {completeHistoryGate.gate && (
