@@ -1,3 +1,32 @@
+# GRAM Scope — v1.1.0 OBSERVED HISTORY FLOOR
+
+v1.1.0 exposes the earliest boundary the current provider evidence can honestly
+support. `GET /api/v1/cases/{case}/observed-history-floor` reconstructs and
+validates current Backfill Progress, projects each stream's oldest successful
+page, and content-addresses the complete document as `ohf_<sha256>`.
+
+Each floor entry binds provider and contract, `cch_` chain, tip checkpoint,
+requested-interval completion, provider-terminal observation, and the exact
+page evidence with cursor, digest, logical times, timestamps, and fetch time.
+The aggregate distinguishes empty, partially observed, observed, and
+provider-terminal-observed states; it reports an earliest timestamp only from
+streams that actually supply one. Logical times remain per-stream evidence and
+are never compared as a global chronology.
+
+The Pydantic contract derives every stream and summary field from the embedded
+`bfp_` input before checking canonical content identity. The strict browser
+parser independently repeats those relationships, and the snapshot-aware UI
+controller aborts or clears obsolete evidence. Summary presents the earliest
+observed timestamp and stream floors after an explicit request and exports the
+strictly parsed JSON with exact progress and checkpoint-cutoff provenance.
+
+This release does not convert provider exhaustion into chain proof. Its public
+contract fixes `earliest_wallet_activity_established` to false, so the v1.0.0
+Complete-History Gate remains locked. No database migration is added; Alembic
+remains at `20260828_0028` and backend API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v1.0.0 COMPLETE-HISTORY GATE
 
 v1.0.0 introduces one canonical negative-assurance boundary for complete

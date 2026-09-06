@@ -60,6 +60,7 @@ from wallet_case_schemas import (
     WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationReceiptV3Response,
     WalletCaseCheckpointContinuationPlanResponse,
+    WalletCaseObservedHistoryFloorResponse,
     WalletCaseStreamCheckpointChainResponse,
     WalletCaseSyncRequest,
 )
@@ -2164,6 +2165,130 @@ def test_backfill_progress_schema_rejects_aggregate_and_frontier_drift(client):
     frontier_drift["document"]["streams"][0]["frontier_advanced"] = True
     with pytest.raises(ValueError, match="backfill progress stream"):
         WalletCaseBackfillProgressResponse.model_validate(frontier_drift)
+
+
+def test_observed_history_floor_is_content_addressed_and_scoped(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/observed-history-floor"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["floor"]["public_id"] == (
+        f"ohf_{body['floor']['content_hash_sha256']}"
+    )
+    assert body["floor"]["contract_version"] == (
+        "wallet_case_observed_history_floor_v1"
+    )
+    progress = body["document"]["input_progress"]
+    stream = body["document"]["streams"][0]
+    progress_stream = progress["document"]["streams"][0]
+    assert body["floor"]["input_progress_public_id"] == (
+        progress["progress"]["public_id"]
+    )
+    assert body["floor"]["checkpoint_cutoff_public_id"] == (
+        progress["progress"]["checkpoint_cutoff_public_id"]
+    )
+    assert stream["chain_public_id"] == progress_stream["chain_public_id"]
+    assert stream["tip_checkpoint_public_id"] == (
+        progress_stream["tip_checkpoint"]["public_id"]
+    )
+    assert stream["floor_status"] == "observed"
+    assert stream["floor_page"] == progress_stream["current_frontier"]["page"]
+    assert stream["provider_terminal_observed"] is False
+    assert body["document"]["summary"] == {
+        "stream_count": 1,
+        "observed_stream_count": 1,
+        "timestamped_stream_count": 1,
+        "provider_terminal_stream_count": 0,
+        "earliest_observed_timestamp": stream["floor_page"]["min_timestamp"],
+        "state": "observed",
+        "earliest_wallet_activity_established": False,
+    }
+    WalletCaseObservedHistoryFloorResponse.model_validate(body)
+    repeated = client.get(
+        f"/api/v1/cases/{case_id}/observed-history-floor"
+    )
+    assert repeated.status_code == 200
+    assert repeated.json() == body
+    tampered = json.loads(json.dumps(body))
+    tampered["floor"]["public_id"] = f"ohf_{'0' * 64}"
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseObservedHistoryFloorResponse.model_validate(tampered)
+    floor_drift = json.loads(json.dumps(body))
+    floor_drift["document"]["streams"][0]["floor_page"]["page_index"] += 1
+    with pytest.raises(ValueError, match="observed history floor"):
+        WalletCaseObservedHistoryFloorResponse.model_validate(floor_drift)
+
+
+def test_observed_history_floor_handles_empty_and_provider_terminal_evidence(client):
+    empty_case_id = _create_case(client)["case"]["public_id"]
+    empty = client.get(
+        f"/api/v1/cases/{empty_case_id}/observed-history-floor"
+    )
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["document"]["streams"] == []
+    assert empty.json()["document"]["summary"] == {
+        "stream_count": 0,
+        "observed_stream_count": 0,
+        "timestamped_stream_count": 0,
+        "provider_terminal_stream_count": 0,
+        "earliest_observed_timestamp": None,
+        "state": "empty",
+        "earliest_wallet_activity_established": False,
+    }
+
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(
+        client,
+        cursor=None,
+        completion_state="complete",
+        termination_reason="provider_terminal",
+    )
+    terminal = client.get(
+        f"/api/v1/cases/{case_id}/observed-history-floor"
+    )
+    assert terminal.status_code == 200, terminal.text
+    terminal_body = terminal.json()
+    assert terminal_body["floor"]["state"] == "provider_terminal_observed"
+    assert terminal_body["floor"]["provider_terminal_stream_count"] == 1
+    assert terminal_body["floor"]["earliest_wallet_activity_established"] is False
+    assert terminal_body["document"]["streams"][0][
+        "provider_terminal_observed"
+    ] is True
+    assert client.get(
+        f"/api/v1/cases/{uuid4()}/observed-history-floor"
+    ).status_code == 404
+
+
+def test_observed_history_floor_fails_closed_on_corrupt_checkpoint(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case.has(public_id=case_id)
+            )
+        )
+        assert checkpoint is not None
+        checkpoint.checkpoint_json = (
+            '{"contract_version":"wallet_case_stream_checkpoint_v1"}'
+        )
+        session.commit()
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/observed-history-floor"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "observed_history_floor_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ),
+        "retryable": False,
+    }
 
 
 def test_complete_history_gate_is_content_addressed_locked_and_scoped(client):

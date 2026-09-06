@@ -67,6 +67,10 @@ CompleteHistoryGatePublicId = Annotated[
     str,
     Field(pattern=r"^chg_[0-9a-f]{64}$", max_length=68),
 ]
+ObservedHistoryFloorPublicId = Annotated[
+    str,
+    Field(pattern=r"^ohf_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -925,6 +929,170 @@ class WalletCaseBackfillProgressResponse(_StrictModel):
             != self.document.checkpoint_cutoff_public_id
         ):
             raise ValueError("backfill progress content address is inconsistent")
+        return self
+
+
+ObservedHistoryFloorState = Literal[
+    "empty",
+    "partially_observed",
+    "observed",
+    "provider_terminal_observed",
+]
+
+
+class WalletCaseObservedHistoryFloorStream(_StrictModel):
+    provider: str = Field(min_length=1, max_length=64)
+    stream_key: str = Field(min_length=1, max_length=40)
+    provider_contract_version: str = Field(min_length=1, max_length=48)
+    chain_public_id: CheckpointChainPublicId
+    tip_checkpoint_public_id: CheckpointPublicId
+    requested_interval_complete: bool
+    provider_terminal_observed: bool
+    floor_status: Literal["observed", "unobserved"]
+    floor_page: WalletCaseStreamCheckpointLastPage | None = None
+
+    @model_validator(mode="after")
+    def _validate_floor(self):
+        if (self.floor_status == "observed") != (self.floor_page is not None):
+            raise ValueError("observed history floor stream is inconsistent")
+        return self
+
+
+class WalletCaseObservedHistoryFloorSummary(_StrictModel):
+    stream_count: int = Field(ge=0, le=32)
+    observed_stream_count: int = Field(ge=0, le=32)
+    timestamped_stream_count: int = Field(ge=0, le=32)
+    provider_terminal_stream_count: int = Field(ge=0, le=32)
+    earliest_observed_timestamp: str | None = None
+    state: ObservedHistoryFloorState
+    earliest_wallet_activity_established: Literal[False] = False
+
+
+class WalletCaseObservedHistoryFloorDocument(_StrictModel):
+    contract_version: Literal["wallet_case_observed_history_floor_v1"]
+    case_public_id: CanonicalPublicId
+    input_progress: WalletCaseBackfillProgressResponse
+    state: ObservedHistoryFloorState
+    streams: list[WalletCaseObservedHistoryFloorStream] = Field(max_length=32)
+    summary: WalletCaseObservedHistoryFloorSummary
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_observed_floor(self):
+        progress = self.input_progress.document
+        expected_streams = []
+        timestamps = []
+        for item in progress.streams:
+            page = (
+                item.current_frontier.page
+                if item.current_frontier is not None
+                else None
+            )
+            if page is not None and page.min_timestamp is not None:
+                timestamps.append(page.min_timestamp)
+            expected_streams.append(
+                {
+                    "provider": item.provider,
+                    "stream_key": item.stream_key,
+                    "provider_contract_version": item.provider_contract_version,
+                    "chain_public_id": item.chain_public_id,
+                    "tip_checkpoint_public_id": item.tip_checkpoint.public_id,
+                    "requested_interval_complete": (
+                        item.requested_interval_complete
+                    ),
+                    "provider_terminal_observed": (
+                        item.termination_reason == "provider_terminal"
+                    ),
+                    "floor_status": "observed" if page is not None else "unobserved",
+                    "floor_page": page.model_dump(mode="json") if page else None,
+                }
+            )
+        observed_count = sum(
+            item["floor_status"] == "observed" for item in expected_streams
+        )
+        terminal_count = sum(
+            item["provider_terminal_observed"] for item in expected_streams
+        )
+        state: ObservedHistoryFloorState = (
+            "empty"
+            if not expected_streams
+            else (
+                "partially_observed"
+                if observed_count < len(expected_streams)
+                else (
+                    "provider_terminal_observed"
+                    if terminal_count == len(expected_streams)
+                    else "observed"
+                )
+            )
+        )
+        expected_summary = {
+            "stream_count": len(expected_streams),
+            "observed_stream_count": observed_count,
+            "timestamped_stream_count": len(timestamps),
+            "provider_terminal_stream_count": terminal_count,
+            "earliest_observed_timestamp": min(timestamps) if timestamps else None,
+            "state": state,
+            "earliest_wallet_activity_established": False,
+        }
+        if (
+            self.case_public_id != progress.case_public_id
+            or [item.model_dump(mode="json") for item in self.streams]
+            != expected_streams
+            or self.state != state
+            or self.summary.model_dump(mode="json") != expected_summary
+        ):
+            raise ValueError("observed history floor is inconsistent")
+        return self
+
+
+class WalletCaseObservedHistoryFloorDescriptor(_StrictModel):
+    public_id: ObservedHistoryFloorPublicId
+    contract_version: Literal["wallet_case_observed_history_floor_v1"]
+    content_hash_sha256: Sha256Digest
+    input_progress_public_id: BackfillProgressPublicId
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    state: ObservedHistoryFloorState
+    stream_count: int = Field(ge=0, le=32)
+    observed_stream_count: int = Field(ge=0, le=32)
+    timestamped_stream_count: int = Field(ge=0, le=32)
+    provider_terminal_stream_count: int = Field(ge=0, le=32)
+    earliest_observed_timestamp: str | None = None
+    earliest_wallet_activity_established: Literal[False] = False
+
+
+class WalletCaseObservedHistoryFloorResponse(_StrictModel):
+    floor: WalletCaseObservedHistoryFloorDescriptor
+    document: WalletCaseObservedHistoryFloorDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        descriptor = self.floor
+        progress = self.document.input_progress.progress
+        summary = self.document.summary.model_dump(mode="json")
+        if (
+            descriptor.public_id != f"ohf_{digest}"
+            or descriptor.content_hash_sha256 != digest
+            or descriptor.contract_version != self.document.contract_version
+            or descriptor.input_progress_public_id != progress.public_id
+            or descriptor.checkpoint_cutoff_public_id
+            != progress.checkpoint_cutoff_public_id
+            or descriptor.state != self.document.state
+            or any(
+                getattr(descriptor, key) != value
+                for key, value in summary.items()
+                if key != "state"
+            )
+        ):
+            raise ValueError("observed history floor content address is inconsistent")
         return self
 
 

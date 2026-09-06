@@ -10,6 +10,7 @@ import {
   checkpointContinuationReceiptV3Fixture,
   checkpointContinuationPlanFixture,
   completeHistoryGateFixture,
+  observedHistoryFloorFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
@@ -23,6 +24,7 @@ import {
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseCompleteHistoryGate,
+  parseWalletCaseObservedHistoryFloor,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
@@ -34,6 +36,7 @@ import {
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseCompleteHistoryGate,
+  serializeWalletCaseObservedHistoryFloor,
   serializeWalletCaseStreamCheckpointChain,
 } from "./walletCaseStreamCheckpoint";
 
@@ -188,6 +191,112 @@ describe("Wallet Case stream checkpoint contracts", () => {
         })),
       },
     })).toThrow(/stream 0 is inconsistent/);
+  });
+
+  it("accepts and exports a verified observed history floor", () => {
+    const floor = observedHistoryFloorFixture();
+
+    expect(parseWalletCaseObservedHistoryFloor(floor)).toEqual(floor);
+    expect(JSON.parse(serializeWalletCaseObservedHistoryFloor(floor))).toEqual(floor);
+  });
+
+  it("rejects observed floor identity, page, state, and summary drift", () => {
+    const floor = observedHistoryFloorFixture();
+    expect(() => parseWalletCaseObservedHistoryFloor({
+      ...floor,
+      floor: { ...floor.floor, public_id: `ohf_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseObservedHistoryFloor({
+      ...floor,
+      document: {
+        ...floor.document,
+        streams: floor.document.streams.map((stream) => ({
+          ...stream,
+          floor_page: { ...stream.floor_page!, page_index: 99 },
+        })),
+      },
+    })).toThrow(/stream 0 is inconsistent/);
+    expect(() => parseWalletCaseObservedHistoryFloor({
+      ...floor,
+      document: { ...floor.document, state: "provider_terminal_observed" },
+    })).toThrow(/inconsistent/);
+    expect(() => parseWalletCaseObservedHistoryFloor({
+      ...floor,
+      document: {
+        ...floor.document,
+        summary: { ...floor.document.summary, timestamped_stream_count: 0 },
+      },
+    })).toThrow(/inconsistent/);
+  });
+
+  it("accepts an empty observed history floor without inventing time", () => {
+    const fixture = observedHistoryFloorFixture();
+    const progress = backfillProgressFixture();
+    const emptyProgress = {
+      progress: {
+        ...progress.progress,
+        public_id: `bfp_${"6a".repeat(32)}`,
+        content_hash_sha256: "6a".repeat(32),
+        checkpoint_cutoff_public_id: null,
+        stream_count: 0,
+        ready_count: 0,
+        revision_count: 0,
+        continuation_revision_count: 0,
+        page_count: 0,
+        pages_succeeded: 0,
+        continuation_page_count: 0,
+        continuation_pages_succeeded: 0,
+        observed_frontier_count: 0,
+        advanced_frontier_count: 0,
+      },
+      document: {
+        ...progress.document,
+        checkpoint_cutoff_public_id: null,
+        aggregate: {
+          stream_count: 0,
+          ready_count: 0,
+          complete_count: 0,
+          blocked_count: 0,
+          revision_count: 0,
+          continuation_revision_count: 0,
+          page_count: 0,
+          pages_succeeded: 0,
+          continuation_page_count: 0,
+          continuation_pages_succeeded: 0,
+          observed_frontier_count: 0,
+          advanced_frontier_count: 0,
+        },
+        streams: [],
+      },
+    };
+    const emptySummary = {
+      stream_count: 0,
+      observed_stream_count: 0,
+      timestamped_stream_count: 0,
+      provider_terminal_stream_count: 0,
+      earliest_observed_timestamp: null,
+      state: "empty" as const,
+      earliest_wallet_activity_established: false as const,
+    };
+    const empty = {
+      floor: {
+        ...fixture.floor,
+        public_id: `ohf_${"6b".repeat(32)}`,
+        content_hash_sha256: "6b".repeat(32),
+        input_progress_public_id: emptyProgress.progress.public_id,
+        checkpoint_cutoff_public_id: null,
+        ...emptySummary,
+      },
+      document: {
+        ...fixture.document,
+        input_progress: emptyProgress,
+        state: "empty" as const,
+        streams: [],
+        summary: emptySummary,
+      },
+    };
+
+    expect(parseWalletCaseObservedHistoryFloor(empty)).toEqual(empty);
   });
 
   it("accepts and exports a fail-closed complete-history gate", () => {

@@ -42,6 +42,7 @@ from wallet_case_schemas import (
     WalletCaseDeletionResponse,
     WalletCaseListResponse,
     WalletCaseMetadataUpdateRequest,
+    WalletCaseObservedHistoryFloorResponse,
     WalletCaseResponse,
     WalletCaseSyncRequest,
     WalletCaseSyncManifestResponse,
@@ -919,6 +920,44 @@ def read_wallet_case_backfill_progress(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case backfill progress storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/observed-history-floor",
+    response_model=WalletCaseObservedHistoryFloorResponse,
+)
+def read_wallet_case_observed_history_floor(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read the oldest successful page observed in each verified stream."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_observed_history_floor(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "observed_history_floor_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case observed history floor storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 

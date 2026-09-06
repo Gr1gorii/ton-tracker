@@ -27,6 +27,7 @@ import {
   parseWalletCaseBackfillProgress,
   parseWalletCaseBackfillSchedule,
   parseWalletCaseCompleteHistoryGate,
+  parseWalletCaseObservedHistoryFloor,
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
@@ -38,6 +39,7 @@ import {
   type WalletCaseBackfillOutcomeResponse,
   type WalletCaseBackfillScheduleResponse,
   type WalletCaseCompleteHistoryGateResponse,
+  type WalletCaseObservedHistoryFloorResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
@@ -715,6 +717,28 @@ export async function getWalletCaseCompleteHistoryGate(
     throw new Error("Wallet Case complete-history gate does not match the request");
   }
   return gate;
+}
+
+export async function getWalletCaseObservedHistoryFloor(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseObservedHistoryFloorResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/observed-history-floor`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case observed history floor read failed",
+    );
+  }
+  const floor = parseWalletCaseObservedHistoryFloor(await response.json());
+  if (floor.document.case_public_id !== caseId) {
+    throw new Error("Wallet Case observed history floor does not match the request");
+  }
+  return floor;
 }
 
 export async function getWalletCaseBackfillSchedule(

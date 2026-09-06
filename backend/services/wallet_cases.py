@@ -2079,6 +2079,122 @@ class WalletCaseService:
         )
         return self._backfill_progress_response(wallet_case, checkpoints)
 
+    def get_observed_history_floor(self, case_public_id: str) -> dict[str, Any]:
+        """Project the oldest page currently observed in each verified stream."""
+        wallet_case = self._required_case(case_public_id)
+        progress = self._backfill_progress_response(
+            wallet_case,
+            self.repository.latest_stream_checkpoints(case_id=wallet_case.id),
+        )
+        streams = []
+        timestamps = []
+        for item in progress["document"]["streams"]:
+            frontier = item["current_frontier"]
+            page = frontier["page"] if frontier is not None else None
+            if page is not None and page["min_timestamp"] is not None:
+                timestamps.append(page["min_timestamp"])
+            streams.append(
+                {
+                    "provider": item["provider"],
+                    "stream_key": item["stream_key"],
+                    "provider_contract_version": item[
+                        "provider_contract_version"
+                    ],
+                    "chain_public_id": item["chain_public_id"],
+                    "tip_checkpoint_public_id": item["tip_checkpoint"][
+                        "public_id"
+                    ],
+                    "requested_interval_complete": item[
+                        "requested_interval_complete"
+                    ],
+                    "provider_terminal_observed": (
+                        item["termination_reason"] == "provider_terminal"
+                    ),
+                    "floor_status": "observed" if page is not None else "unobserved",
+                    "floor_page": page,
+                }
+            )
+        observed_count = sum(
+            item["floor_status"] == "observed" for item in streams
+        )
+        terminal_count = sum(
+            item["provider_terminal_observed"] for item in streams
+        )
+        state = (
+            "empty"
+            if not streams
+            else (
+                "partially_observed"
+                if observed_count < len(streams)
+                else (
+                    "provider_terminal_observed"
+                    if terminal_count == len(streams)
+                    else "observed"
+                )
+            )
+        )
+        summary = {
+            "stream_count": len(streams),
+            "observed_stream_count": observed_count,
+            "timestamped_stream_count": len(timestamps),
+            "provider_terminal_stream_count": terminal_count,
+            "earliest_observed_timestamp": min(timestamps) if timestamps else None,
+            "state": state,
+            "earliest_wallet_activity_established": False,
+        }
+        document = {
+            "contract_version": "wallet_case_observed_history_floor_v1",
+            "case_public_id": wallet_case.public_id,
+            "input_progress": progress,
+            "state": state,
+            "streams": streams,
+            "summary": summary,
+            "limitations": [
+                _limitation(
+                    "observed_floor_is_page_evidence",
+                    (
+                        "Each floor is the oldest successful page currently "
+                        "observed in one verified provider stream."
+                    ),
+                ),
+                _limitation(
+                    "logical_times_are_not_cross_stream_clock",
+                    (
+                        "Logical times remain stream evidence and are not compared "
+                        "as a shared chronological clock."
+                    ),
+                ),
+                _limitation(
+                    "observed_floor_is_not_first_wallet_activity",
+                    (
+                        "Provider exhaustion and the earliest observed page do not "
+                        "prove the wallet's first chain activity."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "floor": {
+                "public_id": f"ohf_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "input_progress_public_id": progress["progress"]["public_id"],
+                "checkpoint_cutoff_public_id": progress["progress"][
+                    "checkpoint_cutoff_public_id"
+                ],
+                **summary,
+            },
+            "document": document,
+        }
+
     def get_complete_history_gate(self, case_public_id: str) -> dict[str, Any]:
         """Explain why verified acquisition still cannot claim complete history."""
         wallet_case = self._required_case(case_public_id)

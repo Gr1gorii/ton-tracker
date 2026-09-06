@@ -257,6 +257,18 @@
 .case-complete-history-provenance > span { color: var(--text-muted); font-size: 0.66rem; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; }
 .case-complete-history-provenance code { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .case-complete-history-provenance small { color: var(--text-muted); }
+.case-observed-history-floor { margin-top: 8px; border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); background: color-mix(in srgb, var(--accent) 5%, var(--surface-solid)); }
+.case-observed-floor-state { display: inline-flex; padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border)); border-radius: 999px; color: var(--accent); background: var(--surface-solid); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; text-transform: capitalize; }
+.case-observed-floor-verdict { margin: 0; color: var(--text-soft); font-size: 0.8rem; line-height: 1.5; }
+.case-observed-floor-verdict time { color: var(--accent); font-weight: 760; }
+.case-observed-floor-streams li { display: flex; padding: 9px 11px; align-items: flex-start; gap: 8px; color: var(--success); }
+.case-observed-floor-streams li + li { border-top: 1px solid var(--border); }
+.case-observed-floor-streams li.is-unobserved { color: var(--warning); }
+.case-observed-floor-streams li > span { display: grid; min-width: 0; gap: 2px; }
+.case-observed-floor-streams b { color: var(--text); font-size: 0.72rem; }
+.case-observed-floor-streams small { color: var(--text-muted); line-height: 1.4; }
+.case-observed-floor-streams code { overflow: hidden; max-width: min(430px, 55vw); color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-observed-floor-boundary { color: var(--warning); line-height: 1.45; }
 .case-backfill-schedule { margin-top: 8px; border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 5%, var(--surface-solid)); }
 .case-backfill-outcome-shell { display: grid; gap: 10px; }
 .case-backfill-outcome { border-color: color-mix(in srgb, var(--success) 42%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); }
