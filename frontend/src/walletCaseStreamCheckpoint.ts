@@ -1,4 +1,8 @@
-import type { WalletCaseLimitation, WalletCaseSyncMode } from "./walletCase";
+import type {
+  WalletCaseDataEnvironment,
+  WalletCaseLimitation,
+  WalletCaseSyncMode,
+} from "./walletCase";
 import type { WalletCaseSyncManifestPeriod } from "./walletCaseSyncManifest";
 
 export type WalletCaseStreamResumeState = "ready" | "complete" | "blocked";
@@ -200,6 +204,54 @@ export interface WalletCaseBackfillProgressResponse {
     checkpoint_cutoff_public_id: string | null;
     aggregate: WalletCaseBackfillProgressAggregate;
     streams: WalletCaseBackfillProgressStream[];
+    limitations: WalletCaseLimitation[];
+  };
+}
+
+export type WalletCaseCompleteHistoryGateCheckCode =
+  | "live_data_environment"
+  | "provider_streams_present"
+  | "all_requested_intervals_complete"
+  | "provider_exhaustion_observed"
+  | "earliest_activity_anchor_verified"
+  | "reorg_invalidation_active";
+
+export interface WalletCaseCompleteHistoryGateCheck {
+  code: WalletCaseCompleteHistoryGateCheckCode;
+  status: "satisfied" | "unmet";
+  message: string;
+}
+
+export interface WalletCaseCompleteHistoryGateSummary {
+  stream_count: number;
+  requested_interval_complete_stream_count: number;
+  provider_terminal_stream_count: number;
+  check_count: 6;
+  satisfied_check_count: number;
+  unmet_check_count: number;
+  state: "locked";
+  complete_wallet_history_established: false;
+}
+
+export interface WalletCaseCompleteHistoryGateResponse {
+  gate: {
+    public_id: string;
+    contract_version: "wallet_case_complete_history_gate_v1";
+    content_hash_sha256: string;
+    input_progress_public_id: string;
+    checkpoint_cutoff_public_id: string | null;
+    state: "locked";
+    satisfied_check_count: number;
+    unmet_check_count: number;
+    complete_wallet_history_established: false;
+  };
+  document: {
+    contract_version: "wallet_case_complete_history_gate_v1";
+    case_public_id: string;
+    data_environment: WalletCaseDataEnvironment;
+    input_progress: WalletCaseBackfillProgressResponse;
+    checks: WalletCaseCompleteHistoryGateCheck[];
+    summary: WalletCaseCompleteHistoryGateSummary;
     limitations: WalletCaseLimitation[];
   };
 }
@@ -487,6 +539,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const CHECKPOINT_ID = /^scp_([0-9a-f]{64})$/;
 const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
 const BACKFILL_PROGRESS_ID = /^bfp_([0-9a-f]{64})$/;
+const COMPLETE_HISTORY_GATE_ID = /^chg_([0-9a-f]{64})$/;
 const BACKFILL_SCHEDULE_ID = /^bfs_([0-9a-f]{64})$/;
 const BACKFILL_OUTCOME_ID = /^bfo_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_PLAN_ID = /^cpl_([0-9a-f]{64})$/;
@@ -1451,6 +1504,190 @@ export function parseWalletCaseBackfillProgress(
 
 export function serializeWalletCaseBackfillProgress(value: unknown): string {
   return `${JSON.stringify(parseWalletCaseBackfillProgress(value), null, 2)}\n`;
+}
+
+const COMPLETE_HISTORY_CHECK_CODES: readonly WalletCaseCompleteHistoryGateCheckCode[] = [
+  "live_data_environment",
+  "provider_streams_present",
+  "all_requested_intervals_complete",
+  "provider_exhaustion_observed",
+  "earliest_activity_anchor_verified",
+  "reorg_invalidation_active",
+];
+
+export function parseWalletCaseCompleteHistoryGate(
+  value: unknown,
+): WalletCaseCompleteHistoryGateResponse {
+  const envelope = record(value, ["gate", "document"], "complete-history gate response");
+  const descriptor = record(envelope.gate, [
+    "public_id", "contract_version", "content_hash_sha256",
+    "input_progress_public_id", "checkpoint_cutoff_public_id", "state",
+    "satisfied_check_count", "unmet_check_count",
+    "complete_wallet_history_established",
+  ], "complete-history gate descriptor");
+  if (descriptor.contract_version !== "wallet_case_complete_history_gate_v1") {
+    fail("complete-history gate descriptor contract is unsupported");
+  }
+  const contentHash = digest(
+    descriptor.content_hash_sha256,
+    "complete-history gate hash",
+  );
+  const gateId = text(descriptor.public_id, "complete-history gate id", 68);
+  if (COMPLETE_HISTORY_GATE_ID.exec(gateId)?.[1] !== contentHash) {
+    fail("complete-history gate identity is invalid");
+  }
+  const inputProgressId = text(
+    descriptor.input_progress_public_id,
+    "complete-history gate input progress id",
+    68,
+  );
+  if (!BACKFILL_PROGRESS_ID.test(inputProgressId)) {
+    fail("complete-history gate input progress id is invalid");
+  }
+  const descriptorCutoff = descriptor.checkpoint_cutoff_public_id === null
+    ? null
+    : checkpointId(
+      descriptor.checkpoint_cutoff_public_id,
+      "complete-history gate descriptor cutoff",
+    );
+  const descriptorSatisfied = integer(
+    descriptor.satisfied_check_count,
+    "complete-history gate descriptor satisfied count",
+  );
+  const descriptorUnmet = integer(
+    descriptor.unmet_check_count,
+    "complete-history gate descriptor unmet count",
+  );
+  if (
+    descriptor.state !== "locked" ||
+    descriptor.complete_wallet_history_established !== false
+  ) fail("complete-history gate descriptor state is invalid");
+
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "data_environment",
+    "input_progress", "checks", "summary", "limitations",
+  ], "complete-history gate document");
+  if (document.contract_version !== "wallet_case_complete_history_gate_v1") {
+    fail("complete-history gate document contract is unsupported");
+  }
+  const caseId = publicId(document.case_public_id, "complete-history gate case id");
+  const environment = text(
+    document.data_environment,
+    "complete-history gate data environment",
+    8,
+  );
+  if (environment !== "demo" && environment !== "live") {
+    fail("complete-history gate data environment is invalid");
+  }
+  const progress = parseWalletCaseBackfillProgress(document.input_progress);
+  if (!Array.isArray(document.checks) || document.checks.length !== 6) {
+    fail("complete-history gate checks are invalid");
+  }
+  const completeCount = progress.document.streams.filter(
+    (stream) => stream.requested_interval_complete,
+  ).length;
+  const terminalCount = progress.document.streams.filter(
+    (stream) => stream.termination_reason === "provider_terminal",
+  ).length;
+  const streamCount = progress.document.streams.length;
+  const expectedStatuses = [
+    environment === "live",
+    streamCount > 0,
+    streamCount > 0 && completeCount === streamCount,
+    streamCount > 0 && terminalCount === streamCount,
+    false,
+    false,
+  ];
+  const checks = document.checks.map((value, index) => {
+    const label = `complete-history gate check ${index}`;
+    const item = record(value, ["code", "status", "message"], label);
+    const code = text(item.code, `${label} code`, 40);
+    const status = text(item.status, `${label} status`, 9);
+    if (
+      code !== COMPLETE_HISTORY_CHECK_CODES[index] ||
+      status !== (expectedStatuses[index] ? "satisfied" : "unmet")
+    ) fail(`${label} is inconsistent`);
+    return {
+      code: code as WalletCaseCompleteHistoryGateCheckCode,
+      status: status as "satisfied" | "unmet",
+      message: text(item.message, `${label} message`, 240),
+    };
+  });
+  const summaryItem = record(document.summary, [
+    "stream_count", "requested_interval_complete_stream_count",
+    "provider_terminal_stream_count", "check_count", "satisfied_check_count",
+    "unmet_check_count", "state", "complete_wallet_history_established",
+  ], "complete-history gate summary");
+  const satisfiedCount = expectedStatuses.filter(Boolean).length;
+  const summary: WalletCaseCompleteHistoryGateSummary = {
+    stream_count: integer(summaryItem.stream_count, "complete-history gate stream count"),
+    requested_interval_complete_stream_count: integer(
+      summaryItem.requested_interval_complete_stream_count,
+      "complete-history gate complete stream count",
+    ),
+    provider_terminal_stream_count: integer(
+      summaryItem.provider_terminal_stream_count,
+      "complete-history gate terminal stream count",
+    ),
+    check_count: integer(summaryItem.check_count, "complete-history gate check count") as 6,
+    satisfied_check_count: integer(
+      summaryItem.satisfied_check_count,
+      "complete-history gate satisfied count",
+    ),
+    unmet_check_count: integer(
+      summaryItem.unmet_check_count,
+      "complete-history gate unmet count",
+    ),
+    state: summaryItem.state as "locked",
+    complete_wallet_history_established:
+      summaryItem.complete_wallet_history_established as false,
+  };
+  const expectedSummary: WalletCaseCompleteHistoryGateSummary = {
+    stream_count: streamCount,
+    requested_interval_complete_stream_count: completeCount,
+    provider_terminal_stream_count: terminalCount,
+    check_count: 6,
+    satisfied_check_count: satisfiedCount,
+    unmet_check_count: 6 - satisfiedCount,
+    state: "locked",
+    complete_wallet_history_established: false,
+  };
+  if (
+    caseId !== progress.document.case_public_id ||
+    JSON.stringify(summary) !== JSON.stringify(expectedSummary) ||
+    inputProgressId !== progress.progress.public_id ||
+    descriptorCutoff !== progress.progress.checkpoint_cutoff_public_id ||
+    descriptorSatisfied !== satisfiedCount || descriptorUnmet !== 6 - satisfiedCount ||
+    descriptor.state !== summary.state ||
+    descriptor.complete_wallet_history_established !==
+      summary.complete_wallet_history_established
+  ) fail("complete-history gate is inconsistent");
+  return {
+    gate: {
+      public_id: gateId,
+      contract_version: "wallet_case_complete_history_gate_v1",
+      content_hash_sha256: contentHash,
+      input_progress_public_id: inputProgressId,
+      checkpoint_cutoff_public_id: descriptorCutoff,
+      state: "locked",
+      satisfied_check_count: descriptorSatisfied,
+      unmet_check_count: descriptorUnmet,
+      complete_wallet_history_established: false,
+    },
+    document: {
+      contract_version: "wallet_case_complete_history_gate_v1",
+      case_public_id: caseId,
+      data_environment: environment,
+      input_progress: progress,
+      checks,
+      summary,
+      limitations: limitations(document.limitations, "complete-history gate limitations"),
+    },
+  };
+}
+
+export function serializeWalletCaseCompleteHistoryGate(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseCompleteHistoryGate(value), null, 2)}\n`;
 }
 
 export function parseWalletCaseBackfillSchedule(

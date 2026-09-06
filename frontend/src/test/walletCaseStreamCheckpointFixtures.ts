@@ -3,6 +3,7 @@ import type {
   WalletCaseBackfillOutcomeResponse,
   WalletCaseBackfillProgressResponse,
   WalletCaseBackfillScheduleResponse,
+  WalletCaseCompleteHistoryGateResponse,
   WalletCaseCheckpointContinuationReceiptV1Response,
   WalletCaseCheckpointContinuationReceiptV2Response,
   WalletCaseCheckpointContinuationReceiptV3Response,
@@ -338,6 +339,86 @@ export function backfillProgressFixture(): WalletCaseBackfillProgressResponse {
         code: "backfill_remaining_work_is_unknown",
         message: "Provider cursors do not expose a reliable remaining-page count.",
       }],
+    },
+  };
+}
+
+export function completeHistoryGateFixture(): WalletCaseCompleteHistoryGateResponse {
+  const progress = backfillProgressFixture();
+  const gateHash = "7d".repeat(32);
+  return {
+    gate: {
+      public_id: `chg_${gateHash}`,
+      contract_version: "wallet_case_complete_history_gate_v1",
+      content_hash_sha256: gateHash,
+      input_progress_public_id: progress.progress.public_id,
+      checkpoint_cutoff_public_id: progress.progress.checkpoint_cutoff_public_id,
+      state: "locked",
+      satisfied_check_count: 1,
+      unmet_check_count: 5,
+      complete_wallet_history_established: false,
+    },
+    document: {
+      contract_version: "wallet_case_complete_history_gate_v1",
+      case_public_id: CASE_ID,
+      data_environment: "demo",
+      input_progress: progress,
+      checks: [
+        {
+          code: "live_data_environment",
+          status: "unmet",
+          message: "Demo data cannot establish complete wallet history.",
+        },
+        {
+          code: "provider_streams_present",
+          status: "satisfied",
+          message: "At least one verified provider stream is present.",
+        },
+        {
+          code: "all_requested_intervals_complete",
+          status: "unmet",
+          message: "One or more provider streams have not completed their requested interval.",
+        },
+        {
+          code: "provider_exhaustion_observed",
+          status: "unmet",
+          message: "Terminal provider exhaustion is not verified for every stream.",
+        },
+        {
+          code: "earliest_activity_anchor_verified",
+          status: "unmet",
+          message: "No chain-verifiable earliest wallet activity anchor is implemented.",
+        },
+        {
+          code: "reorg_invalidation_active",
+          status: "unmet",
+          message: "Dependent evidence is not yet protected by a reorg invalidation policy.",
+        },
+      ],
+      summary: {
+        stream_count: 1,
+        requested_interval_complete_stream_count: 0,
+        provider_terminal_stream_count: 0,
+        check_count: 6,
+        satisfied_check_count: 1,
+        unmet_check_count: 5,
+        state: "locked",
+        complete_wallet_history_established: false,
+      },
+      limitations: [
+        {
+          code: "provider_terminal_is_not_earliest_activity_proof",
+          message: "A provider terminal response is not chain proof of first activity.",
+        },
+        {
+          code: "complete_history_gate_requires_chain_anchor",
+          message: "Complete history stays locked without a chain anchor.",
+        },
+        {
+          code: "complete_history_gate_requires_reorg_invalidation",
+          message: "Complete history stays locked without reorg invalidation.",
+        },
+      ],
     },
   };
 }
