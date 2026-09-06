@@ -71,6 +71,10 @@ ObservedHistoryFloorPublicId = Annotated[
     str,
     Field(pattern=r"^ohf_[0-9a-f]{64}$", max_length=68),
 ]
+EarliestActivityAnchorPublicId = Annotated[
+    str,
+    Field(pattern=r"^eaa_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -1093,6 +1097,223 @@ class WalletCaseObservedHistoryFloorResponse(_StrictModel):
             )
         ):
             raise ValueError("observed history floor content address is inconsistent")
+        return self
+
+
+EarliestActivityAnchorState = Literal[
+    "empty",
+    "ineligible",
+    "verification_required",
+    "predecessor_present",
+    "verified",
+]
+
+
+class WalletCaseEarliestActivityCandidate(_StrictModel):
+    snapshot_public_id: CanonicalPublicId
+    activity_public_id: Annotated[
+        str,
+        Field(pattern=r"^act_[0-9a-f]{64}$", max_length=68),
+    ]
+    occurred_at: str | None = None
+    logical_time: str = Field(pattern=r"^[1-9][0-9]{0,19}$", max_length=20)
+    transaction_hash: Sha256Digest
+    provider: str = Field(min_length=1, max_length=64)
+
+    @field_validator("logical_time")
+    @classmethod
+    def _logical_time_must_fit_uint64(cls, value: str) -> str:
+        if int(value, 10) > 2**64 - 1:
+            raise ValueError("earliest activity logical time exceeds uint64")
+        return value
+
+
+class WalletCaseEarliestActivityBlock(_StrictModel):
+    workchain: int = Field(ge=-1, le=0)
+    shard: str = Field(pattern=r"^(?:0|-?[1-9][0-9]{0,18})$")
+    seqno: int = Field(ge=1, le=2**31 - 1)
+    root_hash: Sha256Digest
+    file_hash: Sha256Digest
+
+    @field_validator("shard")
+    @classmethod
+    def _shard_must_fit_int64(cls, value: str) -> str:
+        if not -(2**63) <= int(value, 10) <= 2**63 - 1:
+            raise ValueError("earliest activity proof shard exceeds int64")
+        return value
+
+
+class WalletCaseEarliestActivityPredecessor(_StrictModel):
+    logical_time: str = Field(pattern=r"^(?:0|[1-9][0-9]{0,19})$", max_length=20)
+    transaction_hash: Sha256Digest
+    absent: bool
+
+    @model_validator(mode="after")
+    def _validate_predecessor(self):
+        zero = self.logical_time == "0" and self.transaction_hash == "0" * 64
+        if self.absent != zero:
+            raise ValueError("earliest activity predecessor state is inconsistent")
+        if self.logical_time == "0" and self.transaction_hash != "0" * 64:
+            raise ValueError("earliest activity predecessor coordinate is inconsistent")
+        if self.logical_time != "0" and self.transaction_hash == "0" * 64:
+            raise ValueError("earliest activity predecessor coordinate is inconsistent")
+        return self
+
+
+class WalletCaseEarliestActivityProof(_StrictModel):
+    evidence_public_id: CanonicalPublicId
+    verification_digest_sha256: Sha256Digest
+    inclusion_catalog_digest_sha256: Sha256Digest
+    selected_proof_digest_sha256: Sha256Digest
+    network: WalletCaseNetwork
+    verifier_policy_id: Literal["ton_liteserver_checkpoint_strict_2026_08_v2"]
+    trust_level: Literal[0]
+    trusted_checkpoint: WalletCaseEarliestActivityBlock
+    block: WalletCaseEarliestActivityBlock
+    transaction_boc_sha256: Sha256Digest
+    account_address_canonical: str = Field(
+        pattern=r"^(?:0|-1):[0-9a-f]{64}$",
+        min_length=66,
+        max_length=67,
+    )
+    logical_time: str = Field(pattern=r"^[1-9][0-9]{0,19}$", max_length=20)
+    transaction_hash: Sha256Digest
+    predecessor: WalletCaseEarliestActivityPredecessor
+    block_merkle_proof_verified: Literal[True]
+    canonical_block_chain_verified_at_capture: Literal[True]
+    provider_free_revalidated: Literal[True]
+
+    @model_validator(mode="after")
+    def _validate_proof_coordinate(self):
+        if (
+            not self.predecessor.absent
+            and int(self.predecessor.logical_time, 10) >= int(self.logical_time, 10)
+        ):
+            raise ValueError("earliest activity predecessor must precede the candidate")
+        return self
+
+
+class WalletCaseEarliestActivityAnchorSummary(_StrictModel):
+    candidate_available: bool
+    canonical_inclusion_proven: bool
+    predecessor_absent: bool | None
+    state: EarliestActivityAnchorState
+    earliest_wallet_activity_established: bool
+
+
+class WalletCaseEarliestActivityAnchorDocument(_StrictModel):
+    contract_version: Literal["wallet_case_earliest_activity_anchor_v1"]
+    case_public_id: CanonicalPublicId
+    network: WalletCaseNetwork
+    data_environment: WalletCaseDataEnvironment
+    wallet_account_canonical: str = Field(
+        pattern=r"^(?:0|-1):[0-9a-f]{64}$",
+        min_length=66,
+        max_length=67,
+    )
+    input_floor: WalletCaseObservedHistoryFloorResponse
+    candidate: WalletCaseEarliestActivityCandidate | None = None
+    proof: WalletCaseEarliestActivityProof | None = None
+    summary: WalletCaseEarliestActivityAnchorSummary
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_anchor(self):
+        candidate = self.candidate
+        proof = self.proof
+        expected_state: EarliestActivityAnchorState = (
+            "ineligible"
+            if self.data_environment != "live"
+            else "empty"
+            if candidate is None
+            else "verification_required"
+            if proof is None
+            else "verified"
+            if proof.predecessor.absent
+            else "predecessor_present"
+        )
+        expected_summary = {
+            "candidate_available": candidate is not None,
+            "canonical_inclusion_proven": proof is not None,
+            "predecessor_absent": (
+                proof.predecessor.absent if proof is not None else None
+            ),
+            "state": expected_state,
+            "earliest_wallet_activity_established": expected_state == "verified",
+        }
+        if (
+            self.case_public_id != self.input_floor.document.case_public_id
+            or (proof is not None and candidate is None)
+            or (self.data_environment != "live" and proof is not None)
+            or (
+                proof is not None
+                and candidate is not None
+                and (
+                    proof.network != self.network
+                    or proof.account_address_canonical
+                    != self.wallet_account_canonical
+                    or proof.logical_time != candidate.logical_time
+                    or proof.transaction_hash != candidate.transaction_hash
+                )
+            )
+            or self.summary.model_dump(mode="json") != expected_summary
+        ):
+            raise ValueError("earliest activity anchor is inconsistent")
+        return self
+
+
+class WalletCaseEarliestActivityAnchorDescriptor(_StrictModel):
+    public_id: EarliestActivityAnchorPublicId
+    contract_version: Literal["wallet_case_earliest_activity_anchor_v1"]
+    content_hash_sha256: Sha256Digest
+    input_floor_public_id: ObservedHistoryFloorPublicId
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    state: EarliestActivityAnchorState
+    candidate_activity_public_id: str | None = Field(
+        default=None,
+        pattern=r"^act_[0-9a-f]{64}$",
+        max_length=68,
+    )
+    canonical_inclusion_proven: bool
+    predecessor_absent: bool | None
+    earliest_wallet_activity_established: bool
+
+
+class WalletCaseEarliestActivityAnchorResponse(_StrictModel):
+    anchor: WalletCaseEarliestActivityAnchorDescriptor
+    document: WalletCaseEarliestActivityAnchorDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        descriptor = self.anchor
+        floor = self.document.input_floor.floor
+        candidate = self.document.candidate
+        summary = self.document.summary
+        if (
+            descriptor.public_id != f"eaa_{digest}"
+            or descriptor.content_hash_sha256 != digest
+            or descriptor.contract_version != self.document.contract_version
+            or descriptor.input_floor_public_id != floor.public_id
+            or descriptor.checkpoint_cutoff_public_id
+            != floor.checkpoint_cutoff_public_id
+            or descriptor.state != summary.state
+            or descriptor.candidate_activity_public_id
+            != (candidate.activity_public_id if candidate is not None else None)
+            or descriptor.canonical_inclusion_proven
+            != summary.canonical_inclusion_proven
+            or descriptor.predecessor_absent != summary.predecessor_absent
+            or descriptor.earliest_wallet_activity_established
+            != summary.earliest_wallet_activity_established
+        ):
+            raise ValueError("earliest activity anchor content address is inconsistent")
         return self
 
 

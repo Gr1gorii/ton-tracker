@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from threading import Barrier, Event, Thread
 import time
@@ -56,6 +57,7 @@ from wallet_case_schemas import (
     WalletCaseBackfillProgressResponse,
     WalletCaseBackfillScheduleResponse,
     WalletCaseCompleteHistoryGateResponse,
+    WalletCaseEarliestActivityAnchorResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationReceiptV3Response,
@@ -2289,6 +2291,71 @@ def test_observed_history_floor_fails_closed_on_corrupt_checkpoint(client):
         ),
         "retryable": False,
     }
+
+
+def test_earliest_activity_anchor_schema_is_content_addressed_and_fail_closed(client):
+    case = _create_case(client)["case"]
+    floor_response = client.get(
+        f"/api/v1/cases/{case['public_id']}/observed-history-floor"
+    )
+    assert floor_response.status_code == 200, floor_response.text
+    document = {
+        "contract_version": "wallet_case_earliest_activity_anchor_v1",
+        "case_public_id": case["public_id"],
+        "network": case["network"],
+        "data_environment": case["data_environment"],
+        "wallet_account_canonical": case["canonical_wallet_key"],
+        "input_floor": floor_response.json(),
+        "candidate": None,
+        "proof": None,
+        "summary": {
+            "candidate_available": False,
+            "canonical_inclusion_proven": False,
+            "predecessor_absent": None,
+            "state": "ineligible",
+            "earliest_wallet_activity_established": False,
+        },
+        "limitations": [{
+            "code": "demo_activity_cannot_anchor_chain_history",
+            "message": "Demo Activity cannot establish a chain anchor.",
+        }],
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    response = {
+        "anchor": {
+            "public_id": f"eaa_{digest}",
+            "contract_version": document["contract_version"],
+            "content_hash_sha256": digest,
+            "input_floor_public_id": document["input_floor"]["floor"]["public_id"],
+            "checkpoint_cutoff_public_id": None,
+            "state": "ineligible",
+            "candidate_activity_public_id": None,
+            "canonical_inclusion_proven": False,
+            "predecessor_absent": None,
+            "earliest_wallet_activity_established": False,
+        },
+        "document": document,
+    }
+
+    WalletCaseEarliestActivityAnchorResponse.model_validate(response)
+    tampered = json.loads(json.dumps(response))
+    tampered["anchor"]["public_id"] = f"eaa_{'0' * 64}"
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseEarliestActivityAnchorResponse.model_validate(tampered)
+    overstated = json.loads(json.dumps(response))
+    overstated["document"]["summary"][
+        "earliest_wallet_activity_established"
+    ] = True
+    with pytest.raises(ValueError, match="earliest activity anchor"):
+        WalletCaseEarliestActivityAnchorResponse.model_validate(overstated)
 
 
 def test_complete_history_gate_is_content_addressed_locked_and_scoped(client):
