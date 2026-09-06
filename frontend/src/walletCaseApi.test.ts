@@ -12,6 +12,7 @@ import {
   getWalletCaseBackfillOutcomeHistory,
   getWalletCaseBackfillProgress,
   getWalletCaseCompleteHistoryGate,
+  getWalletCaseObservedHistoryFloor,
   getWalletCaseBackfillOutcome,
   getWalletCaseBackfillSchedule,
   getWalletCase,
@@ -60,6 +61,7 @@ import {
   checkpointContinuationReceiptFixture,
   checkpointContinuationPlanFixture,
   completeHistoryGateFixture,
+  observedHistoryFloorFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
@@ -646,6 +648,40 @@ describe("Wallet Case API", () => {
       },
     }));
     await expect(getWalletCaseCompleteHistoryGate(CASE_ID)).rejects.toThrow(
+      /does not match/,
+    );
+  });
+
+  it("reads a no-store observed history floor bound to its Wallet Case", async () => {
+    const floor = observedHistoryFloorFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(floor));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseObservedHistoryFloor(
+      CASE_ID,
+      controller.signal,
+    )).resolves.toEqual(floor);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/observed-history-floor`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...floor,
+      document: {
+        ...floor.document,
+        case_public_id: OTHER_CASE_ID,
+        input_progress: {
+          ...floor.document.input_progress,
+          document: {
+            ...floor.document.input_progress.document,
+            case_public_id: OTHER_CASE_ID,
+          },
+        },
+      },
+    }));
+    await expect(getWalletCaseObservedHistoryFloor(CASE_ID)).rejects.toThrow(
       /does not match/,
     );
   });
