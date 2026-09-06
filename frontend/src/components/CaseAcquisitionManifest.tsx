@@ -29,6 +29,7 @@ import {
   serializeWalletCaseBackfillSchedule,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
+  serializeWalletCaseCompleteHistoryGate,
   serializeWalletCaseStreamCheckpointChain,
   type WalletCaseBackfillProgressResponse,
   type WalletCaseBackfillOutcomeResponse,
@@ -40,12 +41,14 @@ import {
 } from "../walletCaseStreamCheckpoint";
 import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
 import { useWalletCaseBackfillHistory } from "../useWalletCaseBackfillHistory";
+import { useWalletCaseCompleteHistoryGate } from "../useWalletCaseCompleteHistoryGate";
 import {
   serializeWalletCaseBackfillCoverageTimeline,
   serializeWalletCaseBackfillCoverageTimelineCsv,
   type WalletCaseBackfillCoverageSource,
 } from "../walletCaseBackfillCoverageTimeline";
 import BackfillCoverageTimeline from "./BackfillCoverageTimeline";
+import CompleteHistoryGatePanel from "./CompleteHistoryGatePanel";
 
 function formatTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -76,6 +79,20 @@ function downloadBackfillProgress(
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `backfill-progress-${progress.progress.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadCompleteHistoryGate(
+  gate: NonNullable<ReturnType<typeof useWalletCaseCompleteHistoryGate>["gate"]>,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseCompleteHistoryGate(gate)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `complete-history-gate-${gate.gate.public_id}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -202,6 +219,10 @@ export default function CaseAcquisitionManifest({
   const backfillOutcomeRequestRef = useRef<AbortController | null>(null);
   const backfillHistory = useWalletCaseBackfillHistory(caseId);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
+  const completeHistoryGate = useWalletCaseCompleteHistoryGate(
+    caseId,
+    snapshot.public_id,
+  );
   const canVerifyContinuationReceipt = (
     snapshot.requested_scope.mode === "resume" &&
     snapshot.requested_scope.continuation_plan_public_id !== null &&
@@ -883,6 +904,21 @@ export default function CaseAcquisitionManifest({
                     <button
                       className="button-secondary case-checkpoint-plan-button"
                       type="button"
+                      disabled={completeHistoryGate.state === "loading"}
+                      onClick={() => void completeHistoryGate.verify()}
+                    >
+                      {completeHistoryGate.state === "loading"
+                        ? <SpinnerGap className="spin" size={15} />
+                        : <ShieldCheck size={15} />}
+                      {completeHistoryGate.state === "loading"
+                        ? "Verifying complete history…"
+                        : completeHistoryGate.gate
+                          ? "Verify complete-history gate again"
+                          : "Verify complete-history gate"}
+                    </button>
+                    <button
+                      className="button-secondary case-checkpoint-plan-button"
+                      type="button"
                       disabled={continuationPlanLoading}
                       onClick={() => void loadContinuationPlan()}
                     >
@@ -991,6 +1027,18 @@ export default function CaseAcquisitionManifest({
                     <div className="case-sync-message is-error" role="alert">
                       <WarningCircle size={16} weight="fill" />
                       <span>{backfillProgressError}</span>
+                    </div>
+                  )}
+                  {completeHistoryGate.gate && (
+                    <CompleteHistoryGatePanel
+                      gate={completeHistoryGate.gate}
+                      onExport={() => downloadCompleteHistoryGate(completeHistoryGate.gate!)}
+                    />
+                  )}
+                  {completeHistoryGate.error && (
+                    <div className="case-sync-message is-error" role="alert">
+                      <WarningCircle size={16} weight="fill" />
+                      <span>{completeHistoryGate.error}</span>
                     </div>
                   )}
                   {backfillSchedule && (

@@ -12,6 +12,7 @@ export interface WalletCaseCompleteHistoryGateController {
 
 export function useWalletCaseCompleteHistoryGate(
   caseId: string,
+  evidenceScope: string = caseId,
 ): WalletCaseCompleteHistoryGateController {
   const [gate, setGate] = useState<WalletCaseCompleteHistoryGateResponse | null>(null);
   const [state, setState] = useState<WalletCaseCompleteHistoryGateController["state"]>("idle");
@@ -25,7 +26,7 @@ export function useWalletCaseCompleteHistoryGate(
     setState("idle");
     setError(null);
     return () => requestRef.current?.abort();
-  }, [caseId]);
+  }, [caseId, evidenceScope]);
 
   const verify = useCallback(async () => {
     requestRef.current?.abort();
