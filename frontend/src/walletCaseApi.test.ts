@@ -11,6 +11,7 @@ import {
   deleteWalletCase,
   getWalletCaseBackfillOutcomeHistory,
   getWalletCaseBackfillProgress,
+  getWalletCaseCompleteHistoryGate,
   getWalletCaseBackfillOutcome,
   getWalletCaseBackfillSchedule,
   getWalletCase,
@@ -58,6 +59,7 @@ import {
   backfillScheduleFixture,
   checkpointContinuationReceiptFixture,
   checkpointContinuationPlanFixture,
+  completeHistoryGateFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
@@ -610,6 +612,40 @@ describe("Wallet Case API", () => {
       document: { ...progress.document, case_public_id: OTHER_CASE_ID },
     }));
     await expect(getWalletCaseBackfillProgress(CASE_ID)).rejects.toThrow(
+      /does not match/,
+    );
+  });
+
+  it("reads a no-store complete-history gate bound to its Wallet Case", async () => {
+    const gate = completeHistoryGateFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(gate));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseCompleteHistoryGate(
+      CASE_ID,
+      controller.signal,
+    )).resolves.toEqual(gate);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/complete-history-gate`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...gate,
+      document: {
+        ...gate.document,
+        case_public_id: OTHER_CASE_ID,
+        input_progress: {
+          ...gate.document.input_progress,
+          document: {
+            ...gate.document.input_progress.document,
+            case_public_id: OTHER_CASE_ID,
+          },
+        },
+      },
+    }));
+    await expect(getWalletCaseCompleteHistoryGate(CASE_ID)).rejects.toThrow(
       /does not match/,
     );
   });

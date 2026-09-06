@@ -55,6 +55,7 @@ from wallet_case_schemas import (
     WalletCaseBackfillOutcomeResponse,
     WalletCaseBackfillProgressResponse,
     WalletCaseBackfillScheduleResponse,
+    WalletCaseCompleteHistoryGateResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationReceiptV3Response,
@@ -2163,6 +2164,121 @@ def test_backfill_progress_schema_rejects_aggregate_and_frontier_drift(client):
     frontier_drift["document"]["streams"][0]["frontier_advanced"] = True
     with pytest.raises(ValueError, match="backfill progress stream"):
         WalletCaseBackfillProgressResponse.model_validate(frontier_drift)
+
+
+def test_complete_history_gate_is_content_addressed_locked_and_scoped(client):
+    case_id = _create_case(client)["case"]["public_id"]
+
+    response = client.get(f"/api/v1/cases/{case_id}/complete-history-gate")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["gate"]["public_id"] == (
+        f"chg_{body['gate']['content_hash_sha256']}"
+    )
+    assert body["gate"]["contract_version"] == (
+        "wallet_case_complete_history_gate_v1"
+    )
+    assert body["gate"]["input_progress_public_id"].startswith("bfp_")
+    assert body["gate"]["checkpoint_cutoff_public_id"] is None
+    assert body["document"]["case_public_id"] == case_id
+    assert body["document"]["data_environment"] == "demo"
+    assert [item["code"] for item in body["document"]["checks"]] == [
+        "live_data_environment",
+        "provider_streams_present",
+        "all_requested_intervals_complete",
+        "provider_exhaustion_observed",
+        "earliest_activity_anchor_verified",
+        "reorg_invalidation_active",
+    ]
+    assert {item["status"] for item in body["document"]["checks"]} == {
+        "unmet"
+    }
+    assert body["document"]["summary"] == {
+        "stream_count": 0,
+        "requested_interval_complete_stream_count": 0,
+        "provider_terminal_stream_count": 0,
+        "check_count": 6,
+        "satisfied_check_count": 0,
+        "unmet_check_count": 6,
+        "state": "locked",
+        "complete_wallet_history_established": False,
+    }
+    WalletCaseCompleteHistoryGateResponse.model_validate(body)
+    repeated = client.get(f"/api/v1/cases/{case_id}/complete-history-gate")
+    assert repeated.status_code == 200
+    assert repeated.json() == body
+    tampered = json.loads(json.dumps(body))
+    tampered["gate"]["public_id"] = f"chg_{'0' * 64}"
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseCompleteHistoryGateResponse.model_validate(tampered)
+    assert client.get(
+        f"/api/v1/cases/{uuid4()}/complete-history-gate"
+    ).status_code == 404
+
+
+def test_complete_history_gate_keeps_terminal_provider_evidence_locked(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(
+        client,
+        cursor=None,
+        completion_state="complete",
+        termination_reason="provider_terminal",
+    )
+
+    response = client.get(f"/api/v1/cases/{case_id}/complete-history-gate")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    statuses = {
+        item["code"]: item["status"] for item in body["document"]["checks"]
+    }
+    assert statuses == {
+        "live_data_environment": "unmet",
+        "provider_streams_present": "satisfied",
+        "all_requested_intervals_complete": "satisfied",
+        "provider_exhaustion_observed": "satisfied",
+        "earliest_activity_anchor_verified": "unmet",
+        "reorg_invalidation_active": "unmet",
+    }
+    assert body["document"]["summary"] == {
+        "stream_count": 1,
+        "requested_interval_complete_stream_count": 1,
+        "provider_terminal_stream_count": 1,
+        "check_count": 6,
+        "satisfied_check_count": 3,
+        "unmet_check_count": 3,
+        "state": "locked",
+        "complete_wallet_history_established": False,
+    }
+    assert body["gate"]["state"] == "locked"
+    assert body["gate"]["complete_wallet_history_established"] is False
+
+
+def test_complete_history_gate_fails_closed_on_corrupt_checkpoint(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case.has(public_id=case_id)
+            )
+        )
+        assert checkpoint is not None
+        checkpoint.checkpoint_json = (
+            '{"contract_version":"wallet_case_stream_checkpoint_v1"}'
+        )
+        session.commit()
+
+    response = client.get(f"/api/v1/cases/{case_id}/complete-history-gate")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "complete_history_gate_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ),
+        "retryable": False,
+    }
 
 
 def test_backfill_schedule_selects_least_advanced_ready_stream(client):

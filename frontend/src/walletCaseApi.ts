@@ -26,6 +26,7 @@ import {
   parseWalletCaseBackfillOutcome,
   parseWalletCaseBackfillProgress,
   parseWalletCaseBackfillSchedule,
+  parseWalletCaseCompleteHistoryGate,
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseStreamCheckpointCatalog,
@@ -36,6 +37,7 @@ import {
   type WalletCaseBackfillOutcomeHistoryResponse,
   type WalletCaseBackfillOutcomeResponse,
   type WalletCaseBackfillScheduleResponse,
+  type WalletCaseCompleteHistoryGateResponse,
   type WalletCaseCheckpointContinuationReceiptResponse,
   type WalletCaseCheckpointContinuationPlanResponse,
   type WalletCaseStreamCheckpointCatalogResponse,
@@ -691,6 +693,28 @@ export async function getWalletCaseBackfillProgress(
     throw new Error("Wallet Case backfill progress does not match the request");
   }
   return progress;
+}
+
+export async function getWalletCaseCompleteHistoryGate(
+  caseId: string,
+  signal?: AbortSignal,
+): Promise<WalletCaseCompleteHistoryGateResponse> {
+  assertPublicId(caseId, "Wallet Case id");
+  const response = await fetch(
+    `${API_BASE}/api/v1/cases/${encodeURIComponent(caseId)}/complete-history-gate`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) {
+    throw await walletCaseResponseError(
+      response,
+      "Wallet Case complete-history gate read failed",
+    );
+  }
+  const gate = parseWalletCaseCompleteHistoryGate(await response.json());
+  if (gate.document.case_public_id !== caseId) {
+    throw new Error("Wallet Case complete-history gate does not match the request");
+  }
+  return gate;
 }
 
 export async function getWalletCaseBackfillSchedule(

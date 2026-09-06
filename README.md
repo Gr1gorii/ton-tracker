@@ -4,10 +4,34 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v0.99.0 — Backfill Coverage Timeline**<br>
+Current product release: **v1.0.0 — Complete-History Gate**<br>
 Stable backend API version: **0.2.1**
 
-## What v0.99.0 adds
+## What v1.0.0 adds
+
+Wallet Case now publishes an explicit, fail-closed answer to the question that
+bounded acquisition alone cannot resolve: whether complete wallet history has
+actually been established. The new
+`GET /api/v1/cases/{case}/complete-history-gate` endpoint embeds the exact
+verified `bfp_<sha256>` Backfill Progress input in a canonical
+`chg_<sha256>` document and evaluates six fixed prerequisites.
+
+The gate checks live-data scope, provider-stream presence, completion of every
+requested interval, terminal exhaustion from every current provider stream, a
+chain-verifiable earliest-activity anchor, and active reorg invalidation. The
+last two capabilities are not implemented in this release, so the only valid
+state is `locked` and `complete_wallet_history_established` is always `false`.
+Provider exhaustion is displayed as bounded evidence, never relabelled as
+proof of a wallet's first activity.
+
+The browser strictly revalidates the nested progress, check order and statuses,
+summary counts, Case/cutoff linkage, and `chg_` identity before display. Summary
+exposes verification only on explicit request, shows every satisfied and unmet
+prerequisite with provenance, and exports the verified JSON. Corrupt stored
+checkpoint evidence fails closed. No migration is added; Alembic remains at
+`20260828_0028` and backend API remains `0.2.1`.
+
+## v0.99.0 backfill coverage timeline
 
 Wallet Case now turns an explicitly verified Backfill Outcome history into a
 chronological coverage timeline. The client derives the series only after the
@@ -399,6 +423,8 @@ profit, ownership proof, or complete wallet history.
   safe append pagination, exact outcome reopening, and JSON export.
 - v0.99.0 verified chronological Backfill Coverage Timeline with fail-closed
   frozen-window composition, accessible movement metrics, and JSON/CSV export.
+- v1.0.0 canonical `chg_` Complete-History Gate with six explicit
+  prerequisites, strict nested provenance, locked verdict, and JSON export.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

@@ -9,6 +9,7 @@ import {
   checkpointContinuationReceiptV2Fixture,
   checkpointContinuationReceiptV3Fixture,
   checkpointContinuationPlanFixture,
+  completeHistoryGateFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
@@ -21,6 +22,7 @@ import {
   parseWalletCaseBackfillSchedule,
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
+  parseWalletCaseCompleteHistoryGate,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
   parseWalletCaseStreamCheckpointDetail,
@@ -31,6 +33,7 @@ import {
   serializeWalletCaseBackfillSchedule,
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
+  serializeWalletCaseCompleteHistoryGate,
   serializeWalletCaseStreamCheckpointChain,
 } from "./walletCaseStreamCheckpoint";
 
@@ -185,6 +188,44 @@ describe("Wallet Case stream checkpoint contracts", () => {
         })),
       },
     })).toThrow(/stream 0 is inconsistent/);
+  });
+
+  it("accepts and exports a fail-closed complete-history gate", () => {
+    const gate = completeHistoryGateFixture();
+
+    expect(parseWalletCaseCompleteHistoryGate(gate)).toEqual(gate);
+    expect(JSON.parse(serializeWalletCaseCompleteHistoryGate(gate))).toEqual(gate);
+  });
+
+  it("rejects complete-history identity, status, summary, and case drift", () => {
+    const gate = completeHistoryGateFixture();
+    expect(() => parseWalletCaseCompleteHistoryGate({
+      ...gate,
+      gate: { ...gate.gate, public_id: `chg_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseCompleteHistoryGate({
+      ...gate,
+      document: {
+        ...gate.document,
+        checks: gate.document.checks.map((check, index) => (
+          index === 1 ? { ...check, status: "unmet" } : check
+        )),
+      },
+    })).toThrow(/check 1 is inconsistent/);
+    expect(() => parseWalletCaseCompleteHistoryGate({
+      ...gate,
+      document: {
+        ...gate.document,
+        summary: { ...gate.document.summary, satisfied_check_count: 2 },
+      },
+    })).toThrow(/inconsistent/);
+    expect(() => parseWalletCaseCompleteHistoryGate({
+      ...gate,
+      document: {
+        ...gate.document,
+        case_public_id: "550e8400-e29b-41d4-b716-446655440002",
+      },
+    })).toThrow(/inconsistent/);
   });
 
   it("accepts and exports a finite content-addressed backfill schedule", () => {
