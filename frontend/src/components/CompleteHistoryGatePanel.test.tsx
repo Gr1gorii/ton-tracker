@@ -19,7 +19,8 @@ describe("CompleteHistoryGatePanel", () => {
     expect(screen.getByText("1/6")).toBeTruthy();
     expect(screen.getAllByRole("listitem")).toHaveLength(6);
     expect(screen.getByText("earliest activity anchor verified")).toBeTruthy();
-    expect(screen.getByText(gate.gate.input_progress_public_id)).toBeTruthy();
+    expect(screen.getByText(gate.gate.input_anchor_public_id)).toBeTruthy();
+    expect(screen.getByText(`Input progress: ${gate.gate.input_progress_public_id}`)).toBeTruthy();
   });
 
   it("delegates export of the verified gate", () => {

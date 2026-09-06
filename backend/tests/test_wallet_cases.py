@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from threading import Barrier, Event, Thread
 import time
@@ -56,6 +57,7 @@ from wallet_case_schemas import (
     WalletCaseBackfillProgressResponse,
     WalletCaseBackfillScheduleResponse,
     WalletCaseCompleteHistoryGateResponse,
+    WalletCaseEarliestActivityAnchorResponse,
     WalletCaseCheckpointContinuationReceiptResponse,
     WalletCaseCheckpointContinuationReceiptV2Response,
     WalletCaseCheckpointContinuationReceiptV3Response,
@@ -72,6 +74,58 @@ RAW_ADDRESS_UPPER = f"0:{ACCOUNT_ID.upper()}"
 BOUNCEABLE_MAINNET = "EQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPrHF"
 NON_BOUNCEABLE_MAINNET = "UQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPuwA"
 BOUNCEABLE_TESTNET = "kQDKbjIcfM6ezt8KjKJJLshZJJSqX7XOA4ff-W72r5gqPgpP"
+
+
+def _earliest_anchor_candidate_and_proof(
+    *,
+    predecessor_lt: str = "0",
+    predecessor_hash: str = "0" * 64,
+) -> tuple[dict, dict]:
+    transaction_hash = "ab" * 32
+    candidate = {
+        "snapshot_public_id": str(uuid4()),
+        "activity_public_id": f"act_{'12' * 32}",
+        "occurred_at": "2026-09-06T12:00:00Z",
+        "logical_time": "20",
+        "transaction_hash": transaction_hash,
+        "provider": "tonapi",
+    }
+    proof = {
+        "evidence_public_id": str(uuid4()),
+        "verification_digest_sha256": "21" * 32,
+        "inclusion_catalog_digest_sha256": "22" * 32,
+        "selected_proof_digest_sha256": "23" * 32,
+        "network": "ton-mainnet",
+        "verifier_policy_id": "ton_liteserver_checkpoint_strict_2026_08_v2",
+        "trust_level": 0,
+        "trusted_checkpoint": {
+            "workchain": -1,
+            "shard": "-9223372036854775808",
+            "seqno": 1,
+            "root_hash": "31" * 32,
+            "file_hash": "32" * 32,
+        },
+        "block": {
+            "workchain": 0,
+            "shard": "-9223372036854775808",
+            "seqno": 2,
+            "root_hash": "33" * 32,
+            "file_hash": "34" * 32,
+        },
+        "transaction_boc_sha256": "35" * 32,
+        "account_address_canonical": RAW_ADDRESS,
+        "logical_time": "20",
+        "transaction_hash": transaction_hash,
+        "predecessor": {
+            "logical_time": predecessor_lt,
+            "transaction_hash": predecessor_hash,
+            "absent": predecessor_lt == "0" and predecessor_hash == "0" * 64,
+        },
+        "block_merkle_proof_verified": True,
+        "canonical_block_chain_verified_at_capture": True,
+        "provider_free_revalidated": True,
+    }
+    return candidate, proof
 
 
 @pytest.fixture
@@ -2291,6 +2345,177 @@ def test_observed_history_floor_fails_closed_on_corrupt_checkpoint(client):
     }
 
 
+def test_earliest_activity_anchor_schema_is_content_addressed_and_fail_closed(client):
+    case = _create_case(client)["case"]
+    floor_response = client.get(
+        f"/api/v1/cases/{case['public_id']}/observed-history-floor"
+    )
+    assert floor_response.status_code == 200, floor_response.text
+    document = {
+        "contract_version": "wallet_case_earliest_activity_anchor_v1",
+        "case_public_id": case["public_id"],
+        "network": case["network"],
+        "data_environment": case["data_environment"],
+        "wallet_account_canonical": case["canonical_wallet_key"],
+        "input_floor": floor_response.json(),
+        "candidate": None,
+        "proof": None,
+        "summary": {
+            "candidate_available": False,
+            "canonical_inclusion_proven": False,
+            "predecessor_absent": None,
+            "state": "ineligible",
+            "earliest_wallet_activity_established": False,
+        },
+        "limitations": [{
+            "code": "demo_activity_cannot_anchor_chain_history",
+            "message": "Demo Activity cannot establish a chain anchor.",
+        }],
+    }
+    digest = hashlib.sha256(
+        json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    response = {
+        "anchor": {
+            "public_id": f"eaa_{digest}",
+            "contract_version": document["contract_version"],
+            "content_hash_sha256": digest,
+            "input_floor_public_id": document["input_floor"]["floor"]["public_id"],
+            "checkpoint_cutoff_public_id": None,
+            "state": "ineligible",
+            "candidate_activity_public_id": None,
+            "canonical_inclusion_proven": False,
+            "predecessor_absent": None,
+            "earliest_wallet_activity_established": False,
+        },
+        "document": document,
+    }
+
+    WalletCaseEarliestActivityAnchorResponse.model_validate(response)
+    tampered = json.loads(json.dumps(response))
+    tampered["anchor"]["public_id"] = f"eaa_{'0' * 64}"
+    with pytest.raises(ValueError, match="content address"):
+        WalletCaseEarliestActivityAnchorResponse.model_validate(tampered)
+    overstated = json.loads(json.dumps(response))
+    overstated["document"]["summary"][
+        "earliest_wallet_activity_established"
+    ] = True
+    with pytest.raises(ValueError, match="earliest activity anchor"):
+        WalletCaseEarliestActivityAnchorResponse.model_validate(overstated)
+
+
+def test_earliest_activity_anchor_endpoint_is_no_store_and_owner_scoped(client):
+    case = _create_case(client)["case"]
+
+    response = client.get(
+        f"/api/v1/cases/{case['public_id']}/earliest-activity-anchor"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["anchor"]["public_id"] == (
+        f"eaa_{body['anchor']['content_hash_sha256']}"
+    )
+    assert body["anchor"]["state"] == "ineligible"
+    assert body["anchor"]["input_floor_public_id"].startswith("ohf_")
+    assert body["document"]["candidate"] is None
+    assert body["document"]["proof"] is None
+    assert body["document"]["summary"] == {
+        "candidate_available": False,
+        "canonical_inclusion_proven": False,
+        "predecessor_absent": None,
+        "state": "ineligible",
+        "earliest_wallet_activity_established": False,
+    }
+    WalletCaseEarliestActivityAnchorResponse.model_validate(body)
+    assert client.get(
+        f"/api/v1/cases/{uuid4()}/earliest-activity-anchor"
+    ).status_code == 404
+
+
+def test_earliest_activity_anchor_endpoint_fails_closed_on_corrupt_floor(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case.has(public_id=case_id)
+            )
+        )
+        assert checkpoint is not None
+        checkpoint.checkpoint_json = (
+            '{"contract_version":"wallet_case_stream_checkpoint_v1"}'
+        )
+        session.commit()
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/earliest-activity-anchor"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "earliest_activity_anchor_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ),
+        "retryable": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("predecessor_lt", "predecessor_hash", "state", "established"),
+    [
+        ("0", "0" * 64, "verified", True),
+        ("10", "cd" * 32, "predecessor_present", False),
+    ],
+)
+def test_earliest_activity_anchor_derives_chain_predecessor_state(
+    client,
+    monkeypatch,
+    predecessor_lt,
+    predecessor_hash,
+    state,
+    established,
+):
+    case_id = _create_case(client)["case"]["public_id"]
+    candidate, proof = _earliest_anchor_candidate_and_proof(
+        predecessor_lt=predecessor_lt,
+        predecessor_hash=predecessor_hash,
+    )
+    with app.state.wallet_case_test_session() as session:
+        wallet_case = session.scalar(
+            select(WalletCase).where(WalletCase.public_id == case_id)
+        )
+        assert wallet_case is not None
+        wallet_case.data_environment = "live"
+        session.commit()
+
+    resolved = object()
+    monkeypatch.setattr(
+        WalletCaseService,
+        "_earliest_activity_candidate",
+        lambda _self, _case: (candidate, resolved),
+    )
+    monkeypatch.setattr(
+        WalletCaseService,
+        "_earliest_activity_candidate_proof",
+        lambda _self, _case, value: proof if value is resolved else None,
+    )
+    with app.state.wallet_case_test_session() as session:
+        response = WalletCaseService(session).get_earliest_activity_anchor(case_id)
+
+    validated = WalletCaseEarliestActivityAnchorResponse.model_validate(response)
+    assert validated.anchor.state == state
+    assert validated.anchor.predecessor_absent is established
+    assert validated.anchor.earliest_wallet_activity_established is established
+
+
 def test_complete_history_gate_is_content_addressed_locked_and_scoped(client):
     case_id = _create_case(client)["case"]["public_id"]
 
@@ -2303,8 +2528,9 @@ def test_complete_history_gate_is_content_addressed_locked_and_scoped(client):
         f"chg_{body['gate']['content_hash_sha256']}"
     )
     assert body["gate"]["contract_version"] == (
-        "wallet_case_complete_history_gate_v1"
+        "wallet_case_complete_history_gate_v2"
     )
+    assert body["gate"]["input_anchor_public_id"].startswith("eaa_")
     assert body["gate"]["input_progress_public_id"].startswith("bfp_")
     assert body["gate"]["checkpoint_cutoff_public_id"] is None
     assert body["document"]["case_public_id"] == case_id
@@ -2378,6 +2604,49 @@ def test_complete_history_gate_keeps_terminal_provider_evidence_locked(client):
     }
     assert body["gate"]["state"] == "locked"
     assert body["gate"]["complete_wallet_history_established"] is False
+
+
+def test_complete_history_gate_consumes_verified_earliest_anchor(
+    client,
+    monkeypatch,
+):
+    case_id = _create_case(client)["case"]["public_id"]
+    with app.state.wallet_case_test_session() as session:
+        wallet_case = session.scalar(
+            select(WalletCase).where(WalletCase.public_id == case_id)
+        )
+        assert wallet_case is not None
+        wallet_case.data_environment = "live"
+        session.commit()
+    candidate, proof = _earliest_anchor_candidate_and_proof()
+    resolved = object()
+    monkeypatch.setattr(
+        WalletCaseService,
+        "_earliest_activity_candidate",
+        lambda _self, _case: (candidate, resolved),
+    )
+    monkeypatch.setattr(
+        WalletCaseService,
+        "_earliest_activity_candidate_proof",
+        lambda _self, _case, value: proof if value is resolved else None,
+    )
+
+    response = client.get(f"/api/v1/cases/{case_id}/complete-history-gate")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    statuses = {
+        item["code"]: item["status"] for item in body["document"]["checks"]
+    }
+    assert statuses["live_data_environment"] == "satisfied"
+    assert statuses["earliest_activity_anchor_verified"] == "satisfied"
+    assert statuses["reorg_invalidation_active"] == "unmet"
+    assert body["gate"]["input_anchor_public_id"] == (
+        body["document"]["input_anchor"]["anchor"]["public_id"]
+    )
+    assert body["gate"]["satisfied_check_count"] == 2
+    assert body["gate"]["complete_wallet_history_established"] is False
+    WalletCaseCompleteHistoryGateResponse.model_validate(body)
 
 
 def test_complete_history_gate_fails_closed_on_corrupt_checkpoint(client):

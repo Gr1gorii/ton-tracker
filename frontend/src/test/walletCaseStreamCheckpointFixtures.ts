@@ -4,6 +4,7 @@ import type {
   WalletCaseBackfillProgressResponse,
   WalletCaseBackfillScheduleResponse,
   WalletCaseCompleteHistoryGateResponse,
+  WalletCaseEarliestActivityAnchorResponse,
   WalletCaseObservedHistoryFloorResponse,
   WalletCaseCheckpointContinuationReceiptV1Response,
   WalletCaseCheckpointContinuationReceiptV2Response,
@@ -406,14 +407,130 @@ export function observedHistoryFloorFixture(): WalletCaseObservedHistoryFloorRes
   };
 }
 
+export function earliestActivityAnchorFixture(): WalletCaseEarliestActivityAnchorResponse {
+  const floor = observedHistoryFloorFixture();
+  const anchorHash = "71".repeat(32);
+  return {
+    anchor: {
+      public_id: `eaa_${anchorHash}`,
+      contract_version: "wallet_case_earliest_activity_anchor_v1",
+      content_hash_sha256: anchorHash,
+      input_floor_public_id: floor.floor.public_id,
+      checkpoint_cutoff_public_id: floor.floor.checkpoint_cutoff_public_id,
+      state: "ineligible",
+      candidate_activity_public_id: null,
+      canonical_inclusion_proven: false,
+      predecessor_absent: null,
+      earliest_wallet_activity_established: false,
+    },
+    document: {
+      contract_version: "wallet_case_earliest_activity_anchor_v1",
+      case_public_id: CASE_ID,
+      network: "ton-mainnet",
+      data_environment: "demo",
+      wallet_account_canonical: `0:${"ab".repeat(32)}`,
+      input_floor: floor,
+      candidate: null,
+      proof: null,
+      summary: {
+        candidate_available: false,
+        canonical_inclusion_proven: false,
+        predecessor_absent: null,
+        state: "ineligible",
+        earliest_wallet_activity_established: false,
+      },
+      limitations: [{
+        code: "zero_predecessor_requires_canonical_inclusion",
+        message: "A zero predecessor requires canonical inclusion proof.",
+      }],
+    },
+  };
+}
+
+export function verifiedEarliestActivityAnchorFixture(): WalletCaseEarliestActivityAnchorResponse {
+  const base = earliestActivityAnchorFixture();
+  const anchorHash = "72".repeat(32);
+  const candidate = {
+    snapshot_public_id: SYNC_ID,
+    activity_public_id: `act_${"12".repeat(32)}`,
+    occurred_at: "2026-09-06T12:00:00Z",
+    logical_time: "20",
+    transaction_hash: "ab".repeat(32),
+    provider: "tonapi",
+  };
+  const proof = {
+    evidence_public_id: "550e8400-e29b-41d4-a716-446655440004",
+    verification_digest_sha256: "21".repeat(32),
+    inclusion_catalog_digest_sha256: "22".repeat(32),
+    selected_proof_digest_sha256: "23".repeat(32),
+    network: "ton-mainnet" as const,
+    verifier_policy_id: "ton_liteserver_checkpoint_strict_2026_08_v2" as const,
+    trust_level: 0 as const,
+    trusted_checkpoint: {
+      workchain: -1,
+      shard: "-9223372036854775808",
+      seqno: 1,
+      root_hash: "31".repeat(32),
+      file_hash: "32".repeat(32),
+    },
+    block: {
+      workchain: 0,
+      shard: "-9223372036854775808",
+      seqno: 2,
+      root_hash: "33".repeat(32),
+      file_hash: "34".repeat(32),
+    },
+    transaction_boc_sha256: "35".repeat(32),
+    account_address_canonical: base.document.wallet_account_canonical,
+    logical_time: candidate.logical_time,
+    transaction_hash: candidate.transaction_hash,
+    predecessor: {
+      logical_time: "0",
+      transaction_hash: "0".repeat(64),
+      absent: true,
+    },
+    block_merkle_proof_verified: true as const,
+    canonical_block_chain_verified_at_capture: true as const,
+    provider_free_revalidated: true as const,
+  };
+  const summary = {
+    candidate_available: true,
+    canonical_inclusion_proven: true,
+    predecessor_absent: true,
+    state: "verified" as const,
+    earliest_wallet_activity_established: true,
+  };
+  return {
+    anchor: {
+      ...base.anchor,
+      public_id: `eaa_${anchorHash}`,
+      content_hash_sha256: anchorHash,
+      state: "verified",
+      candidate_activity_public_id: candidate.activity_public_id,
+      canonical_inclusion_proven: true,
+      predecessor_absent: true,
+      earliest_wallet_activity_established: true,
+    },
+    document: {
+      ...base.document,
+      data_environment: "live",
+      candidate,
+      proof,
+      summary,
+    },
+  };
+}
+
 export function completeHistoryGateFixture(): WalletCaseCompleteHistoryGateResponse {
-  const progress = backfillProgressFixture();
+  const anchor = earliestActivityAnchorFixture();
+  const progress = anchor.document.input_floor.document.input_progress;
   const gateHash = "7d".repeat(32);
   return {
     gate: {
       public_id: `chg_${gateHash}`,
-      contract_version: "wallet_case_complete_history_gate_v1",
+      contract_version: "wallet_case_complete_history_gate_v2",
       content_hash_sha256: gateHash,
+      input_anchor_public_id: anchor.anchor.public_id,
       input_progress_public_id: progress.progress.public_id,
       checkpoint_cutoff_public_id: progress.progress.checkpoint_cutoff_public_id,
       state: "locked",
@@ -422,10 +539,10 @@ export function completeHistoryGateFixture(): WalletCaseCompleteHistoryGateRespo
       complete_wallet_history_established: false,
     },
     document: {
-      contract_version: "wallet_case_complete_history_gate_v1",
+      contract_version: "wallet_case_complete_history_gate_v2",
       case_public_id: CASE_ID,
       data_environment: "demo",
-      input_progress: progress,
+      input_anchor: anchor,
       checks: [
         {
           code: "live_data_environment",

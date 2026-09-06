@@ -269,6 +269,24 @@
 .case-observed-floor-streams small { color: var(--text-muted); line-height: 1.4; }
 .case-observed-floor-streams code { overflow: hidden; max-width: min(430px, 55vw); color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
 .case-observed-floor-boundary { color: var(--warning); line-height: 1.45; }
+.case-earliest-activity-anchor { margin-top: 8px; border-color: color-mix(in srgb, var(--accent) 48%, var(--border)); background: color-mix(in srgb, var(--accent) 7%, var(--surface-solid)); }
+.case-earliest-activity-anchor.is-verified { border-color: color-mix(in srgb, var(--success) 52%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); }
+.case-earliest-anchor-state { display: inline-flex; padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border)); border-radius: 999px; color: var(--accent); background: var(--surface-solid); font-size: 0.62rem; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+.case-earliest-activity-anchor.is-verified .case-earliest-anchor-state { border-color: color-mix(in srgb, var(--success) 52%, var(--border)); color: var(--success); }
+.case-earliest-activity-anchor.is-predecessor_present .case-earliest-anchor-state { border-color: color-mix(in srgb, var(--warning) 52%, var(--border)); color: var(--warning); }
+.case-earliest-anchor-verdict { margin: 0; color: var(--text-soft); font-size: 0.82rem; font-weight: 760; line-height: 1.5; }
+.case-earliest-activity-anchor.is-verified .case-earliest-anchor-verdict { color: var(--success); }
+.case-earliest-anchor-candidate { display: grid; min-width: 0; padding: 10px 11px; gap: 3px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-solid); }
+.case-earliest-anchor-candidate > span { color: var(--text-muted); font-size: 0.66rem; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; }
+.case-earliest-anchor-candidate b { color: var(--text); font-size: 0.76rem; }
+.case-earliest-anchor-candidate small { color: var(--text-muted); }
+.case-earliest-anchor-candidate code { overflow: hidden; max-width: 100%; color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-earliest-anchor-proof { display: flex; padding: 10px 11px; align-items: flex-start; gap: 8px; border: 1px solid color-mix(in srgb, var(--success) 42%, var(--border)); border-radius: 9px; color: var(--success); background: var(--surface-solid); }
+.case-earliest-anchor-proof > span { display: grid; min-width: 0; gap: 3px; }
+.case-earliest-anchor-proof b { color: var(--text); font-size: 0.74rem; }
+.case-earliest-anchor-proof small { color: var(--text-muted); line-height: 1.4; }
+.case-earliest-anchor-proof code { overflow: hidden; max-width: min(540px, 62vw); color: var(--accent); font-size: 0.65rem; text-overflow: ellipsis; white-space: nowrap; }
+.case-earliest-anchor-boundary { color: var(--warning); line-height: 1.45; }
 .case-backfill-schedule { margin-top: 8px; border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); background: color-mix(in srgb, var(--warning) 5%, var(--surface-solid)); }
 .case-backfill-outcome-shell { display: grid; gap: 10px; }
 .case-backfill-outcome { border-color: color-mix(in srgb, var(--success) 42%, var(--border)); background: color-mix(in srgb, var(--success) 7%, var(--surface-solid)); }

@@ -24,6 +24,7 @@ import {
   checkpointContinuationPlanFixture,
   completeHistoryGateFixture,
   observedHistoryFloorFixture,
+  verifiedEarliestActivityAnchorFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
@@ -206,6 +207,7 @@ describe("GramCaseSummary", () => {
     const backfillSchedule = backfillScheduleFixture();
     const continuationPlan = checkpointContinuationPlanFixture();
     const completeHistoryGate = completeHistoryGateFixture();
+    const earliestActivityAnchor = verifiedEarliestActivityAnchorFixture();
     const observedHistoryFloor = observedHistoryFloorFixture();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(
@@ -226,6 +228,10 @@ describe("GramCaseSummary", () => {
       ))
       .mockResolvedValueOnce(new Response(
         JSON.stringify(observedHistoryFloor),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(earliestActivityAnchor),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ))
       .mockResolvedValueOnce(new Response(
@@ -279,6 +285,10 @@ describe("GramCaseSummary", () => {
     expect(await screen.findByRole("region", { name: "Observed history floor" })).toBeTruthy();
     expect(screen.getByText(observedHistoryFloor.floor.public_id)).toBeTruthy();
     expect(screen.getByText(/Oldest successful page 2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Verify earliest activity anchor" }));
+    expect(await screen.findByRole("region", { name: "Earliest activity anchor" })).toBeTruthy();
+    expect(screen.getByText(earliestActivityAnchor.anchor.public_id)).toBeTruthy();
+    expect(screen.getByText(/anchored to canonical chain evidence/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Verify complete-history gate" }));
     expect(await screen.findByText("Complete wallet history is not established.")).toBeTruthy();
     expect(screen.getByText(completeHistoryGate.gate.public_id)).toBeTruthy();
@@ -325,6 +335,7 @@ describe("GramCaseSummary", () => {
     const createObjectUrl = vi.fn()
       .mockReturnValueOnce("blob:backfill-progress")
       .mockReturnValueOnce("blob:observed-history-floor")
+      .mockReturnValueOnce("blob:earliest-activity-anchor")
       .mockReturnValueOnce("blob:complete-history-gate")
       .mockReturnValueOnce("blob:backfill-schedule")
       .mockReturnValueOnce("blob:continuation-plan")
@@ -338,15 +349,17 @@ describe("GramCaseSummary", () => {
       .mockImplementation(() => undefined);
     await user.click(screen.getByRole("button", { name: "Export verified backfill progress JSON" }));
     await user.click(screen.getByRole("button", { name: "Export observed history floor JSON" }));
+    await user.click(screen.getByRole("button", { name: "Export earliest activity anchor JSON" }));
     await user.click(screen.getByRole("button", { name: "Export complete-history gate JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified backfill schedule JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified continuation plan JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified chain JSON" }));
-    expect(createObjectUrl).toHaveBeenCalledTimes(6);
-    expect(anchorClick).toHaveBeenCalledTimes(6);
+    expect(createObjectUrl).toHaveBeenCalledTimes(7);
+    expect(anchorClick).toHaveBeenCalledTimes(7);
     expect(revokeObjectUrl.mock.calls).toEqual([
       ["blob:backfill-progress"],
       ["blob:observed-history-floor"],
+      ["blob:earliest-activity-anchor"],
       ["blob:complete-history-gate"],
       ["blob:backfill-schedule"],
       ["blob:continuation-plan"],
@@ -371,6 +384,10 @@ describe("GramCaseSummary", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/observed-history-floor`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/earliest-activity-anchor`,
       expect.objectContaining({ cache: "no-store" }),
     );
     expect(fetchMock).toHaveBeenCalledWith(

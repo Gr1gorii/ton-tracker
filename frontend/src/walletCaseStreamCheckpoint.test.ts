@@ -10,11 +10,13 @@ import {
   checkpointContinuationReceiptV3Fixture,
   checkpointContinuationPlanFixture,
   completeHistoryGateFixture,
+  earliestActivityAnchorFixture,
   observedHistoryFloorFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
   streamCheckpointHistoryFixture,
+  verifiedEarliestActivityAnchorFixture,
 } from "./test/walletCaseStreamCheckpointFixtures";
 import {
   parseWalletCaseBackfillOutcomeHistory,
@@ -24,6 +26,7 @@ import {
   parseWalletCaseCheckpointContinuationReceipt,
   parseWalletCaseCheckpointContinuationPlan,
   parseWalletCaseCompleteHistoryGate,
+  parseWalletCaseEarliestActivityAnchor,
   parseWalletCaseObservedHistoryFloor,
   parseWalletCaseStreamCheckpointCatalog,
   parseWalletCaseStreamCheckpointChain,
@@ -36,6 +39,7 @@ import {
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseCompleteHistoryGate,
+  serializeWalletCaseEarliestActivityAnchor,
   serializeWalletCaseObservedHistoryFloor,
   serializeWalletCaseStreamCheckpointChain,
 } from "./walletCaseStreamCheckpoint";
@@ -297,6 +301,89 @@ describe("Wallet Case stream checkpoint contracts", () => {
     };
 
     expect(parseWalletCaseObservedHistoryFloor(empty)).toEqual(empty);
+  });
+
+  it("accepts and exports a fail-closed earliest activity anchor", () => {
+    const anchor = earliestActivityAnchorFixture();
+
+    expect(parseWalletCaseEarliestActivityAnchor(anchor)).toEqual(anchor);
+    expect(JSON.parse(serializeWalletCaseEarliestActivityAnchor(anchor))).toEqual(anchor);
+  });
+
+  it("accepts a canonical zero-predecessor earliest activity proof", () => {
+    const anchor = verifiedEarliestActivityAnchorFixture();
+
+    expect(parseWalletCaseEarliestActivityAnchor(anchor)).toEqual(anchor);
+  });
+
+  it("rejects earliest anchor identity, trust, predecessor, and summary drift", () => {
+    const anchor = earliestActivityAnchorFixture();
+    expect(() => parseWalletCaseEarliestActivityAnchor({
+      ...anchor,
+      anchor: { ...anchor.anchor, public_id: `eaa_${"0".repeat(64)}` },
+    })).toThrow(/identity/);
+    expect(() => parseWalletCaseEarliestActivityAnchor({
+      ...anchor,
+      document: {
+        ...anchor.document,
+        summary: {
+          ...anchor.document.summary,
+          earliest_wallet_activity_established: true,
+        },
+      },
+    })).toThrow(/inconsistent/);
+    const candidate = {
+      snapshot_public_id: "550e8400-e29b-41d4-a716-446655440001",
+      activity_public_id: `act_${"12".repeat(32)}`,
+      occurred_at: "2026-09-06T12:00:00Z",
+      logical_time: "20",
+      transaction_hash: "ab".repeat(32),
+      provider: "tonapi",
+    };
+    const proof = {
+      evidence_public_id: "550e8400-e29b-41d4-a716-446655440002",
+      verification_digest_sha256: "21".repeat(32),
+      inclusion_catalog_digest_sha256: "22".repeat(32),
+      selected_proof_digest_sha256: "23".repeat(32),
+      network: "ton-mainnet",
+      verifier_policy_id: "ton_liteserver_checkpoint_strict_2026_08_v2",
+      trust_level: 0,
+      trusted_checkpoint: {
+        workchain: -1,
+        shard: "-9223372036854775808",
+        seqno: 1,
+        root_hash: "31".repeat(32),
+        file_hash: "32".repeat(32),
+      },
+      block: {
+        workchain: 0,
+        shard: "-9223372036854775808",
+        seqno: 2,
+        root_hash: "33".repeat(32),
+        file_hash: "34".repeat(32),
+      },
+      transaction_boc_sha256: "35".repeat(32),
+      account_address_canonical: anchor.document.wallet_account_canonical,
+      logical_time: "20",
+      transaction_hash: "ab".repeat(32),
+      predecessor: {
+        logical_time: "0",
+        transaction_hash: "0".repeat(64),
+        absent: false,
+      },
+      block_merkle_proof_verified: true,
+      canonical_block_chain_verified_at_capture: true,
+      provider_free_revalidated: true,
+    };
+    expect(() => parseWalletCaseEarliestActivityAnchor({
+      ...anchor,
+      document: {
+        ...anchor.document,
+        data_environment: "live",
+        candidate,
+        proof,
+      },
+    })).toThrow(/predecessor/);
   });
 
   it("accepts and exports a fail-closed complete-history gate", () => {

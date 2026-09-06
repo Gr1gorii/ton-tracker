@@ -19,6 +19,7 @@ from services.wallet_cases import (
     WalletCaseContinuationReceiptNotFound,
     WalletCaseContinuationPlanStale,
     WalletCaseDeletionConflict,
+    WalletCaseEarliestActivityAnchorCorrupt,
     WalletCaseMetadataConflict,
     WalletCaseNotFound,
     WalletCaseIdempotencyConflict,
@@ -40,6 +41,7 @@ from wallet_case_schemas import (
     WalletCaseCompleteHistoryGateResponse,
     WalletCaseCreateRequest,
     WalletCaseDeletionResponse,
+    WalletCaseEarliestActivityAnchorResponse,
     WalletCaseListResponse,
     WalletCaseMetadataUpdateRequest,
     WalletCaseObservedHistoryFloorResponse,
@@ -958,6 +960,47 @@ def read_wallet_case_observed_history_floor(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case observed history floor storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/earliest-activity-anchor",
+    response_model=WalletCaseEarliestActivityAnchorResponse,
+)
+def read_wallet_case_earliest_activity_anchor(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read a fail-closed chain anchor for the oldest current Activity transaction."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_earliest_activity_anchor(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except (
+        WalletCaseEarliestActivityAnchorCorrupt,
+        WalletCaseStreamCheckpointCorrupt,
+    ) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "earliest_activity_anchor_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case earliest activity anchor storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 
