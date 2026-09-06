@@ -255,6 +255,89 @@ export interface WalletCaseObservedHistoryFloorResponse {
   };
 }
 
+export type WalletCaseEarliestActivityAnchorState =
+  | "empty"
+  | "ineligible"
+  | "verification_required"
+  | "predecessor_present"
+  | "verified";
+
+export interface WalletCaseEarliestActivityCandidate {
+  snapshot_public_id: string;
+  activity_public_id: string;
+  occurred_at: string | null;
+  logical_time: string;
+  transaction_hash: string;
+  provider: string;
+}
+
+export interface WalletCaseEarliestActivityBlock {
+  workchain: number;
+  shard: string;
+  seqno: number;
+  root_hash: string;
+  file_hash: string;
+}
+
+export interface WalletCaseEarliestActivityProof {
+  evidence_public_id: string;
+  verification_digest_sha256: string;
+  inclusion_catalog_digest_sha256: string;
+  selected_proof_digest_sha256: string;
+  network: "ton-mainnet" | "ton-testnet";
+  verifier_policy_id: "ton_liteserver_checkpoint_strict_2026_08_v2";
+  trust_level: 0;
+  trusted_checkpoint: WalletCaseEarliestActivityBlock;
+  block: WalletCaseEarliestActivityBlock;
+  transaction_boc_sha256: string;
+  account_address_canonical: string;
+  logical_time: string;
+  transaction_hash: string;
+  predecessor: {
+    logical_time: string;
+    transaction_hash: string;
+    absent: boolean;
+  };
+  block_merkle_proof_verified: true;
+  canonical_block_chain_verified_at_capture: true;
+  provider_free_revalidated: true;
+}
+
+export interface WalletCaseEarliestActivityAnchorSummary {
+  candidate_available: boolean;
+  canonical_inclusion_proven: boolean;
+  predecessor_absent: boolean | null;
+  state: WalletCaseEarliestActivityAnchorState;
+  earliest_wallet_activity_established: boolean;
+}
+
+export interface WalletCaseEarliestActivityAnchorResponse {
+  anchor: {
+    public_id: string;
+    contract_version: "wallet_case_earliest_activity_anchor_v1";
+    content_hash_sha256: string;
+    input_floor_public_id: string;
+    checkpoint_cutoff_public_id: string | null;
+    state: WalletCaseEarliestActivityAnchorState;
+    candidate_activity_public_id: string | null;
+    canonical_inclusion_proven: boolean;
+    predecessor_absent: boolean | null;
+    earliest_wallet_activity_established: boolean;
+  };
+  document: {
+    contract_version: "wallet_case_earliest_activity_anchor_v1";
+    case_public_id: string;
+    network: "ton-mainnet" | "ton-testnet";
+    data_environment: WalletCaseDataEnvironment;
+    wallet_account_canonical: string;
+    input_floor: WalletCaseObservedHistoryFloorResponse;
+    candidate: WalletCaseEarliestActivityCandidate | null;
+    proof: WalletCaseEarliestActivityProof | null;
+    summary: WalletCaseEarliestActivityAnchorSummary;
+    limitations: WalletCaseLimitation[];
+  };
+}
+
 export type WalletCaseCompleteHistoryGateCheckCode =
   | "live_data_environment"
   | "provider_streams_present"
@@ -283,8 +366,9 @@ export interface WalletCaseCompleteHistoryGateSummary {
 export interface WalletCaseCompleteHistoryGateResponse {
   gate: {
     public_id: string;
-    contract_version: "wallet_case_complete_history_gate_v1";
+    contract_version: "wallet_case_complete_history_gate_v2";
     content_hash_sha256: string;
+    input_anchor_public_id: string;
     input_progress_public_id: string;
     checkpoint_cutoff_public_id: string | null;
     state: "locked";
@@ -293,10 +377,10 @@ export interface WalletCaseCompleteHistoryGateResponse {
     complete_wallet_history_established: false;
   };
   document: {
-    contract_version: "wallet_case_complete_history_gate_v1";
+    contract_version: "wallet_case_complete_history_gate_v2";
     case_public_id: string;
     data_environment: WalletCaseDataEnvironment;
-    input_progress: WalletCaseBackfillProgressResponse;
+    input_anchor: WalletCaseEarliestActivityAnchorResponse;
     checks: WalletCaseCompleteHistoryGateCheck[];
     summary: WalletCaseCompleteHistoryGateSummary;
     limitations: WalletCaseLimitation[];
@@ -588,6 +672,10 @@ const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
 const BACKFILL_PROGRESS_ID = /^bfp_([0-9a-f]{64})$/;
 const COMPLETE_HISTORY_GATE_ID = /^chg_([0-9a-f]{64})$/;
 const OBSERVED_HISTORY_FLOOR_ID = /^ohf_([0-9a-f]{64})$/;
+const EARLIEST_ACTIVITY_ANCHOR_ID = /^eaa_([0-9a-f]{64})$/;
+const ACTIVITY_ID = /^act_[0-9a-f]{64}$/;
+const ACCOUNT_ID = /^(?:0|-1):[0-9a-f]{64}$/;
+const LOGICAL_TIME = /^(?:0|[1-9][0-9]{0,19})$/;
 const BACKFILL_SCHEDULE_ID = /^bfs_([0-9a-f]{64})$/;
 const BACKFILL_OUTCOME_ID = /^bfo_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_PLAN_ID = /^cpl_([0-9a-f]{64})$/;
@@ -1778,6 +1866,377 @@ export function serializeWalletCaseObservedHistoryFloor(value: unknown): string 
   return `${JSON.stringify(parseWalletCaseObservedHistoryFloor(value), null, 2)}\n`;
 }
 
+const EARLIEST_ACTIVITY_ANCHOR_STATES = new Set<WalletCaseEarliestActivityAnchorState>([
+  "empty",
+  "ineligible",
+  "verification_required",
+  "predecessor_present",
+  "verified",
+]);
+
+function earliestActivityAnchorState(
+  value: unknown,
+  label: string,
+): WalletCaseEarliestActivityAnchorState {
+  const state = text(value, label, 24) as WalletCaseEarliestActivityAnchorState;
+  if (!EARLIEST_ACTIVITY_ANCHOR_STATES.has(state)) fail(`${label} is invalid`);
+  return state;
+}
+
+function logicalTime(value: unknown, label: string, allowZero = false): string {
+  const result = text(value, label, 20);
+  if (!LOGICAL_TIME.test(result) || (!allowZero && result === "0")) {
+    fail(`${label} is invalid`);
+  }
+  if (BigInt(result) > (2n ** 64n) - 1n) fail(`${label} is invalid`);
+  return result;
+}
+
+function earliestActivityBlock(
+  value: unknown,
+  label: string,
+): WalletCaseEarliestActivityBlock {
+  const block = record(
+    value,
+    ["workchain", "shard", "seqno", "root_hash", "file_hash"],
+    label,
+  );
+  if (
+    !Number.isSafeInteger(block.workchain) ||
+    (block.workchain !== -1 && block.workchain !== 0)
+  ) fail(`${label} workchain is invalid`);
+  const shard = text(block.shard, `${label} shard`, 20);
+  if (!/^(?:0|-?[1-9][0-9]{0,18})$/.test(shard)) {
+    fail(`${label} shard is invalid`);
+  }
+  const shardValue = BigInt(shard);
+  if (shardValue < -(2n ** 63n) || shardValue > (2n ** 63n) - 1n) {
+    fail(`${label} shard is invalid`);
+  }
+  const seqno = integer(block.seqno, `${label} seqno`);
+  if (seqno < 1 || seqno > 2_147_483_647) fail(`${label} seqno is invalid`);
+  return {
+    workchain: block.workchain as number,
+    shard,
+    seqno,
+    root_hash: digest(block.root_hash, `${label} root hash`),
+    file_hash: digest(block.file_hash, `${label} file hash`),
+  };
+}
+
+function earliestActivityAnchorSummary(
+  value: unknown,
+  label: string,
+): WalletCaseEarliestActivityAnchorSummary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    fail(`${label} is invalid`);
+  }
+  const summary = value as Record<string, unknown>;
+  if (
+    typeof summary.candidate_available !== "boolean" ||
+    typeof summary.canonical_inclusion_proven !== "boolean" ||
+    (summary.predecessor_absent !== null &&
+      typeof summary.predecessor_absent !== "boolean") ||
+    typeof summary.earliest_wallet_activity_established !== "boolean"
+  ) fail(`${label} is invalid`);
+  return {
+    candidate_available: summary.candidate_available,
+    canonical_inclusion_proven: summary.canonical_inclusion_proven,
+    predecessor_absent: summary.predecessor_absent,
+    state: earliestActivityAnchorState(summary.state, `${label} state`),
+    earliest_wallet_activity_established:
+      summary.earliest_wallet_activity_established,
+  };
+}
+
+export function parseWalletCaseEarliestActivityAnchor(
+  value: unknown,
+): WalletCaseEarliestActivityAnchorResponse {
+  const envelope = record(
+    value,
+    ["anchor", "document"],
+    "earliest activity anchor response",
+  );
+  const descriptor = record(envelope.anchor, [
+    "public_id", "contract_version", "content_hash_sha256",
+    "input_floor_public_id", "checkpoint_cutoff_public_id", "state",
+    "candidate_activity_public_id", "canonical_inclusion_proven",
+    "predecessor_absent", "earliest_wallet_activity_established",
+  ], "earliest activity anchor descriptor");
+  if (descriptor.contract_version !== "wallet_case_earliest_activity_anchor_v1") {
+    fail("earliest activity anchor descriptor contract is unsupported");
+  }
+  const contentHash = digest(
+    descriptor.content_hash_sha256,
+    "earliest activity anchor hash",
+  );
+  const anchorId = text(descriptor.public_id, "earliest activity anchor id", 68);
+  if (EARLIEST_ACTIVITY_ANCHOR_ID.exec(anchorId)?.[1] !== contentHash) {
+    fail("earliest activity anchor identity is invalid");
+  }
+  const inputFloorId = text(
+    descriptor.input_floor_public_id,
+    "earliest activity anchor input floor id",
+    68,
+  );
+  if (!OBSERVED_HISTORY_FLOOR_ID.test(inputFloorId)) {
+    fail("earliest activity anchor input floor id is invalid");
+  }
+  const descriptorCutoff = descriptor.checkpoint_cutoff_public_id === null
+    ? null
+    : checkpointId(
+      descriptor.checkpoint_cutoff_public_id,
+      "earliest activity anchor descriptor cutoff",
+    );
+  const descriptorCandidateId = descriptor.candidate_activity_public_id === null
+    ? null
+    : text(
+      descriptor.candidate_activity_public_id,
+      "earliest activity anchor descriptor candidate id",
+      68,
+    );
+  if (descriptorCandidateId !== null && !ACTIVITY_ID.test(descriptorCandidateId)) {
+    fail("earliest activity anchor descriptor candidate id is invalid");
+  }
+  const descriptorState = earliestActivityAnchorState(
+    descriptor.state,
+    "earliest activity anchor descriptor state",
+  );
+  if (
+    typeof descriptor.canonical_inclusion_proven !== "boolean" ||
+    (descriptor.predecessor_absent !== null &&
+      typeof descriptor.predecessor_absent !== "boolean") ||
+    typeof descriptor.earliest_wallet_activity_established !== "boolean"
+  ) fail("earliest activity anchor descriptor is invalid");
+
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "network", "data_environment",
+    "wallet_account_canonical", "input_floor", "candidate", "proof",
+    "summary", "limitations",
+  ], "earliest activity anchor document");
+  if (document.contract_version !== "wallet_case_earliest_activity_anchor_v1") {
+    fail("earliest activity anchor document contract is unsupported");
+  }
+  const caseId = publicId(document.case_public_id, "earliest activity anchor case id");
+  const network = text(document.network, "earliest activity anchor network", 16);
+  if (network !== "ton-mainnet" && network !== "ton-testnet") {
+    fail("earliest activity anchor network is invalid");
+  }
+  const environment = text(
+    document.data_environment,
+    "earliest activity anchor data environment",
+    8,
+  );
+  if (environment !== "demo" && environment !== "live") {
+    fail("earliest activity anchor data environment is invalid");
+  }
+  const account = text(
+    document.wallet_account_canonical,
+    "earliest activity anchor account",
+    67,
+  );
+  if (!ACCOUNT_ID.test(account)) fail("earliest activity anchor account is invalid");
+  const floor = parseWalletCaseObservedHistoryFloor(document.input_floor);
+
+  let candidate: WalletCaseEarliestActivityCandidate | null = null;
+  if (document.candidate !== null) {
+    const item = record(document.candidate, [
+      "snapshot_public_id", "activity_public_id", "occurred_at", "logical_time",
+      "transaction_hash", "provider",
+    ], "earliest activity candidate");
+    const activityId = text(item.activity_public_id, "earliest activity candidate id", 68);
+    if (!ACTIVITY_ID.test(activityId)) fail("earliest activity candidate id is invalid");
+    candidate = {
+      snapshot_public_id: publicId(
+        item.snapshot_public_id,
+        "earliest activity candidate snapshot id",
+      ),
+      activity_public_id: activityId,
+      occurred_at: nullableTimestamp(
+        item.occurred_at,
+        "earliest activity candidate timestamp",
+      ),
+      logical_time: logicalTime(item.logical_time, "earliest activity candidate logical time"),
+      transaction_hash: digest(
+        item.transaction_hash,
+        "earliest activity candidate transaction hash",
+      ),
+      provider: text(item.provider, "earliest activity candidate provider", 64),
+    };
+  }
+
+  let proof: WalletCaseEarliestActivityProof | null = null;
+  if (document.proof !== null) {
+    const item = record(document.proof, [
+      "evidence_public_id", "verification_digest_sha256",
+      "inclusion_catalog_digest_sha256", "selected_proof_digest_sha256",
+      "network", "verifier_policy_id", "trust_level", "trusted_checkpoint",
+      "block", "transaction_boc_sha256", "account_address_canonical",
+      "logical_time", "transaction_hash", "predecessor",
+      "block_merkle_proof_verified", "canonical_block_chain_verified_at_capture",
+      "provider_free_revalidated",
+    ], "earliest activity proof");
+    const proofNetwork = text(item.network, "earliest activity proof network", 16);
+    const proofAccount = text(
+      item.account_address_canonical,
+      "earliest activity proof account",
+      67,
+    );
+    if (
+      (proofNetwork !== "ton-mainnet" && proofNetwork !== "ton-testnet") ||
+      !ACCOUNT_ID.test(proofAccount) ||
+      item.verifier_policy_id !== "ton_liteserver_checkpoint_strict_2026_08_v2" ||
+      item.trust_level !== 0 ||
+      item.block_merkle_proof_verified !== true ||
+      item.canonical_block_chain_verified_at_capture !== true ||
+      item.provider_free_revalidated !== true
+    ) fail("earliest activity proof trust boundary is invalid");
+    const proofLogicalTime = logicalTime(
+      item.logical_time,
+      "earliest activity proof logical time",
+    );
+    const predecessorItem = record(
+      item.predecessor,
+      ["logical_time", "transaction_hash", "absent"],
+      "earliest activity predecessor",
+    );
+    const predecessorLogicalTime = logicalTime(
+      predecessorItem.logical_time,
+      "earliest activity predecessor logical time",
+      true,
+    );
+    const predecessorHash = digest(
+      predecessorItem.transaction_hash,
+      "earliest activity predecessor hash",
+    );
+    if (typeof predecessorItem.absent !== "boolean") {
+      fail("earliest activity predecessor state is invalid");
+    }
+    const predecessorAbsent =
+      predecessorLogicalTime === "0" && predecessorHash === "0".repeat(64);
+    if (
+      predecessorItem.absent !== predecessorAbsent ||
+      (predecessorLogicalTime === "0") !== (predecessorHash === "0".repeat(64)) ||
+      (!predecessorAbsent && BigInt(predecessorLogicalTime) >= BigInt(proofLogicalTime))
+    ) fail("earliest activity predecessor is inconsistent");
+    proof = {
+      evidence_public_id: publicId(
+        item.evidence_public_id,
+        "earliest activity evidence id",
+      ),
+      verification_digest_sha256: digest(
+        item.verification_digest_sha256,
+        "earliest activity verification digest",
+      ),
+      inclusion_catalog_digest_sha256: digest(
+        item.inclusion_catalog_digest_sha256,
+        "earliest activity inclusion catalog digest",
+      ),
+      selected_proof_digest_sha256: digest(
+        item.selected_proof_digest_sha256,
+        "earliest activity selected proof digest",
+      ),
+      network: proofNetwork,
+      verifier_policy_id: "ton_liteserver_checkpoint_strict_2026_08_v2",
+      trust_level: 0,
+      trusted_checkpoint: earliestActivityBlock(
+        item.trusted_checkpoint,
+        "earliest activity trusted checkpoint",
+      ),
+      block: earliestActivityBlock(item.block, "earliest activity block"),
+      transaction_boc_sha256: digest(
+        item.transaction_boc_sha256,
+        "earliest activity transaction BOC digest",
+      ),
+      account_address_canonical: proofAccount,
+      logical_time: proofLogicalTime,
+      transaction_hash: digest(
+        item.transaction_hash,
+        "earliest activity proof transaction hash",
+      ),
+      predecessor: {
+        logical_time: predecessorLogicalTime,
+        transaction_hash: predecessorHash,
+        absent: predecessorAbsent,
+      },
+      block_merkle_proof_verified: true,
+      canonical_block_chain_verified_at_capture: true,
+      provider_free_revalidated: true,
+    };
+  }
+  const summary = earliestActivityAnchorSummary(
+    document.summary,
+    "earliest activity anchor summary",
+  );
+  const expectedState: WalletCaseEarliestActivityAnchorState = environment !== "live"
+    ? "ineligible"
+    : candidate === null
+      ? "empty"
+      : proof === null
+        ? "verification_required"
+        : proof.predecessor.absent
+          ? "verified"
+          : "predecessor_present";
+  const expectedSummary: WalletCaseEarliestActivityAnchorSummary = {
+    candidate_available: candidate !== null,
+    canonical_inclusion_proven: proof !== null,
+    predecessor_absent: proof?.predecessor.absent ?? null,
+    state: expectedState,
+    earliest_wallet_activity_established: expectedState === "verified",
+  };
+  const expectedCandidateId = candidate?.activity_public_id ?? null;
+  if (
+    caseId !== floor.document.case_public_id ||
+    (environment !== "live" && proof !== null) ||
+    (proof !== null && candidate === null) ||
+    (proof !== null && candidate !== null && (
+      proof.network !== network || proof.account_address_canonical !== account ||
+      proof.logical_time !== candidate.logical_time ||
+      proof.transaction_hash !== candidate.transaction_hash
+    )) ||
+    JSON.stringify(summary) !== JSON.stringify(expectedSummary) ||
+    descriptorState !== summary.state ||
+    descriptor.canonical_inclusion_proven !== summary.canonical_inclusion_proven ||
+    descriptor.predecessor_absent !== summary.predecessor_absent ||
+    descriptor.earliest_wallet_activity_established !==
+      summary.earliest_wallet_activity_established ||
+    descriptorCandidateId !== expectedCandidateId ||
+    inputFloorId !== floor.floor.public_id ||
+    descriptorCutoff !== floor.floor.checkpoint_cutoff_public_id
+  ) fail("earliest activity anchor is inconsistent");
+  return {
+    anchor: {
+      public_id: anchorId,
+      contract_version: "wallet_case_earliest_activity_anchor_v1",
+      content_hash_sha256: contentHash,
+      input_floor_public_id: inputFloorId,
+      checkpoint_cutoff_public_id: descriptorCutoff,
+      state: summary.state,
+      candidate_activity_public_id: descriptorCandidateId,
+      canonical_inclusion_proven: summary.canonical_inclusion_proven,
+      predecessor_absent: summary.predecessor_absent,
+      earliest_wallet_activity_established:
+        summary.earliest_wallet_activity_established,
+    },
+    document: {
+      contract_version: "wallet_case_earliest_activity_anchor_v1",
+      case_public_id: caseId,
+      network,
+      data_environment: environment,
+      wallet_account_canonical: account,
+      input_floor: floor,
+      candidate,
+      proof,
+      summary,
+      limitations: limitations(document.limitations, "earliest activity anchor limitations"),
+    },
+  };
+}
+
+export function serializeWalletCaseEarliestActivityAnchor(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseEarliestActivityAnchor(value), null, 2)}\n`;
+}
+
 const COMPLETE_HISTORY_CHECK_CODES: readonly WalletCaseCompleteHistoryGateCheckCode[] = [
   "live_data_environment",
   "provider_streams_present",
@@ -1793,11 +2252,12 @@ export function parseWalletCaseCompleteHistoryGate(
   const envelope = record(value, ["gate", "document"], "complete-history gate response");
   const descriptor = record(envelope.gate, [
     "public_id", "contract_version", "content_hash_sha256",
-    "input_progress_public_id", "checkpoint_cutoff_public_id", "state",
+    "input_anchor_public_id", "input_progress_public_id",
+    "checkpoint_cutoff_public_id", "state",
     "satisfied_check_count", "unmet_check_count",
     "complete_wallet_history_established",
   ], "complete-history gate descriptor");
-  if (descriptor.contract_version !== "wallet_case_complete_history_gate_v1") {
+  if (descriptor.contract_version !== "wallet_case_complete_history_gate_v2") {
     fail("complete-history gate descriptor contract is unsupported");
   }
   const contentHash = digest(
@@ -1815,6 +2275,14 @@ export function parseWalletCaseCompleteHistoryGate(
   );
   if (!BACKFILL_PROGRESS_ID.test(inputProgressId)) {
     fail("complete-history gate input progress id is invalid");
+  }
+  const inputAnchorId = text(
+    descriptor.input_anchor_public_id,
+    "complete-history gate input anchor id",
+    68,
+  );
+  if (!EARLIEST_ACTIVITY_ANCHOR_ID.test(inputAnchorId)) {
+    fail("complete-history gate input anchor id is invalid");
   }
   const descriptorCutoff = descriptor.checkpoint_cutoff_public_id === null
     ? null
@@ -1837,9 +2305,9 @@ export function parseWalletCaseCompleteHistoryGate(
 
   const document = record(envelope.document, [
     "contract_version", "case_public_id", "data_environment",
-    "input_progress", "checks", "summary", "limitations",
+    "input_anchor", "checks", "summary", "limitations",
   ], "complete-history gate document");
-  if (document.contract_version !== "wallet_case_complete_history_gate_v1") {
+  if (document.contract_version !== "wallet_case_complete_history_gate_v2") {
     fail("complete-history gate document contract is unsupported");
   }
   const caseId = publicId(document.case_public_id, "complete-history gate case id");
@@ -1851,7 +2319,8 @@ export function parseWalletCaseCompleteHistoryGate(
   if (environment !== "demo" && environment !== "live") {
     fail("complete-history gate data environment is invalid");
   }
-  const progress = parseWalletCaseBackfillProgress(document.input_progress);
+  const anchor = parseWalletCaseEarliestActivityAnchor(document.input_anchor);
+  const progress = anchor.document.input_floor.document.input_progress;
   if (!Array.isArray(document.checks) || document.checks.length !== 6) {
     fail("complete-history gate checks are invalid");
   }
@@ -1867,7 +2336,7 @@ export function parseWalletCaseCompleteHistoryGate(
     streamCount > 0,
     streamCount > 0 && completeCount === streamCount,
     streamCount > 0 && terminalCount === streamCount,
-    false,
+    anchor.anchor.earliest_wallet_activity_established,
     false,
   ];
   const checks = document.checks.map((value, index) => {
@@ -1926,6 +2395,8 @@ export function parseWalletCaseCompleteHistoryGate(
   };
   if (
     caseId !== progress.document.case_public_id ||
+    caseId !== anchor.document.case_public_id ||
+    inputAnchorId !== anchor.anchor.public_id ||
     JSON.stringify(summary) !== JSON.stringify(expectedSummary) ||
     inputProgressId !== progress.progress.public_id ||
     descriptorCutoff !== progress.progress.checkpoint_cutoff_public_id ||
@@ -1937,8 +2408,9 @@ export function parseWalletCaseCompleteHistoryGate(
   return {
     gate: {
       public_id: gateId,
-      contract_version: "wallet_case_complete_history_gate_v1",
+      contract_version: "wallet_case_complete_history_gate_v2",
       content_hash_sha256: contentHash,
+      input_anchor_public_id: inputAnchorId,
       input_progress_public_id: inputProgressId,
       checkpoint_cutoff_public_id: descriptorCutoff,
       state: "locked",
@@ -1947,10 +2419,10 @@ export function parseWalletCaseCompleteHistoryGate(
       complete_wallet_history_established: false,
     },
     document: {
-      contract_version: "wallet_case_complete_history_gate_v1",
+      contract_version: "wallet_case_complete_history_gate_v2",
       case_public_id: caseId,
       data_environment: environment,
-      input_progress: progress,
+      input_anchor: anchor,
       checks,
       summary,
       limitations: limitations(document.limitations, "complete-history gate limitations"),

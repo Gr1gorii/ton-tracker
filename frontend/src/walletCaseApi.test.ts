@@ -638,11 +638,25 @@ describe("Wallet Case API", () => {
       document: {
         ...gate.document,
         case_public_id: OTHER_CASE_ID,
-        input_progress: {
-          ...gate.document.input_progress,
+        input_anchor: {
+          ...gate.document.input_anchor,
           document: {
-            ...gate.document.input_progress.document,
+            ...gate.document.input_anchor.document,
             case_public_id: OTHER_CASE_ID,
+            input_floor: {
+              ...gate.document.input_anchor.document.input_floor,
+              document: {
+                ...gate.document.input_anchor.document.input_floor.document,
+                case_public_id: OTHER_CASE_ID,
+                input_progress: {
+                  ...gate.document.input_anchor.document.input_floor.document.input_progress,
+                  document: {
+                    ...gate.document.input_anchor.document.input_floor.document.input_progress.document,
+                    case_public_id: OTHER_CASE_ID,
+                  },
+                },
+              },
+            },
           },
         },
       },
