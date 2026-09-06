@@ -4,8 +4,31 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v1.1.0 — Observed History Floor**<br>
+Current product release: **v1.2.0 — Earliest Activity Anchor**<br>
 Stable backend API version: **0.2.1**
+
+## What v1.2.0 adds
+
+Wallet Case can now prove whether the oldest canonical transaction currently
+selected from a usable Activity snapshot is the TON account's chain origin.
+`GET /api/v1/cases/{case}/earliest-activity-anchor` embeds the exact verified
+`ohf_<sha256>` Observed History Floor and publishes a canonical
+`eaa_<sha256>` document.
+
+For live data, the service selects the lowest logical-time provider-observed
+transaction, revalidates its current trust-level-0 Evidence catalog, reparses
+the verified transaction BOC, and inspects `prev_trans_lt` and
+`prev_trans_hash`. Earliest activity is established only when canonical block
+inclusion is proven and both predecessor coordinates are zero. Missing proof,
+an earlier predecessor, empty Activity, and demo data remain distinct
+fail-closed states.
+
+Summary verifies and exports the anchor only on explicit request and displays
+its Activity, block, Evidence, predecessor, floor, and checkpoint provenance.
+The Complete-History Gate is upgraded to v2 and embeds this exact anchor, so
+its earliest-activity prerequisite can now be satisfied. The final verdict
+remains locked because reorg invalidation is not active. No migration is added;
+Alembic remains at `20260828_0028` and backend API remains `0.2.1`.
 
 ## What v1.1.0 adds
 
@@ -451,6 +474,8 @@ profit, ownership proof, or complete wallet history.
   prerequisites, strict nested provenance, locked verdict, and JSON export.
 - v1.1.0 canonical `ohf_` Observed History Floor with exact oldest-page
   evidence per verified stream, comparable timestamp aggregate, and JSON export.
+- v1.2.0 canonical `eaa_` Earliest Activity Anchor with trust-level-0
+  transaction inclusion, BOC predecessor inspection, and gate-v2 provenance.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

@@ -1,3 +1,37 @@
+# GRAM Scope — v1.2.0 EARLIEST ACTIVITY ANCHOR
+
+v1.2.0 turns the Complete-History Gate's former earliest-activity placeholder
+into independently verifiable chain evidence. The new
+`GET /api/v1/cases/{case}/earliest-activity-anchor` endpoint begins with the
+current canonical `ohf_<sha256>` Observed History Floor and the latest usable
+Wallet Case Activity snapshot, then selects the lowest logical-time canonical
+provider-observed transaction as its candidate.
+
+For a live Case, the service reuses only a successful or partial Evidence job
+with at least three proof stages, reproduces its public response, revalidates
+the strict trust-level-0 transaction inclusion catalog, and locates the exact
+candidate account, logical time, and transaction hash. It reparses the selected
+transaction BOC and binds `prev_trans_lt` and `prev_trans_hash` into the new
+content-addressed `eaa_<sha256>` document. A zero/zero predecessor establishes
+earliest wallet activity only alongside canonical inclusion; contradictory or
+corrupt evidence fails closed.
+
+The public contract distinguishes `empty`, `ineligible`,
+`verification_required`, `predecessor_present`, and `verified` states. Demo
+data can never produce a verified anchor. The strict browser parser recomputes
+candidate, proof, predecessor, summary, Case, network, account, floor, and
+content-identity relationships before the new snapshot-aware controller and
+Summary panel can display or export them.
+
+Complete-History Gate v2 now embeds the exact Earliest Activity Anchor and
+derives its earliest-activity prerequisite dynamically. Even a verified anchor
+does not unlock complete history: reorg invalidation remains unmet, keeping the
+only valid final state `locked` and `complete_wallet_history_established=false`.
+No database migration is added; Alembic remains at `20260828_0028` and backend
+API version remains `0.2.1`.
+
+---
+
 # GRAM Scope — v1.1.0 OBSERVED HISTORY FLOOR
 
 v1.1.0 exposes the earliest boundary the current provider evidence can honestly
