@@ -12,6 +12,7 @@ import {
   getWalletCaseBackfillOutcomeHistory,
   getWalletCaseBackfillProgress,
   getWalletCaseCompleteHistoryGate,
+  getWalletCaseEarliestActivityAnchor,
   getWalletCaseObservedHistoryFloor,
   getWalletCaseBackfillOutcome,
   getWalletCaseBackfillSchedule,
@@ -61,6 +62,7 @@ import {
   checkpointContinuationReceiptFixture,
   checkpointContinuationPlanFixture,
   completeHistoryGateFixture,
+  verifiedEarliestActivityAnchorFixture,
   observedHistoryFloorFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
@@ -662,6 +664,47 @@ describe("Wallet Case API", () => {
       },
     }));
     await expect(getWalletCaseCompleteHistoryGate(CASE_ID)).rejects.toThrow(
+      /does not match/,
+    );
+  });
+
+  it("reads a no-store earliest activity anchor bound to its Wallet Case", async () => {
+    const anchor = verifiedEarliestActivityAnchorFixture();
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(anchor));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+
+    await expect(getWalletCaseEarliestActivityAnchor(
+      CASE_ID,
+      controller.signal,
+    )).resolves.toEqual(anchor);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${CASE_ID}/earliest-activity-anchor`,
+      { cache: "no-store", signal: controller.signal },
+    );
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      ...anchor,
+      document: {
+        ...anchor.document,
+        case_public_id: OTHER_CASE_ID,
+        input_floor: {
+          ...anchor.document.input_floor,
+          document: {
+            ...anchor.document.input_floor.document,
+            case_public_id: OTHER_CASE_ID,
+            input_progress: {
+              ...anchor.document.input_floor.document.input_progress,
+              document: {
+                ...anchor.document.input_floor.document.input_progress.document,
+                case_public_id: OTHER_CASE_ID,
+              },
+            },
+          },
+        },
+      },
+    }));
+    await expect(getWalletCaseEarliestActivityAnchor(CASE_ID)).rejects.toThrow(
       /does not match/,
     );
   });
