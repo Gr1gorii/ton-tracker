@@ -37,6 +37,7 @@ from wallet_case_schemas import (
     WalletCaseBackfillOutcomeResponse,
     WalletCaseBackfillScheduleRunRequest,
     WalletCaseBackfillScheduleResponse,
+    WalletCaseCompleteHistoryGateResponse,
     WalletCaseCreateRequest,
     WalletCaseDeletionResponse,
     WalletCaseListResponse,
@@ -918,6 +919,44 @@ def read_wallet_case_backfill_progress(
         raise HTTPException(
             status_code=503,
             detail="Wallet Case backfill progress storage is unavailable.",
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+
+
+@router.get(
+    "/{public_id}/complete-history-gate",
+    response_model=WalletCaseCompleteHistoryGateResponse,
+)
+def read_wallet_case_complete_history_gate(
+    response: Response,
+    public_id: str = Path(..., pattern=_PUBLIC_ID_PATTERN, max_length=36),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Read the fail-closed prerequisites for a complete-history claim."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        return WalletCaseService(session).get_complete_history_gate(public_id)
+    except WalletCaseNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except WalletCaseStreamCheckpointCorrupt as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "complete_history_gate_integrity_error",
+                "message_safe": str(exc),
+                "retryable": False,
+            },
+            headers={"Cache-Control": "no-store"},
+        ) from exc
+    except SQLAlchemyError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Wallet Case complete-history gate storage is unavailable.",
             headers={"Cache-Control": "no-store"},
         ) from exc
 
