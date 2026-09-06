@@ -17,14 +17,14 @@
     "@fontsource-variable/manrope": "^5.2.8",
     "@phosphor-icons/react": "^2.1.10",
     "@tonconnect/ui-react": "^3.0.0",
-    "react": "^18.3.1",
+    "react": "^19.2.8",
     "react-dom": "^18.3.1",
     "recharts": "^3.9.2"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/react": "^18.3.12",
+    "@types/react": "^19.2.18",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^6.0.3",
     "jsdom": "^29.1.1",
