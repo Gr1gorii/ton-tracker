@@ -2358,6 +2358,64 @@ def test_earliest_activity_anchor_schema_is_content_addressed_and_fail_closed(cl
         WalletCaseEarliestActivityAnchorResponse.model_validate(overstated)
 
 
+def test_earliest_activity_anchor_endpoint_is_no_store_and_owner_scoped(client):
+    case = _create_case(client)["case"]
+
+    response = client.get(
+        f"/api/v1/cases/{case['public_id']}/earliest-activity-anchor"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    body = response.json()
+    assert body["anchor"]["public_id"] == (
+        f"eaa_{body['anchor']['content_hash_sha256']}"
+    )
+    assert body["anchor"]["state"] == "ineligible"
+    assert body["anchor"]["input_floor_public_id"].startswith("ohf_")
+    assert body["document"]["candidate"] is None
+    assert body["document"]["proof"] is None
+    assert body["document"]["summary"] == {
+        "candidate_available": False,
+        "canonical_inclusion_proven": False,
+        "predecessor_absent": None,
+        "state": "ineligible",
+        "earliest_wallet_activity_established": False,
+    }
+    WalletCaseEarliestActivityAnchorResponse.model_validate(body)
+    assert client.get(
+        f"/api/v1/cases/{uuid4()}/earliest-activity-anchor"
+    ).status_code == 404
+
+
+def test_earliest_activity_anchor_endpoint_fails_closed_on_corrupt_floor(client):
+    case_id, _source_sync, _claimed = _publish_transaction_checkpoint(client)
+    with app.state.wallet_case_test_session() as session:
+        checkpoint = session.scalar(
+            select(WalletCaseStreamCheckpoint).where(
+                WalletCaseStreamCheckpoint.case.has(public_id=case_id)
+            )
+        )
+        assert checkpoint is not None
+        checkpoint.checkpoint_json = (
+            '{"contract_version":"wallet_case_stream_checkpoint_v1"}'
+        )
+        session.commit()
+
+    response = client.get(
+        f"/api/v1/cases/{case_id}/earliest-activity-anchor"
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "code": "earliest_activity_anchor_integrity_error",
+        "message_safe": (
+            "Stored Wallet Case stream checkpoint failed integrity validation."
+        ),
+        "retryable": False,
+    }
+
+
 @pytest.mark.parametrize(
     ("predecessor_lt", "predecessor_hash", "state", "established"),
     [
