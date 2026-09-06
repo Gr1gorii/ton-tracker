@@ -208,6 +208,53 @@ export interface WalletCaseBackfillProgressResponse {
   };
 }
 
+export type WalletCaseObservedHistoryFloorState =
+  | "empty"
+  | "partially_observed"
+  | "observed"
+  | "provider_terminal_observed";
+
+export interface WalletCaseObservedHistoryFloorStream {
+  provider: string;
+  stream_key: string;
+  provider_contract_version: string;
+  chain_public_id: string;
+  tip_checkpoint_public_id: string;
+  requested_interval_complete: boolean;
+  provider_terminal_observed: boolean;
+  floor_status: "observed" | "unobserved";
+  floor_page: WalletCaseStreamCheckpointLastPage | null;
+}
+
+export interface WalletCaseObservedHistoryFloorSummary {
+  stream_count: number;
+  observed_stream_count: number;
+  timestamped_stream_count: number;
+  provider_terminal_stream_count: number;
+  earliest_observed_timestamp: string | null;
+  state: WalletCaseObservedHistoryFloorState;
+  earliest_wallet_activity_established: false;
+}
+
+export interface WalletCaseObservedHistoryFloorResponse {
+  floor: {
+    public_id: string;
+    contract_version: "wallet_case_observed_history_floor_v1";
+    content_hash_sha256: string;
+    input_progress_public_id: string;
+    checkpoint_cutoff_public_id: string | null;
+  } & WalletCaseObservedHistoryFloorSummary;
+  document: {
+    contract_version: "wallet_case_observed_history_floor_v1";
+    case_public_id: string;
+    input_progress: WalletCaseBackfillProgressResponse;
+    state: WalletCaseObservedHistoryFloorState;
+    streams: WalletCaseObservedHistoryFloorStream[];
+    summary: WalletCaseObservedHistoryFloorSummary;
+    limitations: WalletCaseLimitation[];
+  };
+}
+
 export type WalletCaseCompleteHistoryGateCheckCode =
   | "live_data_environment"
   | "provider_streams_present"
@@ -540,6 +587,7 @@ const CHECKPOINT_ID = /^scp_([0-9a-f]{64})$/;
 const CHECKPOINT_CHAIN_ID = /^cch_([0-9a-f]{64})$/;
 const BACKFILL_PROGRESS_ID = /^bfp_([0-9a-f]{64})$/;
 const COMPLETE_HISTORY_GATE_ID = /^chg_([0-9a-f]{64})$/;
+const OBSERVED_HISTORY_FLOOR_ID = /^ohf_([0-9a-f]{64})$/;
 const BACKFILL_SCHEDULE_ID = /^bfs_([0-9a-f]{64})$/;
 const BACKFILL_OUTCOME_ID = /^bfo_([0-9a-f]{64})$/;
 const CHECKPOINT_CONTINUATION_PLAN_ID = /^cpl_([0-9a-f]{64})$/;
@@ -1504,6 +1552,230 @@ export function parseWalletCaseBackfillProgress(
 
 export function serializeWalletCaseBackfillProgress(value: unknown): string {
   return `${JSON.stringify(parseWalletCaseBackfillProgress(value), null, 2)}\n`;
+}
+
+const OBSERVED_HISTORY_FLOOR_STATES = new Set<WalletCaseObservedHistoryFloorState>([
+  "empty",
+  "partially_observed",
+  "observed",
+  "provider_terminal_observed",
+]);
+
+function observedHistoryFloorState(
+  value: unknown,
+  label: string,
+): WalletCaseObservedHistoryFloorState {
+  const state = text(value, label, 28) as WalletCaseObservedHistoryFloorState;
+  if (!OBSERVED_HISTORY_FLOOR_STATES.has(state)) fail(`${label} is invalid`);
+  return state;
+}
+
+function parseObservedHistoryFloorSummary(
+  value: Record<string, unknown>,
+  label: string,
+): WalletCaseObservedHistoryFloorSummary {
+  const summary = {
+    stream_count: integer(value.stream_count, `${label} stream count`),
+    observed_stream_count: integer(
+      value.observed_stream_count,
+      `${label} observed stream count`,
+    ),
+    timestamped_stream_count: integer(
+      value.timestamped_stream_count,
+      `${label} timestamped stream count`,
+    ),
+    provider_terminal_stream_count: integer(
+      value.provider_terminal_stream_count,
+      `${label} provider terminal stream count`,
+    ),
+    earliest_observed_timestamp: nullableTimestamp(
+      value.earliest_observed_timestamp,
+      `${label} earliest observed timestamp`,
+    ),
+    state: observedHistoryFloorState(value.state, `${label} state`),
+    earliest_wallet_activity_established:
+      value.earliest_wallet_activity_established as false,
+  };
+  if (
+    summary.stream_count > 32 ||
+    summary.observed_stream_count > summary.stream_count ||
+    summary.timestamped_stream_count > summary.observed_stream_count ||
+    summary.provider_terminal_stream_count > summary.stream_count ||
+    value.earliest_wallet_activity_established !== false
+  ) fail(`${label} is inconsistent`);
+  return summary;
+}
+
+export function parseWalletCaseObservedHistoryFloor(
+  value: unknown,
+): WalletCaseObservedHistoryFloorResponse {
+  const envelope = record(value, ["floor", "document"], "observed history floor response");
+  const descriptor = record(envelope.floor, [
+    "public_id", "contract_version", "content_hash_sha256",
+    "input_progress_public_id", "checkpoint_cutoff_public_id",
+    "stream_count", "observed_stream_count", "timestamped_stream_count",
+    "provider_terminal_stream_count", "earliest_observed_timestamp", "state",
+    "earliest_wallet_activity_established",
+  ], "observed history floor descriptor");
+  if (descriptor.contract_version !== "wallet_case_observed_history_floor_v1") {
+    fail("observed history floor descriptor contract is unsupported");
+  }
+  const contentHash = digest(descriptor.content_hash_sha256, "observed history floor hash");
+  const floorId = text(descriptor.public_id, "observed history floor id", 68);
+  if (OBSERVED_HISTORY_FLOOR_ID.exec(floorId)?.[1] !== contentHash) {
+    fail("observed history floor identity is invalid");
+  }
+  const inputProgressId = text(
+    descriptor.input_progress_public_id,
+    "observed history floor input progress id",
+    68,
+  );
+  if (!BACKFILL_PROGRESS_ID.test(inputProgressId)) {
+    fail("observed history floor input progress id is invalid");
+  }
+  const descriptorCutoff = descriptor.checkpoint_cutoff_public_id === null
+    ? null
+    : checkpointId(
+      descriptor.checkpoint_cutoff_public_id,
+      "observed history floor descriptor cutoff",
+    );
+  const descriptorSummary = parseObservedHistoryFloorSummary(
+    descriptor,
+    "observed history floor descriptor",
+  );
+
+  const document = record(envelope.document, [
+    "contract_version", "case_public_id", "input_progress", "state",
+    "streams", "summary", "limitations",
+  ], "observed history floor document");
+  if (document.contract_version !== "wallet_case_observed_history_floor_v1") {
+    fail("observed history floor document contract is unsupported");
+  }
+  const caseId = publicId(document.case_public_id, "observed history floor case id");
+  const progress = parseWalletCaseBackfillProgress(document.input_progress);
+  const documentState = observedHistoryFloorState(
+    document.state,
+    "observed history floor document state",
+  );
+  if (!Array.isArray(document.streams) || document.streams.length > 32) {
+    fail("observed history floor streams are invalid");
+  }
+  const streams = document.streams.map((value, index) => {
+    const label = `observed history floor stream ${index}`;
+    const item = record(value, [
+      "provider", "stream_key", "provider_contract_version", "chain_public_id",
+      "tip_checkpoint_public_id", "requested_interval_complete",
+      "provider_terminal_observed", "floor_status", "floor_page",
+    ], label);
+    const progressStream = progress.document.streams[index];
+    if (progressStream === undefined) fail(`${label} is inconsistent`);
+    const provider = text(item.provider, `${label} provider`, 64);
+    const streamKey = text(item.stream_key, `${label} key`, 40);
+    const providerContract = text(
+      item.provider_contract_version,
+      `${label} provider contract`,
+      48,
+    );
+    const chainId = text(item.chain_public_id, `${label} chain id`, 68);
+    if (!CHECKPOINT_CHAIN_ID.test(chainId)) fail(`${label} chain id is invalid`);
+    const tipId = checkpointId(item.tip_checkpoint_public_id, `${label} tip id`);
+    if (
+      typeof item.requested_interval_complete !== "boolean" ||
+      typeof item.provider_terminal_observed !== "boolean"
+    ) fail(`${label} state is invalid`);
+    const status = text(item.floor_status, `${label} status`, 10);
+    if (status !== "observed" && status !== "unobserved") {
+      fail(`${label} status is invalid`);
+    }
+    const page = lastPage(item.floor_page);
+    const expectedPage = progressStream.current_frontier?.page ?? null;
+    if (
+      provider !== progressStream.provider ||
+      streamKey !== progressStream.stream_key ||
+      providerContract !== progressStream.provider_contract_version ||
+      chainId !== progressStream.chain_public_id ||
+      tipId !== progressStream.tip_checkpoint.public_id ||
+      item.requested_interval_complete !== progressStream.requested_interval_complete ||
+      item.provider_terminal_observed !==
+        (progressStream.termination_reason === "provider_terminal") ||
+      status !== (expectedPage === null ? "unobserved" : "observed") ||
+      JSON.stringify(page) !== JSON.stringify(expectedPage)
+    ) fail(`${label} is inconsistent`);
+    return {
+      provider,
+      stream_key: streamKey,
+      provider_contract_version: providerContract,
+      chain_public_id: chainId,
+      tip_checkpoint_public_id: tipId,
+      requested_interval_complete: item.requested_interval_complete,
+      provider_terminal_observed: item.provider_terminal_observed,
+      floor_status: status,
+      floor_page: page,
+    } as WalletCaseObservedHistoryFloorStream;
+  });
+  const timestamps = streams.flatMap((stream) => (
+    stream.floor_page?.min_timestamp ? [stream.floor_page.min_timestamp] : []
+  ));
+  const observedCount = streams.filter((stream) => stream.floor_page !== null).length;
+  const terminalCount = streams.filter((stream) => stream.provider_terminal_observed).length;
+  const expectedState: WalletCaseObservedHistoryFloorState = streams.length === 0
+    ? "empty"
+    : observedCount < streams.length
+      ? "partially_observed"
+      : terminalCount === streams.length
+        ? "provider_terminal_observed"
+        : "observed";
+  const expectedSummary: WalletCaseObservedHistoryFloorSummary = {
+    stream_count: streams.length,
+    observed_stream_count: observedCount,
+    timestamped_stream_count: timestamps.length,
+    provider_terminal_stream_count: terminalCount,
+    earliest_observed_timestamp: timestamps.length > 0
+      ? [...timestamps].sort()[0]
+      : null,
+    state: expectedState,
+    earliest_wallet_activity_established: false,
+  };
+  const summary = parseObservedHistoryFloorSummary(
+    record(document.summary, [
+      "stream_count", "observed_stream_count", "timestamped_stream_count",
+      "provider_terminal_stream_count", "earliest_observed_timestamp", "state",
+      "earliest_wallet_activity_established",
+    ], "observed history floor summary"),
+    "observed history floor summary",
+  );
+  if (
+    caseId !== progress.document.case_public_id ||
+    streams.length !== progress.document.streams.length ||
+    documentState !== expectedState ||
+    JSON.stringify(summary) !== JSON.stringify(expectedSummary) ||
+    JSON.stringify(descriptorSummary) !== JSON.stringify(summary) ||
+    inputProgressId !== progress.progress.public_id ||
+    descriptorCutoff !== progress.progress.checkpoint_cutoff_public_id
+  ) fail("observed history floor is inconsistent");
+  return {
+    floor: {
+      public_id: floorId,
+      contract_version: "wallet_case_observed_history_floor_v1",
+      content_hash_sha256: contentHash,
+      input_progress_public_id: inputProgressId,
+      checkpoint_cutoff_public_id: descriptorCutoff,
+      ...descriptorSummary,
+    },
+    document: {
+      contract_version: "wallet_case_observed_history_floor_v1",
+      case_public_id: caseId,
+      input_progress: progress,
+      state: documentState,
+      streams,
+      summary,
+      limitations: limitations(document.limitations, "observed history floor limitations"),
+    },
+  };
+}
+
+export function serializeWalletCaseObservedHistoryFloor(value: unknown): string {
+  return `${JSON.stringify(parseWalletCaseObservedHistoryFloor(value), null, 2)}\n`;
 }
 
 const COMPLETE_HISTORY_CHECK_CODES: readonly WalletCaseCompleteHistoryGateCheckCode[] = [

@@ -4,6 +4,7 @@ import type {
   WalletCaseBackfillProgressResponse,
   WalletCaseBackfillScheduleResponse,
   WalletCaseCompleteHistoryGateResponse,
+  WalletCaseObservedHistoryFloorResponse,
   WalletCaseCheckpointContinuationReceiptV1Response,
   WalletCaseCheckpointContinuationReceiptV2Response,
   WalletCaseCheckpointContinuationReceiptV3Response,
@@ -339,6 +340,68 @@ export function backfillProgressFixture(): WalletCaseBackfillProgressResponse {
         code: "backfill_remaining_work_is_unknown",
         message: "Provider cursors do not expose a reliable remaining-page count.",
       }],
+    },
+  };
+}
+
+export function observedHistoryFloorFixture(): WalletCaseObservedHistoryFloorResponse {
+  const progress = backfillProgressFixture();
+  const progressStream = progress.document.streams[0];
+  const floorHash = "6e".repeat(32);
+  return {
+    floor: {
+      public_id: `ohf_${floorHash}`,
+      contract_version: "wallet_case_observed_history_floor_v1",
+      content_hash_sha256: floorHash,
+      input_progress_public_id: progress.progress.public_id,
+      checkpoint_cutoff_public_id: progress.progress.checkpoint_cutoff_public_id,
+      stream_count: 1,
+      observed_stream_count: 1,
+      timestamped_stream_count: 1,
+      provider_terminal_stream_count: 0,
+      earliest_observed_timestamp: progressStream.current_frontier!.page.min_timestamp,
+      state: "observed",
+      earliest_wallet_activity_established: false,
+    },
+    document: {
+      contract_version: "wallet_case_observed_history_floor_v1",
+      case_public_id: CASE_ID,
+      input_progress: progress,
+      state: "observed",
+      streams: [{
+        provider: progressStream.provider,
+        stream_key: progressStream.stream_key,
+        provider_contract_version: progressStream.provider_contract_version,
+        chain_public_id: progressStream.chain_public_id,
+        tip_checkpoint_public_id: progressStream.tip_checkpoint.public_id,
+        requested_interval_complete: false,
+        provider_terminal_observed: false,
+        floor_status: "observed",
+        floor_page: progressStream.current_frontier!.page,
+      }],
+      summary: {
+        stream_count: 1,
+        observed_stream_count: 1,
+        timestamped_stream_count: 1,
+        provider_terminal_stream_count: 0,
+        earliest_observed_timestamp: progressStream.current_frontier!.page.min_timestamp,
+        state: "observed",
+        earliest_wallet_activity_established: false,
+      },
+      limitations: [
+        {
+          code: "observed_floor_is_page_evidence",
+          message: "The floor is the oldest successful page currently observed.",
+        },
+        {
+          code: "logical_times_are_not_cross_stream_clock",
+          message: "Logical times are not compared as a shared clock.",
+        },
+        {
+          code: "observed_floor_is_not_first_wallet_activity",
+          message: "The floor does not prove the wallet's first chain activity.",
+        },
+      ],
     },
   };
 }
