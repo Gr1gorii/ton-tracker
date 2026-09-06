@@ -4,10 +4,34 @@ TON Tracker is a source-aware wallet intelligence workspace for TON. It ingests
 bounded wallet activity, preserves provider and local-verification evidence,
 and keeps unsupported conclusions visibly unavailable.
 
-Current product release: **v1.0.0 — Complete-History Gate**<br>
+Current product release: **v1.1.0 — Observed History Floor**<br>
 Stable backend API version: **0.2.1**
 
-## What v1.0.0 adds
+## What v1.1.0 adds
+
+Wallet Case can now turn verified provider checkpoint history into a precise
+answer to a narrower, useful question: what is the oldest successful page
+currently observed for each provider stream? The new
+`GET /api/v1/cases/{case}/observed-history-floor` endpoint embeds the exact
+verified `bfp_<sha256>` Backfill Progress and publishes a canonical
+`ohf_<sha256>` document.
+
+Every stream retains its provider contract, verified `cch_` chain and tip,
+requested-interval and provider-terminal states, plus the complete oldest page
+evidence: page index, cursor, response digest, logical-time bounds, timestamp
+bounds, and fetch time. Aggregates report observed and timestamped stream
+counts, terminal-provider count, and the earliest comparable page timestamp.
+Logical times are deliberately not compared across streams as a shared clock.
+
+Summary verifies the floor only on explicit request, displays exact stream
+evidence and `bfp_` provenance, and exports deterministic JSON. Empty Cases do
+not invent timestamps, corrupted checkpoint lineage fails closed, and even a
+provider-terminal floor keeps `earliest_wallet_activity_established=false`.
+The floor is an observed acquisition boundary—not proof of the wallet's first
+chain activity or complete history. No migration is added; Alembic remains at
+`20260828_0028` and backend API remains `0.2.1`.
+
+## v1.0.0 complete-history gate
 
 Wallet Case now publishes an explicit, fail-closed answer to the question that
 bounded acquisition alone cannot resolve: whether complete wallet history has
@@ -425,6 +449,8 @@ profit, ownership proof, or complete wallet history.
   frozen-window composition, accessible movement metrics, and JSON/CSV export.
 - v1.0.0 canonical `chg_` Complete-History Gate with six explicit
   prerequisites, strict nested provenance, locked verdict, and JSON export.
+- v1.1.0 canonical `ohf_` Observed History Floor with exact oldest-page
+  evidence per verified stream, comparable timestamp aggregate, and JSON export.
 - Run-scoped evidence signals, estimated PnL preview, clustering, and exports.
 - TonAPI account/jetton previews, STON.fi pool previews, Bitquery scaffolding,
   and CSV/JSON trade import tools.

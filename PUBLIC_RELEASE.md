@@ -1,4 +1,4 @@
-# GRAM Scope - v1.0.0 Public Release
+# GRAM Scope - v1.1.0 Public Release
 
 Public release handoff for the current TON wallet intelligence workspace.
 
@@ -65,6 +65,10 @@ Public release handoff for the current TON wallet intelligence workspace.
   latest checkpoint chain, separates initial and continued pages, retains root
   and current successful-page frontiers, and reports requested-interval state.
   Summary verifies and exports it without inventing a remaining-page percentage.
+- A canonical `ohf_<sha256>` Observed History Floor derived from exact verified
+  Backfill Progress. It retains each stream's oldest successful page evidence,
+  reports only comparable page timestamps across streams, and keeps earliest
+  wallet activity explicitly unestablished even after provider exhaustion.
 - A budget-bound `bfs_<sha256>` Backfill Schedule that derives one fair ready
   stream from the exact current Progress and Continuation Plan, pauses under
   active-sync backpressure, and executes only after exact stale-state and
@@ -129,7 +133,7 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Release Contract
 
-- Product release label: `v1.0.0 COMPLETE-HISTORY GATE`.
+- Product release label: `v1.1.0 OBSERVED HISTORY FLOOR`.
 - Backend API `VERSION` remains `0.2.1`.
 - Alembic head is `20260828_0028`: 0019 adds durable Case Evidence jobs, 0020
   versions immutable transaction-inclusion proofs by trust level, and 0021
@@ -215,6 +219,9 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Known Limitations
 
+- Observed History Floor is the oldest successful provider page currently
+  captured per stream. It is not a chain-verifiable first-activity anchor;
+  provider cursors, terminal responses, and logical times cannot upgrade it.
 - Complete-History Gate is intentionally locked. Provider terminal exhaustion
   is not earliest-activity proof, and neither chain anchoring nor dependent
   evidence invalidation after a reorg is implemented.
@@ -293,13 +300,13 @@ Public release handoff for the current TON wallet intelligence workspace.
 
 ## Verification Summary
 
-Before tagging `v1.0.0`, confirm:
+Before tagging `v1.1.0`, confirm:
 
 - `npm run build` passes from `frontend/`.
 - `.venv/bin/python -m pytest -q` passes from `backend/`.
 - Browser QA passes on desktop and mobile without console errors or horizontal
   overflow.
-- UI shows `v1.0.0` and keeps GRAM Scope branding distinct from TON asset and
+- UI shows `v1.1.0` and keeps GRAM Scope branding distinct from TON asset and
   blockchain terminology.
 - Create/open case, enqueue/idempotency, polling, retry/cancel, restart
   recovery, snapshot preservation, and direct URL restoration pass the
@@ -351,6 +358,10 @@ Before tagging `v1.0.0`, confirm:
 - Complete-History Gate tests cover empty and provider-terminal inputs,
   canonical `chg_` identity, nested `bfp_` and checkpoint-cutoff binding, all
   six prerequisite states, immutable locked/false verdicts, corruption failure,
+  abort/reset behavior, UI provenance, and deterministic JSON export.
+- Observed History Floor tests cover empty, observed, and provider-terminal
+  states, canonical `ohf_` identity, exact `bfp_`/chain/tip/page linkage,
+  timestamp aggregation, first-activity falsehood, corruption failure,
   abort/reset behavior, UI provenance, and deterministic JSON export.
 - Migration 0021, current-policy selection, legacy trust-0 rejection,
   checkpoint/digest binding, whole-operation timeout, terminate/kill cleanup,
