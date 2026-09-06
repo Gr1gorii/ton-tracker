@@ -1,3 +1,35 @@
+# GRAM Scope — v1.0.0 COMPLETE-HISTORY GATE
+
+v1.0.0 introduces one canonical negative-assurance boundary for complete
+wallet history. `GET /api/v1/cases/{case}/complete-history-gate` revalidates
+the current provider checkpoint chains, embeds the resulting exact
+`wallet_case_backfill_progress_v1` response, and content-addresses the complete
+gate document as `chg_<sha256>`.
+
+Six ordered checks distinguish evidence that is already available from the
+capabilities still required: live data, at least one verified provider stream,
+all requested intervals complete, terminal provider exhaustion for every
+current stream, a chain-verifiable earliest-activity anchor, and active reorg
+invalidation. Earliest-activity anchoring and reorg invalidation are explicitly
+unimplemented, so the contract permits only `state: locked` and
+`complete_wallet_history_established: false`. Even provider-terminal evidence
+cannot unlock or imply the claim.
+
+The Pydantic contract independently recomputes check statuses and summary
+counts before verifying the canonical content address. Stored checkpoint or
+lineage corruption produces a structured integrity failure. The strict browser
+parser repeats the linkage, ordering, status, count, Case, and cutoff checks;
+the UI then presents a visible locked verdict, all six prerequisites, its exact
+`bfp_` input, and deterministic JSON export after an explicit operator request.
+
+This release adds no provider requests, background work, earliest-activity
+heuristic, or reorg monitor. It deliberately makes the missing assurance
+machine-readable instead of upgrading bounded evidence. No database migration
+is added; Alembic remains at `20260828_0028` and backend API version remains
+`0.2.1`.
+
+---
+
 # GRAM Scope — v0.99.0 BACKFILL COVERAGE TIMELINE
 
 v0.99.0 turns the frozen Backfill Outcome journal into a useful coverage-over-
