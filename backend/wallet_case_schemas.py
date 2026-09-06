@@ -63,6 +63,10 @@ BackfillOutcomePublicId = Annotated[
     str,
     Field(pattern=r"^bfo_[0-9a-f]{64}$", max_length=68),
 ]
+CompleteHistoryGatePublicId = Annotated[
+    str,
+    Field(pattern=r"^chg_[0-9a-f]{64}$", max_length=68),
+]
 Sha256Digest = Annotated[
     str,
     Field(pattern=r"^[0-9a-f]{64}$", min_length=64, max_length=64),
@@ -921,6 +925,138 @@ class WalletCaseBackfillProgressResponse(_StrictModel):
             != self.document.checkpoint_cutoff_public_id
         ):
             raise ValueError("backfill progress content address is inconsistent")
+        return self
+
+
+CompleteHistoryGateCheckCode = Literal[
+    "live_data_environment",
+    "provider_streams_present",
+    "all_requested_intervals_complete",
+    "provider_exhaustion_observed",
+    "earliest_activity_anchor_verified",
+    "reorg_invalidation_active",
+]
+
+
+class WalletCaseCompleteHistoryGateCheck(_StrictModel):
+    code: CompleteHistoryGateCheckCode
+    status: Literal["satisfied", "unmet"]
+    message: str = Field(min_length=1, max_length=240)
+
+
+class WalletCaseCompleteHistoryGateSummary(_StrictModel):
+    stream_count: int = Field(ge=0, le=32)
+    requested_interval_complete_stream_count: int = Field(ge=0, le=32)
+    provider_terminal_stream_count: int = Field(ge=0, le=32)
+    check_count: int = Field(ge=6, le=6)
+    satisfied_check_count: int = Field(ge=0, le=6)
+    unmet_check_count: int = Field(ge=0, le=6)
+    state: Literal["locked"]
+    complete_wallet_history_established: Literal[False] = False
+
+
+class WalletCaseCompleteHistoryGateDocument(_StrictModel):
+    contract_version: Literal["wallet_case_complete_history_gate_v1"]
+    case_public_id: CanonicalPublicId
+    data_environment: WalletCaseDataEnvironment
+    input_progress: WalletCaseBackfillProgressResponse
+    checks: list[WalletCaseCompleteHistoryGateCheck] = Field(
+        min_length=6,
+        max_length=6,
+    )
+    summary: WalletCaseCompleteHistoryGateSummary
+    limitations: list[WalletCaseLimitation]
+
+    @model_validator(mode="after")
+    def _validate_gate(self):
+        progress = self.input_progress.document
+        streams = progress.streams
+        complete_count = sum(item.requested_interval_complete for item in streams)
+        terminal_count = sum(
+            item.termination_reason == "provider_terminal" for item in streams
+        )
+        expected_checks = {
+            "live_data_environment": self.data_environment == "live",
+            "provider_streams_present": bool(streams),
+            "all_requested_intervals_complete": (
+                bool(streams) and complete_count == len(streams)
+            ),
+            "provider_exhaustion_observed": (
+                bool(streams) and terminal_count == len(streams)
+            ),
+            "earliest_activity_anchor_verified": False,
+            "reorg_invalidation_active": False,
+        }
+        expected_codes = list(expected_checks)
+        statuses = [item.status for item in self.checks]
+        expected_summary = {
+            "stream_count": len(streams),
+            "requested_interval_complete_stream_count": complete_count,
+            "provider_terminal_stream_count": terminal_count,
+            "check_count": len(expected_checks),
+            "satisfied_check_count": sum(expected_checks.values()),
+            "unmet_check_count": len(expected_checks) - sum(expected_checks.values()),
+            "state": "locked",
+            "complete_wallet_history_established": False,
+        }
+        if (
+            self.case_public_id != progress.case_public_id
+            or [item.code for item in self.checks] != expected_codes
+            or statuses
+            != [
+                "satisfied" if expected_checks[code] else "unmet"
+                for code in expected_codes
+            ]
+            or self.summary.model_dump() != expected_summary
+        ):
+            raise ValueError("complete-history gate is inconsistent")
+        return self
+
+
+class WalletCaseCompleteHistoryGateDescriptor(_StrictModel):
+    public_id: CompleteHistoryGatePublicId
+    contract_version: Literal["wallet_case_complete_history_gate_v1"]
+    content_hash_sha256: Sha256Digest
+    input_progress_public_id: BackfillProgressPublicId
+    checkpoint_cutoff_public_id: CheckpointPublicId | None = None
+    state: Literal["locked"]
+    satisfied_check_count: int = Field(ge=0, le=6)
+    unmet_check_count: int = Field(ge=0, le=6)
+    complete_wallet_history_established: Literal[False] = False
+
+
+class WalletCaseCompleteHistoryGateResponse(_StrictModel):
+    gate: WalletCaseCompleteHistoryGateDescriptor
+    document: WalletCaseCompleteHistoryGateDocument
+
+    @model_validator(mode="after")
+    def _validate_content_address(self):
+        canonical = json.dumps(
+            self.document.model_dump(mode="json"),
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        descriptor = self.gate
+        progress = self.document.input_progress.progress
+        summary = self.document.summary
+        if (
+            descriptor.public_id != f"chg_{digest}"
+            or descriptor.content_hash_sha256 != digest
+            or descriptor.contract_version != self.document.contract_version
+            or descriptor.input_progress_public_id != progress.public_id
+            or descriptor.checkpoint_cutoff_public_id
+            != progress.checkpoint_cutoff_public_id
+            or descriptor.state != summary.state
+            or descriptor.satisfied_check_count
+            != summary.satisfied_check_count
+            or descriptor.unmet_check_count != summary.unmet_check_count
+            or descriptor.complete_wallet_history_established
+            != summary.complete_wallet_history_established
+        ):
+            raise ValueError("complete-history gate content address is inconsistent")
         return self
 
 
