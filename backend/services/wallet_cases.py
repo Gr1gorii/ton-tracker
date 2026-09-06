@@ -139,6 +139,10 @@ class WalletCaseStreamCheckpointCorrupt(RuntimeError):
     """Raised when persisted provider continuation state fails validation."""
 
 
+class WalletCaseEarliestActivityAnchorCorrupt(RuntimeError):
+    """Raised when Activity or proof evidence cannot support an anchor read."""
+
+
 class WalletCaseCheckpointResumeUnavailable(RuntimeError):
     """Raised when a checkpoint cannot safely start a continuation job."""
 
@@ -2082,6 +2086,12 @@ class WalletCaseService:
     def get_observed_history_floor(self, case_public_id: str) -> dict[str, Any]:
         """Project the oldest page currently observed in each verified stream."""
         wallet_case = self._required_case(case_public_id)
+        return self._observed_history_floor_response(wallet_case)
+
+    def _observed_history_floor_response(
+        self,
+        wallet_case: WalletCase,
+    ) -> dict[str, Any]:
         progress = self._backfill_progress_response(
             wallet_case,
             self.repository.latest_stream_checkpoints(case_id=wallet_case.id),
@@ -2194,6 +2204,296 @@ class WalletCaseService:
             },
             "document": document,
         }
+
+    def get_earliest_activity_anchor(self, case_public_id: str) -> dict[str, Any]:
+        """Bind the oldest current Activity transaction to canonical chain proof."""
+        wallet_case = self._required_case(case_public_id)
+        floor = self._observed_history_floor_response(wallet_case)
+        candidate, resolved = self._earliest_activity_candidate(wallet_case)
+        proof = (
+            self._earliest_activity_candidate_proof(wallet_case, resolved)
+            if resolved is not None and wallet_case.data_environment == "live"
+            else None
+        )
+        state = (
+            "ineligible"
+            if wallet_case.data_environment != "live"
+            else "empty"
+            if candidate is None
+            else "verification_required"
+            if proof is None
+            else "verified"
+            if proof["predecessor"]["absent"]
+            else "predecessor_present"
+        )
+        summary = {
+            "candidate_available": candidate is not None,
+            "canonical_inclusion_proven": proof is not None,
+            "predecessor_absent": (
+                proof["predecessor"]["absent"] if proof is not None else None
+            ),
+            "state": state,
+            "earliest_wallet_activity_established": state == "verified",
+        }
+        document = {
+            "contract_version": "wallet_case_earliest_activity_anchor_v1",
+            "case_public_id": wallet_case.public_id,
+            "network": wallet_case.network,
+            "data_environment": wallet_case.data_environment,
+            "wallet_account_canonical": wallet_case.canonical_wallet_key,
+            "input_floor": floor,
+            "candidate": candidate,
+            "proof": proof,
+            "summary": summary,
+            "limitations": [
+                _limitation(
+                    "candidate_is_current_snapshot_activity",
+                    (
+                        "The candidate is the lowest logical-time canonical "
+                        "transaction in the current usable Activity snapshot."
+                    ),
+                ),
+                _limitation(
+                    "zero_predecessor_requires_canonical_inclusion",
+                    (
+                        "A zero predecessor establishes first wallet activity only "
+                        "when the exact transaction BOC has current trust-level-0 "
+                        "canonical block inclusion proof."
+                    ),
+                ),
+                _limitation(
+                    "earliest_anchor_does_not_enable_complete_history",
+                    (
+                        "An earliest-activity anchor satisfies one prerequisite; "
+                        "complete history remains separately gated by provider "
+                        "coverage and reorg invalidation."
+                    ),
+                ),
+            ],
+        }
+        canonical = json.dumps(
+            document,
+            ensure_ascii=True,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest = hashlib.sha256(canonical).hexdigest()
+        return {
+            "anchor": {
+                "public_id": f"eaa_{digest}",
+                "contract_version": document["contract_version"],
+                "content_hash_sha256": digest,
+                "input_floor_public_id": floor["floor"]["public_id"],
+                "checkpoint_cutoff_public_id": floor["floor"][
+                    "checkpoint_cutoff_public_id"
+                ],
+                "state": state,
+                "candidate_activity_public_id": (
+                    candidate["activity_public_id"]
+                    if candidate is not None
+                    else None
+                ),
+                "canonical_inclusion_proven": summary[
+                    "canonical_inclusion_proven"
+                ],
+                "predecessor_absent": summary["predecessor_absent"],
+                "earliest_wallet_activity_established": summary[
+                    "earliest_wallet_activity_established"
+                ],
+            },
+            "document": document,
+        }
+
+    def _earliest_activity_candidate(
+        self,
+        wallet_case: WalletCase,
+    ) -> tuple[dict[str, Any] | None, Any | None]:
+        snapshot = self.repository.latest_usable_syncs([wallet_case.id]).get(
+            wallet_case.id
+        )
+        if snapshot is None:
+            return None, None
+        try:
+            from services.wallet_case_activity import (
+                WalletCaseActivityInvalidQuery,
+                WalletCaseActivityScopeTooLarge,
+                WalletCaseActivityService,
+                WalletCaseActivitySnapshotConflict,
+                WalletCaseActivitySnapshotNotFound,
+            )
+
+            revision = WalletCaseActivityService(
+                self.session,
+                owner_scope_id=self.owner_scope_id,
+            ).resolve_verifiable_transaction_revision(
+                wallet_case.public_id,
+                snapshot_public_id=snapshot.public_id,
+            )
+        except (
+            WalletCaseActivityInvalidQuery,
+            WalletCaseActivityScopeTooLarge,
+            WalletCaseActivitySnapshotConflict,
+            WalletCaseActivitySnapshotNotFound,
+        ) as exc:
+            raise WalletCaseEarliestActivityAnchorCorrupt(
+                "Current Wallet Case Activity cannot support an earliest anchor."
+            ) from exc
+        candidates = list(revision.verifiable_transactions.values())
+        if not candidates:
+            return None, None
+        resolved = min(
+            candidates,
+            key=lambda item: (
+                int(item.item["logical_time"], 10),
+                item.item["transaction"]["hash"],
+            ),
+        )
+        item = resolved.item
+        return {
+            "snapshot_public_id": snapshot.public_id,
+            "activity_public_id": resolved.activity_public_id,
+            "occurred_at": item["occurred_at"],
+            "logical_time": item["logical_time"],
+            "transaction_hash": item["transaction"]["hash"],
+            "provider": item["provenance"]["provider"],
+        }, resolved
+
+    def _earliest_activity_candidate_proof(
+        self,
+        wallet_case: WalletCase,
+        resolved: Any,
+    ) -> dict[str, Any] | None:
+        job = self.session.scalar(
+            select(CaseEvidenceVerification)
+            .where(
+                CaseEvidenceVerification.case_id == wallet_case.id,
+                CaseEvidenceVerification.snapshot_sync_id == resolved.snapshot.id,
+                CaseEvidenceVerification.activity_public_id
+                == resolved.activity_public_id,
+                CaseEvidenceVerification.activity_semantic_fingerprint
+                == resolved.semantic_fingerprint,
+                CaseEvidenceVerification.state.in_(("partial", "succeeded")),
+                CaseEvidenceVerification.progress_current >= 3,
+            )
+            .order_by(CaseEvidenceVerification.id.desc())
+            .limit(1)
+        )
+        if job is None:
+            return None
+        try:
+            from pytoniq_core import Cell
+            from pytoniq_core.tlb.transaction import Transaction
+            from services.ton_liteclient_config import CURRENT_VERIFIER_POLICY_ID
+            from services.wallet_case_evidence import CaseEvidenceService
+            from services.wallet_transaction_inclusion_proof import (
+                get_wallet_transaction_inclusion_proofs,
+            )
+
+            response = CaseEvidenceService(
+                self.session,
+                owner_scope_id=self.owner_scope_id,
+            ).get_verification(wallet_case.public_id, job.public_id)
+            result = response.get("result")
+            if not isinstance(result, dict):
+                raise ValueError("evidence result is unavailable")
+            catalog = get_wallet_transaction_inclusion_proofs(
+                resolved.source_run.id,
+                resolved.source_transaction.transaction_hash_canonical,
+                self.session,
+            )
+            if (
+                catalog is None
+                or catalog.get("catalog_digest_sha256")
+                != job.inclusion_catalog_digest_sha256
+                or catalog.get("verifier_policy_id") != CURRENT_VERIFIER_POLICY_ID
+            ):
+                raise ValueError("inclusion catalog binding changed")
+            proofs = [
+                item
+                for item in catalog["proofs"]
+                if item["account_address_canonical"]
+                == wallet_case.canonical_wallet_key
+                and item["logical_time"] == resolved.item["logical_time"]
+                and item["transaction_hash"]
+                == resolved.item["transaction"]["hash"]
+            ]
+            boc_rows = [
+                item
+                for item in job.boc_verification.transactions
+                if item.node.account_canonical == wallet_case.canonical_wallet_key
+                and item.node.logical_time == resolved.item["logical_time"]
+                and item.transaction_hash == resolved.item["transaction"]["hash"]
+            ]
+            if len(proofs) != 1 or len(boc_rows) != 1:
+                raise ValueError("candidate proof coordinate is ambiguous")
+            proof = proofs[0]
+            if (
+                proof["trust_level"] != 0
+                or proof["canonical_block_chain_verified_at_capture"] is not True
+                or proof["block_merkle_proof_verified"] is not True
+                or proof["provider_free_revalidated"] is not True
+                or proof["transaction_boc_sha256"]
+                != hashlib.sha256(
+                    bytes.fromhex(boc_rows[0].transaction_boc_hex)
+                ).hexdigest()
+            ):
+                raise ValueError("candidate proof trust boundary changed")
+            root = Cell.one_from_boc(bytes.fromhex(boc_rows[0].transaction_boc_hex))
+            parsed = Transaction.deserialize(root.begin_parse())
+            if (
+                root.hash.hex() != proof["transaction_hash"]
+                or parsed.account_addr.hex()
+                != wallet_case.canonical_wallet_key.split(":", 1)[1]
+                or str(parsed.lt) != proof["logical_time"]
+            ):
+                raise ValueError("candidate transaction BOC coordinate changed")
+            predecessor_lt = str(parsed.prev_trans_lt)
+            predecessor_hash = parsed.prev_trans_hash.hex()
+            predecessor_absent = (
+                predecessor_lt == "0" and predecessor_hash == "0" * 64
+            )
+            if (predecessor_lt == "0") != (predecessor_hash == "0" * 64):
+                raise ValueError("candidate predecessor coordinate is incoherent")
+            if not predecessor_absent and int(predecessor_lt, 10) >= parsed.lt:
+                raise ValueError("candidate predecessor does not precede transaction")
+            return {
+                "evidence_public_id": job.public_id,
+                "verification_digest_sha256": result[
+                    "verification_digest_sha256"
+                ],
+                "inclusion_catalog_digest_sha256": catalog[
+                    "catalog_digest_sha256"
+                ],
+                "selected_proof_digest_sha256": proof[
+                    "evidence_digest_sha256"
+                ],
+                "network": wallet_case.network,
+                "verifier_policy_id": proof["verifier_policy_id"],
+                "trust_level": 0,
+                "trusted_checkpoint": proof["trusted_checkpoint"],
+                "block": proof["block"],
+                "transaction_boc_sha256": proof["transaction_boc_sha256"],
+                "account_address_canonical": proof[
+                    "account_address_canonical"
+                ],
+                "logical_time": proof["logical_time"],
+                "transaction_hash": proof["transaction_hash"],
+                "predecessor": {
+                    "logical_time": predecessor_lt,
+                    "transaction_hash": predecessor_hash,
+                    "absent": predecessor_absent,
+                },
+                "block_merkle_proof_verified": True,
+                "canonical_block_chain_verified_at_capture": True,
+                "provider_free_revalidated": True,
+            }
+        except Exception as exc:
+            if isinstance(exc, WalletCaseEarliestActivityAnchorCorrupt):
+                raise
+            raise WalletCaseEarliestActivityAnchorCorrupt(
+                "Stored earliest-activity proof failed local revalidation."
+            ) from exc
 
     def get_complete_history_gate(self, case_public_id: str) -> dict[str, Any]:
         """Explain why verified acquisition still cannot claim complete history."""

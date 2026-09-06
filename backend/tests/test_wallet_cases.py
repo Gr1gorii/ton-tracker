@@ -2358,6 +2358,95 @@ def test_earliest_activity_anchor_schema_is_content_addressed_and_fail_closed(cl
         WalletCaseEarliestActivityAnchorResponse.model_validate(overstated)
 
 
+@pytest.mark.parametrize(
+    ("predecessor_lt", "predecessor_hash", "state", "established"),
+    [
+        ("0", "0" * 64, "verified", True),
+        ("10", "cd" * 32, "predecessor_present", False),
+    ],
+)
+def test_earliest_activity_anchor_derives_chain_predecessor_state(
+    client,
+    monkeypatch,
+    predecessor_lt,
+    predecessor_hash,
+    state,
+    established,
+):
+    case_id = _create_case(client)["case"]["public_id"]
+    activity_id = f"act_{'12' * 32}"
+    transaction_hash = "ab" * 32
+    candidate = {
+        "snapshot_public_id": str(uuid4()),
+        "activity_public_id": activity_id,
+        "occurred_at": "2026-09-06T12:00:00Z",
+        "logical_time": "20",
+        "transaction_hash": transaction_hash,
+        "provider": "tonapi",
+    }
+    proof = {
+        "evidence_public_id": str(uuid4()),
+        "verification_digest_sha256": "21" * 32,
+        "inclusion_catalog_digest_sha256": "22" * 32,
+        "selected_proof_digest_sha256": "23" * 32,
+        "network": "ton-mainnet",
+        "verifier_policy_id": "ton_liteserver_checkpoint_strict_2026_08_v2",
+        "trust_level": 0,
+        "trusted_checkpoint": {
+            "workchain": -1,
+            "shard": "-9223372036854775808",
+            "seqno": 1,
+            "root_hash": "31" * 32,
+            "file_hash": "32" * 32,
+        },
+        "block": {
+            "workchain": 0,
+            "shard": "-9223372036854775808",
+            "seqno": 2,
+            "root_hash": "33" * 32,
+            "file_hash": "34" * 32,
+        },
+        "transaction_boc_sha256": "35" * 32,
+        "account_address_canonical": RAW_ADDRESS,
+        "logical_time": "20",
+        "transaction_hash": transaction_hash,
+        "predecessor": {
+            "logical_time": predecessor_lt,
+            "transaction_hash": predecessor_hash,
+            "absent": established,
+        },
+        "block_merkle_proof_verified": True,
+        "canonical_block_chain_verified_at_capture": True,
+        "provider_free_revalidated": True,
+    }
+    with app.state.wallet_case_test_session() as session:
+        wallet_case = session.scalar(
+            select(WalletCase).where(WalletCase.public_id == case_id)
+        )
+        assert wallet_case is not None
+        wallet_case.data_environment = "live"
+        session.commit()
+
+    resolved = object()
+    monkeypatch.setattr(
+        WalletCaseService,
+        "_earliest_activity_candidate",
+        lambda _self, _case: (candidate, resolved),
+    )
+    monkeypatch.setattr(
+        WalletCaseService,
+        "_earliest_activity_candidate_proof",
+        lambda _self, _case, value: proof if value is resolved else None,
+    )
+    with app.state.wallet_case_test_session() as session:
+        response = WalletCaseService(session).get_earliest_activity_anchor(case_id)
+
+    validated = WalletCaseEarliestActivityAnchorResponse.model_validate(response)
+    assert validated.anchor.state == state
+    assert validated.anchor.predecessor_absent is established
+    assert validated.anchor.earliest_wallet_activity_established is established
+
+
 def test_complete_history_gate_is_content_addressed_locked_and_scoped(client):
     case_id = _create_case(client)["case"]["public_id"]
 
