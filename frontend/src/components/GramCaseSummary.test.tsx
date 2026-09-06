@@ -23,6 +23,7 @@ import {
   checkpointContinuationReceiptV3Fixture,
   checkpointContinuationPlanFixture,
   completeHistoryGateFixture,
+  observedHistoryFloorFixture,
   streamCheckpointCatalogFixture,
   streamCheckpointChainFixture,
   streamCheckpointDetailFixture,
@@ -205,6 +206,7 @@ describe("GramCaseSummary", () => {
     const backfillSchedule = backfillScheduleFixture();
     const continuationPlan = checkpointContinuationPlanFixture();
     const completeHistoryGate = completeHistoryGateFixture();
+    const observedHistoryFloor = observedHistoryFloorFixture();
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(
         JSON.stringify(payload),
@@ -220,6 +222,10 @@ describe("GramCaseSummary", () => {
       ))
       .mockResolvedValueOnce(new Response(
         JSON.stringify(backfillProgress),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify(observedHistoryFloor),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ))
       .mockResolvedValueOnce(new Response(
@@ -269,6 +275,10 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText(backfillProgress.progress.public_id)).toBeTruthy();
     expect(screen.getByText(/1\/1 initial pages · \+1\/1 continued · ready/)).toBeTruthy();
     expect(screen.getByText(/Frontier page 1 → 2/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Verify observed history floor" }));
+    expect(await screen.findByRole("region", { name: "Observed history floor" })).toBeTruthy();
+    expect(screen.getByText(observedHistoryFloor.floor.public_id)).toBeTruthy();
+    expect(screen.getByText(/Oldest successful page 2/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Verify complete-history gate" }));
     expect(await screen.findByText("Complete wallet history is not established.")).toBeTruthy();
     expect(screen.getByText(completeHistoryGate.gate.public_id)).toBeTruthy();
@@ -309,11 +319,12 @@ describe("GramCaseSummary", () => {
     expect(screen.getByText("Root revision")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Verify checkpoint chain" }));
     expect(await screen.findByText("Content-addressed chain")).toBeTruthy();
-    expect(screen.getAllByText(checkpointChain.chain.public_id)).toHaveLength(3);
+    expect(screen.getAllByText(checkpointChain.chain.public_id)).toHaveLength(4);
     expect(screen.getByText("#1 · bounded")).toBeTruthy();
     expect(screen.getByText("#2 · resume")).toBeTruthy();
     const createObjectUrl = vi.fn()
       .mockReturnValueOnce("blob:backfill-progress")
+      .mockReturnValueOnce("blob:observed-history-floor")
       .mockReturnValueOnce("blob:complete-history-gate")
       .mockReturnValueOnce("blob:backfill-schedule")
       .mockReturnValueOnce("blob:continuation-plan")
@@ -326,14 +337,16 @@ describe("GramCaseSummary", () => {
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => undefined);
     await user.click(screen.getByRole("button", { name: "Export verified backfill progress JSON" }));
+    await user.click(screen.getByRole("button", { name: "Export observed history floor JSON" }));
     await user.click(screen.getByRole("button", { name: "Export complete-history gate JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified backfill schedule JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified continuation plan JSON" }));
     await user.click(screen.getByRole("button", { name: "Export verified chain JSON" }));
-    expect(createObjectUrl).toHaveBeenCalledTimes(5);
-    expect(anchorClick).toHaveBeenCalledTimes(5);
+    expect(createObjectUrl).toHaveBeenCalledTimes(6);
+    expect(anchorClick).toHaveBeenCalledTimes(6);
     expect(revokeObjectUrl.mock.calls).toEqual([
       ["blob:backfill-progress"],
+      ["blob:observed-history-floor"],
       ["blob:complete-history-gate"],
       ["blob:backfill-schedule"],
       ["blob:continuation-plan"],
@@ -354,6 +367,10 @@ describe("GramCaseSummary", () => {
     );
     expect(fetchMock).toHaveBeenCalledWith(
       `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/stream-checkpoints/backfill-progress`,
+      expect.objectContaining({ cache: "no-store" }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${API_BASE}/api/v1/cases/${payload.document.case_public_id}/observed-history-floor`,
       expect.objectContaining({ cache: "no-store" }),
     );
     expect(fetchMock).toHaveBeenCalledWith(

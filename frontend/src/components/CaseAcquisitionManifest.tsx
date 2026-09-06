@@ -30,6 +30,7 @@ import {
   serializeWalletCaseCheckpointContinuationReceipt,
   serializeWalletCaseCheckpointContinuationPlan,
   serializeWalletCaseCompleteHistoryGate,
+  serializeWalletCaseObservedHistoryFloor,
   serializeWalletCaseStreamCheckpointChain,
   type WalletCaseBackfillProgressResponse,
   type WalletCaseBackfillOutcomeResponse,
@@ -42,6 +43,7 @@ import {
 import { useWalletCaseCheckpointHistory } from "../useWalletCaseCheckpointHistory";
 import { useWalletCaseBackfillHistory } from "../useWalletCaseBackfillHistory";
 import { useWalletCaseCompleteHistoryGate } from "../useWalletCaseCompleteHistoryGate";
+import { useWalletCaseObservedHistoryFloor } from "../useWalletCaseObservedHistoryFloor";
 import {
   serializeWalletCaseBackfillCoverageTimeline,
   serializeWalletCaseBackfillCoverageTimelineCsv,
@@ -49,6 +51,7 @@ import {
 } from "../walletCaseBackfillCoverageTimeline";
 import BackfillCoverageTimeline from "./BackfillCoverageTimeline";
 import CompleteHistoryGatePanel from "./CompleteHistoryGatePanel";
+import ObservedHistoryFloorPanel from "./ObservedHistoryFloorPanel";
 
 function formatTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -93,6 +96,20 @@ function downloadCompleteHistoryGate(
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `complete-history-gate-${gate.gate.public_id}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadObservedHistoryFloor(
+  floor: NonNullable<ReturnType<typeof useWalletCaseObservedHistoryFloor>["floor"]>,
+): void {
+  const url = URL.createObjectURL(new Blob(
+    [serializeWalletCaseObservedHistoryFloor(floor)],
+    { type: "application/json" },
+  ));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `observed-history-floor-${floor.floor.public_id}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -220,6 +237,10 @@ export default function CaseAcquisitionManifest({
   const backfillHistory = useWalletCaseBackfillHistory(caseId);
   const checkpointHistory = useWalletCaseCheckpointHistory(caseId);
   const completeHistoryGate = useWalletCaseCompleteHistoryGate(
+    caseId,
+    snapshot.public_id,
+  );
+  const observedHistoryFloor = useWalletCaseObservedHistoryFloor(
     caseId,
     snapshot.public_id,
   );
@@ -904,6 +925,21 @@ export default function CaseAcquisitionManifest({
                     <button
                       className="button-secondary case-checkpoint-plan-button"
                       type="button"
+                      disabled={observedHistoryFloor.state === "loading"}
+                      onClick={() => void observedHistoryFloor.verify()}
+                    >
+                      {observedHistoryFloor.state === "loading"
+                        ? <SpinnerGap className="spin" size={15} />
+                        : <ClockCounterClockwise size={15} />}
+                      {observedHistoryFloor.state === "loading"
+                        ? "Verifying observed floor…"
+                        : observedHistoryFloor.floor
+                          ? "Verify observed history floor again"
+                          : "Verify observed history floor"}
+                    </button>
+                    <button
+                      className="button-secondary case-checkpoint-plan-button"
+                      type="button"
                       disabled={completeHistoryGate.state === "loading"}
                       onClick={() => void completeHistoryGate.verify()}
                     >
@@ -1027,6 +1063,20 @@ export default function CaseAcquisitionManifest({
                     <div className="case-sync-message is-error" role="alert">
                       <WarningCircle size={16} weight="fill" />
                       <span>{backfillProgressError}</span>
+                    </div>
+                  )}
+                  {observedHistoryFloor.floor && (
+                    <ObservedHistoryFloorPanel
+                      floor={observedHistoryFloor.floor}
+                      onExport={() => downloadObservedHistoryFloor(
+                        observedHistoryFloor.floor!,
+                      )}
+                    />
+                  )}
+                  {observedHistoryFloor.error && (
+                    <div className="case-sync-message is-error" role="alert">
+                      <WarningCircle size={16} weight="fill" />
+                      <span>{observedHistoryFloor.error}</span>
                     </div>
                   )}
                   {completeHistoryGate.gate && (
