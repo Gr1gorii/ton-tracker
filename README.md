@@ -7,6 +7,10 @@ and keeps unsupported conclusions visibly unavailable.
 Current product release: **v1.2.0 — Earliest Activity Anchor**<br>
 Stable backend API version: **0.2.1**
 
+## Hosted demo setup
+
+`Dockerfile.demo` builds the frontend and API into one service. `render.yaml` selects Render Free in Frankfurt. The hosted demo uses deterministic mock data, an ephemeral SQLite database, and disabled background runners. It needs no TonAPI key. Database changes reset when the free instance restarts.
+
 ## What v1.2.0 adds
 
 Wallet Case can now prove whether the oldest canonical transaction currently
